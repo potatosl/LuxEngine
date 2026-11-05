@@ -2,8 +2,10 @@
 set(LuxEngine_SHADER_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/shaders")
 
 include(CMakeFindDependencyMacro)
-find_dependency(SDL3 3.2 CONFIG)
-find_dependency(box2d 2.4...<3 CONFIG)
+# The hints point at the packages the engine was built with, so games find them even without the
+# same CMAKE_PREFIX_PATH or vcpkg toolchain.
+find_dependency(SDL3 3.2 CONFIG HINTS "@SDL3_DIR@")
+find_dependency(box2d 2.4...<3 CONFIG HINTS "@box2d_DIR@")
 find_dependency(Vulkan 1.1)
 include("${CMAKE_CURRENT_LIST_DIR}/LuxEngineTargets.cmake")
 
