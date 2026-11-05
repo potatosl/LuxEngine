@@ -3,6 +3,7 @@
 #include "Engine/Physics/PhysicsWorld2D.h"
 #include "Engine/Scene/Entity.hpp"
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -66,6 +67,11 @@ void Scene::RemovePhysicsBody2D(uint32 id) {
 }
 void Scene::OnRender() {}
 namespace {
+std::filesystem::path Utf8Path(const std::string& text) {
+    return std::filesystem::path(
+        std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
+}
+
 std::ostream& operator<<(std::ostream& o, const Vec2& v) {
     return o << v.x << ' ' << v.y << ' ';
 }
@@ -98,7 +104,7 @@ bool Scene::Serialize(const std::string& filepath) {
     for (const auto& [type, pool] : pools_)
         if (!pool->Empty() && !supported.contains(type))
             return false;
-    std::ofstream out(filepath, std::ios::trunc);
+    std::ofstream out(Utf8Path(filepath), std::ios::trunc);
     if (!out)
         return false;
     out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 1 "
@@ -139,7 +145,7 @@ bool Scene::Serialize(const std::string& filepath) {
     return static_cast<bool>(out);
 }
 bool Scene::Deserialize(const std::string& filepath) {
-    std::ifstream in(filepath);
+    std::ifstream in(Utf8Path(filepath));
     std::string header;
     unsigned version = 0;
     uint64 count = 0;

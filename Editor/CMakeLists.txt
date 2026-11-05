@@ -39,12 +39,17 @@ endfunction()
 add_executable(LuxEditor WIN32 MACOSX_BUNDLE
     App/Main.cpp
     App/EditorFrame.cpp
+    App/EditorFrameProjects.cpp
     Project/EditorProject.cpp
+    Project/ProjectArchive.cpp
     Project/ProjectDialog.cpp
+    Project/ProjectSettings.cpp
+    Project/ProjectTemplates.cpp
     Scene/EditorDocument.cpp
     Viewport/SceneCanvas.cpp
 )
 target_include_directories(LuxEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(LuxEditor PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
 target_link_libraries(LuxEditor PRIVATE LuxEngine::Engine ${wxWidgets_LIBRARIES})
 if(COMMAND lux_set_target_warnings)
     lux_set_target_warnings(LuxEditor)
@@ -60,10 +65,14 @@ if(LUX_BUILD_TESTS)
     add_executable(LuxEditorDocumentTests
         Scene/EditorDocument.cpp
         Project/EditorProject.cpp
+        Project/ProjectArchive.cpp
+        Project/ProjectSettings.cpp
+        Project/ProjectTemplates.cpp
         Tests/EditorDocumentTest.cpp
     )
     target_include_directories(LuxEditorDocumentTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine)
+    target_compile_definitions(LuxEditorDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
+    target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine ${wxWidgets_LIBRARIES})
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorDocumentTests)
     endif()

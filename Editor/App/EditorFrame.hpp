@@ -25,10 +25,20 @@ private:
     void UpdateChrome();
     void UpdateRecentMenu();
     void RefreshProjectExplorer();
+    void ApplyProjectPreferences();
+    bool OpenProjectScene(const std::filesystem::path& file);
+    void RecoverAutosaveIfNeeded();
+    void AutoSaveScene();
     void NewProject();
     void OpenProjectDialog();
     void OpenProjectFile(const std::filesystem::path& file);
     void EditProjectSettings();
+    void CloneCurrentProject();
+    void ImportProjectDialog();
+    void ExportCurrentProject();
+    void BackupCurrentProject();
+    void RestoreCurrentProject();
+    void RescanProjectResources();
     bool ConfirmDiscardChanges();
     bool SaveScene(bool choosePath);
     void AddEntity();
@@ -43,6 +53,7 @@ private:
     std::optional<EditorProject> project_;
     RecentProjects recentProjects_;
     wxMenu* recentMenu_ = nullptr;
+    wxTimer autoSaveTimer_;
     SceneCanvas* canvas_ = nullptr;
     wxListBox* hierarchy_ = nullptr;
     wxListBox* projectFiles_ = nullptr;

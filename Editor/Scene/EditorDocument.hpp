@@ -14,6 +14,7 @@ public:
 
     void NewScene();
     bool Open(const std::string& path);
+    bool Recover(const std::string& originalPath, const std::string& autosavePath);
     bool Save();
     bool SaveAs(const std::string& path);
 

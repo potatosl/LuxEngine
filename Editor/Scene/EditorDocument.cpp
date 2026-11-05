@@ -26,6 +26,19 @@ bool EditorDocument::Open(const std::string& path) {
     return true;
 }
 
+bool EditorDocument::Recover(const std::string& originalPath, const std::string& autosavePath) {
+    if (originalPath.empty() || autosavePath.empty())
+        return false;
+    auto replacement = std::make_unique<Scene>();
+    if (!replacement->Deserialize(autosavePath))
+        return false;
+    scene_.swap(replacement);
+    selectedId_.reset();
+    path_ = originalPath;
+    dirty_ = true;
+    return true;
+}
+
 bool EditorDocument::Save() {
     if (path_.empty() || !scene_->Serialize(path_))
         return false;

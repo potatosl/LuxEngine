@@ -1,5 +1,7 @@
 #include "EditorFrame.hpp"
 #include "Engine/ECS/ECS.hpp"
+#include "Project/PathEncoding.hpp"
+#include "Project/ProjectArchive.hpp"
 #include "Project/ProjectDialog.hpp"
 #include "Viewport/SceneCanvas.hpp"
 #include <algorithm>
@@ -7,10 +9,12 @@
 #include <string>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
+#include <wx/image.h>
 #include <wx/notebook.h>
 #include <wx/scrolwin.h>
 #include <wx/splitter.h>
 #include <wx/stdpaths.h>
+#include <wx/textdlg.h>
 
 namespace LuxEngine {
 namespace {
@@ -21,9 +25,16 @@ enum : int {
     NewProjectId,
     OpenProjectId,
     ProjectSettingsId,
+    CloneProjectId,
+    ImportProjectId,
+    ExportProjectId,
+    BackupProjectId,
+    RestoreProjectId,
+    RescanResourcesId,
     RecentProjectFirstId
 };
 constexpr int MaxRecentProjects = 10;
+constexpr int AutoSaveTimerId = wxID_HIGHEST + 150;
 
 wxSpinCtrlDouble* MakeNumber(wxWindow* parent, double low, double high, double initial,
                              double step) {
@@ -45,11 +56,13 @@ wxString Ui(const char* text) {
 
 EditorFrame::EditorFrame()
     : wxFrame(nullptr, wxID_ANY, "LuxEditor", wxDefaultPosition, wxSize(1280, 800)),
-      recentProjects_(std::filesystem::path(Utf8(wxStandardPaths::Get().GetUserDataDir())) /
+      recentProjects_(PathFromUtf8(Utf8(wxStandardPaths::Get().GetUserDataDir())) /
                       "recent-projects.txt") {
     SetMinSize(wxSize(960, 600));
     CreateStatusBar();
     recentProjects_.Load();
+    autoSaveTimer_.SetOwner(this, AutoSaveTimerId);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) { AutoSaveScene(); }, AutoSaveTimerId);
     BuildMenus();
     BuildLayout();
     Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& event) {
@@ -69,6 +82,12 @@ void EditorFrame::BuildMenus() {
     recentMenu_ = new wxMenu;
     file->AppendSubMenu(recentMenu_, Ui("최근 프로젝트"));
     file->Append(ProjectSettingsId, Ui("프로젝트 설정..."));
+    file->Append(CloneProjectId, Ui("프로젝트 복제..."));
+    file->Append(ImportProjectId, Ui("프로젝트 가져오기..."));
+    file->Append(ExportProjectId, Ui("프로젝트 내보내기..."));
+    file->Append(BackupProjectId, Ui("프로젝트 백업"));
+    file->Append(RestoreProjectId, Ui("프로젝트 백업 복구..."));
+    file->Append(RescanResourcesId, Ui("프로젝트 리소스 재검색"));
     file->AppendSeparator();
     file->Append(wxID_NEW, Ui("새 장면\tCtrl+N"));
     file->Append(wxID_OPEN, Ui("장면 열기...\tCtrl+O"));
@@ -96,6 +115,12 @@ void EditorFrame::BuildMenus() {
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { NewProject(); }, NewProjectId);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { OpenProjectDialog(); }, OpenProjectId);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { EditProjectSettings(); }, ProjectSettingsId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { CloneCurrentProject(); }, CloneProjectId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { ImportProjectDialog(); }, ImportProjectId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { ExportCurrentProject(); }, ExportProjectId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { BackupCurrentProject(); }, BackupProjectId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { RestoreCurrentProject(); }, RestoreProjectId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { RescanProjectResources(); }, RescanResourcesId);
     Bind(
         wxEVT_MENU,
         [this](wxCommandEvent& event) {
@@ -130,6 +155,7 @@ void EditorFrame::BuildMenus() {
                 return;
             }
             project_.reset();
+            ApplyProjectPreferences();
             RefreshAll();
         },
         wxID_OPEN);
@@ -139,7 +165,18 @@ void EditorFrame::BuildMenus() {
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { AddEntity(); }, AddEntityId);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { DeleteEntity(); }, DeleteEntityId);
     Bind(
-        wxEVT_MENU, [this](wxCommandEvent& event) { canvas_->SetSnapToGrid(event.IsChecked()); },
+        wxEVT_MENU,
+        [this](wxCommandEvent& event) {
+            canvas_->SetSnapToGrid(event.IsChecked());
+            if (project_) {
+                auto settings = project_->GetSettings();
+                settings.snapToGrid = event.IsChecked();
+                std::string error;
+                if (!project_->UpdateSettings(settings, error))
+                    wxMessageBox(wxString::FromUTF8(error), Ui("프로젝트 설정 저장 실패"),
+                                 wxOK | wxICON_ERROR, this);
+            }
+        },
         SnapGridId);
 }
 
@@ -152,7 +189,7 @@ void EditorFrame::UpdateRecentMenu() {
         return;
     }
     for (size_t index = 0; index < files.size(); ++index) {
-        const auto label = wxString::FromUTF8(files[index].string().c_str());
+        const auto label = wxString::FromUTF8(PathUtf8(files[index]));
         recentMenu_->Append(RecentProjectFirstId + static_cast<int>(index), label);
     }
 }
@@ -169,12 +206,13 @@ void EditorFrame::NewProject() {
                      wxOK | wxICON_ERROR, this);
         return;
     }
-    if (!document_.Open(created->GetSceneFile().string())) {
+    if (!document_.Open(PathUtf8(created->GetSceneFile()))) {
         wxMessageBox(Ui("생성한 시작 장면을 열 수 없습니다."), Ui("프로젝트 열기 실패"),
                      wxOK | wxICON_ERROR, this);
         return;
     }
     project_ = std::move(created);
+    ApplyProjectPreferences();
     recentProjects_.Add(project_->GetFile());
     UpdateRecentMenu();
     RefreshAll();
@@ -185,7 +223,7 @@ void EditorFrame::OpenProjectDialog() {
                         Ui("Lux 프로젝트 (*.luxproj)|*.luxproj|모든 파일 (*.*)|*.*"),
                         wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (dialog.ShowModal() == wxID_OK)
-        OpenProjectFile(Utf8(dialog.GetPath()));
+        OpenProjectFile(PathFromUtf8(Utf8(dialog.GetPath())));
 }
 
 void EditorFrame::OpenProjectFile(const std::filesystem::path& file) {
@@ -200,12 +238,14 @@ void EditorFrame::OpenProjectFile(const std::filesystem::path& file) {
     }
     if (!ConfirmDiscardChanges())
         return;
-    if (!document_.Open(opened->GetSceneFile().string())) {
+    if (!document_.Open(PathUtf8(opened->GetSceneFile()))) {
         wxMessageBox(Ui("시작 장면을 열 수 없습니다."), Ui("프로젝트 열기 실패"),
                      wxOK | wxICON_ERROR, this);
         return;
     }
     project_ = std::move(opened);
+    ApplyProjectPreferences();
+    RecoverAutosaveIfNeeded();
     recentProjects_.Add(project_->GetFile());
     UpdateRecentMenu();
     RefreshAll();
@@ -214,15 +254,91 @@ void EditorFrame::OpenProjectFile(const std::filesystem::path& file) {
 void EditorFrame::EditProjectSettings() {
     if (!project_)
         return;
-    auto name = ShowProjectNameDialog(this, project_->GetName());
-    if (!name)
+    auto request = ShowProjectSettingsDialog(this, project_->GetSettings());
+    if (!request)
         return;
     std::string error;
-    if (!project_->Rename(*name, error)) {
+    if (!request->iconSource.empty() && !project_->SetIcon(request->iconSource, error)) {
         wxMessageBox(wxString::FromUTF8(error.c_str()), Ui("프로젝트 설정 저장 실패"),
                      wxOK | wxICON_ERROR, this);
+        return;
     }
-    UpdateChrome();
+    if (!request->iconSource.empty())
+        request->settings.icon = project_->GetIcon();
+    if (!project_->UpdateSettings(request->settings, error)) {
+        wxMessageBox(wxString::FromUTF8(error.c_str()), Ui("프로젝트 설정 저장 실패"),
+                     wxOK | wxICON_ERROR, this);
+        return;
+    }
+    ApplyProjectPreferences();
+    RefreshAll();
+}
+
+void EditorFrame::ApplyProjectPreferences() {
+    autoSaveTimer_.Stop();
+    const bool snap = project_ ? project_->GetSettings().snapToGrid : true;
+    GetMenuBar()->Check(SnapGridId, snap);
+    if (canvas_)
+        canvas_->SetSnapToGrid(snap);
+    if (!project_) {
+        SetIcon(wxIcon());
+        return;
+    }
+    const auto seconds = project_->GetSettings().autosaveSeconds;
+    if (seconds > 0)
+        autoSaveTimer_.Start(static_cast<int>(seconds * 1000));
+    if (!project_->GetIcon().empty()) {
+        wxImage image;
+        const auto path = project_->GetFile().parent_path() / project_->GetIcon();
+        if (image.LoadFile(wxString::FromUTF8(PathUtf8(path)))) {
+            wxIcon icon;
+            icon.CopyFromBitmap(wxBitmap(image.Scale(32, 32)));
+            SetIcon(icon);
+        } else {
+            SetIcon(wxIcon());
+        }
+    } else {
+        SetIcon(wxIcon());
+    }
+}
+
+bool EditorFrame::OpenProjectScene(const std::filesystem::path& file) {
+    if (!ConfirmDiscardChanges())
+        return false;
+    if (!document_.Open(PathUtf8(file))) {
+        wxMessageBox(Ui("장면 파일을 열 수 없습니다."), Ui("장면 열기 실패"), wxOK | wxICON_ERROR,
+                     this);
+        return false;
+    }
+    RecoverAutosaveIfNeeded();
+    RefreshAll();
+    return true;
+}
+
+void EditorFrame::RecoverAutosaveIfNeeded() {
+    if (!project_ || !project_->HasNewerAutosave(PathFromUtf8(document_.GetPath())))
+        return;
+    const auto path = project_->GetAutosaveFile(PathFromUtf8(document_.GetPath()));
+    const int answer =
+        wxMessageBox(Ui("저장된 장면보다 새 자동 저장본이 있습니다. 복구하시겠습니까?"),
+                     Ui("장면 자동 저장 복구"), wxYES_NO | wxICON_QUESTION, this);
+    if (answer == wxYES) {
+        if (!document_.Recover(document_.GetPath(), PathUtf8(path)))
+            wxMessageBox(Ui("자동 저장본을 읽을 수 없습니다."), Ui("복구 실패"),
+                         wxOK | wxICON_ERROR, this);
+    } else {
+        project_->ClearAutosave(PathFromUtf8(document_.GetPath()));
+    }
+}
+
+void EditorFrame::AutoSaveScene() {
+    if (!project_ || !document_.IsDirty() || document_.GetPath().empty())
+        return;
+    std::string error;
+    if (project_->SaveAutosave(PathFromUtf8(document_.GetPath()), document_.GetScene(), error))
+        SetStatusText(Ui("장면 자동 저장본을 만들었습니다."));
+    else
+        SetStatusText(wxString::FromUTF8(error));
 }
 
 void EditorFrame::BuildLayout() {
@@ -260,15 +376,9 @@ void EditorFrame::BuildLayout() {
         const int selection = projectFiles_->GetSelection();
         if (selection == wxNOT_FOUND ||
             static_cast<size_t>(selection) >= projectFilePaths_.size() ||
-            projectFilePaths_[static_cast<size_t>(selection)].extension() != ".lux" ||
-            !ConfirmDiscardChanges())
+            projectFilePaths_[static_cast<size_t>(selection)].extension() != ".lux")
             return;
-        if (!document_.Open(projectFilePaths_[static_cast<size_t>(selection)].string())) {
-            wxMessageBox(Ui("장면 파일을 열 수 없습니다."), Ui("장면 열기 실패"),
-                         wxOK | wxICON_ERROR, this);
-            return;
-        }
-        RefreshAll();
+        OpenProjectScene(projectFilePaths_[static_cast<size_t>(selection)]);
     });
     add->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { AddEntity(); });
     remove->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { DeleteEntity(); });
@@ -410,7 +520,7 @@ void EditorFrame::RefreshProjectExplorer() {
             const auto path = iterator->path();
             projectFilePaths_.push_back(path);
             projectFiles_->Append(
-                wxString::FromUTF8(path.lexically_relative(root).generic_string().c_str()));
+                wxString::FromUTF8(GenericPathUtf8(path.lexically_relative(root))));
         }
         iterator.increment(error);
     }
@@ -488,6 +598,9 @@ void EditorFrame::UpdateChrome() {
     SetStatusText(wxString::Format(Ui("%s엔티티 %u개"), projectName.c_str(),
                                    static_cast<unsigned>(document_.GetScene().GetEntityCount())));
     GetMenuBar()->Enable(ProjectSettingsId, project_.has_value());
+    for (int id :
+         {CloneProjectId, ExportProjectId, BackupProjectId, RestoreProjectId, RescanResourcesId})
+        GetMenuBar()->Enable(id, project_.has_value());
 }
 
 bool EditorFrame::ConfirmDiscardChanges() {
@@ -501,6 +614,7 @@ bool EditorFrame::ConfirmDiscardChanges() {
 }
 
 bool EditorFrame::SaveScene(bool choosePath) {
+    const auto previousPath = document_.GetPath();
     bool saved = false;
     if (choosePath || document_.GetPath().empty()) {
         wxFileDialog dialog(this, Ui("장면 저장"), wxEmptyString, wxEmptyString,
@@ -526,6 +640,11 @@ bool EditorFrame::SaveScene(bool choosePath) {
         return false;
     }
     RefreshProjectExplorer();
+    if (project_) {
+        if (!previousPath.empty())
+            project_->ClearAutosave(PathFromUtf8(previousPath));
+        project_->ClearAutosave(PathFromUtf8(document_.GetPath()));
+    }
     UpdateChrome();
     return true;
 }
