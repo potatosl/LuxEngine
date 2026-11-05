@@ -43,12 +43,23 @@ foreach(stage vert frag)
 endforeach()
 add_custom_target(LuxShaders ALL DEPENDS ${LUX_SHADER_OUTPUTS})
 
+# Every executable is built into the same bin folder. Copying shaders and SDL3.dll from each
+# target's POST_BUILD made parallel builds write the same files at once and fail with
+# "Permission denied", so one target copies them and the executables depend on it.
+if(CMAKE_CONFIGURATION_TYPES)
+    set(LUX_RUNTIME_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin/$<CONFIG>")
+else()
+    set(LUX_RUNTIME_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin")
+endif()
+set(_lux_runtime_copy
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders" "${LUX_RUNTIME_OUTPUT_DIR}/shaders")
+if(WIN32 AND TARGET SDL3::SDL3-shared)
+    list(APPEND _lux_runtime_copy
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> "${LUX_RUNTIME_OUTPUT_DIR}")
+endif()
+add_custom_target(LuxRuntimeFiles ALL ${_lux_runtime_copy} VERBATIM)
+add_dependencies(LuxRuntimeFiles LuxShaders)
+
 function(lux_copy_runtime target)
-    add_dependencies(${target} LuxShaders)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders" "$<TARGET_FILE_DIR:${target}>/shaders")
-    if(WIN32 AND TARGET SDL3::SDL3-shared)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:${target}>)
-    endif()
+    add_dependencies(${target} LuxRuntimeFiles)
 endfunction()
