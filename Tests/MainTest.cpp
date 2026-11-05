@@ -1407,6 +1407,22 @@ void Failures() {
         GpuTexture survivor;
         Vk::InjectFault(Vk::Fault::SurfaceZeroExtent);
         gpu.NotifyResize();
+
+        GpuDeviceConfig medium;
+        medium.maxFrameVertexBytes = 4ull << 20;
+        gpu.Shutdown();
+        Check(gpu.Initialize(window, medium), "device with a 4 MiB vertex budget");
+        Renderer3D::Init(&gpu);
+        PerspectiveCamera camera(ToRadians(60), 4.0f / 3, 0.1f, 100);
+        Check(graphics.Begin(), "over-budget 3D frame");
+        Renderer3D::BeginScene(camera, {});
+        for (int cube = 0; cube < 3300; ++cube)
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+        Renderer3D::EndScene();
+        Check(Renderer3D::GetStats().drawCalls == 2 && gpu.IsReady(),
+              "3D scene over the vertex budget keeps the chunks that fit");
+        Check(gpu.EndFrame(), "over-budget 3D frame submitted");
+        Renderer3D::Shutdown();
         window.PollEvents();
         Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped && gpu.IsReady(),
               "zero surface extent skips instead of acquiring from the stale swapchain");

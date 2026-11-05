@@ -1,10 +1,13 @@
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
+#include "Engine/Core/Log.hpp"
 #include <algorithm>
 #include <array>
 #include <stdexcept>
 namespace LuxEngine {
+#include <string>
 namespace {
 GpuDevice* device = nullptr;
+constexpr size_t MaxSubmitVertices = 3 * 16384;
 Mat4 viewProjection;
 DirectionalLight light;
 std::vector<RenderVertex> vertices;
@@ -57,9 +60,18 @@ void Renderer3D::EndScene() {
     if (!active)
         return;
     active = false;
-    if (device && !vertices.empty() &&
-        device->DrawTriangles(vertices, viewProjection, nullptr, true))
-        ++stats.drawCalls;
+    if (device) {
+        const std::span<const RenderVertex> all(vertices);
+        for (size_t first = 0; first < all.size(); first += MaxSubmitVertices) {
+            const auto chunk = all.subspan(first, std::min(MaxSubmitVertices, all.size() - first));
+            if (!device->DrawTriangles(chunk, viewProjection, nullptr, true)) {
+                Log::Warn("Renderer3D dropped " + std::to_string((all.size() - first) / 3) +
+                          " of " + std::to_string(all.size() / 3) + " triangles this frame");
+                break;
+            }
+            ++stats.drawCalls;
+        }
+    }
     vertices.clear();
 }
 void Renderer3D::DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
