@@ -126,6 +126,14 @@ void TestDetection() {
     Check(tools.enginePackage == sdk / "lib/cmake/LuxEngine", "engine package found from SDK root");
     Check(!tools.toolchainFile.empty(), "vcpkg toolchain found");
     Check(DescribeMissingTools(tools).empty(), "complete tools");
+#ifdef _WIN32
+    // An MSYS2 cmake earlier on PATH cannot build with Visual Studio and must be skipped.
+    const fs::path msys = files.path / "msys64/ucrt64/bin";
+    Write(msys / "cmake.exe");
+    env["PATH"] = PathUtf8(msys) + ";" + PathUtf8(bin);
+    tools = DetectBuildTools(files.path / "app", lookup);
+    Check(tools.cmake.parent_path() == bin, "msys2 cmake on PATH is skipped");
+#endif
 
     env["LUX_ENGINE_DIR"] = PathUtf8(files.path / "missing");
     env.erase("PATH");

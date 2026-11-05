@@ -30,6 +30,22 @@ bool IsFile(const fs::path& path) {
     return fs::is_regular_file(path, ec);
 }
 
+std::string LowerAscii(std::string text);
+
+// MSYS2, MinGW and Cygwin ship their own cmake builds. They cannot drive Visual Studio and the
+// x64-windows vcpkg packages the engine SDK uses, so a game build started with one fails.
+bool IsUnixLayerTool(const fs::path& program) {
+#ifdef _WIN32
+    std::string text = LowerAscii(GenericPathUtf8(program));
+    for (const char* marker : {"/msys", "/mingw", "/ucrt64/", "/clang64/", "/cygwin"})
+        if (text.find(marker) != std::string::npos)
+            return true;
+#else
+    (void)program;
+#endif
+    return false;
+}
+
 fs::path FindOnPath(const std::string& pathVariable, const std::string& name) {
     size_t start = 0;
     while (start <= pathVariable.size()) {
@@ -38,7 +54,7 @@ fs::path FindOnPath(const std::string& pathVariable, const std::string& name) {
             end = pathVariable.size();
         if (end > start) {
             const fs::path candidate = PathFromUtf8(pathVariable.substr(start, end - start)) / name;
-            if (IsFile(candidate))
+            if (IsFile(candidate) && !IsUnixLayerTool(candidate))
                 return candidate;
         }
         start = end + 1;
