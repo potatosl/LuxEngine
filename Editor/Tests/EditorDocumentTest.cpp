@@ -1,5 +1,7 @@
 #include "Scene/EditorDocument.hpp"
 #include "Project/EditorProject.hpp"
+#include "Project/PathEncoding.hpp"
+#include "Project/ProjectArchive.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -8,6 +10,9 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <wx/image.h>
+#include <wx/wfstream.h>
+#include <wx/zipstrm.h>
 
 namespace {
 
@@ -94,6 +99,14 @@ void TestDocument() {
           "saved transform survives roundtrip");
 
     document.Select(entities[0].GetId());
+    const auto recovery = (files.path / "recovery.lux").string();
+    document.CreateEntity("RecoveryOnly");
+    Check(document.GetScene().Serialize(recovery), "autosave fixture serializes");
+    Check(document.Open(savedPath), "original scene opens before recovery");
+    Check(document.Recover(savedPath, recovery), "autosave recovers into original document");
+    Check(document.IsDirty() && document.GetPath() == savedPath &&
+              document.GetScene().GetEntityCount() == 2,
+          "recovered scene keeps original save path and dirty state");
     document.NewScene();
     Check(document.GetScene().GetEntityCount() == 0 && !document.GetSelected(),
           "new scene clears entities and selection");
@@ -122,9 +135,9 @@ void TestProjectManagement() {
               "project metadata survives roundtrip");
         EditorDocument document;
         Check(document.Open(opened->GetSceneFile().string()), "template scene opens in editor");
-        Check(document.GetScene().GetEntityCount() == (index == 0   ? 0u
-                                                       : index == 3 ? 3u
-                                                                    : 2u),
+        Check(document.GetScene().GetEntityCount() == (index == 0                 ? 0u
+                                                       : index == 3 || index == 4 ? 3u
+                                                                                  : 2u),
               "template creates expected starter entities");
         Check(!EditorProject::Create(directory, "Duplicate", templates[index], error),
               "existing project is preserved");
@@ -159,12 +172,203 @@ void TestProjectManagement() {
     Check(restored.Get().size() == 1, "missing or corrupt recent projects are pruned");
 }
 
+void TestProjectOperations() {
+    using namespace LuxEngine;
+    TempDirectory files;
+    std::string error;
+    auto project = EditorProject::Create(files.path / "original", "Original",
+                                         ProjectTemplate::Platformer, error);
+    Check(project.has_value(), "project operations fixture creates");
+    Check(std::filesystem::is_regular_file(files.path / "original" / "Source" / "Main.cpp") &&
+              std::filesystem::is_regular_file(files.path / "original" / "CMakeLists.txt"),
+          "template includes buildable source layout");
+    auto settings = project->GetSettings();
+    settings.version = "1.2.3";
+    settings.autosaveSeconds = 30;
+    settings.backupLimit = 2;
+    settings.snapToGrid = false;
+    settings.dependencies.push_back({"ExamplePackage", "1.2"});
+    Check(project->UpdateSettings(settings, error), "project settings save");
+    auto invalidSettings = settings;
+    invalidSettings.version = "invalid";
+    Check(!project->UpdateSettings(invalidSettings, error) &&
+              project->GetSettings().version == "1.2.3",
+          "invalid project version preserves settings");
+    invalidSettings = settings;
+    invalidSettings.dependencies = {{"Bad;Command", "1.0"}};
+    Check(!project->UpdateSettings(invalidSettings, error),
+          "dependency package cannot inject CMake commands");
+    Check(EditorProject::Open(project->GetFile(), error)->GetSettings().version == "1.2.3",
+          "project settings survive reopen");
+    Check(std::filesystem::exists(files.path / "original" / "Dependencies.cmake"),
+          "dependency declarations are generated");
+    Check(project->BumpVersion(2, error) && project->GetSettings().version == "1.2.4",
+          "patch version increments");
+    Check(project->BumpVersion(1, error) && project->GetSettings().version == "1.3.0",
+          "minor version resets patch");
+    const auto icon = files.path / "icon.png";
+    wxInitAllImageHandlers();
+    wxImage iconImage(1, 1);
+    iconImage.SetRGB(0, 0, 255, 100, 50);
+    Check(iconImage.SaveFile(wxString::FromUTF8(icon.string()), wxBITMAP_TYPE_PNG),
+          "icon fixture saves as PNG");
+    Check(project->SetIcon(icon, error) &&
+              std::filesystem::is_regular_file(files.path / "original" / project->GetIcon()),
+          "project icon is copied into assets");
+    const auto previousIcon = project->GetIcon();
+    const auto badIcon = files.path / "invalid-icon.png";
+    std::ofstream(badIcon, std::ios::binary) << "not an image";
+    Check(!project->SetIcon(badIcon, error) && project->GetIcon() == previousIcon,
+          "invalid icon leaves existing icon unchanged");
+    Check(project->RescanResources(error) == 1 && error.empty(), "assets are rescanned");
+    std::ofstream(files.path / "original" / "Assets" / "new.txt") << "new";
+    Check(project->RescanResources(error) == 2, "resource rescan detects added assets");
+    Check(std::filesystem::is_regular_file(files.path / "original" / ".lux" / "assets.index"),
+          "resource index is persisted");
+
+    Scene autosaved;
+    Check(autosaved.Deserialize(project->GetSceneFile().string()), "scene loads for autosave");
+    autosaved.CreateEntity("Unsaved");
+    Check(project->SaveAutosave(project->GetSceneFile(), autosaved, error),
+          "dirty scene can be autosaved");
+    std::filesystem::last_write_time(project->GetAutosaveFile(project->GetSceneFile()),
+                                     std::filesystem::file_time_type::clock::now() +
+                                         std::chrono::seconds(5));
+    Check(project->HasNewerAutosave(project->GetSceneFile()), "newer autosave is detected");
+    Check(project->ClearAutosave(project->GetSceneFile()), "autosave can be cleared");
+    Check(!project->HasNewerAutosave(project->GetSceneFile()), "cleared autosave is ignored");
+    Check(!project->SaveAutosave(files.path / "outside.lux", autosaved, error),
+          "autosave refuses a scene outside the project");
+
+    std::filesystem::create_directory(files.path / "original" / ".git");
+    std::ofstream(files.path / "original" / ".git" / "config") << "local git data";
+    const auto archive = files.path / "export.luxpack";
+    Check(ExportProject(*project, archive, error), "project exports to package");
+    Check(ExportProject(*project, archive, error), "project export safely replaces package");
+    auto imported = ImportProject(archive, files.path / "imported", error);
+    Check(imported.has_value() && imported->GetName() == "Original" &&
+              imported->GetSettings().dependencies.size() == 1 &&
+              !std::filesystem::exists(files.path / "imported" / ".git"),
+          "project package imports with metadata");
+    Check(!ImportProject(archive, files.path / "imported", error),
+          "import does not overwrite existing project");
+    auto cloned = CloneProject(*project, files.path / "clone", "Clone", error);
+    Check(cloned.has_value() && cloned->GetName() == "Clone", "project clone changes name");
+    Check(!CloneProject(*project, files.path / "invalid-clone", "../Bad", error) &&
+              !std::filesystem::exists(files.path / "invalid-clone"),
+          "invalid clone does not leave project folder");
+
+    std::filesystem::path backup;
+    Check(CreateProjectBackup(*project, backup, error) && std::filesystem::exists(backup),
+          "project backup is created");
+    Check(project->Rename("Changed", error), "project changes after backup");
+    Check(RestoreProjectBackup(*project, backup, error), "project backup restores");
+    auto restored = EditorProject::Open(project->GetFile(), error);
+    Check(restored.has_value() && restored->GetName() == "Original",
+          "restore recovers earlier project metadata");
+    Check(std::filesystem::exists(backup), "restore preserves backup history");
+    bool hasPreRestoreBackup = false;
+    for (const auto& entry :
+         std::filesystem::directory_iterator(files.path / "original" / ".lux" / "backups"))
+        hasPreRestoreBackup |= entry.path().filename().string().starts_with("pre-restore-");
+    Check(hasPreRestoreBackup, "restore keeps pre-restore safety backup in project history");
+    std::filesystem::path secondBackup;
+    std::filesystem::path thirdBackup;
+    Check(CreateProjectBackup(*restored, secondBackup, error) &&
+              CreateProjectBackup(*restored, thirdBackup, error),
+          "multiple backups can be created");
+    size_t backupCount = 0;
+    for (const auto& entry :
+         std::filesystem::directory_iterator(files.path / "original" / ".lux" / "backups"))
+        if (entry.path().extension() == ".luxbackup")
+            ++backupCount;
+    Check(backupCount == 2, "project backup retention limit is applied");
+
+    const auto legacy = files.path / "legacy";
+    std::filesystem::create_directories(legacy / "Scenes");
+    std::filesystem::copy_file(project->GetSceneFile(), legacy / "Scenes" / "Main.lux");
+    std::ofstream(legacy / EditorProject::FileName)
+        << "LUXPROJECT 1\nname \"Legacy\"\nengine_version \""
+        << EditorProject::CurrentEngineVersion()
+        << "\"\ntemplate \"empty\"\nstart_scene \"Scenes/Main.lux\"\n";
+    auto migrated = EditorProject::Open(legacy / EditorProject::FileName, error);
+    Check(migrated.has_value() && std::filesystem::exists(legacy / "project.luxproj.v1.bak"),
+          "v1 project migrates with original manifest backup");
+    std::ifstream migratedFile(migrated->GetFile());
+    std::string firstLine;
+    std::getline(migratedFile, firstLine);
+    Check(firstLine == "LUXPROJECT 2", "migration writes current project format");
+    Check(std::filesystem::is_regular_file(legacy / "Source" / "Main.cpp") &&
+              std::filesystem::is_regular_file(legacy / "CMakeLists.txt"),
+          "migration supplies template source to legacy projects");
+    Check(EditorProject::Open(migrated->GetFile(), error).has_value(), "migrated project reopens");
+
+    const auto incompatible = files.path / "incompatible.luxproj";
+    std::filesystem::copy_file(project->GetFile(), incompatible);
+    std::ifstream source(incompatible);
+    std::string text((std::istreambuf_iterator<char>(source)), std::istreambuf_iterator<char>());
+    source.close();
+    const auto engineVersion = "engine_version \"" + EditorProject::CurrentEngineVersion() + "\"";
+    const auto location = text.find(engineVersion);
+    Check(location != std::string::npos, "fixture engine version exists");
+    text.replace(location, engineVersion.size(), "engine_version \"99.0.0\"");
+    std::ofstream(incompatible) << text;
+    Check(!EditorProject::Open(incompatible, error), "incompatible engine version is rejected");
+
+    const auto malicious = files.path / "malicious.luxpack";
+    {
+        wxFFileOutputStream output(wxString::FromUTF8(malicious.string()));
+        wxZipOutputStream zip(output);
+        Check(zip.PutNextEntry("../outside.txt"), "malicious archive fixture creates");
+        zip.Write("bad", 3);
+        Check(zip.Close(), "malicious archive fixture closes");
+    }
+    Check(!ImportProject(malicious, files.path / "unsafe", error) &&
+              !std::filesystem::exists(files.path / "outside.txt") &&
+              !std::filesystem::exists(files.path / "unsafe"),
+          "archive path traversal is rejected without writing outside destination");
+}
+
+void TestUnicodeProjectPaths() {
+    using namespace LuxEngine;
+    TempDirectory files;
+    std::string error;
+    const auto directory = files.path / PathFromUtf8("한글 프로젝트");
+    auto project = EditorProject::Create(directory, "숲속 게임", ProjectTemplate::Empty, error);
+    Check(project.has_value(), "unicode project creates");
+    EditorDocument document;
+    Check(document.Open(PathUtf8(project->GetSceneFile())), "unicode scene opens");
+    document.CreateEntity("한글 객체");
+    Check(document.Save(), "unicode scene saves");
+    const auto resource = directory / "Assets" / PathFromUtf8("나무.txt");
+    std::ofstream(resource) << "tree";
+    Check(project->RescanResources(error) == 1 && error.empty(), "unicode resource rescans");
+    const auto archive = files.path / PathFromUtf8("한글 패키지.luxpack");
+    Check(ExportProject(*project, archive, error), "unicode project exports");
+    const auto importedDirectory = files.path / PathFromUtf8("가져온 프로젝트");
+    auto imported = ImportProject(archive, importedDirectory, error);
+    Check(imported.has_value() && imported->GetName() == "숲속 게임" &&
+              std::filesystem::exists(importedDirectory / "Assets" / PathFromUtf8("나무.txt")),
+          "unicode project and resource import");
+    Check(document.Open(PathUtf8(imported->GetSceneFile())) &&
+              document.GetScene().GetEntityCount() == 1,
+          "imported unicode scene opens");
+    RecentProjects recent(files.path / PathFromUtf8("설정") / "recent.txt");
+    Check(recent.Add(imported->GetFile()), "unicode recent project saves");
+    RecentProjects reloaded(files.path / PathFromUtf8("설정") / "recent.txt");
+    reloaded.Load();
+    Check(reloaded.Get().size() == 1 && reloaded.Get()[0] == imported->GetFile(),
+          "unicode recent project reloads");
+}
+
 } // namespace
 
 int main() {
     try {
         TestDocument();
         TestProjectManagement();
+        TestProjectOperations();
+        TestUnicodeProjectPaths();
         std::cout << "Editor document checks passed\n";
         return 0;
     } catch (const std::exception& error) {
