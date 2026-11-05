@@ -1,7 +1,7 @@
 #include "SceneCanvas.hpp"
 
-#include "EditorDocument.hpp"
 #include "Engine/ECS/ECS.hpp"
+#include "Scene/EditorDocument.hpp"
 
 #include <wx/dcbuffer.h>
 #include <wx/event.h>

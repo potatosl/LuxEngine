@@ -37,11 +37,14 @@ function(lux_editor_copy_runtime target)
 endfunction()
 
 add_executable(LuxEditor WIN32 MACOSX_BUNDLE
-    Main.cpp
-    EditorDocument.cpp
-    EditorFrame.cpp
-    SceneCanvas.cpp
+    App/Main.cpp
+    App/EditorFrame.cpp
+    Project/EditorProject.cpp
+    Project/ProjectDialog.cpp
+    Scene/EditorDocument.cpp
+    Viewport/SceneCanvas.cpp
 )
+target_include_directories(LuxEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(LuxEditor PRIVATE LuxEngine::Engine ${wxWidgets_LIBRARIES})
 if(COMMAND lux_set_target_warnings)
     lux_set_target_warnings(LuxEditor)
@@ -54,7 +57,12 @@ if(MSVC)
 endif()
 
 if(LUX_BUILD_TESTS)
-    add_executable(LuxEditorDocumentTests EditorDocument.cpp EditorDocumentTest.cpp)
+    add_executable(LuxEditorDocumentTests
+        Scene/EditorDocument.cpp
+        Project/EditorProject.cpp
+        Tests/EditorDocumentTest.cpp
+    )
+    target_include_directories(LuxEditorDocumentTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine)
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorDocumentTests)

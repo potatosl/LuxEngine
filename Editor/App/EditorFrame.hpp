@@ -1,6 +1,7 @@
 #pragma once
 
-#include "EditorDocument.hpp"
+#include "Project/EditorProject.hpp"
+#include "Scene/EditorDocument.hpp"
 #include <array>
 #include <optional>
 #include <vector>
@@ -22,6 +23,12 @@ private:
     void RefreshHierarchy();
     void RefreshInspector();
     void UpdateChrome();
+    void UpdateRecentMenu();
+    void RefreshProjectExplorer();
+    void NewProject();
+    void OpenProjectDialog();
+    void OpenProjectFile(const std::filesystem::path& file);
+    void EditProjectSettings();
     bool ConfirmDiscardChanges();
     bool SaveScene(bool choosePath);
     void AddEntity();
@@ -33,8 +40,13 @@ private:
     void SelectEntity(std::optional<uint32> id);
 
     EditorDocument document_;
+    std::optional<EditorProject> project_;
+    RecentProjects recentProjects_;
+    wxMenu* recentMenu_ = nullptr;
     SceneCanvas* canvas_ = nullptr;
     wxListBox* hierarchy_ = nullptr;
+    wxListBox* projectFiles_ = nullptr;
+    wxStaticText* projectLabel_ = nullptr;
     wxStaticText* selectionLabel_ = nullptr;
     wxPanel* inspectorBody_ = nullptr;
     wxTextCtrl* name_ = nullptr;
@@ -42,6 +54,7 @@ private:
     std::array<std::array<wxSpinCtrlDouble*, 3>, 3> transform_{};
     std::array<wxSpinCtrlDouble*, 4> color_{};
     std::vector<uint32> hierarchyIds_;
+    std::vector<std::filesystem::path> projectFilePaths_;
     bool refreshingHierarchy_ = false;
     bool refreshingInspector_ = false;
 };
