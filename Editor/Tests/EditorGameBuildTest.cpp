@@ -56,7 +56,10 @@ bool Run(const fs::path& program, const QStringList& arguments, const fs::path& 
         output += "\n[timed out]";
         return false;
     }
-    return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+    const bool ok = process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+    if (!ok)
+        output += "\n[exit code " + std::to_string(process.exitCode()) + "]";
+    return ok;
 }
 
 void PrintTail(const std::string& text) {
