@@ -1,4 +1,5 @@
 #include "SceneViewport2D.hpp"
+#include "EngineSceneRenderer.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Scene/EditorDocument.hpp"
 #include <QMouseEvent>
@@ -47,6 +48,7 @@ SceneViewport2D::SceneViewport2D(QWidget* parent, EditorDocument& document,
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(300, 200);
 }
+SceneViewport2D::~SceneViewport2D() = default;
 QPointF SceneViewport2D::WorldToScreen(double x, double y) const {
     return {width() * 0.5 + pan_.x() + x * pixelsPerUnit_,
             height() * 0.5 + pan_.y() - y * pixelsPerUnit_};
@@ -63,10 +65,11 @@ void SceneViewport2D::FocusSelection() {
         update();
     }
 }
-void SceneViewport2D::paintEvent(QPaintEvent*) {
-    QPainter painter(this);
-    painter.fillRect(rect(), Background);
-    painter.setRenderHint(QPainter::Antialiasing);
+void SceneViewport2D::DrawGrid(QPainter& painter, int alpha) const {
+    auto line = [alpha](QColor color) {
+        color.setAlpha(alpha);
+        return color;
+    };
     const double originX = width() * 0.5 + pan_.x();
     const double originY = height() * 0.5 + pan_.y();
     const int minX = std::max(-10000, static_cast<int>(std::floor(-originX / pixelsPerUnit_)));
@@ -76,21 +79,42 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         std::max(-10000, static_cast<int>(std::floor((originY - height()) / pixelsPerUnit_)));
     const int maxY = std::min(10000, static_cast<int>(std::ceil(originY / pixelsPerUnit_)));
     for (int unit = minX; unit <= maxX; ++unit) {
-        painter.setPen(QPen(unit == 0       ? QColor(170, 84, 91)
-                            : unit % 5 == 0 ? QColor(67, 74, 86)
-                                            : QColor(48, 54, 64),
+        painter.setPen(QPen(line(unit == 0       ? QColor(170, 84, 91)
+                                 : unit % 5 == 0 ? QColor(67, 74, 86)
+                                                 : QColor(48, 54, 64)),
                             unit == 0 ? 2 : 1));
         const double x = originX + unit * pixelsPerUnit_;
         painter.drawLine(QPointF(x, 0), QPointF(x, height()));
     }
     for (int unit = minY; unit <= maxY; ++unit) {
-        painter.setPen(QPen(unit == 0       ? QColor(89, 157, 113)
-                            : unit % 5 == 0 ? QColor(67, 74, 86)
-                                            : QColor(48, 54, 64),
+        painter.setPen(QPen(line(unit == 0       ? QColor(89, 157, 113)
+                                 : unit % 5 == 0 ? QColor(67, 74, 86)
+                                                 : QColor(48, 54, 64)),
                             unit == 0 ? 2 : 1));
         const double y = originY - unit * pixelsPerUnit_;
         painter.drawLine(QPointF(0, y), QPointF(width(), y));
     }
+}
+void SceneViewport2D::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.fillRect(rect(), Background);
+    painter.setRenderHint(QPainter::Antialiasing);
+    engineFrame_ = false;
+    if (EngineSceneRenderer::Allowed()) {
+        if (!engineRenderer_)
+            engineRenderer_ = std::make_unique<EngineSceneRenderer>();
+        const qreal ratio = devicePixelRatioF();
+        const QPointF topLeft = ScreenToWorld(QPointF(0, 0));
+        const QPointF bottomRight = ScreenToWorld(QPointF(width(), height()));
+        QImage frame;
+        if (engineRenderer_->Render(document_.GetScene(), static_cast<int>(std::lround(width() * ratio)),
+                                    static_cast<int>(std::lround(height() * ratio)),
+                                    QRectF(topLeft, bottomRight), frame)) {
+            painter.drawImage(rect(), frame);
+            engineFrame_ = true;
+        }
+    }
+    DrawGrid(painter, engineFrame_ ? 70 : 255);
     auto entities = document_.GetScene().GetEntities();
     std::stable_sort(entities.begin(), entities.end(), [](Entity a, Entity b) {
         const float az = a.HasComponent<TransformComponent>()
@@ -120,8 +144,8 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
                 if (top.x() + size < 0 || top.x() > width() || top.y() + size < 0 ||
                     top.y() > height())
                     continue;
-                painter.setPen(QPen(QColor(20, 24, 26, 130), 1));
-                painter.setBrush(TileColor(tile));
+                painter.setPen(QPen(QColor(20, 24, 26, engineFrame_ ? 70 : 130), 1));
+                painter.setBrush(engineFrame_ ? QBrush(Qt::NoBrush) : QBrush(TileColor(tile)));
                 painter.drawRect(QRectF(top, QSizeF(size, size)));
             }
         if (selected && selected.GetId() == entity.GetId()) {
@@ -151,9 +175,12 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         }
         const bool active = selected && selected.GetId() == entity.GetId();
         painter.setPen(QPen(active ? Selection : QColor(178, 189, 204), active ? 3 : 1));
-        painter.setBrush(
-            QColor::fromRgbF(std::clamp(color.x, 0.0f, 1.0f), std::clamp(color.y, 0.0f, 1.0f),
-                             std::clamp(color.z, 0.0f, 1.0f), std::clamp(color.w, 0.0f, 1.0f)));
+        if (engineFrame_)
+            painter.setBrush(Qt::NoBrush);
+        else
+            painter.setBrush(QColor::fromRgbF(
+                std::clamp(color.x, 0.0f, 1.0f), std::clamp(color.y, 0.0f, 1.0f),
+                std::clamp(color.z, 0.0f, 1.0f), std::clamp(color.w, 0.0f, 1.0f)));
         painter.drawPolygon(polygon);
         painter.setPen(active ? Selection : QColor(215, 222, 231));
         painter.drawText(polygon.boundingRect().topLeft() - QPointF(0, 6), Name(entity));
@@ -187,7 +214,10 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
     }
     painter.setPen(QColor(219, 226, 235));
     painter.drawText(12, 22,
-                     QStringLiteral("2D 장면  |  %1 px/단위").arg(pixelsPerUnit_, 0, 'f', 0));
+                     QStringLiteral("2D 장면  |  %1 px/단위  |  %2")
+                         .arg(pixelsPerUnit_, 0, 'f', 0)
+                         .arg(engineFrame_ ? QStringLiteral("엔진 Vulkan")
+                                           : QStringLiteral("소프트웨어")));
     painter.setPen(QColor(166, 178, 194));
     const QString help = snapToGrid_ ? QStringLiteral("휠 확대 · 가운데 드래그 이동 · 스냅 켜짐")
                                      : QStringLiteral("휠 확대 · 가운데 드래그 이동 · 스냅 꺼짐");

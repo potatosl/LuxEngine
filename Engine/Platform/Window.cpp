@@ -25,6 +25,9 @@ bool Window::Initialize(const WindowProps& props) {
     if (props_.vulkan) {
         flags |= SDL_WINDOW_VULKAN;
     }
+    if (props_.hidden) {
+        flags |= SDL_WINDOW_HIDDEN;
+    }
 
     window_ = SDL_CreateWindow(props_.title.c_str(), static_cast<int>(props_.width),
                                static_cast<int>(props_.height), flags);
@@ -186,6 +189,17 @@ bool Window::GetFramebufferSize(uint32& width, uint32& height) const {
         return false;
     width = static_cast<uint32>(pixelWidth);
     height = static_cast<uint32>(pixelHeight);
+    return true;
+}
+
+bool Window::SetSize(uint32 width, uint32 height) {
+    if (!window_ || width == 0 || height == 0 || width > 16384 || height > 16384)
+        return false;
+    if (!SDL_SetWindowSize(window_, static_cast<int>(width), static_cast<int>(height)))
+        return false;
+    SDL_SyncWindow(window_);
+    props_.width = width;
+    props_.height = height;
     return true;
 }
 

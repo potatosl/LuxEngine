@@ -18,6 +18,8 @@ struct WindowProps {
     bool resizable = true;
     bool vsync = true;
     bool vulkan = false;
+    // Creates the window without showing it, e.g. for offscreen rendering in tools.
+    bool hidden = false;
 };
 
 class LUX_API Window {
@@ -50,6 +52,7 @@ public:
     uint32 GetWidth() const;
     uint32 GetHeight() const;
     bool GetFramebufferSize(uint32& width, uint32& height) const;
+    bool SetSize(uint32 width, uint32 height);
     bool IsMinimized() const;
     bool HasFocus() const;
     float GetDisplayScale() const;

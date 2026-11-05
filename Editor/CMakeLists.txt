@@ -41,6 +41,7 @@ add_library(LuxEditorUi STATIC
     Project/ProjectTemplates.cpp
     Scene/EditorDocument.cpp
     Ui/IconFactory.cpp
+    Viewport/EngineSceneRenderer.cpp
     Viewport/SceneViewport2D.cpp
     Viewport/SceneViewport3D.cpp
 )

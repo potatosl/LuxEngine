@@ -5,10 +5,12 @@
 #include <QWidget>
 #include <array>
 #include <functional>
+#include <memory>
 #include <optional>
 
 namespace LuxEngine {
 class EditorDocument;
+class EngineSceneRenderer;
 struct TransformComponent;
 class SceneViewport2D final : public QWidget {
 public:
@@ -17,6 +19,7 @@ public:
                     std::function<void(uint32, const TransformComponent&)> onTransform,
                     std::function<void(uint32, uint32, uint32, uint8_t)> onPaintTile,
                     std::function<void()> onBeginEdit, std::function<void()> onEndEdit);
+    ~SceneViewport2D() override;
     void RefreshScene() {
         update();
     }
@@ -65,5 +68,8 @@ private:
     EditorTool tool_ = EditorTool::Select;
     uint8_t tileId_ = 1;
     void PaintAt(QPointF point);
+    void DrawGrid(class QPainter& painter, int alpha) const;
+    std::unique_ptr<EngineSceneRenderer> engineRenderer_;
+    bool engineFrame_ = false;
 };
 } // namespace LuxEngine
