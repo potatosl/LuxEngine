@@ -89,6 +89,8 @@ public:
     static void Shutdown();
 
     static void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light);
+    static void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light,
+                           std::span<const PointLight> pointLights);
     static void EndScene();
 
     static void DrawMesh(const Mat4& transform, const Material3D& material);
