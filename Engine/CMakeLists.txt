@@ -45,8 +45,15 @@ set(LUXENGINE_SOURCES
 # Organize source files into Visual Studio folders matching the directory structure
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${LUXENGINE_SOURCES} ${LUXENGINE_HEADERS})
 
-add_library(LuxEngine STATIC ${LUXENGINE_SOURCES} ${LUXENGINE_HEADERS})
+option(LUX_BUILD_SHARED "Build LuxEngine as a shared library" OFF)
+if(LUX_BUILD_SHARED)
+    add_library(LuxEngine SHARED ${LUXENGINE_SOURCES} ${LUXENGINE_HEADERS})
+    target_compile_definitions(LuxEngine PUBLIC LUX_ENGINE_SHARED PRIVATE LUX_ENGINE_BUILD)
+else()
+    add_library(LuxEngine STATIC ${LUXENGINE_SOURCES} ${LUXENGINE_HEADERS})
+endif()
 add_library(LuxEngine::Engine ALIAS LuxEngine)
+set_target_properties(LuxEngine PROPERTIES EXPORT_NAME Engine)
 target_sources(LuxEngine PRIVATE "${CMAKE_BINARY_DIR}/generated/Branding.cpp")
 
 target_include_directories(LuxEngine PUBLIC

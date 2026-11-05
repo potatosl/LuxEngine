@@ -14,7 +14,7 @@ namespace LuxEngine {
         Vec2 texCoords;
     };
 
-    class OrthographicCamera {
+    class LUX_API OrthographicCamera {
     public:
         OrthographicCamera() = default;
         OrthographicCamera(float left, float right, float bottom, float top);
@@ -40,7 +40,7 @@ namespace LuxEngine {
         float rotation_ = 0.0f;
     };
 
-    class Renderer2D {
+    class LUX_API Renderer2D {
     public:
         struct Statistics {
             uint32 drawCalls = 0;
