@@ -9,23 +9,47 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         enable_testing()
     endif()
     find_package(LuxEngine CONFIG REQUIRED)
+    # Same layout as the engine build: every executable and the files it needs in bin[/<Config>].
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    foreach(_config ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER ${_config} _config_upper)
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${_config_upper} "${CMAKE_BINARY_DIR}/bin/${_config}")
+    endforeach()
 endif()
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
 find_package(libzip CONFIG REQUIRED)
 
+if(NOT COMMAND lux_copy_runtime)
+    # Standalone build against the installed SDK: copy the engine's shaders, SDL3.dll and the
+    # SDK's LuxPlayer (used by "run in window") once into the shared bin folder.
+    if(CMAKE_CONFIGURATION_TYPES)
+        set(_lux_editor_runtime_dir "${CMAKE_BINARY_DIR}/bin/$<CONFIG>")
+    else()
+        set(_lux_editor_runtime_dir "${CMAKE_BINARY_DIR}/bin")
+    endif()
+    set(_lux_editor_runtime_copy
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${LuxEngine_SHADER_DIR}" "${_lux_editor_runtime_dir}/shaders")
+    if(WIN32 AND TARGET SDL3::SDL3-shared)
+        list(APPEND _lux_editor_runtime_copy
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> "${_lux_editor_runtime_dir}")
+    endif()
+    find_program(LUX_PLAYER_EXECUTABLE LuxPlayer
+        HINTS "${LuxEngine_DIR}/../../../bin" NO_DEFAULT_PATH)
+    if(LUX_PLAYER_EXECUTABLE)
+        list(APPEND _lux_editor_runtime_copy
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LUX_PLAYER_EXECUTABLE}" "${_lux_editor_runtime_dir}")
+    else()
+        message(WARNING "LuxPlayer was not found in the engine SDK; \"run in window\" will be unavailable.")
+    endif()
+    add_custom_target(LuxEditorRuntimeFiles ALL ${_lux_editor_runtime_copy} VERBATIM)
+endif()
+
 function(lux_editor_copy_runtime target)
     if(COMMAND lux_copy_runtime)
         lux_copy_runtime(${target})
-    elseif(COMMAND lux_copy_shaders)
-        lux_copy_shaders(${target})
-        if(WIN32 AND TARGET SDL3::SDL3-shared)
-            add_custom_command(TARGET ${target} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:SDL3::SDL3-shared>
-                    "$<TARGET_FILE_DIR:${target}>"
-                VERBATIM)
-        endif()
+    else()
+        add_dependencies(${target} LuxEditorRuntimeFiles)
     endif()
 endfunction()
 
