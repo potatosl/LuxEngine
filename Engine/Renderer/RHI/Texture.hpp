@@ -6,7 +6,7 @@
 
 namespace LuxEngine {
 
-    class GpuTexture {
+    class LUX_API GpuTexture {
     public:
         GpuTexture() = default;
         ~GpuTexture();

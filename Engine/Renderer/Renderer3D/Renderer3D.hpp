@@ -32,7 +32,7 @@ namespace LuxEngine {
         float radius = 10.0f;
     };
 
-    class PerspectiveCamera {
+    class LUX_API PerspectiveCamera {
     public:
         PerspectiveCamera() = default;
         PerspectiveCamera(float fovRadians, float aspect, float nearClip, float farClip);
@@ -59,7 +59,7 @@ namespace LuxEngine {
         Vec3 up_{ 0.0f, 1.0f, 0.0f };
     };
 
-    class Renderer3D {
+    class LUX_API Renderer3D {
     public:
         struct Statistics {
             uint32 drawCalls = 0;

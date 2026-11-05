@@ -1,42 +1,8 @@
-include(FetchContent)
-option(LUX_FETCH_DEPENDENCIES "Download missing build dependencies" ON)
-if(MSVC)
-    find_package(SDL3 3.2 CONFIG QUIET NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH)
-else()
-    find_package(SDL3 3.2 CONFIG QUIET)
+# Build dependencies are installed by the developer, never downloaded by CMake.
+find_package(SDL3 3.2 CONFIG REQUIRED)
+
+find_path(STB_IMAGE_INCLUDE_DIR NAMES stb_image.h PATH_SUFFIXES stb)
+if(NOT STB_IMAGE_INCLUDE_DIR OR NOT EXISTS "${STB_IMAGE_INCLUDE_DIR}/stb_image.h")
+    message(FATAL_ERROR "stb_image.h not found. Install stb-devel or set STB_IMAGE_INCLUDE_DIR to its containing directory.")
 endif()
-if(NOT TARGET SDL3::SDL3)
-    if(NOT LUX_FETCH_DEPENDENCIES)
-        message(FATAL_ERROR "SDL3 package not found. Set SDL3_DIR or CMAKE_PREFIX_PATH.")
-    endif()
-    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
-    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(SDL_SHARED ON CACHE BOOL "" FORCE)
-    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(SDL3
-        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG release-3.4.18
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(SDL3)
-    if(MSVC)
-        target_compile_options(SDL3-shared PRIVATE /FS)
-    endif()
-endif()
-set(STB_IMAGE_INCLUDE_DIR "" CACHE PATH "Directory containing an existing stb_image.h")
-if(STB_IMAGE_INCLUDE_DIR)
-    if(NOT EXISTS "${STB_IMAGE_INCLUDE_DIR}/stb_image.h")
-        message(FATAL_ERROR "STB_IMAGE_INCLUDE_DIR must contain stb_image.h")
-    endif()
-    set(stb_SOURCE_DIR "${STB_IMAGE_INCLUDE_DIR}")
-else()
-    if(NOT LUX_FETCH_DEPENDENCIES)
-        message(FATAL_ERROR "stb_image.h not found. Set STB_IMAGE_INCLUDE_DIR.")
-    endif()
-    FetchContent_Declare(stb
-        GIT_REPOSITORY https://github.com/nothings/stb.git
-        GIT_TAG d14d46f6b44456eb88beac58cba833a4135d4c89
-    )
-    FetchContent_MakeAvailable(stb)
-endif()
+set(stb_SOURCE_DIR "${STB_IMAGE_INCLUDE_DIR}")

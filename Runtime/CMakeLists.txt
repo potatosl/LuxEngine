@@ -9,9 +9,11 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${LUXRUNTIME_SOURCES})
 
 add_library(LuxRuntime STATIC ${LUXRUNTIME_SOURCES})
 add_library(LuxEngine::Runtime ALIAS LuxRuntime)
+set_target_properties(LuxRuntime PROPERTIES EXPORT_NAME Runtime)
 
 target_include_directories(LuxRuntime PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
 )
 
 target_link_libraries(LuxRuntime PUBLIC LuxEngine::Engine)

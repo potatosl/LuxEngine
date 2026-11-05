@@ -12,7 +12,7 @@ namespace LuxEngine {
         Uniform
     };
 
-    class GpuBuffer {
+    class LUX_API GpuBuffer {
     public:
         GpuBuffer() = default;
         ~GpuBuffer();

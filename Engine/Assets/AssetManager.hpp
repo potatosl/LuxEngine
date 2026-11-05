@@ -13,7 +13,7 @@ namespace LuxEngine {
         std::vector<uint32> indices;
     };
 
-    class AssetManager {
+    class LUX_API AssetManager {
     public:
         static void Init();
         static void Shutdown();

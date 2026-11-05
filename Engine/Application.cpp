@@ -10,6 +10,17 @@
 
 namespace LuxEngine {
 
+    namespace {
+        template <typename Fn>
+        void AttemptShutdown(Fn&& operation, const char* error) noexcept {
+            try {
+                operation();
+            } catch (...) {
+                try { Log::Error(error); } catch (...) {}
+            }
+        }
+    }
+
     Application* Application::s_Instance = nullptr;
 
     Application::Application(const ApplicationSpecification& spec)
@@ -20,6 +31,21 @@ namespace LuxEngine {
         s_Instance = this;
     }
 
+    Application& Application::Get() {
+        if (!s_Instance) throw std::logic_error("Application instance does not exist");
+        return *s_Instance;
+    }
+
+    Window& Application::GetWindow() {
+        if (!window_ || !window_->GetNativeHandle()) throw std::logic_error("Window is not initialized");
+        return *window_;
+    }
+
+    GpuDevice& Application::GetGpuDevice() {
+        if (!gpuDevice_ || !gpuDevice_->IsReady()) throw std::logic_error("GPU device is not initialized");
+        return *gpuDevice_;
+    }
+
     Application::~Application() {
         Shutdown();
         if (s_Instance == this) {
@@ -28,11 +54,16 @@ namespace LuxEngine {
     }
 
     bool Application::Initialize() {
+        if (shuttingDown_) return false;
         if (sdlInitialized_) return running_;
         Log::Init();
 
-        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+        ownsSdlRoot_ = SDL_WasInit(0) == 0;
+        if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             Log::Error(std::string("SDL_Init failed: ") + SDL_GetError());
+            if (ownsSdlRoot_) SDL_Quit();
+            ownsSdlRoot_ = false;
+            Log::Shutdown();
             return false;
         }
         sdlInitialized_ = true;
@@ -66,6 +97,7 @@ namespace LuxEngine {
         try { OnInit(); }
         catch (...) { Shutdown(); throw; }
         if (!running_) { Shutdown(); return false; }
+        lastTicksNs_ = SDL_GetTicksNS();
         return true;
     }
 
@@ -87,86 +119,128 @@ namespace LuxEngine {
     }
 
     int Application::Run() {
-        if (!running_) return 1;
+        if (!sdlInitialized_) return 1;
+        while (true) {
+            const FrameResult result = RunFrame();
+            if (result == FrameResult::Continue) continue;
+            if (result == FrameResult::Skipped) {
+                SDL_Delay(1);
+                continue;
+            }
+            return result == FrameResult::Stopped ? 0 : 1;
+        }
+    }
 
-        uint64 last = SDL_GetTicksNS();
+    Application::FrameResult Application::RunFrame() {
+        if (!sdlInitialized_) return FrameResult::Error;
         constexpr double fixedStep = 1.0 / 60.0;
-        double accumulator = 0.0;
 
         try {
-        while (running_ && window_->IsRunning()) {
+            if (!running_ || !window_->IsRunning()) {
+                Shutdown();
+                return FrameResult::Stopped;
+            }
+
             window_->PollEvents();
             if (!running_ || !window_->IsRunning()) {
-                break;
+                Shutdown();
+                return FrameResult::Stopped;
             }
 
             const uint64 now = SDL_GetTicksNS();
-            const double dt = std::clamp(static_cast<double>(now - last) / 1'000'000'000.0, 0.0, 0.25);
-            last = now;
+            const double dt = std::clamp(static_cast<double>(now - lastTicksNs_) / 1'000'000'000.0, 0.0, 0.25);
+            lastTicksNs_ = now;
             elapsedSeconds_ += dt;
-            accumulator += dt;
+            accumulator_ += dt;
 
             int steps = 0;
-            while (running_ && accumulator >= fixedStep && steps < 5) {
+            while (running_ && accumulator_ >= fixedStep && steps < 5) {
                 OnUpdate(fixedStep);
-                accumulator -= fixedStep;
+                accumulator_ -= fixedStep;
                 ++steps;
             }
-            if (steps == 5 && accumulator >= fixedStep) {
-                accumulator = 0.0;
+            if (!running_) {
+                Shutdown();
+                return FrameResult::Stopped;
+            }
+            if (steps == 5 && accumulator_ >= fixedStep) accumulator_ = 0.0;
+
+            const auto frameStart = gpuDevice_->BeginFrame();
+            if (frameStart == GpuDevice::FrameStart::Error) {
+                Shutdown();
+                return FrameResult::Error;
+            }
+            if (frameStart == GpuDevice::FrameStart::Skipped) {
+                return FrameResult::Skipped;
             }
 
-            if (!running_) break;
-            if (gpuDevice_->BeginFrame()) {
-                const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(elapsedSeconds_));
-                gpuDevice_->Clear(
-                    0.05f + 0.05f * pulse,
-                    0.08f + 0.08f * pulse,
-                    0.15f + 0.15f * pulse,
-                    1.0f
-                );
-
-                OnRender(static_cast<float>(elapsedSeconds_));
+            const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(elapsedSeconds_));
+            const bool cleared = gpuDevice_->Clear(
+                0.05f + 0.05f * pulse,
+                0.08f + 0.08f * pulse,
+                0.15f + 0.15f * pulse,
+                1.0f
+            );
+            if (!cleared) {
                 gpuDevice_->EndFrame();
-            } else {
-                SDL_Delay(1);
+                Shutdown();
+                return FrameResult::Error;
             }
-        }
 
-        } catch (...) { Shutdown(); throw; }
-        Shutdown();
-        return 0;
+            OnRender(static_cast<float>(elapsedSeconds_));
+            if (!sdlInitialized_) return FrameResult::Stopped;
+            if (!gpuDevice_->EndFrame()) {
+                Shutdown();
+                return FrameResult::Error;
+            }
+            if (!running_) {
+                Shutdown();
+                return FrameResult::Stopped;
+            }
+            return FrameResult::Continue;
+        } catch (...) {
+            Shutdown();
+            throw;
+        }
     }
 
-    void Application::Shutdown() {
-        if (!running_ && !sdlInitialized_) return;
+    void Application::Shutdown() noexcept {
+        if (shuttingDown_) return;
+        if (!running_ && !sdlInitialized_ && !window_ && !gpuDevice_) return;
+        shuttingDown_ = true;
 
         running_ = false;
+        lastTicksNs_ = 0;
+        accumulator_ = 0.0;
+        elapsedSeconds_ = 0.0;
         if (initHookEntered_) {
             initHookEntered_ = false;
-            try { OnShutdown(); } catch (...) { Log::Error("OnShutdown failed"); }
+            AttemptShutdown([this] { OnShutdown(); }, "OnShutdown failed");
         }
-        AssetManager::Shutdown();
-        AudioEngine::Shutdown();
-        Renderer3D::Shutdown();
-        Renderer2D::Shutdown();
+        AttemptShutdown([] { AssetManager::Shutdown(); }, "AssetManager shutdown failed");
+        AttemptShutdown([] { AudioEngine::Shutdown(); }, "AudioEngine shutdown failed");
+        AttemptShutdown([] { Renderer3D::Shutdown(); }, "Renderer3D shutdown failed");
+        AttemptShutdown([] { Renderer2D::Shutdown(); }, "Renderer2D shutdown failed");
 
         if (gpuDevice_) {
-            gpuDevice_->Shutdown();
-            gpuDevice_.reset();
+            AttemptShutdown([this] { gpuDevice_->Shutdown(); }, "GpuDevice shutdown failed");
+            AttemptShutdown([this] { gpuDevice_.reset(); }, "GpuDevice release failed");
         }
 
         if (window_) {
-            window_->Shutdown();
-            window_.reset();
+            AttemptShutdown([this] { window_->Shutdown(); }, "Window shutdown failed");
+            AttemptShutdown([this] { window_.reset(); }, "Window release failed");
         }
 
         if (sdlInitialized_) {
-            SDL_Quit();
+            SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
+            if (ownsSdlRoot_) SDL_Quit();
             sdlInitialized_ = false;
+            ownsSdlRoot_ = false;
         }
 
-        Log::Shutdown();
+        AttemptShutdown([] { Log::Shutdown(); }, "Log shutdown failed");
+        shuttingDown_ = false;
     }
 
 } // namespace LuxEngine
