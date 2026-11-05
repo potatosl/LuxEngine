@@ -254,6 +254,16 @@ std::optional<fs::path> FindBuiltExecutable(const BuildPlan& plan) {
     return std::nullopt;
 }
 
+// MSBuild appends " [C:\\path\\project.vcxproj]" to every diagnostic; it is noise in the issue list.
+static std::string StripProjectSuffix(std::string message) {
+    if (message.size() > 2 && message.back() == ']') {
+        const size_t open = message.rfind(" [");
+        if (open != std::string::npos && message.find("proj", open) != std::string::npos)
+            message.erase(open);
+    }
+    return message;
+}
+
 std::optional<BuildDiagnostic> ParseBuildLine(const std::string& rawLine) {
     const std::string line = Trim(rawLine);
     if (line.empty())
@@ -261,16 +271,18 @@ std::optional<BuildDiagnostic> ParseBuildLine(const std::string& rawLine) {
     std::smatch match;
     BuildDiagnostic diagnostic;
 
-    // MSVC compiler: path(12,5): error C2065: message
+    // MSVC compiler: path(12,5): error C2065: message [project.vcxproj]
+    // Localized Visual Studio prints the keyword in its language, e.g. Korean "오류"/"경고".
     static const std::regex msvc(
-        R"(^(.+?)\((\d{1,9})(?:,(\d{1,9}))?\)\s*:\s*(fatal error|error|warning)\s+([A-Za-z]+\d+)\s*:\s*(.*)$)");
+        R"(^(.+?)\((\d{1,9})(?:,(\d{1,9}))?\)\s*:\s*(fatal error|error|warning|치명적인 오류|오류|경고)\s+([A-Za-z]+\d+)\s*:\s*(.*)$)");
     if (std::regex_match(line, match, msvc)) {
         diagnostic.file = match[1];
         diagnostic.line = std::stoi(match[2]);
         diagnostic.column = match[3].matched ? std::stoi(match[3]) : 0;
-        diagnostic.severity = SeverityFrom(match[4] == "warning" ? "warning" : "error");
+        const bool warning = match[4] == "warning" || match[4] == "경고";
+        diagnostic.severity = SeverityFrom(warning ? "warning" : "error");
         diagnostic.code = match[5];
-        diagnostic.message = Trim(match[6]);
+        diagnostic.message = StripProjectSuffix(Trim(match[6]));
         return diagnostic;
     }
     // GCC / Clang: path:12:5: error: message
@@ -286,11 +298,11 @@ std::optional<BuildDiagnostic> ParseBuildLine(const std::string& rawLine) {
     }
     // Linker: [file : ]fatal error LNK1104: message
     static const std::regex linker(
-        R"(^(?:(.+?)\s*:\s*)?(fatal error|error)\s+(LNK\d+)\s*:\s*(.*)$)");
+        R"(^(?:(.+?)\s*:\s*)?(fatal error|error|치명적인 오류|오류)\s+(LNK\d+)\s*:\s*(.*)$)");
     if (std::regex_match(line, match, linker)) {
         diagnostic.file = match[1].matched ? match[1].str() : std::string{};
         diagnostic.code = match[3];
-        diagnostic.message = Trim(match[4]);
+        diagnostic.message = StripProjectSuffix(Trim(match[4]));
         return diagnostic;
     }
     // CMake: CMake Error at CMakeLists.txt:7 (find_package):

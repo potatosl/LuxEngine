@@ -44,6 +44,16 @@ void TestDiagnostics() {
     Check(d && d->severity == DiagnosticSeverity::Error && d->file == R"(C:\proj\Source\Main.cpp)" &&
               d->line == 42 && d->column == 17 && d->code == "C2065",
           "msvc error");
+    Check(d && d->message == "'x': undeclared identifier", "msbuild project suffix stripped");
+    d = ParseBuildLine("C:\\프로젝트\\Main.cpp(5,3): 오류 C2065: 'x': 선언되지 않은 식별자입니다.");
+    Check(d && d->severity == DiagnosticSeverity::Error && d->line == 5 && d->code == "C2065",
+          "korean msvc error");
+    d = ParseBuildLine("Main.cpp(8): 경고 C4100: 'a': 참조되지 않은 매개 변수");
+    Check(d && d->severity == DiagnosticSeverity::Warning && d->code == "C4100",
+          "korean msvc warning");
+    d = ParseBuildLine("LINK : 치명적인 오류 LNK1104: 'x.lib' 파일을 열 수 없습니다.");
+    Check(d && d->severity == DiagnosticSeverity::Error && d->code == "LNK1104",
+          "korean linker fatal error");
     d = ParseBuildLine("Main.cpp(7): warning C4100: 'a': unreferenced formal parameter");
     Check(d && d->severity == DiagnosticSeverity::Warning && d->line == 7 && d->column == 0,
           "msvc warning without column");
