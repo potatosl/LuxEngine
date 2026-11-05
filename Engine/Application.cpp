@@ -2,6 +2,11 @@
 #include <SDL3/SDL.h>
 #include <cmath>
 #include <algorithm>
+#include <stdexcept>
+#include "Engine/Assets/AssetManager.hpp"
+#include "Engine/Audio/AudioEngine.hpp"
+#include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
+#include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 
 namespace LuxEngine {
 
@@ -9,15 +14,21 @@ namespace LuxEngine {
 
     Application::Application(const ApplicationSpecification& spec)
         : spec_(spec) {
+        if (s_Instance) {
+            throw std::logic_error("Application instance already exists");
+        }
         s_Instance = this;
     }
 
     Application::~Application() {
         Shutdown();
-        s_Instance = nullptr;
+        if (s_Instance == this) {
+            s_Instance = nullptr;
+        }
     }
 
     bool Application::Initialize() {
+        if (sdlInitialized_) return running_;
         Log::Init();
 
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -34,18 +45,45 @@ namespace LuxEngine {
 
         if (!window_->Initialize(props)) {
             Log::Error("Failed to initialize window.");
+            Shutdown();
             return false;
         }
+
+        window_->SetEventCallback([this](Event& e) {
+            OnEvent(e);
+        });
 
         gpuDevice_ = CreateScope<GpuDevice>();
         if (!gpuDevice_->Initialize(window_->GetNativeHandle())) {
             Log::Error("Failed to initialize GPU Device.");
+            Shutdown();
             return false;
         }
 
-        OnInit();
+        window_->SetPresentCallback([this](bool enabled) { return gpuDevice_ && gpuDevice_->SetVSync(enabled); });
+        initHookEntered_ = true;
         running_ = true;
+        try { OnInit(); }
+        catch (...) { Shutdown(); throw; }
+        if (!running_) { Shutdown(); return false; }
         return true;
+    }
+
+    void Application::OnEvent(Event& e) {
+        EventDispatcher dispatcher(e);
+        dispatcher.Dispatch<WindowCloseEvent>([this](WindowCloseEvent& ev) { return OnWindowClose(ev); });
+        dispatcher.Dispatch<WindowResizeEvent>([this](WindowResizeEvent& ev) { return OnWindowResize(ev); });
+    }
+
+    bool Application::OnWindowClose(WindowCloseEvent& /*e*/) {
+        running_ = false;
+        return true;
+    }
+
+    bool Application::OnWindowResize(WindowResizeEvent& e) {
+        spec_.width = e.GetWidth();
+        spec_.height = e.GetHeight();
+        return false;
     }
 
     int Application::Run() {
@@ -55,6 +93,7 @@ namespace LuxEngine {
         constexpr double fixedStep = 1.0 / 60.0;
         double accumulator = 0.0;
 
+        try {
         while (running_ && window_->IsRunning()) {
             window_->PollEvents();
             if (!running_ || !window_->IsRunning()) {
@@ -62,13 +101,13 @@ namespace LuxEngine {
             }
 
             const uint64 now = SDL_GetTicksNS();
-            const double dt = std::min(static_cast<double>(now - last) / 1'000'000'000.0, 0.25);
+            const double dt = std::clamp(static_cast<double>(now - last) / 1'000'000'000.0, 0.0, 0.25);
             last = now;
             elapsedSeconds_ += dt;
             accumulator += dt;
 
             int steps = 0;
-            while (accumulator >= fixedStep && steps < 5) {
+            while (running_ && accumulator >= fixedStep && steps < 5) {
                 OnUpdate(fixedStep);
                 accumulator -= fixedStep;
                 ++steps;
@@ -77,9 +116,9 @@ namespace LuxEngine {
                 accumulator = 0.0;
             }
 
+            if (!running_) break;
             if (gpuDevice_->BeginFrame()) {
                 const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(elapsedSeconds_));
-                // LuxEngine theme clear color (Deep Indigo / Teal highlight)
                 gpuDevice_->Clear(
                     0.05f + 0.05f * pulse,
                     0.08f + 0.08f * pulse,
@@ -89,9 +128,13 @@ namespace LuxEngine {
 
                 OnRender(static_cast<float>(elapsedSeconds_));
                 gpuDevice_->EndFrame();
+            } else {
+                SDL_Delay(1);
             }
         }
 
+        } catch (...) { Shutdown(); throw; }
+        Shutdown();
         return 0;
     }
 
@@ -99,7 +142,14 @@ namespace LuxEngine {
         if (!running_ && !sdlInitialized_) return;
 
         running_ = false;
-        OnShutdown();
+        if (initHookEntered_) {
+            initHookEntered_ = false;
+            try { OnShutdown(); } catch (...) { Log::Error("OnShutdown failed"); }
+        }
+        AssetManager::Shutdown();
+        AudioEngine::Shutdown();
+        Renderer3D::Shutdown();
+        Renderer2D::Shutdown();
 
         if (gpuDevice_) {
             gpuDevice_->Shutdown();
