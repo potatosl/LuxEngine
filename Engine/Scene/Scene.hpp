@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine/Animation/AnimationEngine.hpp"
 #include "Engine/Core/Core.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Engine/Physics/PhysicsEngine.hpp"

@@ -26,6 +26,19 @@ bool EditorDocument::Open(const std::string& path) {
     return true;
 }
 
+bool EditorDocument::Recover(const std::string& originalPath, const std::string& autosavePath) {
+    if (originalPath.empty() || autosavePath.empty())
+        return false;
+    auto replacement = std::make_unique<Scene>();
+    if (!replacement->Deserialize(autosavePath))
+        return false;
+    scene_.swap(replacement);
+    selectedId_.reset();
+    path_ = originalPath;
+    dirty_ = true;
+    return true;
+}
+
 bool EditorDocument::Save() {
     if (path_.empty() || !scene_->Serialize(path_))
         return false;
@@ -41,6 +54,17 @@ bool EditorDocument::SaveAs(const std::string& path) {
         return false;
     path_.swap(newPath);
     dirty_ = false;
+    return true;
+}
+
+bool EditorDocument::ReplaceScene(const std::string& serializedPath,
+                                  std::optional<uint32> selectedId) {
+    auto replacement = std::make_unique<Scene>();
+    if (!replacement->Deserialize(serializedPath))
+        return false;
+    scene_.swap(replacement);
+    selectedId_ = selectedId && scene_->IsAlive(*selectedId) ? selectedId : std::nullopt;
+    dirty_ = true;
     return true;
 }
 

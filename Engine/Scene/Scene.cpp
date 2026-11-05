@@ -1,8 +1,11 @@
 #include "Engine/Scene/Scene.hpp"
 #include "Engine/Physics/PhysicsEngine.hpp"
 #include "Engine/Physics/PhysicsWorld2D.h"
+#include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include <algorithm>
+#include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -46,6 +49,15 @@ std::vector<Entity> Scene::GetEntities() {
     return result;
 }
 void Scene::OnUpdate(double dt) {
+    for (auto id : entities_) {
+        if (!HasComponent<AnimationComponent>(id) || !HasComponent<TransformComponent>(id))
+            continue;
+        auto& animation = GetComponent<AnimationComponent>(id);
+        if (animation.playing && !animation.clip.keyframes.empty())
+            AnimationEngine::UpdateClip(animation.clip, animation.currentTime,
+                                        static_cast<float>(dt),
+                                        GetComponent<TransformComponent>(id));
+    }
     if (!physics2D_)
         physics2D_ = std::make_unique<PhysicsWorld2D>();
     physics2D_->Step(*this, dt, collisionEvents2D_);
@@ -64,8 +76,58 @@ void Scene::RemovePhysicsBody2D(uint32 id) {
         physics2D_->Remove(id);
     collisionEvents2D_.clear();
 }
-void Scene::OnRender() {}
 namespace {
+Vec4 TileColor(uint8_t tile) {
+    switch (tile) {
+    case 1:
+        return {0.36f, 0.65f, 0.27f, 1.0f};
+    case 2:
+        return {0.43f, 0.31f, 0.21f, 1.0f};
+    case 3:
+        return {0.48f, 0.51f, 0.54f, 1.0f};
+    case 4:
+        return {0.22f, 0.46f, 0.74f, 0.82f};
+    case 5:
+        return {0.76f, 0.66f, 0.42f, 1.0f};
+    default:
+        return {0, 0, 0, 0};
+    }
+}
+} // namespace
+void Scene::OnRender() {
+    // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직 연결되지 않았습니다.
+    for (Entity entity : GetEntities()) {
+        if (!entity.HasComponent<TransformComponent>())
+            continue;
+        const auto& transform = entity.GetComponent<TransformComponent>();
+        if (entity.HasComponent<TilemapComponent>()) {
+            const auto& map = entity.GetComponent<TilemapComponent>();
+            for (uint32 y = 0; y < map.height; ++y)
+                for (uint32 x = 0; x < map.width; ++x) {
+                    const uint8_t tile = map.Get(x, y);
+                    if (tile == 0)
+                        continue;
+                    const float size = map.tileSize;
+                    Renderer2D::DrawQuad({transform.position.x + (x + .5f) * size,
+                                          transform.position.y + (y + .5f) * size,
+                                          transform.position.z},
+                                         {size, size}, TileColor(tile));
+                }
+        }
+        if (entity.HasComponent<SpriteRendererComponent>()) {
+            const auto& sprite = entity.GetComponent<SpriteRendererComponent>();
+            Renderer2D::DrawRotatedQuad({transform.position.x, transform.position.y},
+                                        {transform.scale.x, transform.scale.y},
+                                        transform.rotation.z, sprite.color);
+        }
+    }
+}
+namespace {
+std::filesystem::path Utf8Path(const std::string& text) {
+    return std::filesystem::path(
+        std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
+}
+
 std::ostream& operator<<(std::ostream& o, const Vec2& v) {
     return o << v.x << ' ' << v.y << ' ';
 }
@@ -94,18 +156,43 @@ bool Scene::Serialize(const std::string& filepath) {
                                                         typeid(Rigidbody2DComponent),
                                                         typeid(BoxCollider2DComponent),
                                                         typeid(Rigidbody3DComponent),
-                                                        typeid(BoxCollider3DComponent)};
+                                                        typeid(BoxCollider3DComponent),
+                                                        typeid(TilemapComponent),
+                                                        typeid(AnimationComponent)};
     for (const auto& [type, pool] : pools_)
         if (!pool->Empty() && !supported.contains(type))
             return false;
-    std::ofstream out(filepath, std::ios::trunc);
+    for (const uint32 id : entities_) {
+        if (const auto* map = TryGetComponent<TilemapComponent>(id)) {
+            if (map->width == 0 || map->width > 256 || map->height == 0 || map->height > 256 ||
+                !std::isfinite(map->tileSize) || map->tileSize <= 0 || map->tileSize > 64 ||
+                map->tiles.size() != static_cast<size_t>(map->width) * map->height ||
+                std::any_of(map->tiles.begin(), map->tiles.end(),
+                            [](uint8_t tile) { return tile > 5; }))
+                return false;
+        }
+        if (const auto* animation = TryGetComponent<AnimationComponent>(id)) {
+            if (!std::isfinite(animation->clip.duration) || animation->clip.duration <= 0 ||
+                animation->clip.keyframes.size() > 4096)
+                return false;
+            for (const auto& key : animation->clip.keyframes)
+                if (!std::isfinite(key.time) || key.time < 0 || !std::isfinite(key.position.x) ||
+                    !std::isfinite(key.position.y) || !std::isfinite(key.position.z) ||
+                    !std::isfinite(key.rotation.x) || !std::isfinite(key.rotation.y) ||
+                    !std::isfinite(key.rotation.z) || !std::isfinite(key.scale.x) ||
+                    !std::isfinite(key.scale.y) || !std::isfinite(key.scale.z))
+                    return false;
+        }
+    }
+    std::ofstream out(Utf8Path(filepath), std::ios::trunc);
     if (!out)
         return false;
-    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 1 "
+    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 2 "
         << entities_.size() << '\n';
     std::vector<uint32> ids(entities_.begin(), entities_.end());
     std::sort(ids.begin(), ids.end());
     for (auto id : ids) {
+        out << id << '\n';
         auto save = [&]<class T>(auto write) {
             const bool present = HasComponent<T>(id);
             out << present << ' ';
@@ -134,22 +221,44 @@ bool Scene::Serialize(const std::string& filepath) {
         });
         save.operator()<BoxCollider3DComponent>(
             [&](const auto& c) { out << c.size << c.offset << c.isTrigger; });
+        save.operator()<TilemapComponent>([&](const auto& c) {
+            std::string cells;
+            cells.reserve(c.tiles.size());
+            for (uint8_t tile : c.tiles)
+                cells.push_back(static_cast<char>('0' + tile));
+            out << c.width << ' ' << c.height << ' ' << c.tileSize << ' ' << std::quoted(cells);
+        });
+        save.operator()<AnimationComponent>([&](const auto& c) {
+            out << std::quoted(c.clip.name) << ' ' << c.clip.duration << ' ' << c.clip.loop << ' '
+                << c.playing << ' ' << c.clip.keyframes.size();
+            for (const auto& key : c.clip.keyframes)
+                out << ' ' << key.time << ' ' << key.position << key.rotation << key.scale;
+        });
     }
     out.flush();
     return static_cast<bool>(out);
 }
 bool Scene::Deserialize(const std::string& filepath) {
-    std::ifstream in(filepath);
+    std::ifstream in(Utf8Path(filepath));
     std::string header;
     unsigned version = 0;
     uint64 count = 0;
-    if (!(in >> header >> version >> count) || header != "LuxEngineScene" || version != 1 ||
-        count > 1000000)
+    if (!(in >> header >> version >> count) || header != "LuxEngineScene" ||
+        (version != 1 && version != 2) || count > 1000000)
         return false;
     Scene parsed;
-    parsed.nextEntityId_ = nextEntityId_;
+    parsed.nextEntityId_ = 1;
+    uint32 lastId = 0;
     try {
         for (uint64 n = 0; n < count; ++n) {
+            if (version == 2) {
+                uint32 id = 0;
+                if (!(in >> id) || id == 0 || id <= lastId ||
+                    id == std::numeric_limits<uint32>::max())
+                    return false;
+                parsed.nextEntityId_ = id;
+                lastId = id;
+            }
             auto entity = parsed.CreateEntity();
             entity.RemoveComponent<TagComponent>();
             entity.RemoveComponent<TransformComponent>();
@@ -190,6 +299,36 @@ bool Scene::Deserialize(const std::string& filepath) {
             load.operator()<Rigidbody3DComponent>(body);
             load.operator()<BoxCollider3DComponent>(
                 [&](auto& c) { in >> c.size >> c.offset >> c.isTrigger; });
+            if (version == 2) {
+                load.operator()<TilemapComponent>([&](auto& c) {
+                    std::string cells;
+                    in >> c.width >> c.height >> c.tileSize >> std::quoted(cells);
+                    if (c.width == 0 || c.width > 256 || c.height == 0 || c.height > 256 ||
+                        !std::isfinite(c.tileSize) || c.tileSize <= 0.0f || c.tileSize > 64.0f ||
+                        cells.size() != c.width * c.height)
+                        in.setstate(std::ios::failbit);
+                    c.tiles.clear();
+                    for (char tile : cells) {
+                        if (tile < '0' || tile > '5')
+                            in.setstate(std::ios::failbit);
+                        c.tiles.push_back(static_cast<uint8_t>(tile - '0'));
+                    }
+                });
+                load.operator()<AnimationComponent>([&](auto& c) {
+                    size_t keyCount = 0;
+                    in >> std::quoted(c.clip.name) >> c.clip.duration >> c.clip.loop >> c.playing >>
+                        keyCount;
+                    if (keyCount > 4096 || !std::isfinite(c.clip.duration) ||
+                        c.clip.duration <= 0.0f)
+                        in.setstate(std::ios::failbit);
+                    for (size_t keyIndex = 0; keyIndex < keyCount && in; ++keyIndex) {
+                        Keyframe key;
+                        in >> key.time >> key.position >> key.rotation >> key.scale;
+                        if (in)
+                            c.clip.AddKeyframe(key);
+                    }
+                });
+            }
         }
         in >> std::ws;
         if (!in.eof())
@@ -202,6 +341,7 @@ bool Scene::Deserialize(const std::string& filepath) {
     nextEntityId_ = parsed.nextEntityId_;
     physics2D_.reset();
     collisionEvents2D_.clear();
+    lifetime_ = std::make_shared<int>(0);
     return true;
 }
 } // namespace LuxEngine
