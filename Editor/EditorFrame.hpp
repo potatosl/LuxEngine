@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Editor/EditorDocument.hpp"
-#include <wx/wx.h>
-#include <wx/spinctrl.h>
+#include "EditorDocument.hpp"
 #include <array>
 #include <optional>
 #include <vector>
+#include <wx/spinctrl.h>
+#include <wx/wx.h>
 
 namespace LuxEngine {
 

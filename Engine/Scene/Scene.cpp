@@ -16,10 +16,17 @@ Entity Scene::CreateEntity(const std::string& name) {
         throw std::overflow_error("Entity IDs exhausted");
     const auto id = nextEntityId_++;
     entities_.insert(id);
-    Entity entity{id, this};
-    entity.AddComponent<TagComponent>(name);
-    entity.AddComponent<TransformComponent>();
-    return entity;
+    try {
+        Entity entity{id, this};
+        entity.AddComponent<TagComponent>(name);
+        entity.AddComponent<TransformComponent>();
+        return entity;
+    } catch (...) {
+        for (auto& [type, pool] : pools_)
+            pool->Erase(id);
+        entities_.erase(id);
+        throw;
+    }
 }
 void Scene::DestroyEntity(Entity entity) {
     if (entity.GetScene() != this || !entity.IsValid())

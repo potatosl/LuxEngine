@@ -1,12 +1,18 @@
 #pragma once
 #include "Engine/Core/Core.hpp"
 #include "Engine/Core/Math.hpp"
-#include "Engine/Renderer/RHI/Texture.hpp"
 #include "Engine/Renderer/RHI/Buffer.hpp"
+#include "Engine/Renderer/RHI/Texture.hpp"
 #include <span>
 
+struct LuxOgreContext;
+
 namespace LuxEngine {
-struct RenderVertex { Vec3 position; Vec4 color; Vec2 uv; };
+struct RenderVertex {
+    Vec3 position;
+    Vec4 color;
+    Vec2 uv;
+};
 class LUX_API GpuDevice {
 public:
     enum class FrameStart { Ready, Skipped, Error };
@@ -22,14 +28,25 @@ public:
     FrameStart BeginFrame();
     bool Clear(float r, float g, float b, float a);
     bool EndFrame();
-    bool DrawTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection, GpuTexture* texture = nullptr, bool depth = false);
+    bool DrawTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection,
+                       GpuTexture* texture = nullptr, bool depth = false);
     bool SetVSync(bool enabled);
-    SDL_GPUDevice* GetHandle() const { return device_; }
-    bool IsReady() const { return device_ && claimed_; }
+    SDL_GPUDevice* GetHandle() const {
+        return device_;
+    }
+    LuxOgreContext* GetOgreContext() const {
+        return ogreContext_;
+    }
+    bool IsReady() const {
+        return ogreContext_ || (device_ && claimed_);
+    }
+
 private:
     bool CreatePipelines();
     bool ResizeDepth(uint32 width, uint32 height);
     SDL_Window* window_ = nullptr;
+    LuxOgreContext* ogreContext_ = nullptr;
+    bool frameActive_ = false;
     SDL_GPUDevice* device_ = nullptr;
     SDL_GPUCommandBuffer* currentCommandBuffer_ = nullptr;
     SDL_GPUTexture* currentSwapchainTexture_ = nullptr;
@@ -42,4 +59,4 @@ private:
     bool claimed_ = false;
     bool depthCleared_ = false;
 };
-}
+} // namespace LuxEngine

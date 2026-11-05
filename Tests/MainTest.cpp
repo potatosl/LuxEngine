@@ -51,6 +51,18 @@ struct Files {
 };
 using namespace LuxEngine;
 void Core() {
+    Random first(42), second(42);
+    for (int index = 0; index < 32; ++index) {
+        const float value = first.Range(-2.0f, 3.0f);
+        Check(value >= -2.0f && value < 3.0f && Near(value, second.Range(-2.0f, 3.0f)),
+              "deterministic random range");
+    }
+    Throws([&] { first.Range(2.0f, 1.0f); }, "reversed random range rejected");
+    Throws([&] { first.Range(0.0f, std::numeric_limits<float>::infinity()); },
+           "non-finite random range rejected");
+    Throws(
+        [&] { first.Range(-std::numeric_limits<float>::max(), std::numeric_limits<float>::max()); },
+        "overflowing random range rejected");
     static_assert(!std::is_move_constructible_v<Window>);
     static_assert(!std::is_move_constructible_v<GpuDevice>);
     GpuDevice uninitializedGpu;
@@ -420,6 +432,7 @@ void Scenes() {
     scene.DestroyEntity(a);
     Check(!a.IsValid() && !a.HasComponent<Custom>() && !a.HasComponent<Rigidbody2DComponent>(),
           "destroy all components");
+    Check(a.TryGetComponent<Custom>() == nullptr, "stale entity lookup is safe");
     scene.DestroyEntity(a);
     Check(scene.GetEntityCount() == 1 && b.IsValid(), "double destruction");
     Scene foreign;
@@ -430,6 +443,14 @@ void Scenes() {
     Throws([&] { view.GetComponent<SpriteRendererComponent>(b.GetId()); },
            "const missing component throws");
     Check(!b.HasComponent<SpriteRendererComponent>(), "query never inserts");
+    Check(b.TryGetComponent<SpriteRendererComponent>() == nullptr &&
+              view.TryGetComponent<SpriteRendererComponent>(b.GetId()) == nullptr,
+          "missing component lookup is safe");
+    Check(b.TryGetComponent<TagComponent>() != nullptr &&
+              view.TryGetComponent<TagComponent>(b.GetId()) != nullptr,
+          "present component lookup returns value");
+    Throws([&] { scene.RemoveComponent<TagComponent>(a.GetId()); },
+           "stale direct component removal rejected");
     Throws([&] { a.GetComponent<TagComponent>(); }, "stale entity throws");
     Throws([&] { b.AddComponent<TagComponent>(); }, "duplicate component throws");
     Entity orphan;
@@ -587,6 +608,11 @@ void WindowEvents() {
         Check(!window.Initialize() && window.GetNativeHandle() == handle,
               "duplicate initialization preserves window");
         Check(window.GetWidth() == 320 && window.GetHeight() == 240, "initial window dimensions");
+#if LUX_USE_OGRE
+        GpuDevice unavailable;
+        Check(!unavailable.Initialize(handle) && !unavailable.IsReady(),
+              "Ogre rejects a non-X11 window without loading the GL plugin");
+#endif
         Check(SDL_SetWindowSize(handle, 400, 300), "window resizes");
         Check(window.GetWidth() == 400 && window.GetHeight() == 300,
               "window dimensions stay current");
@@ -625,6 +651,9 @@ struct Graphics {
         props.width = 320;
         props.height = 240;
         props.title = "LuxEngine GPU verification";
+#if LUX_USE_OGRE
+        props.useOpenGL = true;
+#endif
         Check(window.Initialize(props), "GPU test window");
         const bool iconAvailable = window.HasWindowIcon();
         Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland",
@@ -725,16 +754,30 @@ void Lifecycle() {
 }
 void Gpu() {
     Graphics graphics;
+#if LUX_USE_OGRE
+    GpuDevice duplicateOgre;
+    Check(!duplicateOgre.Initialize(graphics.window.GetNativeHandle()) && !duplicateOgre.IsReady(),
+          "only one Ogre root is active");
+#endif
     Files files;
     auto* surface = SDL_CreateSurface(2, 2, SDL_PIXELFORMAT_RGBA32);
     Check(surface != nullptr, "test image surface");
     SDL_FillSurfaceRect(surface, nullptr, SDL_MapSurfaceRGBA(surface, 255, 0, 0, 255));
     Check(SDL_SaveBMP(surface, files.Path("red.bmp").c_str()), "write test image");
     SDL_DestroySurface(surface);
+#if LUX_USE_OGRE
+    auto texture = AssetManager::LoadTexture(files.Path("red.bmp"), &graphics.gpu);
+#else
     auto texture = AssetManager::LoadTexture(files.Path("red.bmp"), graphics.gpu.GetHandle());
+#endif
     Check(texture && texture->IsValid() && texture->GetWidth() == 2, "real image upload");
+#if LUX_USE_OGRE
+    Check(!AssetManager::LoadTexture(files.Path("absent.png"), &graphics.gpu),
+          "missing GPU image fails");
+#else
     Check(!AssetManager::LoadTexture(files.Path("absent.png"), graphics.gpu.GetHandle()),
           "missing GPU image fails");
+#endif
     Renderer2D::Init(&graphics.gpu);
     Renderer3D::Init(&graphics.gpu);
     OrthographicCamera camera(-2, 2, -2, 2);
@@ -756,9 +799,12 @@ void Gpu() {
               "real 3D draw call");
         Check(graphics.gpu.EndFrame(), "submit frame");
     }
+#if !LUX_USE_OGRE
     Check(SDL_WaitForGPUIdle(graphics.gpu.GetHandle()), "GPU completion");
+#endif
     texture.reset();
     AssetManager::Shutdown();
+#if !LUX_USE_OGRE
     GpuBuffer buffer;
     Check(buffer.Initialize(graphics.gpu.GetHandle(), BufferType::Vertex, 4), "buffer init");
     const uint32 value = 42;
@@ -767,9 +813,14 @@ void Gpu() {
     GpuBuffer moved = std::move(buffer);
     Check(!buffer.IsValid() && moved.IsValid(), "buffer ownership transfer");
     moved.Release();
+#endif
     const uint32 pixel = 0xffffffff;
     GpuTexture delayed;
+#if LUX_USE_OGRE
+    Check(delayed.Initialize(&graphics.gpu, 1, 1, &pixel), "delayed texture init");
+#else
     Check(delayed.Initialize(graphics.gpu.GetHandle(), 1, 1, &pixel), "delayed texture init");
+#endif
     graphics.gpu.Shutdown();
     Check(!delayed.IsValid() && !delayed.GetHandle(), "device shutdown invalidates resources");
     delayed.Release();

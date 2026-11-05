@@ -2,6 +2,11 @@
 find_package(SDL3 3.2 CONFIG REQUIRED)
 find_package(box2d 2.4...<3 CONFIG REQUIRED)
 
+option(LUX_USE_OGRE "Use Ogre for engine rendering instead of SDL GPU" ON)
+if(LUX_USE_OGRE)
+    include(LuxOgreDependency)
+endif()
+
 # Older configurations cached an empty value before downloading stb.
 # An empty cache entry prevents find_path from searching installed headers.
 if(DEFINED STB_IMAGE_INCLUDE_DIR AND STB_IMAGE_INCLUDE_DIR STREQUAL "")

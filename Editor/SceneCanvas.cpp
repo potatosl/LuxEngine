@@ -1,6 +1,6 @@
-#include "Editor/SceneCanvas.hpp"
+#include "SceneCanvas.hpp"
 
-#include "Editor/EditorDocument.hpp"
+#include "EditorDocument.hpp"
 #include "Engine/ECS/ECS.hpp"
 
 #include <wx/dcbuffer.h>
@@ -27,8 +27,8 @@ struct SpriteShape {
 bool ValidTransform(const TransformComponent& transform) {
     const auto& p = transform.position;
     const auto& s = transform.scale;
-    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) &&
-           std::isfinite(s.x) && std::isfinite(s.y) && std::isfinite(transform.rotation.z);
+    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) && std::isfinite(s.x) &&
+           std::isfinite(s.y) && std::isfinite(transform.rotation.z);
 }
 
 wxString EntityName(const Entity& entity) {
@@ -36,7 +36,8 @@ wxString EntityName(const Entity& entity) {
         const std::string& tag = entity.GetComponent<TagComponent>().tag;
         if (!tag.empty()) {
             const wxString name = wxString::FromUTF8(tag);
-            if (!name.empty()) return name;
+            if (!name.empty())
+                return name;
         }
     }
     return wxString::Format("Entity #%u", static_cast<unsigned>(entity.GetId()));
@@ -45,10 +46,14 @@ wxString EntityName(const Entity& entity) {
 std::vector<SpriteShape> CollectSprites(EditorDocument& document) {
     std::vector<SpriteShape> result;
     for (const Entity& entity : document.GetScene().GetEntities()) {
-        if (!entity.HasComponent<TransformComponent>() || !entity.HasComponent<SpriteRendererComponent>()) continue;
+        if (!entity.HasComponent<TransformComponent>() ||
+            !entity.HasComponent<SpriteRendererComponent>())
+            continue;
         const auto& transform = entity.GetComponent<TransformComponent>();
-        if (!ValidTransform(transform)) continue;
-        result.push_back({entity.GetId(), transform, entity.GetComponent<SpriteRendererComponent>().color,
+        if (!ValidTransform(transform))
+            continue;
+        result.push_back({entity.GetId(), transform,
+                          entity.GetComponent<SpriteRendererComponent>().color,
                           EntityName(entity)});
     }
     std::sort(result.begin(), result.end(), [](const SpriteShape& a, const SpriteShape& b) {
@@ -60,12 +65,15 @@ std::vector<SpriteShape> CollectSprites(EditorDocument& document) {
 }
 
 unsigned char BlendedChannel(float component, double alpha, unsigned char background) {
-    const double value = std::isfinite(component) ? std::clamp(static_cast<double>(component), 0.0, 1.0) : 1.0;
-    return static_cast<unsigned char>(std::lround(background * (1.0 - alpha) + value * 255.0 * alpha));
+    const double value =
+        std::isfinite(component) ? std::clamp(static_cast<double>(component), 0.0, 1.0) : 1.0;
+    return static_cast<unsigned char>(
+        std::lround(background * (1.0 - alpha) + value * 255.0 * alpha));
 }
 
 wxColour SpriteColor(const Vec4& color) {
-    const double alpha = std::isfinite(color.w) ? std::clamp(static_cast<double>(color.w), 0.0, 1.0) : 1.0;
+    const double alpha =
+        std::isfinite(color.w) ? std::clamp(static_cast<double>(color.w), 0.0, 1.0) : 1.0;
     return {BlendedChannel(color.x, alpha, kBackground.Red()),
             BlendedChannel(color.y, alpha, kBackground.Green()),
             BlendedChannel(color.z, alpha, kBackground.Blue())};
@@ -90,7 +98,9 @@ SceneCanvas::SceneCanvas(wxWindow* parent, EditorDocument& document,
     Bind(wxEVT_MOUSE_CAPTURE_LOST, &SceneCanvas::OnCaptureLost, this);
 }
 
-void SceneCanvas::RefreshScene() { Refresh(false); }
+void SceneCanvas::RefreshScene() {
+    Refresh(false);
+}
 
 void SceneCanvas::SetSnapToGrid(bool enabled) {
     snapToGrid_ = enabled;
@@ -120,29 +130,36 @@ void SceneCanvas::OnPaint(wxPaintEvent&) {
 
     const wxSize size = GetClientSize();
     const int width = size.GetWidth(), height = size.GetHeight();
-    if (width <= 0 || height <= 0) return;
+    if (width <= 0 || height <= 0)
+        return;
 
     const double originX = width * 0.5 + panX_;
     const double originY = height * 0.5 + panY_;
     const auto verticalStart = static_cast<long long>(std::floor(-originX / pixelsPerUnit_));
     const auto verticalEnd = static_cast<long long>(std::ceil((width - originX) / pixelsPerUnit_));
-    const auto horizontalStart = static_cast<long long>(std::floor((originY - height) / pixelsPerUnit_));
+    const auto horizontalStart =
+        static_cast<long long>(std::floor((originY - height) / pixelsPerUnit_));
     const auto horizontalEnd = static_cast<long long>(std::ceil(originY / pixelsPerUnit_));
     for (long long unit = verticalStart; unit <= verticalEnd; ++unit) {
         const int x = static_cast<int>(std::lround(originX + unit * pixelsPerUnit_));
-        dc.SetPen(wxPen(unit == 0 ? wxColour(170, 84, 91)
-                       : unit % 5 == 0 ? wxColour(67, 74, 86) : wxColour(48, 54, 64), unit == 0 ? 2 : 1));
+        dc.SetPen(wxPen(unit == 0       ? wxColour(170, 84, 91)
+                        : unit % 5 == 0 ? wxColour(67, 74, 86)
+                                        : wxColour(48, 54, 64),
+                        unit == 0 ? 2 : 1));
         dc.DrawLine(x, 0, x, height);
     }
     for (long long unit = horizontalStart; unit <= horizontalEnd; ++unit) {
         const int y = static_cast<int>(std::lround(originY - unit * pixelsPerUnit_));
-        dc.SetPen(wxPen(unit == 0 ? wxColour(89, 157, 113)
-                       : unit % 5 == 0 ? wxColour(67, 74, 86) : wxColour(48, 54, 64), unit == 0 ? 2 : 1));
+        dc.SetPen(wxPen(unit == 0       ? wxColour(89, 157, 113)
+                        : unit % 5 == 0 ? wxColour(67, 74, 86)
+                                        : wxColour(48, 54, 64),
+                        unit == 0 ? 2 : 1));
         dc.DrawLine(0, y, width, y);
     }
 
     const Entity selected = document_.GetSelected();
-    const std::optional<uint32> selectedId = selected ? std::optional<uint32>(selected.GetId()) : std::nullopt;
+    const std::optional<uint32> selectedId =
+        selected ? std::optional<uint32>(selected.GetId()) : std::nullopt;
     const auto sprites = CollectSprites(document_);
     for (const auto& sprite : sprites) {
         const auto& transform = sprite.transform;
@@ -150,9 +167,8 @@ void SceneCanvas::OnPaint(wxPaintEvent&) {
         const double sine = std::sin(transform.rotation.z);
         const double halfX = transform.scale.x * 0.5;
         const double halfY = transform.scale.y * 0.5;
-        const std::array<std::pair<double, double>, 4> corners{{
-            {-halfX, -halfY}, {halfX, -halfY}, {halfX, halfY}, {-halfX, halfY}
-        }};
+        const std::array<std::pair<double, double>, 4> corners{
+            {{-halfX, -halfY}, {halfX, -halfY}, {halfX, halfY}, {-halfX, halfY}}};
         std::array<wxPoint, 4> points;
         for (size_t index = 0; index < corners.size(); ++index) {
             const auto [localX, localY] = corners[index];
@@ -167,15 +183,19 @@ void SceneCanvas::OnPaint(wxPaintEvent&) {
         if (isSelected) {
             dc.SetBrush(wxBrush(kSelection));
             dc.SetPen(*wxTRANSPARENT_PEN);
-            for (const wxPoint& point : points) dc.DrawRectangle(point.x - 3, point.y - 3, 7, 7);
+            for (const wxPoint& point : points)
+                dc.DrawRectangle(point.x - 3, point.y - 3, 7, 7);
         }
 
-        const int top = std::min_element(points.begin(), points.end(),
-                                         [](const wxPoint& a, const wxPoint& b) { return a.y < b.y; })->y;
+        const int top =
+            std::min_element(points.begin(), points.end(), [](const wxPoint& a, const wxPoint& b) {
+                return a.y < b.y;
+            })->y;
         const wxPoint center = WorldToScreen(transform.position.x, transform.position.y);
         const wxSize textSize = dc.GetTextExtent(sprite.name);
         dc.SetTextForeground(isSelected ? kSelection : wxColour(215, 222, 231));
-        dc.DrawText(sprite.name, center.x - textSize.GetWidth() / 2, top - textSize.GetHeight() - 5);
+        dc.DrawText(sprite.name, center.x - textSize.GetWidth() / 2,
+                    top - textSize.GetHeight() - 5);
     }
 
     if (selected && selected.HasComponent<TransformComponent>() &&
@@ -194,16 +214,19 @@ void SceneCanvas::OnPaint(wxPaintEvent&) {
     }
 
     dc.SetTextForeground(wxColour(219, 226, 235));
-    dc.DrawText(wxString::Format(wxString::FromUTF8("2D 장면  |  %.0f px/단위"), pixelsPerUnit_), 12, 10);
+    dc.DrawText(wxString::Format(wxString::FromUTF8("2D 장면  |  %.0f px/단위"), pixelsPerUnit_),
+                12, 10);
     dc.SetTextForeground(wxColour(166, 178, 194));
-    wxString help = wxString::FromUTF8("왼쪽 드래그: 엔티티 이동  |  휠: 확대/축소  |  가운데 드래그: 화면 이동");
+    wxString help = wxString::FromUTF8(
+        "왼쪽 드래그: 엔티티 이동  |  휠: 확대/축소  |  가운데 드래그: 화면 이동");
     help += snapToGrid_ ? wxString::FromUTF8("  |  1칸 스냅 켜짐")
                         : wxString::FromUTF8("  |  스냅 꺼짐");
     dc.DrawText(help, 12, height - 26);
 }
 
 void SceneCanvas::OnLeftDown(wxMouseEvent& event) {
-    if (panning_) return;
+    if (panning_)
+        return;
     const auto [worldX, worldY] = ScreenToWorld(event.GetPosition());
     std::optional<uint32> hit;
     const auto sprites = CollectSprites(document_);
@@ -221,29 +244,35 @@ void SceneCanvas::OnLeftDown(wxMouseEvent& event) {
             break;
         }
     }
-    if (onSelect_) onSelect_(hit);
+    if (onSelect_)
+        onSelect_(hit);
     if (hit && onMove_) {
         const Entity selected = document_.GetSelected();
-        if (selected && selected.GetId() == *hit &&
-            selected.HasComponent<TransformComponent>() && selected.HasComponent<SpriteRendererComponent>()) {
+        if (selected && selected.GetId() == *hit && selected.HasComponent<TransformComponent>() &&
+            selected.HasComponent<SpriteRendererComponent>()) {
             const auto& position = selected.GetComponent<TransformComponent>().position;
             dragEntityId_ = *hit;
             dragOffsetX_ = static_cast<double>(position.x) - worldX;
             dragOffsetY_ = static_cast<double>(position.y) - worldY;
             draggingSprite_ = true;
-            if (!HasCapture()) CaptureMouse();
+            if (!HasCapture())
+                CaptureMouse();
         }
     }
     RefreshScene();
 }
 
-void SceneCanvas::OnLeftUp(wxMouseEvent&) { StopSpriteDrag(); }
+void SceneCanvas::OnLeftUp(wxMouseEvent&) {
+    StopSpriteDrag();
+}
 
 void SceneCanvas::StopSpriteDrag() {
-    if (!draggingSprite_) return;
+    if (!draggingSprite_)
+        return;
     draggingSprite_ = false;
     dragEntityId_ = 0;
-    if (HasCapture()) ReleaseMouse();
+    if (HasCapture())
+        ReleaseMouse();
 }
 
 void SceneCanvas::OnMouseWheel(wxMouseEvent& event) {
@@ -263,23 +292,28 @@ void SceneCanvas::OnMouseWheel(wxMouseEvent& event) {
 }
 
 void SceneCanvas::OnMiddleDown(wxMouseEvent& event) {
-    if (draggingSprite_) return;
-    if (!HasCapture()) CaptureMouse();
+    if (draggingSprite_)
+        return;
+    if (!HasCapture())
+        CaptureMouse();
     panning_ = true;
     lastPanPoint_ = event.GetPosition();
 }
 
 void SceneCanvas::OnMiddleUp(wxMouseEvent&) {
-    if (!panning_) return;
+    if (!panning_)
+        return;
     panning_ = false;
-    if (HasCapture()) ReleaseMouse();
+    if (HasCapture())
+        ReleaseMouse();
 }
 
 void SceneCanvas::OnMouseMove(wxMouseEvent& event) {
     if (panning_) {
         if (!event.MiddleIsDown()) {
             panning_ = false;
-            if (HasCapture()) ReleaseMouse();
+            if (HasCapture())
+                ReleaseMouse();
             return;
         }
         const wxPoint current = event.GetPosition();
@@ -289,14 +323,16 @@ void SceneCanvas::OnMouseMove(wxMouseEvent& event) {
         RefreshScene();
         return;
     }
-    if (!draggingSprite_) return;
+    if (!draggingSprite_)
+        return;
     if (!event.LeftIsDown()) {
         StopSpriteDrag();
         return;
     }
     const Entity selected = document_.GetSelected();
     if (!selected || selected.GetId() != dragEntityId_ ||
-        !selected.HasComponent<TransformComponent>() || !selected.HasComponent<SpriteRendererComponent>()) {
+        !selected.HasComponent<TransformComponent>() ||
+        !selected.HasComponent<SpriteRendererComponent>()) {
         StopSpriteDrag();
         return;
     }
@@ -308,8 +344,8 @@ void SceneCanvas::OnMouseMove(wxMouseEvent& event) {
         y = std::round(y);
     }
     const auto& position = selected.GetComponent<TransformComponent>().position;
-    if (std::isfinite(x) && std::isfinite(y) &&
-        (position.x != x || position.y != y) && onMove_) onMove_(dragEntityId_, x, y);
+    if (std::isfinite(x) && std::isfinite(y) && (position.x != x || position.y != y) && onMove_)
+        onMove_(dragEntityId_, x, y);
     RefreshScene();
 }
 
