@@ -8,6 +8,10 @@ namespace LuxEngine {
     }
 
     bool GpuDevice::Initialize(SDL_Window* window) {
+        if (device_) {
+            Shutdown();
+        }
+
         window_ = window;
         constexpr SDL_GPUShaderFormat formats = static_cast<SDL_GPUShaderFormat>(
             SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL);
@@ -20,6 +24,9 @@ namespace LuxEngine {
 
         if (!SDL_ClaimWindowForGPUDevice(device_, window_)) {
             Log::Error(std::string("Failed to claim window for GPU Device: ") + SDL_GetError());
+            SDL_DestroyGPUDevice(device_);
+            device_ = nullptr;
+            window_ = nullptr;
             return false;
         }
 
@@ -30,6 +37,12 @@ namespace LuxEngine {
     }
 
     void GpuDevice::Shutdown() {
+        if (currentCommandBuffer_) {
+            SDL_CancelGPUCommandBuffer(currentCommandBuffer_);
+            currentCommandBuffer_ = nullptr;
+            currentSwapchainTexture_ = nullptr;
+        }
+
         if (device_) {
             if (claimed_ && window_) {
                 SDL_ReleaseWindowFromGPUDevice(device_, window_);

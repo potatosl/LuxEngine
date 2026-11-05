@@ -9,12 +9,17 @@ namespace LuxEngine {
 
     Application::Application(const ApplicationSpecification& spec)
         : spec_(spec) {
+        if (s_Instance) {
+            Log::Error("Application instance already exists!");
+        }
         s_Instance = this;
     }
 
     Application::~Application() {
         Shutdown();
-        s_Instance = nullptr;
+        if (s_Instance == this) {
+            s_Instance = nullptr;
+        }
     }
 
     bool Application::Initialize() {
@@ -62,7 +67,7 @@ namespace LuxEngine {
             }
 
             const uint64 now = SDL_GetTicksNS();
-            const double dt = std::min(static_cast<double>(now - last) / 1'000'000'000.0, 0.25);
+            const double dt = std::clamp(static_cast<double>(now - last) / 1'000'000'000.0, 0.0, 0.25);
             last = now;
             elapsedSeconds_ += dt;
             accumulator += dt;
@@ -79,7 +84,6 @@ namespace LuxEngine {
 
             if (gpuDevice_->BeginFrame()) {
                 const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(elapsedSeconds_));
-                // LuxEngine theme clear color (Deep Indigo / Teal highlight)
                 gpuDevice_->Clear(
                     0.05f + 0.05f * pulse,
                     0.08f + 0.08f * pulse,
@@ -89,6 +93,8 @@ namespace LuxEngine {
 
                 OnRender(static_cast<float>(elapsedSeconds_));
                 gpuDevice_->EndFrame();
+            } else {
+                SDL_Delay(1);
             }
         }
 

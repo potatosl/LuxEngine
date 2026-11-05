@@ -10,6 +10,11 @@ namespace LuxEngine {
         GpuDevice() = default;
         ~GpuDevice();
 
+        GpuDevice(const GpuDevice&) = delete;
+        GpuDevice& operator=(const GpuDevice&) = delete;
+        GpuDevice(GpuDevice&&) noexcept = default;
+        GpuDevice& operator=(GpuDevice&&) noexcept = default;
+
         bool Initialize(SDL_Window* window);
         void Shutdown();
 

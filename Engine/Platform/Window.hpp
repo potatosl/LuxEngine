@@ -23,6 +23,11 @@ namespace LuxEngine {
         Window() = default;
         ~Window();
 
+        Window(const Window&) = delete;
+        Window& operator=(const Window&) = delete;
+        Window(Window&&) noexcept = default;
+        Window& operator=(Window&&) noexcept = default;
+
         bool Initialize(const WindowProps& props = WindowProps{});
         void Shutdown();
         void PollEvents();

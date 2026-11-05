@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <memory>
-#include <iostream>
+#include <utility>
 
 #if defined(_WIN32) || defined(_WIN64)
     #define LUX_PLATFORM_WINDOWS 1
@@ -29,7 +29,7 @@ namespace LuxEngine {
     using Scope = std::unique_ptr<T>;
 
     template<typename T, typename ... Args>
-    constexpr Scope<T> CreateScope(Args&& ... args) {
+    inline Scope<T> CreateScope(Args&& ... args) {
         return std::make_unique<T>(std::forward<Args>(args)...);
     }
 
@@ -37,7 +37,7 @@ namespace LuxEngine {
     using Ref = std::shared_ptr<T>;
 
     template<typename T, typename ... Args>
-    constexpr Ref<T> CreateRef(Args&& ... args) {
+    inline Ref<T> CreateRef(Args&& ... args) {
         return std::make_shared<T>(std::forward<Args>(args)...);
     }
 

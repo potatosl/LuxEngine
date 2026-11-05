@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Core/Core.hpp"
+#include <string>
 
 namespace LuxEngine {
 
