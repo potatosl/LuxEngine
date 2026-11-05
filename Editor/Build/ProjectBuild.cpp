@@ -144,12 +144,14 @@ BuildTools DetectBuildTools(const fs::path& applicationDirectory,
         if (IsFile(PathFromUtf8(explicitCMake)))
             tools.cmake = PathFromUtf8(explicitCMake);
     }
-    if (tools.cmake.empty())
-        tools.cmake = FindOnPath(env("PATH"), std::string("cmake") + ExecutableSuffix);
 #ifdef _WIN32
+    // Visual Studio's own cmake always matches the compiler the SDK was built with. Other cmake
+    // copies on PATH (MSYS2, tools that bundle their own) are often old or cannot drive it.
     if (tools.cmake.empty())
         tools.cmake = FindVisualStudioCMake();
 #endif
+    if (tools.cmake.empty())
+        tools.cmake = FindOnPath(env("PATH"), std::string("cmake") + ExecutableSuffix);
 
     if (const std::string sdk = env("LUX_ENGINE_DIR"); !sdk.empty()) {
         const fs::path root = PathFromUtf8(sdk);

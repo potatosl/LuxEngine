@@ -122,7 +122,12 @@ void TestDetection() {
     env["LUX_ENGINE_DIR"] = PathUtf8(sdk);
     env["VCPKG_ROOT"] = PathUtf8(files.path / "vcpkg");
     tools = DetectBuildTools(files.path / "app", lookup);
+#ifdef _WIN32
+    // Visual Studio's bundled cmake wins when installed; otherwise PATH is used.
+    Check(!tools.cmake.empty(), "cmake found");
+#else
     Check(tools.cmake.parent_path() == bin, "cmake found on PATH");
+#endif
     Check(tools.enginePackage == sdk / "lib/cmake/LuxEngine", "engine package found from SDK root");
     Check(!tools.toolchainFile.empty(), "vcpkg toolchain found");
     Check(DescribeMissingTools(tools).empty(), "complete tools");
@@ -132,7 +137,8 @@ void TestDetection() {
     Write(msys / "cmake.exe");
     env["PATH"] = PathUtf8(msys) + ";" + PathUtf8(bin);
     tools = DetectBuildTools(files.path / "app", lookup);
-    Check(tools.cmake.parent_path() == bin, "msys2 cmake on PATH is skipped");
+    Check(!tools.cmake.empty() && tools.cmake.parent_path() != msys,
+          "msys2 cmake on PATH is skipped");
 #endif
 
     env["LUX_ENGINE_DIR"] = PathUtf8(files.path / "missing");
