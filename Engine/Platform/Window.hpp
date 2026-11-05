@@ -17,7 +17,7 @@ struct WindowProps {
     uint32 height = 720;
     bool resizable = true;
     bool vsync = true;
-    bool useOpenGL = false;
+    bool vulkan = false;
 };
 
 class LUX_API Window {
@@ -49,6 +49,10 @@ public:
     }
     uint32 GetWidth() const;
     uint32 GetHeight() const;
+    bool GetFramebufferSize(uint32& width, uint32& height) const;
+    bool IsMinimized() const;
+    bool HasFocus() const;
+    float GetDisplayScale() const;
 
     void SetFullscreen(bool fullscreen);
     bool IsFullscreen() const;
@@ -64,6 +68,8 @@ public:
     void SetEventCallback(const EventCallbackFn& callback) {
         eventCallback_ = callback;
     }
+
+    static constexpr uint32 MaxEventsPerPoll = 4096;
 
 private:
     bool ApplySystemTheme();

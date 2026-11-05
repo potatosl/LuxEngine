@@ -1,15 +1,14 @@
 #pragma once
 
 #include "Engine/Core/Core.hpp"
-#include "Engine/Renderer/RHI/DeviceLifetime.hpp"
-#include <SDL3/SDL.h>
 #include <cstddef>
-
-struct LuxOgreContext;
-struct LuxOgreTexture;
+#include <memory>
 
 namespace LuxEngine {
 class GpuDevice;
+namespace Vk {
+struct DeviceState;
+}
 
 class LUX_API GpuTexture {
 public:
@@ -21,8 +20,6 @@ public:
     GpuTexture(GpuTexture&& other) noexcept;
     GpuTexture& operator=(GpuTexture&& other) noexcept;
 
-    bool Initialize(SDL_GPUDevice* device, uint32 width, uint32 height,
-                    const void* pixelData = nullptr);
     bool Initialize(GpuDevice* device, uint32 width, uint32 height,
                     const void* pixelData = nullptr);
     bool Initialize(std::nullptr_t, uint32, uint32, const void* = nullptr) {
@@ -31,38 +28,19 @@ public:
     }
     void Release();
 
-    SDL_GPUDevice* GetDevice() const {
-        return IsValid() ? device_ : nullptr;
-    }
-    SDL_GPUTexture* GetHandle() const {
-        return IsValid() ? texture_ : nullptr;
-    }
-    SDL_GPUSampler* GetSampler() const {
-        return IsValid() ? sampler_ : nullptr;
-    }
-    LuxOgreContext* GetOgreContext() const {
-        return IsValid() ? ogreContext_ : nullptr;
-    }
-    LuxOgreTexture* GetOgreTexture() const {
-        return IsValid() ? ogreTexture_ : nullptr;
-    }
     uint32 GetWidth() const {
-        return width_;
+        return IsValid() ? width_ : 0;
     }
     uint32 GetHeight() const {
-        return height_;
+        return IsValid() ? height_ : 0;
     }
-    bool IsValid() const {
-        return (texture_ != nullptr || ogreTexture_ != nullptr) && lifetime_.Alive();
-    }
+    bool IsValid() const;
+    bool BelongsTo(const GpuDevice& device) const;
 
 private:
-    DeviceLifetime lifetime_;
-    SDL_GPUDevice* device_ = nullptr;
-    SDL_GPUTexture* texture_ = nullptr;
-    SDL_GPUSampler* sampler_ = nullptr;
-    LuxOgreContext* ogreContext_ = nullptr;
-    LuxOgreTexture* ogreTexture_ = nullptr;
+    friend class GpuDevice;
+    std::weak_ptr<Vk::DeviceState> owner_;
+    uint64 handle_ = 0;
     uint32 width_ = 0;
     uint32 height_ = 0;
 };

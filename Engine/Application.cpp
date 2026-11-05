@@ -6,7 +6,6 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <stdexcept>
 
 namespace LuxEngine {
@@ -65,13 +64,6 @@ bool Application::Initialize() {
         return running_;
     Log::Init();
 
-#if defined(LUX_USE_OGRE) && LUX_USE_OGRE && defined(__linux__)
-    // The installed Ogre 1.9 GLX renderer requires an X11 window.
-    if (SDL_WasInit(SDL_INIT_VIDEO) == 0 && !std::getenv("SDL_VIDEODRIVER") &&
-        !std::getenv("SDL_VIDEO_DRIVER")) {
-        SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "x11", SDL_HINT_OVERRIDE);
-    }
-#endif
     ownsSdlRoot_ = SDL_WasInit(0) == 0;
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         Log::Error(std::string("SDL_Init failed: ") + SDL_GetError());
@@ -89,9 +81,7 @@ bool Application::Initialize() {
     props.title = spec_.name;
     props.width = spec_.width;
     props.height = spec_.height;
-#if defined(LUX_USE_OGRE) && LUX_USE_OGRE
-    props.useOpenGL = true;
-#endif
+    props.vulkan = true;
 
     if (!window_->Initialize(props)) {
         Log::Error("Failed to initialize window.");
@@ -102,7 +92,7 @@ bool Application::Initialize() {
     window_->SetEventCallback([this](Event& e) { OnEvent(e); });
 
     gpuDevice_ = CreateScope<GpuDevice>();
-    if (!gpuDevice_->Initialize(window_->GetNativeHandle())) {
+    if (!gpuDevice_->Initialize(*window_)) {
         Log::Error("Failed to initialize GPU Device.");
         Shutdown();
         return false;
@@ -142,6 +132,8 @@ bool Application::OnWindowClose(WindowCloseEvent& /*e*/) {
 bool Application::OnWindowResize(WindowResizeEvent& e) {
     spec_.width = e.GetWidth();
     spec_.height = e.GetHeight();
+    if (gpuDevice_)
+        gpuDevice_->NotifyResize();
     return false;
 }
 
@@ -200,6 +192,8 @@ Application::FrameResult Application::RunFrame() {
 
         const auto frameStart = gpuDevice_->BeginFrame();
         if (frameStart == GpuDevice::FrameStart::Error) {
+            Log::Error(std::string("GPU frame failed (") + ToString(gpuDevice_->GetStatus()) +
+                       "): " + gpuDevice_->GetLastError());
             Shutdown();
             return FrameResult::Error;
         }
@@ -219,7 +213,9 @@ Application::FrameResult Application::RunFrame() {
         OnRender(static_cast<float>(elapsedSeconds_));
         if (!sdlInitialized_)
             return FrameResult::Stopped;
-        if (!gpuDevice_->EndFrame()) {
+        if (!gpuDevice_->EndFrame() && !gpuDevice_->IsReady()) {
+            Log::Error(std::string("GPU frame submission failed (") +
+                       ToString(gpuDevice_->GetStatus()) + "): " + gpuDevice_->GetLastError());
             Shutdown();
             return FrameResult::Error;
         }

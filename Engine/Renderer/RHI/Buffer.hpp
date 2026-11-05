@@ -1,12 +1,15 @@
 #pragma once
 
 #include "Engine/Core/Core.hpp"
-#include "Engine/Renderer/RHI/DeviceLifetime.hpp"
-#include <SDL3/SDL.h>
+#include <memory>
 
 namespace LuxEngine {
+class GpuDevice;
+namespace Vk {
+struct DeviceState;
+}
 
-enum class BufferType { Vertex, Index, Uniform };
+enum class BufferType { Vertex, Index, Uniform, Storage };
 
 class LUX_API GpuBuffer {
 public:
@@ -18,28 +21,22 @@ public:
     GpuBuffer(GpuBuffer&& other) noexcept;
     GpuBuffer& operator=(GpuBuffer&& other) noexcept;
 
-    bool Initialize(SDL_GPUDevice* device, BufferType type, uint32 sizeBytes);
-    bool SetData(const void* data, uint32 sizeBytes, SDL_GPUCommandBuffer* command = nullptr);
+    bool Initialize(GpuDevice* device, BufferType type, uint32 sizeBytes);
+    bool SetData(const void* data, uint32 sizeBytes, uint32 offsetBytes = 0);
     void Release();
 
-    SDL_GPUBuffer* GetHandle() const {
-        return IsValid() ? buffer_ : nullptr;
-    }
     uint32 GetSize() const {
-        return sizeBytes_;
+        return IsValid() ? sizeBytes_ : 0;
     }
     BufferType GetType() const {
         return type_;
     }
-    bool IsValid() const {
-        return buffer_ != nullptr && lifetime_.Alive();
-    }
+    bool IsValid() const;
+    bool BelongsTo(const GpuDevice& device) const;
 
 private:
-    DeviceLifetime lifetime_;
-    SDL_GPUDevice* device_ = nullptr;
-    SDL_GPUBuffer* buffer_ = nullptr;
-    SDL_GPUTransferBuffer* transfer_ = nullptr;
+    std::weak_ptr<Vk::DeviceState> owner_;
+    uint64 handle_ = 0;
     BufferType type_ = BufferType::Vertex;
     uint32 sizeBytes_ = 0;
 };

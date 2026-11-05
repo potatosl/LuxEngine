@@ -1,291 +1,593 @@
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include "Engine/Core/Log.hpp"
+#include "Engine/Platform/Window.hpp"
+#include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include <algorithm>
-#include <cstddef>
-#include <fstream>
+#include <chrono>
+#include <cstring>
 #include <limits>
-#include <vector>
 
 namespace LuxEngine {
+namespace {
+constexpr uint64 AcquireTimeoutNs = 1'000'000'000ull;
+constexpr uint32 MaxSwapchainFailures = 3;
+constexpr uint32 MaxFrameFailures = 3;
+const std::string NoError;
+const GpuDeviceInfo NoInfo;
+
+VkResult SubmitRecoveryFrame(Vk::DeviceState& s, Vk::FrameData& frame, uint64& serial) {
+    VkResult result = vkResetCommandPool(s.device, frame.pool, 0);
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (result == VK_SUCCESS)
+        result = vkBeginCommandBuffer(frame.cmd, &begin);
+    if (result != VK_SUCCESS)
+        return result;
+    s.BeginRenderPass();
+    vkCmdEndRenderPass(frame.cmd);
+    s.renderPassActive = false;
+    result = vkEndCommandBuffer(frame.cmd);
+    if (result != VK_SUCCESS)
+        return result;
+    return s.Submit(frame.cmd, frame.imageAvailable, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    s.swapchain.renderFinished[s.imageIndex], serial);
+}
+
+std::string VersionString(uint32 version) {
+    return std::to_string(VK_API_VERSION_MAJOR(version)) + "." +
+           std::to_string(VK_API_VERSION_MINOR(version)) + "." +
+           std::to_string(VK_API_VERSION_PATCH(version));
+}
+} // namespace
+
+const char* ToString(GpuStatus status) {
+    switch (status) {
+    case GpuStatus::Uninitialized:
+        return "Uninitialized";
+    case GpuStatus::Ready:
+        return "Ready";
+    case GpuStatus::OutOfMemory:
+        return "OutOfMemory";
+    case GpuStatus::SurfaceLost:
+        return "SurfaceLost";
+    case GpuStatus::Timeout:
+        return "Timeout";
+    case GpuStatus::DeviceLost:
+        return "DeviceLost";
+    case GpuStatus::Error:
+        return "Error";
+    }
+    return "Unknown";
+}
+
 GpuDevice::~GpuDevice() {
     Shutdown();
 }
-bool GpuDevice::Initialize(SDL_Window* window) {
-    if (device_ || !window)
+
+bool GpuDevice::Initialize(Window& window, const GpuDeviceConfig& config) {
+    if (state_ && state_->status != GpuStatus::Uninitialized)
         return false;
-    Shutdown();
-    window_ = window;
-    const SDL_GPUShaderFormat formats =
-        SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL;
-#ifdef LUX_DEBUG
-    constexpr bool debug = true;
-#else
-    constexpr bool debug = false;
-#endif
-    device_ = SDL_CreateGPUDevice(formats, debug, nullptr);
-    if (!device_ || !SDL_ClaimWindowForGPUDevice(device_, window_)) {
-        Log::Error(SDL_GetError());
-        Shutdown();
+    state_.reset();
+    if (!window.GetNativeHandle())
+        return false;
+    auto state = CreateRef<Vk::DeviceState>();
+    state->window = &window;
+    state->config = config;
+    state->config.stagingFlushBytes = std::max<uint64>(config.stagingFlushBytes, 1ull << 20);
+    state->config.maxFrameVertexBytes = std::max<uint64>(config.maxFrameVertexBytes, 1ull << 16);
+    state->frameCount = std::clamp<uint32>(config.framesInFlight, 1, Vk::MaxFramesInFlight);
+    state->vsync = config.vsync;
+    state->info.framesInFlight = state->frameCount;
+    state_ = state;
+
+    bool ready = state->CreateInstance() && state->SelectPhysicalDevice() &&
+                 state->CreateDevice() && state->CreateSync() && state->LoadShaders() &&
+                 state->CreateFrames();
+    if (ready) {
+        const VkFormat format = state->SurfaceFormat();
+        ready = format != VK_FORMAT_UNDEFINED && state->CreateRenderPass(format) &&
+                state->CreatePipelines();
+        if (format == VK_FORMAT_UNDEFINED)
+            state->Fail(GpuStatus::Error, "Surface has no usable format");
+    }
+    if (ready) {
+        state->status = GpuStatus::Ready;
+        ready = state->CreateSwapchain() != Vk::SwapchainResult::Failed;
+    }
+    if (ready) {
+        const uint32 white = 0xffffffffu;
+        Vk::TextureRecord record;
+        ready = state->CreateTextureResource(1, 1, &white, record);
+        if (ready)
+            state->whiteTexture = state->textures.Insert(record);
+        ready = ready && state->FlushUploads();
+    }
+    if (!ready) {
+        const std::string error = state->lastError;
+        const GpuStatus failure = state->lastFailure;
+        state->Shutdown();
+        state->lastError = error;
+        state->lastFailure = failure;
+        Log::Error("GPU device initialization failed: " + error);
         return false;
     }
-    claimed_ = true;
-    DeviceLifetime::Register(device_);
-    const uint32 pixel = 0xffffffff;
-    if (!white_.Initialize(device_, 1, 1, &pixel) || !CreatePipelines()) {
-        Log::Error(SDL_GetError());
-        Shutdown();
-        return false;
-    }
+    Log::Info("Vulkan device: " + state->info.deviceName + " (" + state->info.deviceType +
+              ", Vulkan " + VersionString(state->info.apiVersion) + ", timeline " +
+              (state->info.timelineSemaphores ? "on" : "off") + ", validation " +
+              (state->info.validation ? "on" : "off") + ")");
     return true;
 }
-bool GpuDevice::CreatePipelines() {
-    const auto formats = SDL_GetGPUShaderFormats(device_);
-    const auto format = (formats & SDL_GPU_SHADERFORMAT_DXIL)
-                            ? SDL_GPU_SHADERFORMAT_DXIL
-                            : ((formats & SDL_GPU_SHADERFORMAT_SPIRV) ? SDL_GPU_SHADERFORMAT_SPIRV
-                                                                      : SDL_GPU_SHADERFORMAT_MSL);
-    auto shader = [&](bool vertex) {
-        const std::string extension = format == SDL_GPU_SHADERFORMAT_DXIL ? "dxil" : "spv";
-        const std::string file =
-            format == SDL_GPU_SHADERFORMAT_MSL
-                ? "Basic.metal"
-                : std::string("Basic.") + (vertex ? "vert." : "frag.") + extension;
-        std::ifstream in(std::string(SDL_GetBasePath()) + "shaders/" + file,
-                         std::ios::binary | std::ios::ate);
-        if (!in) {
-            SDL_SetError("Shader file missing: %s", file.c_str());
-            return static_cast<SDL_GPUShader*>(nullptr);
-        }
-        const auto size = in.tellg();
-        if (size <= 0)
-            return static_cast<SDL_GPUShader*>(nullptr);
-        std::vector<uint8> bytes(static_cast<size_t>(size) + 1, 0);
-        in.seekg(0);
-        if (!in.read(reinterpret_cast<char*>(bytes.data()), size))
-            return static_cast<SDL_GPUShader*>(nullptr);
-        SDL_GPUShaderCreateInfo info{};
-        info.code = bytes.data();
-        info.code_size = static_cast<size_t>(size);
-        info.entrypoint =
-            format == SDL_GPU_SHADERFORMAT_MSL ? (vertex ? "vertexMain" : "fragmentMain") : "main";
-        info.format = format;
-        info.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-        info.num_uniform_buffers = vertex ? 1 : 0;
-        info.num_samplers = vertex ? 0 : 1;
-        return SDL_CreateGPUShader(device_, &info);
-    };
-    auto* vs = shader(true);
-    auto* fs = shader(false);
-    if (!vs || !fs) {
-        if (vs)
-            SDL_ReleaseGPUShader(device_, vs);
-        if (fs)
-            SDL_ReleaseGPUShader(device_, fs);
-        return false;
-    }
-    SDL_GPUVertexBufferDescription buffer{};
-    buffer.slot = 0;
-    buffer.pitch = sizeof(RenderVertex);
-    buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
-    SDL_GPUVertexAttribute attributes[3]{};
-    attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(RenderVertex, position)};
-    attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(RenderVertex, color)};
-    attributes[2] = {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(RenderVertex, uv)};
-    SDL_GPUColorTargetDescription color{};
-    color.format = SDL_GetGPUSwapchainTextureFormat(device_, window_);
-    color.blend_state.enable_blend = true;
-    color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-    color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-    SDL_GPUGraphicsPipelineCreateInfo info{};
-    info.vertex_shader = vs;
-    info.fragment_shader = fs;
-    info.vertex_input_state = {&buffer, 1, attributes, 3};
-    info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-    info.rasterizer_state.enable_depth_clip = true;
-    info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    info.target_info.color_target_descriptions = &color;
-    info.target_info.num_color_targets = 1;
-    pipeline2D_ = SDL_CreateGPUGraphicsPipeline(device_, &info);
-    color.blend_state.enable_blend = false;
-    info.target_info.has_depth_stencil_target = true;
-    info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    info.depth_stencil_state.enable_depth_test = true;
-    info.depth_stencil_state.enable_depth_write = true;
-    info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
-    pipeline3D_ = SDL_CreateGPUGraphicsPipeline(device_, &info);
-    SDL_ReleaseGPUShader(device_, vs);
-    SDL_ReleaseGPUShader(device_, fs);
-    return pipeline2D_ && pipeline3D_;
-}
+
 void GpuDevice::Shutdown() {
-    if (currentCommandBuffer_) {
-        if (currentSwapchainTexture_)
-            EndFrame();
-        else {
-            if (!SDL_CancelGPUCommandBuffer(currentCommandBuffer_))
-                Log::Error(SDL_GetError());
-            currentCommandBuffer_ = nullptr;
+    if (!state_)
+        return;
+    if (state_->frameActive && state_->Usable())
+        EndFrame();
+    state_->Shutdown();
+    state_.reset();
+}
+
+bool GpuDevice::IsReady() const {
+    return state_ && state_->Usable();
+}
+
+GpuStatus GpuDevice::GetStatus() const {
+    return state_ ? state_->status : GpuStatus::Uninitialized;
+}
+
+GpuStatus GpuDevice::GetLastFailure() const {
+    return state_ ? state_->lastFailure : GpuStatus::Ready;
+}
+
+const std::string& GpuDevice::GetLastError() const {
+    return state_ ? state_->lastError : NoError;
+}
+
+const GpuDeviceInfo& GpuDevice::GetInfo() const {
+    return state_ ? state_->info : NoInfo;
+}
+
+GpuFrameStats GpuDevice::GetFrameStats() const {
+    return state_ ? state_->lastFrameStats : GpuFrameStats{};
+}
+
+GpuDeviceCounters GpuDevice::GetCounters() const {
+    if (!state_)
+        return {};
+    GpuDeviceCounters counters = state_->counters;
+    counters.validationErrors = state_->validationErrors.load();
+    counters.validationWarnings = state_->validationWarnings.load();
+    return counters;
+}
+
+GpuMemoryStats GpuDevice::GetMemoryStats() const {
+    GpuMemoryStats stats;
+    if (!state_ || !state_->allocator)
+        return stats;
+    auto& s = *state_;
+    VkPhysicalDeviceMemoryProperties memory{};
+    vkGetPhysicalDeviceMemoryProperties(s.physical, &memory);
+    VmaBudget budgets[VK_MAX_MEMORY_HEAPS]{};
+    vmaGetHeapBudgets(s.allocator, budgets);
+    for (uint32 heap = 0; heap < memory.memoryHeapCount; ++heap) {
+        stats.allocationBytes += budgets[heap].statistics.allocationBytes;
+        stats.allocationCount += budgets[heap].statistics.allocationCount;
+        if (memory.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            stats.deviceLocalUsage += budgets[heap].usage;
+            stats.deviceLocalBudget += budgets[heap].budget;
         }
     }
-    currentCommandBuffer_ = nullptr;
-    currentSwapchainTexture_ = nullptr;
-    if (device_) {
-        SDL_WaitForGPUIdle(device_);
-        vertices_.Release();
-        white_.Release();
-        if (depth_)
-            SDL_ReleaseGPUTexture(device_, depth_);
-        if (pipeline2D_)
-            SDL_ReleaseGPUGraphicsPipeline(device_, pipeline2D_);
-        if (pipeline3D_)
-            SDL_ReleaseGPUGraphicsPipeline(device_, pipeline3D_);
-        if (claimed_)
-            SDL_ReleaseWindowFromGPUDevice(device_, window_);
-        DeviceLifetime::Forget(device_);
-        SDL_DestroyGPUDevice(device_);
-    }
-    depth_ = nullptr;
-    pipeline2D_ = nullptr;
-    pipeline3D_ = nullptr;
-    depthWidth_ = depthHeight_ = 0;
-    claimed_ = false;
-    device_ = nullptr;
-    window_ = nullptr;
+    stats.liveBuffers = s.buffers.Live();
+    stats.liveTextures = s.textures.Live();
+    stats.pendingDestructions = static_cast<uint32>(s.retired.size() + s.pendingRetire.size());
+    stats.descriptorPools = static_cast<uint32>(s.descriptorPools.size());
+    stats.pendingStagingBytes = s.liveStagingBytes;
+    return stats;
 }
-bool GpuDevice::ResizeDepth(uint32 width, uint32 height) {
-    if (depth_ && depthWidth_ == width && depthHeight_ == height)
-        return true;
-    SDL_GPUTextureCreateInfo info{};
-    info.type = SDL_GPU_TEXTURETYPE_2D;
-    info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
-    info.width = width;
-    info.height = height;
-    info.layer_count_or_depth = 1;
-    info.num_levels = 1;
-    auto* replacement = SDL_CreateGPUTexture(device_, &info);
-    if (!replacement)
-        return false;
-    if (depth_)
-        SDL_ReleaseGPUTexture(device_, depth_);
-    depth_ = replacement;
-    depthWidth_ = width;
-    depthHeight_ = height;
-    return true;
-}
+
 GpuDevice::FrameStart GpuDevice::BeginFrame() {
-    if (!IsReady() || currentCommandBuffer_)
+    if (!state_ || !state_->Usable() || state_->frameActive)
         return FrameStart::Error;
-    currentCommandBuffer_ = SDL_AcquireGPUCommandBuffer(device_);
-    if (!currentCommandBuffer_) {
-        Log::Error(SDL_GetError());
+    auto& s = *state_;
+    s.PollCompleted();
+    if (!s.Usable())
         return FrameStart::Error;
-    }
-    currentSwapchainTexture_ = nullptr;
     uint32 width = 0, height = 0;
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(currentCommandBuffer_, window_,
-                                               &currentSwapchainTexture_, &width, &height)) {
-        Log::Error(SDL_GetError());
-        SDL_CancelGPUCommandBuffer(currentCommandBuffer_);
-        currentCommandBuffer_ = nullptr;
-        currentSwapchainTexture_ = nullptr;
+    if (s.window->IsMinimized() || !s.window->GetFramebufferSize(width, height) || width == 0 ||
+        height == 0) {
+        ++s.counters.framesSkipped;
+        return FrameStart::Skipped;
+    }
+    if (!s.swapchain.handle || s.swapchainDirty) {
+        if (!s.RecreateSwapchain()) {
+            if (!s.Usable() || ++s.swapchainFailures >= MaxSwapchainFailures)
+                return FrameStart::Error;
+            ++s.counters.framesSkipped;
+            return FrameStart::Skipped;
+        }
+        s.swapchainFailures = 0;
+        if (!s.swapchain.handle) {
+            ++s.counters.framesSkipped;
+            return FrameStart::Skipped;
+        }
+    }
+
+    Vk::FrameData& frame = s.frames[s.frameSlot];
+    s.frameStats = {};
+    const auto waitStart = std::chrono::steady_clock::now();
+    if (!s.WaitForSerial(frame.serial))
+        return FrameStart::Error;
+    s.frameStats.cpuWaitMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
+            .count();
+    s.frameStats.gpuTimeMs = s.lastFrameStats.gpuTimeMs;
+    if (frame.queries && frame.queriesWritten) {
+        uint64 ticks[2]{};
+        if (vkGetQueryPoolResults(s.device, frame.queries, 0, 2, sizeof(ticks), ticks,
+                                  sizeof(uint64), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS &&
+            ticks[1] >= ticks[0])
+            s.frameStats.gpuTimeMs =
+                static_cast<double>(ticks[1] - ticks[0]) * s.timestampPeriod / 1'000'000.0;
+        frame.queriesWritten = false;
+    }
+    s.CollectGarbage();
+
+    VkResult acquired =
+        Vk::ConsumeFault(Vk::Fault::AcquireOutOfDate)
+            ? VK_ERROR_OUT_OF_DATE_KHR
+            : vkAcquireNextImageKHR(s.device, s.swapchain.handle, AcquireTimeoutNs,
+                                    frame.imageAvailable, VK_NULL_HANDLE, &s.imageIndex);
+    if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+        s.swapchainDirty = true;
+        ++s.counters.framesSkipped;
+        return FrameStart::Skipped;
+    }
+    if (acquired == VK_TIMEOUT || acquired == VK_NOT_READY) {
+        ++s.counters.framesSkipped;
+        return FrameStart::Skipped;
+    }
+    if (acquired == VK_SUBOPTIMAL_KHR) {
+        s.swapchainDirty = true;
+    } else if (acquired != VK_SUCCESS) {
+        s.Fail(acquired, "vkAcquireNextImageKHR");
         return FrameStart::Error;
     }
-    if (!currentSwapchainTexture_)
-        return EndFrame() ? FrameStart::Skipped : FrameStart::Error;
-    if (!ResizeDepth(width, height)) {
-        Log::Error(SDL_GetError());
+
+    VkResult result = vkResetCommandPool(s.device, frame.pool, 0);
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (result == VK_SUCCESS)
+        result = Vk::ConsumeFault(Vk::Fault::CommandBuffer)
+                     ? VK_ERROR_OUT_OF_HOST_MEMORY
+                     : vkBeginCommandBuffer(frame.cmd, &begin);
+    s.frameActive = true;
+    s.renderPassActive = false;
+    s.commandsOpen = result == VK_SUCCESS;
+    if (result != VK_SUCCESS) {
+        s.Fail(result, "Frame command buffer begin");
         EndFrame();
-        return FrameStart::Error;
+        return s.Usable() ? FrameStart::Skipped : FrameStart::Error;
     }
-    depthCleared_ = false;
+    if (frame.queries) {
+        vkCmdResetQueryPool(frame.cmd, frame.queries, 0, 2);
+        vkCmdWriteTimestamp(frame.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, frame.queries, 0);
+    }
+    frame.ring.used = 0;
+    s.frameStats.frameIndex = ++s.frameIndex;
+    s.clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    s.boundPipeline = VK_NULL_HANDLE;
+    s.boundSet = VK_NULL_HANDLE;
+    s.boundVertexBuffer = VK_NULL_HANDLE;
+    s.matrixBound = false;
     return FrameStart::Ready;
 }
-bool GpuDevice::Clear(float r, float g, float b, float a) {
-    if (!currentCommandBuffer_ || !currentSwapchainTexture_)
-        return false;
-    SDL_GPUColorTargetInfo color{};
-    color.texture = currentSwapchainTexture_;
-    color.clear_color = {r, g, b, a};
-    color.load_op = SDL_GPU_LOADOP_CLEAR;
-    color.store_op = SDL_GPU_STOREOP_STORE;
-    auto* pass = SDL_BeginGPURenderPass(currentCommandBuffer_, &color, 1, nullptr);
-    if (!pass) {
-        Log::Error(SDL_GetError());
-        return false;
-    }
-    SDL_EndGPURenderPass(pass);
+
+bool Vk::DeviceState::BeginRenderPass() {
+    FrameData& frame = frames[frameSlot];
+    VkClearValue clears[2]{};
+    clears[0].color = clearColor;
+    clears[1].depthStencil = {1.0f, 0};
+    VkRenderPassBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    begin.renderPass = renderPass;
+    begin.framebuffer = swapchain.framebuffers[imageIndex];
+    begin.renderArea = {{0, 0}, swapchain.extent};
+    begin.clearValueCount = 2;
+    begin.pClearValues = clears;
+    vkCmdBeginRenderPass(frame.cmd, &begin, VK_SUBPASS_CONTENTS_INLINE);
+    const float width = static_cast<float>(swapchain.extent.width);
+    const float height = static_cast<float>(swapchain.extent.height);
+    const VkViewport viewport{0.0f, height, width, -height, 0.0f, 1.0f};
+    const VkRect2D scissor{{0, 0}, swapchain.extent};
+    vkCmdSetViewport(frame.cmd, 0, 1, &viewport);
+    vkCmdSetScissor(frame.cmd, 0, 1, &scissor);
+    renderPassActive = true;
     return true;
 }
-bool GpuDevice::DrawTriangles(std::span<const RenderVertex> data, const Mat4& vp,
-                              GpuTexture* texture, bool depth) {
-    if (!currentCommandBuffer_ || !currentSwapchainTexture_ || data.empty() ||
-        data.size() % 3 != 0 || data.size_bytes() > std::numeric_limits<uint32>::max())
+
+bool GpuDevice::Clear(float r, float g, float b, float a) {
+    if (!state_ || !state_->frameActive)
         return false;
-    const auto bytes = static_cast<uint32>(data.size_bytes());
-    if (vertices_.GetSize() < bytes) {
-        const auto capacity = static_cast<uint32>(std::min<uint64>(
-            std::numeric_limits<uint32>::max(),
-            std::max<uint64>(
-                bytes, std::max<uint64>(65536, static_cast<uint64>(vertices_.GetSize()) * 2))));
-        if (!vertices_.Initialize(device_, BufferType::Vertex, capacity))
+    auto& s = *state_;
+    s.clearColor = {{r, g, b, a}};
+    if (s.renderPassActive) {
+        VkClearAttachment attachment{};
+        attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        attachment.colorAttachment = 0;
+        attachment.clearValue.color = s.clearColor;
+        const VkClearRect rect{{{0, 0}, s.swapchain.extent}, 0, 1};
+        vkCmdClearAttachments(s.frames[s.frameSlot].cmd, 1, &attachment, 1, &rect);
+    }
+    return true;
+}
+
+bool GpuDevice::DrawTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection,
+                              GpuTexture* texture, bool depth) {
+    if (!state_ || !state_->frameActive || vertices.empty() || vertices.size() % 3 != 0 ||
+        vertices.size() > std::numeric_limits<uint32>::max())
+        return false;
+    auto& s = *state_;
+    Vk::TextureRecord* record = nullptr;
+    if (texture) {
+        if (!texture->BelongsTo(*this))
+            return false;
+        record = s.textures.Get(texture->handle_);
+    } else {
+        record = s.textures.Get(s.whiteTexture);
+    }
+    if (!record)
+        return false;
+    Vk::FrameData& frame = s.frames[s.frameSlot];
+    const VkDeviceSize bytes = vertices.size_bytes();
+    if (!s.EnsureVertexCapacity(frame, bytes))
+        return false;
+    const auto firstVertex = static_cast<uint32>(frame.ring.used / sizeof(RenderVertex));
+    std::memcpy(frame.ring.mapped + frame.ring.used, vertices.data(), static_cast<size_t>(bytes));
+    frame.ring.used += bytes;
+
+    if (!s.renderPassActive)
+        s.BeginRenderPass();
+    VkCommandBuffer cmd = frame.cmd;
+    VkPipeline pipeline = depth ? s.pipeline3D : s.pipeline2D;
+    if (pipeline != s.boundPipeline) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        s.boundPipeline = pipeline;
+        ++s.frameStats.pipelineBinds;
+    }
+    if (frame.ring.buffer != s.boundVertexBuffer) {
+        const VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &frame.ring.buffer, &offset);
+        s.boundVertexBuffer = frame.ring.buffer;
+    }
+    if (record->set != s.boundSet) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelineLayout, 0, 1,
+                                &record->set, 0, nullptr);
+        s.boundSet = record->set;
+        ++s.frameStats.descriptorBinds;
+    }
+    if (!s.matrixBound ||
+        std::memcmp(s.boundMatrix.elements, viewProjection.elements, sizeof(Mat4::elements)) != 0) {
+        vkCmdPushConstants(cmd, s.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(Mat4::elements), viewProjection.elements);
+        s.boundMatrix = viewProjection;
+        s.matrixBound = true;
+        ++s.frameStats.pushConstantUpdates;
+    }
+    vkCmdDraw(cmd, static_cast<uint32>(vertices.size()), 1, firstVertex, 0);
+    ++s.frameStats.drawCalls;
+    s.frameStats.vertexBytes += bytes;
+    return true;
+}
+
+bool GpuDevice::EndFrame() {
+    if (!state_ || !state_->frameActive)
+        return false;
+    auto& s = *state_;
+    Vk::FrameData& frame = s.frames[s.frameSlot];
+    VkCommandBuffer cmd = frame.cmd;
+    const bool recording = s.Usable() && s.commandsOpen;
+    s.commandsOpen = false;
+    if (recording) {
+        if (!s.renderPassActive)
+            s.BeginRenderPass();
+        vkCmdEndRenderPass(cmd);
+        s.renderPassActive = false;
+        if (s.capture.requested) {
+            s.capture.requested = false;
+            const VkExtent2D extent = s.swapchain.extent;
+            const VkDeviceSize size = static_cast<VkDeviceSize>(extent.width) * extent.height * 4;
+            if (!s.swapchain.transferSource)
+                s.Fail(GpuStatus::Error, "Swapchain images cannot be read back");
+            else if (s.EnsureCaptureBuffer(size)) {
+                VkImageMemoryBarrier barrier{};
+                barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.image = s.swapchain.images[s.imageIndex];
+                barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+                barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                VkBufferMemoryBarrier reuse{};
+                reuse.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                reuse.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_READ_BIT;
+                reuse.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                reuse.srcQueueFamilyIndex = reuse.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                reuse.buffer = s.capture.buffer;
+                reuse.size = VK_WHOLE_SIZE;
+                vkCmdPipelineBarrier(cmd,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT |
+                                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &reuse, 1,
+                                     &barrier);
+                VkBufferImageCopy region{};
+                region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                region.imageExtent = {extent.width, extent.height, 1};
+                vkCmdCopyImageToBuffer(cmd, barrier.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                       s.capture.buffer, 1, &region);
+                barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                barrier.dstAccessMask = 0;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
+                                     nullptr, 1, &barrier);
+                VkBufferMemoryBarrier host{};
+                host.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+                host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                host.buffer = s.capture.buffer;
+                host.size = VK_WHOLE_SIZE;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &host, 0,
+                                     nullptr);
+                s.capture.recorded = true;
+                s.capture.serial = 0;
+                s.capture.width = extent.width;
+                s.capture.height = extent.height;
+                s.capture.format = s.swapchain.format;
+            }
+        }
+        if (frame.queries) {
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, frame.queries, 1);
+            frame.queriesWritten = true;
+        }
+        if (frame.ring.used)
+            vmaFlushAllocation(s.allocator, frame.ring.allocation, 0, frame.ring.used);
+    }
+
+    VkResult result = recording ? vkEndCommandBuffer(cmd) : VK_ERROR_UNKNOWN;
+    if (result == VK_SUCCESS && !s.FlushUploads())
+        result = VK_ERROR_UNKNOWN;
+    uint64 serial = 0;
+    if (result == VK_SUCCESS)
+        result = s.Submit(cmd, frame.imageAvailable, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          s.swapchain.renderFinished[s.imageIndex], serial);
+    bool rendered = result == VK_SUCCESS;
+    if (!rendered) {
+        frame.queriesWritten = false;
+        s.capture.recorded = false;
+        if (result == VK_ERROR_DEVICE_LOST && serial != 0)
+            frame.serial = serial;
+        if (recording || result != VK_ERROR_UNKNOWN)
+            s.Fail(result, "Frame submission");
+        result = s.Usable() ? SubmitRecoveryFrame(s, frame, serial) : VK_ERROR_UNKNOWN;
+        if (result != VK_SUCCESS) {
+            if (s.Usable()) {
+                s.Fail(result, "Frame recovery submission");
+                s.status = GpuStatus::Error;
+            }
+            s.frameActive = false;
+            s.StampPending(s.submittedSerial);
+            s.frameSlot = (s.frameSlot + 1) % s.frameCount;
+            return false;
+        }
+        s.swapchainDirty = true;
+    }
+    frame.serial = serial;
+    s.frameActive = false;
+    s.StampPending(serial);
+    if (s.capture.recorded && s.capture.serial == 0)
+        s.capture.serial = serial;
+    s.frameSlot = (s.frameSlot + 1) % s.frameCount;
+
+    VkPresentInfoKHR present{};
+    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores = &s.swapchain.renderFinished[s.imageIndex];
+    present.swapchainCount = 1;
+    present.pSwapchains = &s.swapchain.handle;
+    present.pImageIndices = &s.imageIndex;
+    const VkResult presented = vkQueuePresentKHR(s.presentQueue, &present);
+    if (rendered) {
+        s.lastFrameStats = s.frameStats;
+        ++s.counters.framesSubmitted;
+        s.frameFailures = 0;
+    } else if (++s.frameFailures >= MaxFrameFailures) {
+        s.status = GpuStatus::Error;
+        s.lastError = "Repeated frame submission failures: " + s.lastError;
+    }
+    if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR)
+        s.swapchainDirty = true;
+    else if (presented != VK_SUCCESS)
+        return s.Fail(presented, "vkQueuePresentKHR");
+    return rendered;
+}
+
+bool GpuDevice::SetVSync(bool enabled) {
+    if (!IsReady() || state_->frameActive)
+        return false;
+    auto& s = *state_;
+    if (!enabled) {
+        uint32 count = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(s.physical, s.surface, &count, nullptr);
+        std::vector<VkPresentModeKHR> modes(count);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(s.physical, s.surface, &count, modes.data());
+        const bool tearing = std::any_of(modes.begin(), modes.end(), [](VkPresentModeKHR mode) {
+            return mode == VK_PRESENT_MODE_MAILBOX_KHR || mode == VK_PRESENT_MODE_IMMEDIATE_KHR;
+        });
+        if (!tearing)
             return false;
     }
-    if (!vertices_.SetData(data.data(), bytes, currentCommandBuffer_))
-        return false;
-    if (!texture)
-        texture = &white_;
-    if (!texture->IsValid() || texture->GetDevice() != device_)
-        return false;
-    SDL_GPUColorTargetInfo color{};
-    color.texture = currentSwapchainTexture_;
-    color.load_op = SDL_GPU_LOADOP_LOAD;
-    color.store_op = SDL_GPU_STOREOP_STORE;
-    SDL_GPUDepthStencilTargetInfo depthInfo{};
-    depthInfo.texture = depth_;
-    depthInfo.clear_depth = 1.0f;
-    depthInfo.load_op = depthCleared_ ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
-    depthInfo.store_op = SDL_GPU_STOREOP_STORE;
-    depthInfo.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-    depthInfo.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-    SDL_PushGPUVertexUniformData(currentCommandBuffer_, 0, vp.elements, sizeof(vp.elements));
-    auto* pass =
-        SDL_BeginGPURenderPass(currentCommandBuffer_, &color, 1, depth ? &depthInfo : nullptr);
-    if (!pass)
-        return false;
-    SDL_BindGPUGraphicsPipeline(pass, depth ? pipeline3D_ : pipeline2D_);
-    SDL_GPUBufferBinding binding{vertices_.GetHandle(), 0};
-    SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
-    SDL_GPUTextureSamplerBinding sampler{texture->GetHandle(), texture->GetSampler()};
-    SDL_BindGPUFragmentSamplers(pass, 0, &sampler, 1);
-    SDL_DrawGPUPrimitives(pass, static_cast<uint32>(data.size()), 1, 0, 0);
-    SDL_EndGPURenderPass(pass);
-    if (depth)
-        depthCleared_ = true;
+    if (s.vsync != enabled) {
+        s.vsync = enabled;
+        s.swapchainDirty = true;
+    }
     return true;
 }
-bool GpuDevice::EndFrame() {
-    if (!currentCommandBuffer_)
-        return false;
-    const bool submitted = SDL_SubmitGPUCommandBuffer(currentCommandBuffer_);
-    if (!submitted)
-        Log::Error(SDL_GetError());
-    currentCommandBuffer_ = nullptr;
-    currentSwapchainTexture_ = nullptr;
-    return submitted;
+
+void GpuDevice::NotifyResize() {
+    if (state_)
+        state_->swapchainDirty = true;
 }
-bool GpuDevice::SetVSync(bool enabled) {
-    if (!IsReady() || currentCommandBuffer_)
-        return false;
-    auto mode = enabled ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
-    if (!SDL_WindowSupportsGPUPresentMode(device_, window_, mode))
-        return false;
-    return SDL_SetGPUSwapchainParameters(device_, window_, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
+
+bool GpuDevice::FlushUploads() {
+    return IsReady() && state_->FlushUploads();
 }
+
+bool GpuDevice::WaitIdle() {
+    if (!IsReady() || state_->frameActive || !state_->FlushUploads())
+        return false;
+    if (const VkResult result = vkDeviceWaitIdle(state_->device); result != VK_SUCCESS)
+        return state_->Fail(result, "vkDeviceWaitIdle");
+    state_->CollectGarbage();
+    return state_->Usable();
+}
+
+bool GpuDevice::RequestFrameCapture() {
+    if (!IsReady())
+        return false;
+    state_->capture.requested = true;
+    return true;
+}
+
+bool GpuDevice::ReadFrameCapture(GpuFrameCapture& capture) {
+    if (!IsReady() || !state_->capture.recorded || state_->capture.serial == 0)
+        return false;
+    auto& s = *state_;
+    if (!s.WaitForSerial(s.capture.serial))
+        return false;
+    if (const VkResult result =
+            vmaInvalidateAllocation(s.allocator, s.capture.allocation, 0, VK_WHOLE_SIZE);
+        result != VK_SUCCESS)
+        return s.Fail(result, "Frame capture invalidate");
+    VmaAllocationInfo allocation{};
+    vmaGetAllocationInfo(s.allocator, s.capture.allocation, &allocation);
+    const auto* source = static_cast<const uint8*>(allocation.pMappedData);
+    capture.width = s.capture.width;
+    capture.height = s.capture.height;
+    capture.rgba.assign(source,
+                        source + static_cast<size_t>(s.capture.width) * s.capture.height * 4);
+    const bool bgra =
+        s.capture.format == VK_FORMAT_B8G8R8A8_UNORM || s.capture.format == VK_FORMAT_B8G8R8A8_SRGB;
+    if (bgra)
+        for (size_t index = 0; index < capture.rgba.size(); index += 4)
+            std::swap(capture.rgba[index], capture.rgba[index + 2]);
+    s.capture.recorded = false;
+    return true;
+}
+
 } // namespace LuxEngine

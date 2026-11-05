@@ -22,8 +22,8 @@ bool Window::Initialize(const WindowProps& props) {
     if (props_.resizable) {
         flags |= SDL_WINDOW_RESIZABLE;
     }
-    if (props_.useOpenGL) {
-        flags |= SDL_WINDOW_OPENGL;
+    if (props_.vulkan) {
+        flags |= SDL_WINDOW_VULKAN;
     }
 
     window_ = SDL_CreateWindow(props_.title.c_str(), static_cast<int>(props_.width),
@@ -96,8 +96,10 @@ void Window::PollEvents() {
         ApplySystemTheme();
     const SDL_WindowID currentWindowID = SDL_GetWindowID(window_);
     SDL_Event event;
+    uint32 processed = 0;
 
-    while (SDL_PollEvent(&event)) {
+    while (processed < MaxEventsPerPoll && SDL_PollEvent(&event)) {
+        ++processed;
         const bool foreignInput =
             ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
              event.key.windowID != currentWindowID) ||
@@ -158,7 +160,10 @@ void Window::PollEvents() {
                 eventCallback_(e);
             }
         } else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
-                   event.type == SDL_EVENT_WINDOW_RESIZED) {
+                   event.type == SDL_EVENT_WINDOW_RESIZED ||
+                   event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED ||
+                   event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED ||
+                   event.type == SDL_EVENT_WINDOW_RESTORED) {
             if (event.window.windowID == currentWindowID) {
                 int width = 0, height = 0;
                 if (SDL_GetWindowSize(window_, &width, &height)) {
@@ -172,6 +177,29 @@ void Window::PollEvents() {
             }
         }
     }
+}
+
+bool Window::GetFramebufferSize(uint32& width, uint32& height) const {
+    int pixelWidth = 0, pixelHeight = 0;
+    if (!window_ || !SDL_GetWindowSizeInPixels(window_, &pixelWidth, &pixelHeight) ||
+        pixelWidth < 0 || pixelHeight < 0)
+        return false;
+    width = static_cast<uint32>(pixelWidth);
+    height = static_cast<uint32>(pixelHeight);
+    return true;
+}
+
+bool Window::IsMinimized() const {
+    return window_ && (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) != 0;
+}
+
+bool Window::HasFocus() const {
+    return window_ && (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS) != 0;
+}
+
+float Window::GetDisplayScale() const {
+    const float scale = window_ ? SDL_GetWindowDisplayScale(window_) : 0.0f;
+    return scale > 0.0f ? scale : 1.0f;
 }
 
 uint32 Window::GetWidth() const {

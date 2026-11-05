@@ -81,21 +81,7 @@ install(TARGETS LuxEngine LuxRuntime EXPORT LuxEngineTargets
 )
 install(DIRECTORY Engine/ DESTINATION include/Engine FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY Runtime/ DESTINATION include/Runtime FILES_MATCHING PATTERN "*.hpp")
-if(NOT LUX_USE_OGRE)
-    if(APPLE)
-        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/Basic.metal"
-            DESTINATION share/LuxEngine/shaders)
-    else()
-        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders/"
-            DESTINATION share/LuxEngine/shaders)
-    endif()
-else()
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LuxOgreDependency.cmake"
-        DESTINATION lib/cmake/LuxEngine)
-    if(WIN32)
-        install(FILES "${LUX_OGRE_MAIN_DLL}" "${LUX_OGRE_GL_PLUGIN_PATH}" DESTINATION bin)
-    endif()
-endif()
+install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders/" DESTINATION share/LuxEngine/shaders)
 install(EXPORT LuxEngineTargets NAMESPACE LuxEngine:: DESTINATION lib/cmake/LuxEngine)
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfig.cmake"

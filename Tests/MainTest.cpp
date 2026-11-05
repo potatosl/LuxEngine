@@ -611,11 +611,9 @@ void WindowEvents() {
         Check(!window.Initialize() && window.GetNativeHandle() == handle,
               "duplicate initialization preserves window");
         Check(window.GetWidth() == 320 && window.GetHeight() == 240, "initial window dimensions");
-#if LUX_USE_OGRE
         GpuDevice unavailable;
-        Check(!unavailable.Initialize(handle) && !unavailable.IsReady(),
-              "Ogre rejects a non-X11 window without loading the GL plugin");
-#endif
+        Check(!unavailable.Initialize(window) && !unavailable.IsReady(),
+              "GPU device rejects a window created without Vulkan support");
         Check(SDL_SetWindowSize(handle, 400, 300), "window resizes");
         Check(window.GetWidth() == 400 && window.GetHeight() == 300,
               "window dimensions stay current");
@@ -754,9 +752,7 @@ struct Graphics {
         props.width = 320;
         props.height = 240;
         props.title = "LuxEngine GPU verification";
-#if LUX_USE_OGRE
-        props.useOpenGL = true;
-#endif
+        props.vulkan = true;
         Check(window.Initialize(props), "GPU test window");
         const bool iconAvailable = window.HasWindowIcon();
         Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland",
@@ -772,7 +768,7 @@ struct Graphics {
         if (iconAvailable)
             Check(window.HasWindowIcon() && window.GetColorTheme() == expected,
                   "theme event preserves correct icon");
-        Check(gpu.Initialize(window.GetNativeHandle()), SDL_GetError());
+        Check(gpu.Initialize(window), gpu.GetLastError().c_str());
     }
     ~Graphics() {
         AssetManager::Shutdown();
@@ -857,30 +853,17 @@ void Lifecycle() {
 }
 void Gpu() {
     Graphics graphics;
-#if LUX_USE_OGRE
-    GpuDevice duplicateOgre;
-    Check(!duplicateOgre.Initialize(graphics.window.GetNativeHandle()) && !duplicateOgre.IsReady(),
-          "only one Ogre root is active");
-#endif
+    Check(!graphics.gpu.Initialize(graphics.window), "duplicate device initialization rejected");
     Files files;
     auto* surface = SDL_CreateSurface(2, 2, SDL_PIXELFORMAT_RGBA32);
     Check(surface != nullptr, "test image surface");
     SDL_FillSurfaceRect(surface, nullptr, SDL_MapSurfaceRGBA(surface, 255, 0, 0, 255));
     Check(SDL_SaveBMP(surface, files.Path("red.bmp").c_str()), "write test image");
     SDL_DestroySurface(surface);
-#if LUX_USE_OGRE
     auto texture = AssetManager::LoadTexture(files.Path("red.bmp"), &graphics.gpu);
-#else
-    auto texture = AssetManager::LoadTexture(files.Path("red.bmp"), graphics.gpu.GetHandle());
-#endif
     Check(texture && texture->IsValid() && texture->GetWidth() == 2, "real image upload");
-#if LUX_USE_OGRE
     Check(!AssetManager::LoadTexture(files.Path("absent.png"), &graphics.gpu),
           "missing GPU image fails");
-#else
-    Check(!AssetManager::LoadTexture(files.Path("absent.png"), graphics.gpu.GetHandle()),
-          "missing GPU image fails");
-#endif
     Renderer2D::Init(&graphics.gpu);
     Renderer3D::Init(&graphics.gpu);
     OrthographicCamera camera(-2, 2, -2, 2);
@@ -902,30 +885,22 @@ void Gpu() {
               "real 3D draw call");
         Check(graphics.gpu.EndFrame(), "submit frame");
     }
-#if !LUX_USE_OGRE
-    Check(SDL_WaitForGPUIdle(graphics.gpu.GetHandle()), "GPU completion");
-#endif
+    Check(graphics.gpu.WaitIdle(), "GPU completion");
     texture.reset();
     AssetManager::Shutdown();
-#if !LUX_USE_OGRE
     GpuBuffer buffer;
-    Check(buffer.Initialize(graphics.gpu.GetHandle(), BufferType::Vertex, 4), "buffer init");
+    Check(buffer.Initialize(&graphics.gpu, BufferType::Vertex, 4), "buffer init");
     const uint32 value = 42;
     Check(!buffer.SetData(&value, 8), "oversized upload rejected");
     Check(buffer.SetData(&value, 4), "buffer upload");
     GpuBuffer moved = std::move(buffer);
     Check(!buffer.IsValid() && moved.IsValid(), "buffer ownership transfer");
     moved.Release();
-#endif
     const uint32 pixel = 0xffffffff;
     GpuTexture delayed;
-#if LUX_USE_OGRE
     Check(delayed.Initialize(&graphics.gpu, 1, 1, &pixel), "delayed texture init");
-#else
-    Check(delayed.Initialize(graphics.gpu.GetHandle(), 1, 1, &pixel), "delayed texture init");
-#endif
     graphics.gpu.Shutdown();
-    Check(!delayed.IsValid() && !delayed.GetHandle(), "device shutdown invalidates resources");
+    Check(!delayed.IsValid() && delayed.GetWidth() == 0, "device shutdown invalidates resources");
     delayed.Release();
 }
 } // namespace
