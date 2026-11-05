@@ -6,6 +6,7 @@
 #include <QGuiApplication>
 #include <SDL3/SDL.h>
 #include <cstring>
+#include <exception>
 
 namespace LuxEngine {
 struct EngineSceneRenderer::State {
@@ -118,9 +119,18 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
     // Renderer2D is a process-wide singleton and the editor has several 2D viewports, each with
     // its own device, so bind this viewport's device for every frame.
     Renderer2D::Init(&s.gpu);
-    Renderer2D::BeginScene(camera);
-    scene.OnRender();
-    Renderer2D::EndScene();
+    try {
+        Renderer2D::BeginScene(camera);
+        scene.OnRender();
+        Renderer2D::EndScene();
+    } catch (const std::exception& exception) {
+        // An exception escaping paintEvent would take the whole editor down with unsaved work.
+        // Close the frame, report it, and let the viewport fall back to software drawing.
+        Renderer2D::Init(&s.gpu);
+        s.gpu.EndFrame();
+        error_ = QStringLiteral("엔진 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+        return false;
+    }
     if (!s.gpu.EndFrame()) {
         error_ = QString::fromStdString(s.gpu.GetLastError());
         return false;
