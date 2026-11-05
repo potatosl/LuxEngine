@@ -30,21 +30,25 @@ function(lux_editor_copy_runtime target)
 endfunction()
 
 # Qt needs its platform plugin (platforms/qwindows.dll) next to the executable; vcpkg does not copy it.
+# One target copies it into the shared bin folder so parallel builds do not write it at once.
+if(WIN32 AND TARGET Qt6::QWindowsIntegrationPlugin)
+    if(CMAKE_CONFIGURATION_TYPES)
+        set(_lux_editor_bin "${CMAKE_BINARY_DIR}/bin/$<CONFIG>")
+    else()
+        set(_lux_editor_bin "${CMAKE_BINARY_DIR}/bin")
+    endif()
+    set(_lux_qt_plugins $<TARGET_FILE:Qt6::QWindowsIntegrationPlugin>)
+    if(TARGET Qt6::QOffscreenIntegrationPlugin)
+        list(APPEND _lux_qt_plugins $<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>)
+    endif()
+    add_custom_target(LuxEditorQtPlugins ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_lux_editor_bin}/platforms"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_lux_qt_plugins} "${_lux_editor_bin}/platforms"
+        VERBATIM)
+endif()
 function(lux_editor_copy_qt_plugins target)
-    if(WIN32 AND TARGET Qt6::QWindowsIntegrationPlugin)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/platforms"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:Qt6::QWindowsIntegrationPlugin>
-                "$<TARGET_FILE_DIR:${target}>/platforms"
-            VERBATIM)
-        if(TARGET Qt6::QOffscreenIntegrationPlugin)
-            add_custom_command(TARGET ${target} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>
-                    "$<TARGET_FILE_DIR:${target}>/platforms"
-                VERBATIM)
-        endif()
+    if(TARGET LuxEditorQtPlugins)
+        add_dependencies(${target} LuxEditorQtPlugins)
     endif()
 endfunction()
 
