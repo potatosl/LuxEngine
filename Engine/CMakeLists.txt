@@ -44,6 +44,19 @@ set(LUXENGINE_SOURCES
     Application.cpp
 )
 
+if(LUX_USE_OGRE)
+    list(REMOVE_ITEM LUXENGINE_SOURCES Renderer/RHI/GpuDevice.cpp)
+    list(APPEND LUXENGINE_SOURCES Renderer/RHI/GpuDeviceOgre.cpp)
+    add_library(LuxOgreBridge OBJECT Renderer/Ogre/OgreBridge.cpp Renderer/Ogre/OgreBridge.h)
+    set_target_properties(LuxOgreBridge PROPERTIES
+        CXX_STANDARD 14
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(LuxOgreBridge PRIVATE "${CMAKE_SOURCE_DIR}")
+    target_link_libraries(LuxOgreBridge PRIVATE SDL3::SDL3 LuxOgre::Main)
+endif()
+
 # Organize source files into Visual Studio folders matching the directory structure
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${LUXENGINE_SOURCES} ${LUXENGINE_HEADERS})
 
@@ -57,6 +70,14 @@ endif()
 add_library(LuxEngine::Engine ALIAS LuxEngine)
 set_target_properties(LuxEngine PROPERTIES EXPORT_NAME Engine)
 target_sources(LuxEngine PRIVATE "${CMAKE_BINARY_DIR}/generated/Branding.cpp")
+if(LUX_USE_OGRE)
+    target_sources(LuxEngine PRIVATE $<TARGET_OBJECTS:LuxOgreBridge>)
+    target_link_libraries(LuxEngine PUBLIC LuxOgre::Main)
+    target_compile_definitions(LuxEngine PUBLIC LUX_USE_OGRE=1
+        PRIVATE "LUX_OGRE_GL_PLUGIN_PATH=\"${LUX_OGRE_GL_PLUGIN_PATH}\"")
+else()
+    target_compile_definitions(LuxEngine PUBLIC LUX_USE_OGRE=0)
+endif()
 
 target_include_directories(LuxEngine PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>

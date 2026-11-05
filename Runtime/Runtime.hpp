@@ -5,9 +5,9 @@
 
 namespace LuxEngine {
 
-    class Runtime {
-    public:
-        static void PrintEngineInfo();
-    };
+class Runtime {
+public:
+    static void PrintEngineInfo();
+};
 
 } // namespace LuxEngine
