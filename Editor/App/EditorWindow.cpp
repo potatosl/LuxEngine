@@ -275,6 +275,26 @@ void EditorWindow::BuildMenus() {
     breakOnCollisionAction_ = debug->addAction(QStringLiteral("충돌 시 일시정지"));
     breakOnCollisionAction_->setCheckable(true);
     debug->addAction(docks_[7]->toggleViewAction());
+    QMenu* buildMenu = menuBar()->addMenu(QStringLiteral("빌드"));
+    add(buildMenu, QStringLiteral("Debug 빌드"), QStringLiteral("buildDebug"),
+        QKeySequence(Qt::CTRL | Qt::Key_B),
+        [this] { StartBuild(BuildConfiguration::Debug, false, BuildFollowUp::None); });
+    add(buildMenu, QStringLiteral("Release 빌드"), QStringLiteral("buildRelease"),
+        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_B),
+        [this] { StartBuild(BuildConfiguration::Release, false, BuildFollowUp::None); });
+    add(buildMenu, QStringLiteral("빌드 후 실행 (Debug)"), QStringLiteral("buildRun"),
+        QKeySequence(Qt::Key_F9),
+        [this] { StartBuild(BuildConfiguration::Debug, false, BuildFollowUp::Run); });
+    add(buildMenu, QStringLiteral("클린 빌드 (Debug)"), QStringLiteral("buildClean"), {},
+        [this] { StartBuild(BuildConfiguration::Debug, true, BuildFollowUp::None); });
+    buildMenu->addSeparator();
+    add(buildMenu, QStringLiteral("배포 ZIP 만들기 (Release)..."), QStringLiteral("buildPackage"),
+        {}, [this] { StartBuild(BuildConfiguration::Release, false, BuildFollowUp::Package); });
+    buildMenu->addSeparator();
+    add(buildMenu, QStringLiteral("빌드 중지"), QStringLiteral("buildCancel"), {},
+        [this] { CancelBuild(); });
+    add(buildMenu, QStringLiteral("엔진 SDK 경로 설정..."), QStringLiteral("buildSdk"), {},
+        [this] { ChooseEnginePackage(); });
     QMenu* window = menuBar()->addMenu(QStringLiteral("창"));
     add(window, QStringLiteral("새 에디터 창"), QStringLiteral("newWindow"), {}, [] {
         auto* next = new EditorWindow;
@@ -508,6 +528,7 @@ void EditorWindow::RunWithProgress(const QString& message, const std::function<v
 void EditorWindow::closeEvent(QCloseEvent* event) {
     StopPreview();
     StopSceneWindow();
+    CancelBuild();
     if (!ConfirmDiscardChanges()) {
         event->ignore();
         return;

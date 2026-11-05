@@ -1,4 +1,5 @@
 #pragma once
+#include "Build/ProjectBuild.hpp"
 #include "Project/EditorProject.hpp"
 #include "Scene/EditorDocument.hpp"
 #include "Viewport/EditorTool.hpp"
@@ -30,6 +31,7 @@ class QWidget;
 class QSlider;
 class QPushButton;
 class QProcess;
+class QProgressBar;
 
 namespace LuxEngine {
 class SceneViewport2D;
@@ -100,6 +102,15 @@ private:
     // Saves the current scene and runs it in a separate LuxPlayer window.
     void RunSceneInWindow();
     void StopSceneWindow();
+    // Builds the open project with CMake (Debug/Release), optionally running or packaging it.
+    enum class BuildFollowUp { None, Run, Package };
+    void StartBuild(BuildConfiguration configuration, bool clean, BuildFollowUp followUp);
+    void RunNextBuildStep();
+    void FinishBuild(bool success);
+    void CancelBuild();
+    void HandleBuildOutput(const QByteArray& data);
+    void ChooseEnginePackage();
+    void PackageBuild();
     void ApplyViewportTransform(uint32 id, const TransformComponent& value);
     void BeginViewportEdit();
     void EndViewportEdit();
@@ -209,6 +220,13 @@ private:
     QString theme_ = QStringLiteral("dark");
     double uiScale_ = 1.0;
     QProcess* playerProcess_ = nullptr;
+    QProcess* buildProcess_ = nullptr;
+    QProgressBar* buildProgress_ = nullptr;
+    std::optional<BuildPlan> buildPlan_;
+    size_t buildStep_ = 0;
+    BuildFollowUp buildFollowUp_ = BuildFollowUp::None;
+    std::vector<BuildDiagnostic> buildDiagnostics_;
+    QByteArray buildLineBuffer_;
     QString playerScenePath_;
 };
 } // namespace LuxEngine
