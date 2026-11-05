@@ -29,6 +29,7 @@ class QUndoStack;
 class QWidget;
 class QSlider;
 class QPushButton;
+class QProcess;
 
 namespace LuxEngine {
 class SceneViewport2D;
@@ -96,6 +97,9 @@ private:
     void TogglePreviewPause();
     void StepPreview();
     void TickPreview();
+    // Saves the current scene and runs it in a separate LuxPlayer window.
+    void RunSceneInWindow();
+    void StopSceneWindow();
     void ApplyViewportTransform(uint32 id, const TransformComponent& value);
     void BeginViewportEdit();
     void EndViewportEdit();
@@ -204,5 +208,7 @@ private:
     bool debugDockHiddenForSize_ = false;
     QString theme_ = QStringLiteral("dark");
     double uiScale_ = 1.0;
+    QProcess* playerProcess_ = nullptr;
+    QString playerScenePath_;
 };
 } // namespace LuxEngine

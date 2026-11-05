@@ -57,6 +57,12 @@ QPointF SceneViewport2D::ScreenToWorld(QPointF point) const {
     return {(point.x() - width() * 0.5 - pan_.x()) / pixelsPerUnit_,
             (height() * 0.5 + pan_.y() - point.y()) / pixelsPerUnit_};
 }
+void SceneViewport2D::GetView(double& centerX, double& centerY, double& halfHeight) const {
+    const QPointF center = ScreenToWorld(QPointF(width() * 0.5, height() * 0.5));
+    centerX = center.x();
+    centerY = center.y();
+    halfHeight = std::max(1.0, height() * 0.5) / pixelsPerUnit_;
+}
 void SceneViewport2D::FocusSelection() {
     Entity selected = document_.GetSelected();
     if (selected && selected.HasComponent<TransformComponent>()) {
