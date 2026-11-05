@@ -90,5 +90,8 @@ target_include_directories(LuxEngine SYSTEM PRIVATE ${stb_SOURCE_DIR})
 lux_set_target_warnings(LuxEngine)
 
 if(MSVC)
-    target_compile_options(LuxEngine PRIVATE /utf-8)
+    # PUBLIC: games and tools built on the engine (including from the installed SDK) also read
+    # their sources as UTF-8. Without it Korean Windows reads them as code page 949 and Korean
+    # string literals fail to compile (C2001).
+    target_compile_options(LuxEngine PUBLIC $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/utf-8>)
 endif()
