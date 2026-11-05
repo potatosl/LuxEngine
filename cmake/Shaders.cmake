@@ -35,7 +35,7 @@ function(lux_copy_runtime target)
             COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/shaders"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/Shaders/Basic.metal" "$<TARGET_FILE_DIR:${target}>/shaders/Basic.metal")
     endif()
-    if(WIN32)
+    if(WIN32 AND TARGET SDL3::SDL3-shared)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:${target}>)
     endif()
