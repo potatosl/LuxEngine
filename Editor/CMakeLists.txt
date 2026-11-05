@@ -26,13 +26,6 @@ function(lux_editor_copy_runtime target)
                     "$<TARGET_FILE_DIR:${target}>"
                 VERBATIM)
         endif()
-        if(WIN32 AND LuxEngine_USE_OGRE)
-            add_custom_command(TARGET ${target} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${LUX_OGRE_MAIN_DLL}" "${LUX_OGRE_GL_PLUGIN_PATH}"
-                    "$<TARGET_FILE_DIR:${target}>"
-                VERBATIM)
-        endif()
     endif()
 endfunction()
 

@@ -39,12 +39,6 @@ if(WIN32)
                     $<TARGET_FILE:box2d::box2d> $<TARGET_FILE_DIR:LuxGame>)
         endif()
     endif()
-    if(LuxEngine_USE_OGRE)
-        add_custom_command(TARGET LuxGame POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${LUX_OGRE_MAIN_DLL}" "${LUX_OGRE_GL_PLUGIN_PATH}"
-                $<TARGET_FILE_DIR:LuxGame>)
-    endif()
 endif()
 )LUX";
 
@@ -161,16 +155,8 @@ protected:
 
     void OnRender(float) override {
         le::Renderer2D::BeginScene(camera_);
-        for (auto entity : scene_.GetEntities()) {
-            if (!entity.HasComponent<le::TransformComponent>() ||
-                !entity.HasComponent<le::SpriteRendererComponent>())
-                continue;
-            const auto& transform = entity.GetComponent<le::TransformComponent>();
-            const auto& color = entity.GetComponent<le::SpriteRendererComponent>().color;
-            le::Renderer2D::DrawRotatedQuad({transform.position.x, transform.position.y},
-                                            {transform.scale.x, transform.scale.y},
-                                            transform.rotation.z, color);
-        }
+        // Scene::OnRender draws tilemaps and sprites, so maps painted in the editor appear in game.
+        scene_.OnRender();
         le::Renderer2D::EndScene();
     }
 
