@@ -30,3 +30,25 @@ add_test(NAME Engine_runtime COMMAND LuxEngineDemo --smoke-test)
 set_tests_properties(Engine_runtime PROPERTIES TIMEOUT 60 LABELS gpu
     WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineDemo>"
     ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}")
+
+# Runtime: LuxPlayer argument parsing and view fitting, then a real LuxPlayer run.
+add_executable(LuxRuntimeTests RuntimeTest.cpp)
+target_link_libraries(LuxRuntimeTests PRIVATE LuxEngine::Runtime)
+lux_set_target_warnings(LuxRuntimeTests)
+if(MSVC)
+    target_compile_options(LuxRuntimeTests PRIVATE /utf-8)
+endif()
+lux_copy_runtime(LuxRuntimeTests)
+foreach(suite parse fit)
+    add_test(NAME Runtime_${suite} COMMAND LuxRuntimeTests ${suite})
+    set_tests_properties(Runtime_${suite} PROPERTIES TIMEOUT 30 LABELS headless)
+endforeach()
+add_test(NAME Runtime_player_scene
+    COMMAND LuxRuntimeTests write-scene "${CMAKE_CURRENT_BINARY_DIR}/PlayerSmoke.lux")
+set_tests_properties(Runtime_player_scene PROPERTIES FIXTURES_SETUP lux_player_scene LABELS gpu)
+add_test(NAME Runtime_player
+    COMMAND LuxPlayer "${CMAKE_CURRENT_BINARY_DIR}/PlayerSmoke.lux" --frames 30)
+set_tests_properties(Runtime_player PROPERTIES TIMEOUT 60 LABELS gpu
+    FIXTURES_REQUIRED lux_player_scene
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxPlayer>"
+    ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}")
