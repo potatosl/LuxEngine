@@ -38,6 +38,12 @@ public:
     TransformComponent Sample(float time) const;
 };
 
+struct AnimationComponent {
+    AnimationClip clip;
+    float currentTime = 0.0f;
+    bool playing = true;
+};
+
 class LUX_API AnimationEngine {
 public:
     static void Init();
