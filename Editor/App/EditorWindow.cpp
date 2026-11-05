@@ -617,7 +617,7 @@ void EditorWindow::RefreshProjectExplorer() {
         }
         if (it->is_regular_file(error)) {
             const QString label = Q(GenericPathUtf8(relative));
-            const QString suffix = Q(it->path().extension().string()).toLower();
+            const QString suffix = Q(PathUtf8(it->path().extension())).toLower();
             const bool scene = suffix == QLatin1String(".lux");
             const bool image = suffix == QLatin1String(".png") || suffix == QLatin1String(".jpg") ||
                                suffix == QLatin1String(".jpeg") ||

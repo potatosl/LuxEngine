@@ -11,25 +11,32 @@ constexpr uint32 SetsPerPool = 256;
 constexpr size_t MaxDescriptorPools = 4096;
 constexpr std::streamoff MaxShaderBytes = 16 << 20;
 
+// generic_string() throws on Windows when the path has characters outside the ANSI code page
+// (e.g. a game installed under a Korean folder), which turned "shader missing" into a crash.
+std::string DisplayPath(const std::filesystem::path& path) {
+    const auto text = path.generic_u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
+}
+
 bool ReadSpirv(const std::filesystem::path& path, std::vector<uint32>& code, std::string& error) {
     std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in) {
-        error = "Shader file missing: " + path.generic_string();
+        error = "Shader file missing: " + DisplayPath(path);
         return false;
     }
     const std::streamoff size = in.tellg();
     if (size <= 0 || size % 4 != 0 || size > MaxShaderBytes) {
-        error = "Shader file has an invalid SPIR-V size: " + path.generic_string();
+        error = "Shader file has an invalid SPIR-V size: " + DisplayPath(path);
         return false;
     }
     code.assign(static_cast<size_t>(size / 4), 0);
     in.seekg(0);
     if (!in.read(reinterpret_cast<char*>(code.data()), size)) {
-        error = "Shader file could not be read: " + path.generic_string();
+        error = "Shader file could not be read: " + DisplayPath(path);
         return false;
     }
     if (code.size() < 5 || code[0] != SpirvMagic) {
-        error = "Shader file is not SPIR-V: " + path.generic_string();
+        error = "Shader file is not SPIR-V: " + DisplayPath(path);
         return false;
     }
     return true;

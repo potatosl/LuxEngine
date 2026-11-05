@@ -93,7 +93,7 @@ bool ValidSettings(const ProjectSettings& settings) {
             GenericPathUtf8(settings.icon).find("..") != std::string::npos ||
             GenericPathUtf8(settings.icon).find('\\') != std::string::npos)
             return false;
-        const auto extension = settings.icon.extension().string();
+        const auto extension = PathUtf8(settings.icon.extension());
         if (extension != ".png" && extension != ".jpg" && extension != ".jpeg" &&
             extension != ".ico" && extension != ".icns")
             return false;
