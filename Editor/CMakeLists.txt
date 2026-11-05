@@ -33,6 +33,7 @@ add_library(LuxEditorUi STATIC
     App/EditorWindow.cpp
     App/EditorWindowLayout.cpp
     App/EditorWindowProjects.cpp
+    App/EditorWindowPlay.cpp
     Debug/DebugPanel.cpp
     Project/EditorProject.cpp
     Project/ProjectArchive.cpp
@@ -54,6 +55,10 @@ endif()
 add_executable(LuxEditor WIN32 MACOSX_BUNDLE App/Main.cpp)
 target_link_libraries(LuxEditor PRIVATE LuxEditorUi)
 lux_editor_copy_runtime(LuxEditor)
+if(TARGET LuxPlayer)
+    # The editor launches LuxPlayer from its own folder for "run in window".
+    add_dependencies(LuxEditor LuxPlayer)
+endif()
 install(TARGETS LuxEditor RUNTIME DESTINATION bin BUNDLE DESTINATION .)
 
 if(MSVC)

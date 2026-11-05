@@ -267,6 +267,11 @@ void EditorWindow::BuildMenus() {
         QKeySequence(Qt::Key_F7), [this] { StepPreview(); });
     add(debug, QStringLiteral("실행 중지"), QStringLiteral("previewStop"),
         QKeySequence(Qt::SHIFT | Qt::Key_F5), [this] { StopPreview(); });
+    debug->addSeparator();
+    add(debug, QStringLiteral("별도 창에서 실행"), QStringLiteral("playWindow"),
+        QKeySequence(Qt::CTRL | Qt::Key_F5), [this] { RunSceneInWindow(); });
+    add(debug, QStringLiteral("게임 창 닫기"), QStringLiteral("playWindowStop"),
+        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F5), [this] { StopSceneWindow(); });
     breakOnCollisionAction_ = debug->addAction(QStringLiteral("충돌 시 일시정지"));
     breakOnCollisionAction_->setCheckable(true);
     debug->addAction(docks_[7]->toggleViewAction());
@@ -502,6 +507,7 @@ void EditorWindow::RunWithProgress(const QString& message, const std::function<v
 }
 void EditorWindow::closeEvent(QCloseEvent* event) {
     StopPreview();
+    StopSceneWindow();
     if (!ConfirmDiscardChanges()) {
         event->ignore();
         return;

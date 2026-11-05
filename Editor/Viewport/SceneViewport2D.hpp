@@ -24,6 +24,8 @@ public:
         update();
     }
     void FocusSelection();
+    // Visible area in world units: centre and half height.
+    void GetView(double& centerX, double& centerY, double& halfHeight) const;
     void SetSnapToGrid(bool enabled) {
         snapToGrid_ = enabled;
         update();

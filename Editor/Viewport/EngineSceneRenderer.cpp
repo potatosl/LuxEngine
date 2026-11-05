@@ -115,6 +115,9 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
                                     static_cast<float>(worldBounds.right()),
                                     static_cast<float>(worldBounds.bottom()),
                                     static_cast<float>(worldBounds.top()));
+    // Renderer2D is a process-wide singleton and the editor has several 2D viewports, each with
+    // its own device, so bind this viewport's device for every frame.
+    Renderer2D::Init(&s.gpu);
     Renderer2D::BeginScene(camera);
     scene.OnRender();
     Renderer2D::EndScene();
