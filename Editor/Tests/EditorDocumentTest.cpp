@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -181,6 +182,28 @@ void Test2DEditorComponents() {
     restored[0].GetComponent<TilemapComponent>().tiles[0] = 255;
     Check(!document.GetScene().Serialize((files.path / "invalid-world.lux").string()),
           "invalid tilemap is rejected before serialization");
+    // A failed save must leave the previous file untouched and no temporary file behind.
+    {
+        std::ifstream before(path, std::ios::binary);
+        const std::string original((std::istreambuf_iterator<char>(before)),
+                                   std::istreambuf_iterator<char>());
+        before.close();
+        Check(!original.empty() && !document.SaveAs(path), "invalid scene does not save");
+        std::ifstream after(path, std::ios::binary);
+        const std::string kept((std::istreambuf_iterator<char>(after)),
+                               std::istreambuf_iterator<char>());
+        size_t files_in_folder = 0;
+        for ([[maybe_unused]] const auto& entry :
+             std::filesystem::directory_iterator(std::filesystem::path(path).parent_path()))
+            ++files_in_folder;
+        Check(kept == original, "failed save keeps the previous scene file");
+        size_t leftovers = 0;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(std::filesystem::path(path).parent_path()))
+            if (entry.path().string().find(".saving-") != std::string::npos)
+                ++leftovers;
+        Check(leftovers == 0 && files_in_folder > 0, "failed save leaves no temporary file");
+    }
 }
 
 void TestProjectManagement() {
