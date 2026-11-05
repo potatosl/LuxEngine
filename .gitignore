@@ -1,0 +1,40 @@
+# Visual Studio & IDEs
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vscode/
+.idea/
+
+# CMake & Build Artifacts
+build/
+bin/
+out/
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+compile_commands.json
+*.dir/
+
+# Compiled Binaries & Libraries
+*.obj
+*.o
+*.lib
+*.a
+*.exp
+*.dll
+*.so
+*.dylib
+*.exe
+*.pdb
+*.ilk
+
+# Dependency downloads
+_deps/
+subprojects/
+
+# OS Specific
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store

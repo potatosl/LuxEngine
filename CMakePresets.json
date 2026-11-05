@@ -1,0 +1,89 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "vs2026-x64-debug",
+      "displayName": "Visual Studio 2026 x64 Debug",
+      "description": "Target Windows x64 with Visual Studio 18 2026 (Debug)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2026",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "vs2026-x64-release",
+      "displayName": "Visual Studio 2026 x64 Release",
+      "description": "Target Windows x64 with Visual Studio 18 2026 (Release)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2026",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ninja-x64-debug",
+      "displayName": "Ninja x64 Debug",
+      "description": "Target Windows x64 with Ninja generator (Debug)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ninja-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ninja-x64-release",
+      "displayName": "Ninja x64 Release",
+      "description": "Target Windows x64 with Ninja generator (Release)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ninja-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "vs2026-debug",
+      "displayName": "Build VS2026 Debug",
+      "configurePreset": "vs2026-x64-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs2026-release",
+      "displayName": "Build VS2026 Release",
+      "configurePreset": "vs2026-x64-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "ninja-debug",
+      "displayName": "Build Ninja Debug",
+      "configurePreset": "ninja-x64-debug"
+    },
+    {
+      "name": "ninja-release",
+      "displayName": "Build Ninja Release",
+      "configurePreset": "ninja-x64-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "vs2026-debug-test",
+      "displayName": "Run Tests (VS2026 Debug)",
+      "configurePreset": "vs2026-x64-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "ninja-debug-test",
+      "displayName": "Run Tests (Ninja Debug)",
+      "configurePreset": "ninja-x64-debug"
+    }
+  ]
+}
