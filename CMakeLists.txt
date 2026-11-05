@@ -42,6 +42,9 @@ include(Shaders)
 include(Branding)
 option(LUX_BUILD_TESTS "Build engine tests" ON)
 option(LUX_BUILD_EDITOR "Build the separate wxWidgets editor" OFF)
+if(LUX_BUILD_TESTS)
+    enable_testing()
+endif()
 
 # -------------------------------------------------------------
 # Subdirectories
@@ -54,7 +57,6 @@ if(LUX_BUILD_EDITOR)
 endif()
 
 if(LUX_BUILD_TESTS)
-    enable_testing()
     add_subdirectory(Tests)
 endif()
 
