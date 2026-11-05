@@ -29,9 +29,18 @@ set(LUXENGINE_SOURCES
     Core/Timer.cpp
     Platform/Window.cpp
     Platform/Input.cpp
+    Platform/VulkanPlatform.hpp
+    Platform/VulkanPlatform.cpp
     Renderer/RHI/GpuDevice.cpp
     Renderer/RHI/Buffer.cpp
     Renderer/RHI/Texture.cpp
+    Renderer/Vulkan/VulkanFault.hpp
+    Renderer/Vulkan/VulkanDevice.hpp
+    Renderer/Vulkan/VulkanAllocator.cpp
+    Renderer/Vulkan/VulkanContext.cpp
+    Renderer/Vulkan/VulkanSwapchain.cpp
+    Renderer/Vulkan/VulkanPipeline.cpp
+    Renderer/Vulkan/VulkanResources.cpp
     Renderer/Renderer2D/Renderer2D.cpp
     Renderer/Renderer3D/Renderer3D.cpp
     Scene/Scene.cpp
@@ -43,19 +52,6 @@ set(LUXENGINE_SOURCES
     Assets/AssetManager.cpp
     Application.cpp
 )
-
-if(LUX_USE_OGRE)
-    list(REMOVE_ITEM LUXENGINE_SOURCES Renderer/RHI/GpuDevice.cpp)
-    list(APPEND LUXENGINE_SOURCES Renderer/RHI/GpuDeviceOgre.cpp)
-    add_library(LuxOgreBridge OBJECT Renderer/Ogre/OgreBridge.cpp Renderer/Ogre/OgreBridge.h)
-    set_target_properties(LuxOgreBridge PROPERTIES
-        CXX_STANDARD 14
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-        POSITION_INDEPENDENT_CODE ON)
-    target_include_directories(LuxOgreBridge PRIVATE "${CMAKE_SOURCE_DIR}")
-    target_link_libraries(LuxOgreBridge PRIVATE SDL3::SDL3 LuxOgre::Main)
-endif()
 
 # Organize source files into Visual Studio folders matching the directory structure
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${LUXENGINE_SOURCES} ${LUXENGINE_HEADERS})
@@ -70,13 +66,9 @@ endif()
 add_library(LuxEngine::Engine ALIAS LuxEngine)
 set_target_properties(LuxEngine PROPERTIES EXPORT_NAME Engine)
 target_sources(LuxEngine PRIVATE "${CMAKE_BINARY_DIR}/generated/Branding.cpp")
-if(LUX_USE_OGRE)
-    target_sources(LuxEngine PRIVATE $<TARGET_OBJECTS:LuxOgreBridge>)
-    target_link_libraries(LuxEngine PUBLIC LuxOgre::Main)
-    target_compile_definitions(LuxEngine PUBLIC LUX_USE_OGRE=1
-        PRIVATE "LUX_OGRE_GL_PLUGIN_PATH=\"${LUX_OGRE_GL_PLUGIN_PATH}\"")
-else()
-    target_compile_definitions(LuxEngine PUBLIC LUX_USE_OGRE=0)
+option(LUX_GPU_FAULT_INJECTION "Compile Vulkan failure-injection hooks used by the tests" ${LUX_BUILD_TESTS})
+if(LUX_GPU_FAULT_INJECTION)
+    target_compile_definitions(LuxEngine PUBLIC LUX_GPU_FAULT_INJECTION=1)
 endif()
 
 target_include_directories(LuxEngine PUBLIC
@@ -87,6 +79,9 @@ target_include_directories(LuxEngine PUBLIC
 target_link_libraries(LuxEngine PUBLIC
     SDL3::SDL3
     box2d::box2d
+    PRIVATE
+    Vulkan::Vulkan
+    $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>
 )
 
 target_compile_features(LuxEngine PUBLIC cxx_std_20)

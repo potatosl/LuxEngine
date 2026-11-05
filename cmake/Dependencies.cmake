@@ -1,10 +1,19 @@
 # Build dependencies are installed by the developer, never downloaded by CMake.
 find_package(SDL3 3.2 CONFIG REQUIRED)
 find_package(box2d 2.4...<3 CONFIG REQUIRED)
+find_package(Vulkan 1.1 REQUIRED)
 
-option(LUX_USE_OGRE "Use Ogre for engine rendering instead of SDL GPU" ON)
-if(LUX_USE_OGRE)
-    include(LuxOgreDependency)
+find_package(VulkanMemoryAllocator CONFIG QUIET)
+if(NOT TARGET GPUOpen::VulkanMemoryAllocator)
+    find_path(LUX_VMA_INCLUDE_DIR NAMES vk_mem_alloc.h
+        HINTS "${Vulkan_INCLUDE_DIRS}" "$ENV{VULKAN_SDK}/Include" "$ENV{VULKAN_SDK}/include"
+        PATH_SUFFIXES vma)
+    if(NOT LUX_VMA_INCLUDE_DIR)
+        message(FATAL_ERROR "vk_mem_alloc.h not found. Install Vulkan Memory Allocator (the Vulkan SDK ships it) or set LUX_VMA_INCLUDE_DIR.")
+    endif()
+    add_library(GPUOpen::VulkanMemoryAllocator INTERFACE IMPORTED)
+    set_target_properties(GPUOpen::VulkanMemoryAllocator PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${LUX_VMA_INCLUDE_DIR}")
 endif()
 
 # Older configurations cached an empty value before downloading stb.

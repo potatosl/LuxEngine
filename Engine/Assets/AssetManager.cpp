@@ -1,6 +1,7 @@
 #include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
+#include <SDL3/SDL.h>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
 #include <cmath>
@@ -49,36 +50,12 @@ void AssetManager::Init() {
 void AssetManager::Shutdown() {
     Clear();
 }
-Ref<GpuTexture> AssetManager::LoadTexture(const std::string& filepath, SDL_GPUDevice* device) {
-    if (!device)
-        return {};
-    const auto key = Key(filepath);
-    auto it = s_TextureCache.find(key);
-    if (it != s_TextureCache.end() && it->second->GetDevice() == device)
-        return it->second;
-    int width = 0, height = 0;
-    stbi_uc* pixels = DecodeTexture(filepath, width, height);
-    if (!pixels)
-        return {};
-    auto texture = CreateRef<GpuTexture>();
-    const bool valid = width > 0 && height > 0 &&
-                       texture->Initialize(device, static_cast<uint32>(width),
-                                           static_cast<uint32>(height), pixels);
-    stbi_image_free(pixels);
-    if (!valid)
-        return {};
-    s_TextureCache[key] = texture;
-    return texture;
-}
 Ref<GpuTexture> AssetManager::LoadTexture(const std::string& filepath, GpuDevice* device) {
     if (!device || !device->IsReady())
         return {};
-    LuxOgreContext* context = device->GetOgreContext();
-    if (!context)
-        return LoadTexture(filepath, device->GetHandle());
     const auto key = Key(filepath);
     auto it = s_TextureCache.find(key);
-    if (it != s_TextureCache.end() && it->second->GetOgreContext() == context)
+    if (it != s_TextureCache.end() && it->second->BelongsTo(*device))
         return it->second;
     int width = 0, height = 0;
     stbi_uc* pixels = DecodeTexture(filepath, width, height);

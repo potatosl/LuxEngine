@@ -1,8 +1,12 @@
 #include "Engine/LuxEngine.hpp"
 #include "Engine/Platform/Branding.hpp"
+#include "Engine/Renderer/Vulkan/VulkanFault.hpp"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,6 +16,7 @@
 #include <string_view>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 namespace {
 int checks = 0;
@@ -63,6 +68,19 @@ void Core() {
     Throws(
         [&] { first.Range(-std::numeric_limits<float>::max(), std::numeric_limits<float>::max()); },
         "overflowing random range rejected");
+    auto project = [](const Mat4& m, const Vec3& p) {
+        const auto& e = m.elements;
+        const float z = e[2] * p.x + e[6] * p.y + e[10] * p.z + e[14];
+        const float w = e[3] * p.x + e[7] * p.y + e[11] * p.z + e[15];
+        return z / w;
+    };
+    const Mat4 perspective = Mat4::Perspective(ToRadians(60), 1.0f, 0.5f, 50.0f);
+    Check(Near(project(perspective, {0, 0, -0.5f}), 0.0f) &&
+              Near(project(perspective, {0, 0, -50.0f}), 1.0f),
+          "perspective depth maps near/far to Vulkan's 0..1 range");
+    const Mat4 ortho = Mat4::Orthographic(-1, 1, -1, 1, -1, 1);
+    Check(Near(project(ortho, {0, 0, 1}), 0.0f) && Near(project(ortho, {0, 0, -1}), 1.0f),
+          "orthographic depth maps into Vulkan's 0..1 range");
     static_assert(!std::is_move_constructible_v<Window>);
     static_assert(!std::is_move_constructible_v<GpuDevice>);
     GpuDevice uninitializedGpu;
@@ -611,11 +629,9 @@ void WindowEvents() {
         Check(!window.Initialize() && window.GetNativeHandle() == handle,
               "duplicate initialization preserves window");
         Check(window.GetWidth() == 320 && window.GetHeight() == 240, "initial window dimensions");
-#if LUX_USE_OGRE
         GpuDevice unavailable;
-        Check(!unavailable.Initialize(handle) && !unavailable.IsReady(),
-              "Ogre rejects a non-X11 window without loading the GL plugin");
-#endif
+        Check(!unavailable.Initialize(window) && !unavailable.IsReady(),
+              "GPU device rejects a window created without Vulkan support");
         Check(SDL_SetWindowSize(handle, 400, 300), "window resizes");
         Check(window.GetWidth() == 400 && window.GetHeight() == 300,
               "window dimensions stay current");
@@ -734,6 +750,28 @@ void WindowEvents() {
               "focus loss releases held keyboard action");
         Input::ClearAction("Focus");
 
+        int moves = 0;
+        window.SetEventCallback([&](Event& e) {
+            if (e.GetEventType() == EventType::MouseMoved)
+                ++moves;
+        });
+        SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        constexpr int flood = 10000;
+        for (int index = 0; index < flood; ++index) {
+            event = {};
+            event.type = SDL_EVENT_MOUSE_MOTION;
+            event.motion.windowID = SDL_GetWindowID(handle);
+            event.motion.x = static_cast<float>(index);
+            SDL_PushEvent(&event);
+        }
+        window.PollEvents();
+        Check(moves > 0 && moves <= static_cast<int>(Window::MaxEventsPerPoll),
+              "event flood is bounded per poll");
+        for (int poll = 0; poll < 8 && moves < flood; ++poll)
+            window.PollEvents();
+        Check(moves == flood, "flooded events are delivered over later polls");
+        window.SetEventCallback({});
+
         event = {};
         event.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
         event.window.windowID = SDL_GetWindowID(handle);
@@ -744,35 +782,55 @@ void WindowEvents() {
     Input::Shutdown();
     SDL_Quit();
 }
+struct SkipTest : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+bool MissingVulkanDevice(const std::string& error) {
+    return error.find("No Vulkan physical devices") != std::string::npos ||
+           error.find("No suitable Vulkan device") != std::string::npos ||
+           error.find("Vulkan 1.1 loader") != std::string::npos ||
+           error.find("VK_ERROR_INCOMPATIBLE_DRIVER") != std::string::npos;
+}
 struct Graphics {
     Window window;
     GpuDevice gpu;
-    Graphics() {
+    explicit Graphics(const GpuDeviceConfig& config = {}, uint32 width = 320, uint32 height = 240,
+                      bool checkTheme = true) {
         if (!SDL_Init(SDL_INIT_VIDEO))
-            throw std::runtime_error(SDL_GetError());
+            throw SkipTest(std::string("no video driver: ") + SDL_GetError());
         WindowProps props;
-        props.width = 320;
-        props.height = 240;
+        props.width = width;
+        props.height = height;
         props.title = "LuxEngine GPU verification";
-#if LUX_USE_OGRE
-        props.useOpenGL = true;
-#endif
-        Check(window.Initialize(props), "GPU test window");
-        const bool iconAvailable = window.HasWindowIcon();
-        Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland",
-              "window icon applied when supported");
-        const auto expected =
-            SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK ? ColorTheme::Dark : ColorTheme::Light;
-        if (iconAvailable)
-            Check(window.GetColorTheme() == expected, "window icon follows system theme");
-        SDL_Event changed{};
-        changed.type = SDL_EVENT_SYSTEM_THEME_CHANGED;
-        Check(SDL_PushEvent(&changed), "theme event queued");
-        window.PollEvents();
-        if (iconAvailable)
-            Check(window.HasWindowIcon() && window.GetColorTheme() == expected,
-                  "theme event preserves correct icon");
-        Check(gpu.Initialize(window.GetNativeHandle()), SDL_GetError());
+        props.vulkan = true;
+        if (!window.Initialize(props)) {
+            SDL_Quit();
+            throw SkipTest("no Vulkan-capable window system");
+        }
+        if (checkTheme) {
+            const bool iconAvailable = window.HasWindowIcon();
+            Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland",
+                  "window icon applied when supported");
+            const auto expected = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK ? ColorTheme::Dark
+                                                                                : ColorTheme::Light;
+            if (iconAvailable)
+                Check(window.GetColorTheme() == expected, "window icon follows system theme");
+            SDL_Event changed{};
+            changed.type = SDL_EVENT_SYSTEM_THEME_CHANGED;
+            Check(SDL_PushEvent(&changed), "theme event queued");
+            window.PollEvents();
+            if (iconAvailable)
+                Check(window.HasWindowIcon() && window.GetColorTheme() == expected,
+                      "theme event preserves correct icon");
+        }
+        if (!gpu.Initialize(window, config)) {
+            const std::string error = gpu.GetLastError();
+            window.Shutdown();
+            SDL_Quit();
+            if (MissingVulkanDevice(error))
+                throw SkipTest("no Vulkan device: " + error);
+            throw std::runtime_error("GPU initialization failed: " + error);
+        }
     }
     ~Graphics() {
         AssetManager::Shutdown();
@@ -782,8 +840,66 @@ struct Graphics {
         window.Shutdown();
         SDL_Quit();
     }
+    bool Begin(int attempts = 8) {
+        for (int attempt = 0; attempt < attempts; ++attempt) {
+            window.PollEvents();
+            const auto start = gpu.BeginFrame();
+            if (start == GpuDevice::FrameStart::Ready)
+                return true;
+            if (start == GpuDevice::FrameStart::Error)
+                return false;
+            SDL_Delay(5);
+        }
+        return false;
+    }
+    template <class F> GpuFrameCapture Capture(F&& draw) {
+        Check(gpu.RequestFrameCapture(), "frame capture requested");
+        Check(Begin(), "capture frame begins");
+        draw();
+        Check(gpu.EndFrame(), "capture frame submitted");
+        GpuFrameCapture capture;
+        Check(gpu.ReadFrameCapture(capture), "frame capture read back");
+        Check(capture.rgba.size() == static_cast<size_t>(capture.width) * capture.height * 4,
+              "frame capture size");
+        return capture;
+    }
+    void ValidationClean(const char* stage) {
+        const auto counters = gpu.GetCounters();
+        if (counters.validationErrors != 0)
+            throw std::runtime_error(std::string("Vulkan validation errors after ") + stage + ": " +
+                                     std::to_string(counters.validationErrors));
+        ++checks;
+    }
 };
+std::array<int, 4> Pixel(const GpuFrameCapture& capture, float x, float y) {
+    const auto px = std::min<uint32>(capture.width - 1, static_cast<uint32>(x * capture.width));
+    const auto py = std::min<uint32>(capture.height - 1, static_cast<uint32>(y * capture.height));
+    const size_t index = (static_cast<size_t>(py) * capture.width + px) * 4;
+    return {capture.rgba[index], capture.rgba[index + 1], capture.rgba[index + 2],
+            capture.rgba[index + 3]};
+}
+bool IsColor(const std::array<int, 4>& pixel, int r, int g, int b, int tolerance = 3) {
+    return std::abs(pixel[0] - r) <= tolerance && std::abs(pixel[1] - g) <= tolerance &&
+           std::abs(pixel[2] - b) <= tolerance;
+}
+std::array<RenderVertex, 6> Rect(float x0, float y0, float x1, float y1, float z,
+                                 const Vec4& color) {
+    return {{{{x0, y0, z}, color, {0, 1}},
+             {{x1, y0, z}, color, {1, 1}},
+             {{x1, y1, z}, color, {1, 0}},
+             {{x1, y1, z}, color, {1, 0}},
+             {{x0, y1, z}, color, {0, 0}},
+             {{x0, y0, z}, color, {0, 1}}}};
+}
+void ReportValidation(const GpuDevice& gpu) {
+    const auto& info = gpu.GetInfo();
+    std::cout << "device: " << info.deviceName << " (" << info.deviceType << "), validation "
+              << (info.validation ? "on" : "unavailable/off") << ", sync validation "
+              << (info.synchronizationValidation ? "on" : "off") << ", timeline "
+              << (info.timelineSemaphores ? "on" : "off") << '\n';
+}
 void Lifecycle() {
+    { Graphics probe({}, 64, 64, false); }
     struct Probe : Application {
         int shutdowns = 0;
         bool failInit = false, failRender = false, closeOnUpdate = true;
@@ -855,39 +971,121 @@ void Lifecycle() {
     }
     SDL_Quit();
 }
+void RenderOutput(Graphics& graphics) {
+    const Mat4 identity;
+    auto capture = graphics.Capture([&] { Check(graphics.gpu.Clear(1, 0, 0, 1), "clear red"); });
+    Check(IsColor(Pixel(capture, 0.5f, 0.5f), 255, 0, 0), "clear color reaches the swapchain");
+
+    capture = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 1, 1);
+        const auto top = Rect(-1, 0, 1, 1, 0.5f, {0, 1, 0, 1});
+        Check(graphics.gpu.DrawTriangles(top, identity), "top half draw");
+    });
+    Check(IsColor(Pixel(capture, 0.5f, 0.25f), 0, 255, 0) &&
+              IsColor(Pixel(capture, 0.5f, 0.75f), 0, 0, 255),
+          "positive clip-space Y is the top of the window");
+
+    capture = graphics.Capture([&] {
+        graphics.gpu.Clear(1, 0, 0, 1);
+        const auto blended = Rect(-1, -1, 1, 1, 0.5f, {0, 0, 1, 0.5f});
+        Check(graphics.gpu.DrawTriangles(blended, identity), "blended draw");
+    });
+    Check(IsColor(Pixel(capture, 0.5f, 0.5f), 128, 0, 128, 3), "2D alpha blending");
+
+    capture = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        const auto nearQuad = Rect(-1, -1, 0, 1, 0.25f, {0, 1, 0, 1});
+        const auto farQuad = Rect(-1, -1, 0, 1, 0.75f, {1, 0, 0, 1});
+        const auto farFirst = Rect(0, -1, 1, 1, 0.75f, {1, 0, 0, 1});
+        const auto nearLast = Rect(0, -1, 1, 1, 0.25f, {0, 1, 0, 1});
+        const auto clipped = Rect(-1, -1, 1, 1, 1.5f, {1, 1, 1, 1});
+        Check(graphics.gpu.DrawTriangles(nearQuad, identity, nullptr, true) &&
+                  graphics.gpu.DrawTriangles(farQuad, identity, nullptr, true) &&
+                  graphics.gpu.DrawTriangles(farFirst, identity, nullptr, true) &&
+                  graphics.gpu.DrawTriangles(nearLast, identity, nullptr, true) &&
+                  graphics.gpu.DrawTriangles(clipped, identity, nullptr, true),
+              "depth draws");
+    });
+    Check(IsColor(Pixel(capture, 0.25f, 0.5f), 0, 255, 0) &&
+              IsColor(Pixel(capture, 0.75f, 0.5f), 0, 255, 0),
+          "depth test keeps the nearest surface in both draw orders");
+
+    const std::array<uint8, 16> quadrants{255, 0, 0,   255, 0,   255, 0,   255,
+                                          0,   0, 255, 255, 255, 255, 255, 255};
+    GpuTexture texture;
+    Check(texture.Initialize(&graphics.gpu, 2, 2, quadrants.data()), "quadrant texture");
+    GpuTexture empty;
+    Check(empty.Initialize(&graphics.gpu, 4, 4), "uninitialized texture");
+    Renderer2D::Init(&graphics.gpu);
+    capture = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+        Renderer2D::DrawSprite({0, 0}, {2, 2}, &texture);
+        Renderer2D::DrawSprite({0, 0}, {2, 2}, &empty);
+        Renderer2D::EndScene();
+    });
+    Check(IsColor(Pixel(capture, 0.25f, 0.25f), 255, 0, 0) &&
+              IsColor(Pixel(capture, 0.75f, 0.25f), 0, 255, 0) &&
+              IsColor(Pixel(capture, 0.25f, 0.75f), 0, 0, 255) &&
+              IsColor(Pixel(capture, 0.75f, 0.75f), 255, 255, 255),
+          "texture rows and columns keep their orientation; empty textures are transparent");
+
+    capture = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        OrthographicCamera camera(-2, 2, -2, 2);
+        Renderer2D::BeginScene(camera);
+        Renderer2D::DrawQuad(Vec2(1, 1), {1, 1}, {1, 1, 0, 1});
+        Renderer2D::EndScene();
+    });
+    Check(IsColor(Pixel(capture, 0.75f, 0.25f), 255, 255, 0) &&
+              IsColor(Pixel(capture, 0.25f, 0.75f), 0, 0, 0),
+          "orthographic camera maps +X right and +Y up");
+
+    Renderer3D::Init(&graphics.gpu);
+    capture = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        PerspectiveCamera camera(ToRadians(60), 4.0f / 3, 0.1f, 100);
+        camera.SetPosition({0, 0, 5});
+        DirectionalLight light;
+        light.direction = {0, 0, -1};
+        Renderer3D::BeginScene(camera, light);
+        Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+        Renderer3D::EndScene();
+    });
+    const auto center = Pixel(capture, 0.5f, 0.5f);
+    Check(center[0] > 200 && center[1] > 200 && center[2] > 200 &&
+              IsColor(Pixel(capture, 0.05f, 0.05f), 0, 0, 0),
+          "perspective cube faces the camera and is lit");
+    texture.Release();
+    empty.Release();
+    graphics.ValidationClean("render output checks");
+}
 void Gpu() {
     Graphics graphics;
-#if LUX_USE_OGRE
-    GpuDevice duplicateOgre;
-    Check(!duplicateOgre.Initialize(graphics.window.GetNativeHandle()) && !duplicateOgre.IsReady(),
-          "only one Ogre root is active");
-#endif
+    ReportValidation(graphics.gpu);
+    Check(!graphics.gpu.Initialize(graphics.window), "duplicate device initialization rejected");
     Files files;
     auto* surface = SDL_CreateSurface(2, 2, SDL_PIXELFORMAT_RGBA32);
     Check(surface != nullptr, "test image surface");
     SDL_FillSurfaceRect(surface, nullptr, SDL_MapSurfaceRGBA(surface, 255, 0, 0, 255));
     Check(SDL_SaveBMP(surface, files.Path("red.bmp").c_str()), "write test image");
     SDL_DestroySurface(surface);
-#if LUX_USE_OGRE
     auto texture = AssetManager::LoadTexture(files.Path("red.bmp"), &graphics.gpu);
-#else
-    auto texture = AssetManager::LoadTexture(files.Path("red.bmp"), graphics.gpu.GetHandle());
-#endif
     Check(texture && texture->IsValid() && texture->GetWidth() == 2, "real image upload");
-#if LUX_USE_OGRE
+    Check(AssetManager::LoadTexture(files.Path("red.bmp"), &graphics.gpu) == texture,
+          "cached texture reused for the same device");
     Check(!AssetManager::LoadTexture(files.Path("absent.png"), &graphics.gpu),
           "missing GPU image fails");
-#else
-    Check(!AssetManager::LoadTexture(files.Path("absent.png"), graphics.gpu.GetHandle()),
-          "missing GPU image fails");
-#endif
+    files.Text("corrupt.png", "\x89PNG\r\n\x1a\n not really a png");
+    Check(!AssetManager::LoadTexture(files.Path("corrupt.png"), &graphics.gpu) &&
+              !AssetManager::HasTexture(files.Path("corrupt.png")),
+          "corrupted image rejected and not cached");
     Renderer2D::Init(&graphics.gpu);
     Renderer3D::Init(&graphics.gpu);
     OrthographicCamera camera(-2, 2, -2, 2);
     PerspectiveCamera perspective(ToRadians(60), 4.0f / 3, 0.1f, 100);
     for (int frame = 0; frame < 3; ++frame) {
-        graphics.window.PollEvents();
-        Check(graphics.gpu.BeginFrame() == GpuDevice::FrameStart::Ready, "begin frame");
+        Check(graphics.Begin(), "begin frame");
         Check(graphics.gpu.Clear(0, 0, 0, 1), "clear frame");
         Renderer2D::BeginScene(camera);
         Renderer2D::DrawSprite({-1, 0}, {1, 1}, texture.get());
@@ -901,35 +1099,567 @@ void Gpu() {
         Check(Renderer3D::GetStats().drawCalls == 1 && Renderer3D::GetStats().meshCount == 1,
               "real 3D draw call");
         Check(graphics.gpu.EndFrame(), "submit frame");
+        const auto stats = graphics.gpu.GetFrameStats();
+        if (frame == 0)
+            std::cout << "frame stats: draws " << stats.drawCalls << ", pipelines "
+                      << stats.pipelineBinds << ", descriptors " << stats.descriptorBinds
+                      << ", push constants " << stats.pushConstantUpdates << '\n';
+        Check(stats.drawCalls == 3 && stats.pipelineBinds == 2 && stats.descriptorBinds == 2 &&
+                  stats.pushConstantUpdates == 2 && stats.submissions >= 1,
+              "frame statistics count recorded GPU commands");
     }
-#if !LUX_USE_OGRE
-    Check(SDL_WaitForGPUIdle(graphics.gpu.GetHandle()), "GPU completion");
-#endif
+    Check(graphics.gpu.WaitIdle(), "GPU completion");
     texture.reset();
     AssetManager::Shutdown();
-#if !LUX_USE_OGRE
     GpuBuffer buffer;
-    Check(buffer.Initialize(graphics.gpu.GetHandle(), BufferType::Vertex, 4), "buffer init");
+    Check(buffer.Initialize(&graphics.gpu, BufferType::Vertex, 4), "buffer init");
     const uint32 value = 42;
     Check(!buffer.SetData(&value, 8), "oversized upload rejected");
     Check(buffer.SetData(&value, 4), "buffer upload");
     GpuBuffer moved = std::move(buffer);
     Check(!buffer.IsValid() && moved.IsValid(), "buffer ownership transfer");
     moved.Release();
-#endif
+    RenderOutput(graphics);
     const uint32 pixel = 0xffffffff;
     GpuTexture delayed;
-#if LUX_USE_OGRE
     Check(delayed.Initialize(&graphics.gpu, 1, 1, &pixel), "delayed texture init");
-#else
-    Check(delayed.Initialize(graphics.gpu.GetHandle(), 1, 1, &pixel), "delayed texture init");
-#endif
+    graphics.ValidationClean("GPU suite");
     graphics.gpu.Shutdown();
-    Check(!delayed.IsValid() && !delayed.GetHandle(), "device shutdown invalidates resources");
+    Check(!delayed.IsValid() && delayed.GetWidth() == 0, "device shutdown invalidates resources");
     delayed.Release();
+}
+void VulkanSystems() {
+    Graphics graphics;
+    ReportValidation(graphics.gpu);
+    auto& gpu = graphics.gpu;
+    const auto& info = gpu.GetInfo();
+    Check(!info.deviceName.empty() && info.apiVersion >= ((1u << 22) | (1u << 12)) &&
+              info.maxTextureSize >= 4096 && info.framesInFlight == 2,
+          "device capabilities reported");
+    Check(gpu.GetStatus() == GpuStatus::Ready && gpu.IsReady(), "device ready");
+
+    Check(!gpu.Clear(0, 0, 0, 1) && !gpu.EndFrame(), "frame commands outside a frame rejected");
+    const auto triangle = Rect(-1, -1, 1, 1, 0.5f, {1, 1, 1, 1});
+    Check(!gpu.DrawTriangles(triangle, Mat4{}), "draw outside a frame rejected");
+    Check(graphics.Begin(), "frame begins");
+    Check(gpu.BeginFrame() == GpuDevice::FrameStart::Error, "nested frame rejected");
+    Check(!gpu.SetVSync(false) && !gpu.WaitIdle(), "swapchain changes rejected mid-frame");
+    Check(!gpu.DrawTriangles(std::span(triangle).first(4), Mat4{}) &&
+              !gpu.DrawTriangles({}, Mat4{}),
+          "non-triangle vertex counts rejected");
+    Check(gpu.EndFrame() && !gpu.EndFrame(), "frame ends once");
+
+    GpuBuffer buffers[4];
+    const BufferType types[4] = {BufferType::Vertex, BufferType::Index, BufferType::Uniform,
+                                 BufferType::Storage};
+    for (int index = 0; index < 4; ++index)
+        Check(buffers[index].Initialize(&gpu, types[index], 256) &&
+                  buffers[index].GetSize() == 256 && buffers[index].GetType() == types[index],
+              "every buffer type allocates");
+    std::array<uint8, 256> bytes{};
+    Check(buffers[0].SetData(bytes.data(), 128, 128) && !buffers[0].SetData(bytes.data(), 128, 129),
+          "buffer offsets are bounds checked");
+    Check(!buffers[0].SetData(bytes.data(), 1, std::numeric_limits<uint32>::max()) &&
+              !buffers[0].SetData(nullptr, 4) && !buffers[0].SetData(bytes.data(), 0),
+          "overflowing, null and empty uploads rejected");
+    GpuBuffer zero;
+    Check(!zero.Initialize(&gpu, BufferType::Vertex, 0) &&
+              !zero.Initialize(nullptr, BufferType::Vertex, 4),
+          "invalid buffer creation rejected");
+    buffers[1].Release();
+    buffers[1].Release();
+    Check(!buffers[1].IsValid() && buffers[1].GetSize() == 0, "double release is harmless");
+
+    GpuTexture texture;
+    Check(!texture.Initialize(&gpu, 0, 4) && !texture.Initialize(&gpu, info.maxTextureSize + 1, 1),
+          "texture dimensions validated against device limits");
+    const auto before = gpu.GetMemoryStats();
+    Check(texture.Initialize(&gpu, 64, 64) &&
+              gpu.GetMemoryStats().liveTextures == before.liveTextures + 1,
+          "texture tracked");
+    Check(graphics.Begin(), "frame with released texture begins");
+    Renderer2D::Init(&gpu);
+    Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+    Renderer2D::DrawSprite({0, 0}, {1, 1}, &texture);
+    Renderer2D::EndScene();
+    texture.Release();
+    Check(gpu.GetMemoryStats().pendingDestructions > 0, "in-use texture destruction is deferred");
+    Check(gpu.EndFrame(), "frame using a released texture submits");
+    Check(gpu.WaitIdle() && gpu.GetMemoryStats().pendingDestructions == 0 &&
+              gpu.GetMemoryStats().liveTextures == before.liveTextures,
+          "deferred destruction completes after the GPU finishes");
+
+    {
+        Window other;
+        WindowProps props;
+        props.vulkan = true;
+        props.width = 64;
+        props.height = 64;
+        Check(other.Initialize(props), "second window");
+        GpuDevice otherGpu;
+        Check(otherGpu.Initialize(other), "second device");
+        GpuTexture foreign;
+        Check(foreign.Initialize(&otherGpu, 1, 1), "foreign texture");
+        Check(graphics.Begin(), "foreign texture frame");
+        Check(!gpu.DrawTriangles(triangle, Mat4{}, &foreign),
+              "textures from another device rejected");
+        Check(gpu.EndFrame(), "frame after foreign draw");
+        Check(!foreign.BelongsTo(gpu) && foreign.BelongsTo(otherGpu), "texture ownership");
+        otherGpu.Shutdown();
+        Check(!foreign.IsValid(), "foreign texture invalid after its device shuts down");
+    }
+
+    const auto recreations = gpu.GetCounters().swapchainRecreations;
+    SDL_SetWindowSize(graphics.window.GetNativeHandle(), 400, 300);
+    SDL_SyncWindow(graphics.window.GetNativeHandle());
+    gpu.NotifyResize();
+    auto capture = graphics.Capture([&] { gpu.Clear(0, 1, 0, 1); });
+    uint32 width = 0, height = 0;
+    graphics.window.GetFramebufferSize(width, height);
+    Check(gpu.GetCounters().swapchainRecreations > recreations && capture.width == width &&
+              capture.height == height && IsColor(Pixel(capture, 0.9f, 0.9f), 0, 255, 0),
+          "swapchain follows window resize");
+    if (gpu.SetVSync(false)) {
+        Check(graphics.Begin() && gpu.EndFrame(), "frame after disabling vsync");
+        Check(gpu.SetVSync(true) && graphics.Begin() && gpu.EndFrame(),
+              "frame after enabling vsync");
+    } else {
+        std::cout << "note: surface offers no non-vsync present mode\n";
+    }
+    SDL_MinimizeWindow(graphics.window.GetNativeHandle());
+    SDL_SyncWindow(graphics.window.GetNativeHandle());
+    graphics.window.PollEvents();
+    if (graphics.window.IsMinimized()) {
+        Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped, "minimized window skips frames");
+        SDL_RestoreWindow(graphics.window.GetNativeHandle());
+        SDL_SyncWindow(graphics.window.GetNativeHandle());
+    } else {
+        std::cout << "note: display server ignored minimize; minimized-frame check not run\n";
+    }
+    Check(graphics.Begin(20) && gpu.EndFrame(), "rendering resumes after restore");
+
+    for (int frame = 0; frame < 6; ++frame)
+        Check(graphics.Begin() && gpu.EndFrame(), "timestamp frames");
+    if (info.gpuTimestamps)
+        Check(gpu.GetFrameStats().gpuTimeMs >= 0.0, "GPU timestamps measured");
+
+    gpu.Shutdown();
+    for (uint32 frames : {0u, 1u, 3u, 9u}) {
+        GpuDeviceConfig config;
+        config.framesInFlight = frames;
+        Check(gpu.Initialize(graphics.window, config), "device reinitializes");
+        Check(gpu.GetInfo().framesInFlight == std::clamp(frames, 1u, 3u),
+              "frames in flight clamped");
+        for (int frame = 0; frame < 5; ++frame)
+            Check(graphics.Begin() && gpu.EndFrame(), "frames with configured depth");
+        graphics.ValidationClean("frames-in-flight configuration");
+        gpu.Shutdown();
+        Check(!gpu.IsReady() && gpu.BeginFrame() == GpuDevice::FrameStart::Error,
+              "API calls after shutdown rejected");
+    }
+    Check(gpu.Initialize(graphics.window), "device available for teardown");
+    for (auto& buffer : buffers)
+        Check(!buffer.IsValid(), "buffers from a previous device stay invalid");
+}
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+struct FaultScope {
+    FaultScope() {
+        Vk::ClearFaults();
+    }
+    ~FaultScope() {
+        Vk::ClearFaults();
+    }
+};
+void Failures() {
+    Graphics graphics;
+    ReportValidation(graphics.gpu);
+    auto& gpu = graphics.gpu;
+    auto& window = graphics.window;
+    gpu.Shutdown();
+    const Vk::Fault initFaults[] = {
+        Vk::Fault::InstanceCreation, Vk::Fault::SurfaceCreation, Vk::Fault::DeviceSelection,
+        Vk::Fault::DeviceCreation,   Vk::Fault::SyncObject,      Vk::Fault::ShaderModule,
+        Vk::Fault::PipelineCreation, Vk::Fault::CommandBuffer,   Vk::Fault::SwapchainCreation,
+        Vk::Fault::ImageAllocation,  Vk::Fault::Submit};
+    for (Vk::Fault fault : initFaults) {
+        FaultScope scope;
+        Vk::InjectFault(fault);
+        Check(!gpu.Initialize(window) && !gpu.IsReady() && !gpu.GetLastError().empty(),
+              "initialization failure detected and reported");
+        Check(Vk::TriggeredFaults(fault) == 1, "injected initialization fault reached");
+        Vk::ClearFaults();
+        Check(gpu.Initialize(window) && graphics.Begin() && gpu.EndFrame(),
+              "device initializes after a failed attempt");
+        gpu.Shutdown();
+    }
+    Files files;
+    GpuDeviceConfig config;
+    config.shaderDirectory = files.Path("");
+    Check(!gpu.Initialize(window, config) &&
+              gpu.GetLastError().find("Shader file missing") != std::string::npos,
+          "missing shaders reported");
+    files.Text("Basic.vert.spv", "not spir-v");
+    files.Text("Basic.frag.spv", "12345678");
+    Check(!gpu.Initialize(window, config) && !gpu.IsReady(), "corrupted shaders rejected");
+
+    Check(gpu.Initialize(window), "device for runtime failures");
+    {
+        FaultScope scope;
+        Vk::InjectFault(Vk::Fault::BufferAllocation);
+        GpuBuffer buffer;
+        Check(!buffer.Initialize(&gpu, BufferType::Vertex, 64) && gpu.IsReady() &&
+                  gpu.GetLastFailure() == GpuStatus::OutOfMemory,
+              "buffer allocation failure is recoverable");
+        Check(buffer.Initialize(&gpu, BufferType::Vertex, 64), "buffer allocation retried");
+        Vk::InjectFault(Vk::Fault::ImageAllocation);
+        GpuTexture texture;
+        Check(!texture.Initialize(&gpu, 8, 8) && gpu.IsReady(), "image allocation failure");
+        Vk::InjectFault(Vk::Fault::BufferAllocation);
+        const uint32 pixels[4]{};
+        Check(!texture.Initialize(&gpu, 2, 2, pixels) && gpu.GetMemoryStats().liveTextures == 1,
+              "staging failure releases the partial texture");
+        Vk::InjectFault(Vk::Fault::ImageAllocation);
+        auto* image = SDL_CreateSurface(2, 2, SDL_PIXELFORMAT_RGBA32);
+        Check(image && SDL_SaveBMP(image, files.Path("image.bmp").c_str()), "asset image");
+        SDL_DestroySurface(image);
+        Check(!AssetManager::LoadTexture(files.Path("image.bmp"), &gpu) &&
+                  !AssetManager::HasTexture(files.Path("image.bmp")),
+              "GPU upload failure is not cached");
+        Check(AssetManager::LoadTexture(files.Path("image.bmp"), &gpu) != nullptr,
+              "asset load succeeds once memory is available");
+        AssetManager::Shutdown();
+
+        Vk::InjectFault(Vk::Fault::Submit);
+        Check(graphics.Begin() && !gpu.EndFrame() && gpu.IsReady(),
+              "single submission failure keeps the device usable");
+        Check(graphics.Begin() && gpu.EndFrame(), "rendering recovers after a failed submission");
+
+        Vk::InjectFault(Vk::Fault::AcquireOutOfDate);
+        window.PollEvents();
+        const auto recreations = gpu.GetCounters().swapchainRecreations;
+        Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped, "out-of-date swapchain skips");
+        Check(graphics.Begin() && gpu.EndFrame() &&
+                  gpu.GetCounters().swapchainRecreations == recreations + 1,
+              "out-of-date swapchain recreated once");
+
+        Vk::InjectFault(Vk::Fault::SwapchainCreation);
+        gpu.NotifyResize();
+        window.PollEvents();
+        Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped && gpu.IsReady(),
+              "swapchain recreation failure skips the frame");
+        Check(graphics.Begin() && gpu.EndFrame(), "swapchain recreation retried");
+
+        GpuDeviceConfig small;
+        small.maxFrameVertexBytes = 1 << 16;
+        gpu.Shutdown();
+        Check(gpu.Initialize(window, small), "device with a small vertex budget");
+        std::vector<RenderVertex> many(3 * 1000, RenderVertex{{0, 0, 0}, {1, 1, 1, 1}, {0, 0}});
+        Check(graphics.Begin(), "budget frame");
+        Check(!gpu.DrawTriangles(many, Mat4{}) && gpu.GetLastFailure() == GpuStatus::OutOfMemory,
+              "per-frame vertex budget enforced");
+        Check(gpu.EndFrame() && gpu.IsReady(), "frame survives an over-budget draw");
+        graphics.ValidationClean("recoverable failures");
+
+        Vk::InjectFault(Vk::Fault::CommandBuffer, 3);
+        for (int frame = 0; frame < 2; ++frame) {
+            window.PollEvents();
+            Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped && gpu.IsReady(),
+                  "command recording failure skips the frame");
+        }
+        window.PollEvents();
+        Check(gpu.BeginFrame() == GpuDevice::FrameStart::Error && !gpu.IsReady() &&
+                  gpu.GetStatus() == GpuStatus::Error,
+              "repeated frame failures stop the device");
+        graphics.ValidationClean("repeated frame failures");
+        gpu.Shutdown();
+
+        Check(gpu.Initialize(window), "device for unrecoverable submission");
+        Vk::InjectFault(Vk::Fault::Submit, 2);
+        Check(graphics.Begin() && !gpu.EndFrame() && !gpu.IsReady() &&
+                  gpu.GetStatus() == GpuStatus::Error,
+              "failed recovery submission is unrecoverable");
+        gpu.Shutdown();
+
+        Check(gpu.Initialize(window), "device for timeout");
+        Check(graphics.Begin() && gpu.EndFrame(), "timeout setup frame");
+        Vk::InjectFault(Vk::Fault::GpuTimeout);
+        Check(graphics.Begin() && gpu.EndFrame() &&
+                  gpu.BeginFrame() == GpuDevice::FrameStart::Error &&
+                  gpu.GetLastFailure() == GpuStatus::Timeout,
+              "GPU timeout reported");
+        gpu.Shutdown();
+
+        Check(gpu.Initialize(window), "device for device-lost");
+        GpuTexture survivor;
+        Check(survivor.Initialize(&gpu, 4, 4), "resource before device loss");
+        Vk::InjectFault(Vk::Fault::DeviceLost);
+        Check(graphics.Begin() && !gpu.EndFrame(), "device loss reported at submission");
+        Check(gpu.GetStatus() == GpuStatus::DeviceLost && !gpu.IsReady() &&
+                  gpu.BeginFrame() == GpuDevice::FrameStart::Error &&
+                  !texture.Initialize(&gpu, 1, 1),
+              "lost device rejects further work");
+        gpu.Shutdown();
+        Check(!survivor.IsValid(), "resources invalid after a lost device is destroyed");
+        Check(gpu.Initialize(window) && graphics.Begin() && gpu.EndFrame(),
+              "a new device can be created after device loss");
+    }
+    graphics.ValidationClean("failure injection");
+    gpu.Shutdown();
+    window.Shutdown();
+
+    struct Probe : Application {
+        int shutdowns = 0;
+        void OnShutdown() override {
+            ++shutdowns;
+        }
+    };
+    {
+        FaultScope scope;
+        Probe app;
+        Vk::InjectFault(Vk::Fault::DeviceCreation);
+        Check(!app.Initialize(), "application reports GPU initialization failure");
+        Check(app.shutdowns == 0, "application hooks skipped when GPU is unavailable");
+    }
+    {
+        FaultScope scope;
+        Probe app;
+        Check(app.Initialize(), "application for device loss");
+        Vk::InjectFault(Vk::Fault::DeviceLost);
+        Application::FrameResult result = Application::FrameResult::Skipped;
+        for (int frame = 0; frame < 20 && result != Application::FrameResult::Error; ++frame) {
+            result = app.RunFrame();
+            SDL_Delay(2);
+        }
+        Check(result == Application::FrameResult::Error && app.shutdowns == 1,
+              "application stops cleanly on device loss");
+    }
+}
+#else
+void Failures() {
+    throw SkipTest("built without LUX_GPU_FAULT_INJECTION");
+}
+#endif
+template <class F> std::vector<double> TimedFrames(Graphics& graphics, int frames, F&& draw) {
+    std::vector<double> times;
+    for (int frame = 0; frame < frames; ++frame) {
+        const auto start = std::chrono::steady_clock::now();
+        Check(graphics.Begin(), "stress frame begins");
+        draw(frame);
+        Check(graphics.gpu.EndFrame(), "stress frame submitted");
+        times.push_back(
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                .count());
+    }
+    return times;
+}
+void PrintTimes(const char* name, std::vector<double> times) {
+    std::sort(times.begin(), times.end());
+    double sum = 0;
+    for (double time : times)
+        sum += time;
+    auto at = [&](double p) { return times[std::min(times.size() - 1, size_t(p * times.size()))]; };
+    std::cout << name << ": avg " << sum / times.size() << " ms, p95 " << at(0.95) << " ms, p99 "
+              << at(0.99) << " ms over " << times.size() << " frames\n";
+}
+void Stress() {
+    Graphics graphics({}, 640, 360, false);
+    ReportValidation(graphics.gpu);
+    auto& gpu = graphics.gpu;
+    Renderer2D::Init(&gpu);
+    Renderer3D::Init(&gpu);
+    std::vector<GpuTexture> textures(8);
+    for (size_t index = 0; index < textures.size(); ++index) {
+        const uint32 pixel = 0xff000000u | static_cast<uint32>(index * 0x202020u);
+        Check(textures[index].Initialize(&gpu, 1, 1, &pixel), "stress texture");
+    }
+    OrthographicCamera camera(-16, 16, -9, 9);
+    auto times = TimedFrames(graphics, 60, [&](int frame) {
+        Renderer2D::BeginScene(camera);
+        for (int index = 0; index < 20000; ++index)
+            Renderer2D::DrawSprite(
+                {float(index % 200) * 0.16f - 16, float(index / 200) * 0.18f - 9}, {0.15f, 0.15f},
+                &textures[(index / 7 + frame) % textures.size()]);
+        Renderer2D::EndScene();
+    });
+    PrintTimes("20k textured quads", times);
+    const auto settled = gpu.GetMemoryStats();
+    TimedFrames(graphics, 60, [&](int) {
+        Renderer2D::BeginScene(camera);
+        for (int index = 0; index < 20000; ++index)
+            Renderer2D::DrawQuad(
+                Vec2{float(index % 200) * 0.16f - 16, float(index / 200) * 0.18f - 9},
+                {0.15f, 0.15f}, {1, 1, 1, 1});
+        Renderer2D::EndScene();
+    });
+    Check(gpu.GetMemoryStats().allocationBytes == settled.allocationBytes,
+          "steady-state frames allocate no GPU memory");
+
+    const auto baseline = gpu.GetMemoryStats();
+    uint32 peakPools = 0;
+    for (int round = 0; round < 10; ++round) {
+        std::vector<GpuTexture> churn(300);
+        for (auto& texture : churn)
+            Check(texture.Initialize(&gpu, 32, 32), "churn texture");
+        TimedFrames(graphics, 2, [&](int) {
+            Renderer2D::BeginScene(camera);
+            for (size_t index = 0; index < churn.size(); ++index)
+                Renderer2D::DrawSprite({float(index % 30) - 15, float(index / 30) - 5}, {1, 1},
+                                       &churn[index]);
+            Renderer2D::EndScene();
+        });
+        peakPools = std::max(peakPools, gpu.GetMemoryStats().descriptorPools);
+    }
+    Check(gpu.WaitIdle(), "churn drained");
+    TimedFrames(graphics, 3, [](int) {});
+    const auto churned = gpu.GetMemoryStats();
+    Check(churned.liveTextures == baseline.liveTextures && churned.pendingDestructions == 0 &&
+              churned.allocationCount == baseline.allocationCount,
+          "texture churn returns every allocation");
+    Check(peakPools <= 4, "descriptor pools are reused instead of growing");
+
+    std::vector<uint8> big(512 * 512 * 4, 0x7f);
+    std::vector<GpuTexture> uploads(200);
+    uint64 peakStaging = 0;
+    for (auto& texture : uploads) {
+        Check(texture.Initialize(&gpu, 512, 512, big.data()), "bulk upload texture");
+        peakStaging = std::max(peakStaging, gpu.GetMemoryStats().pendingStagingBytes);
+    }
+    Check(peakStaging <= GpuDeviceConfig{}.stagingFlushBytes * 4 + big.size(),
+          "staging memory bounded during bulk uploads");
+    uploads.clear();
+    std::vector<uint8> payload(64 * 1024, 1);
+    GpuBuffer buffer;
+    Check(buffer.Initialize(&gpu, BufferType::Storage, static_cast<uint32>(payload.size())),
+          "upload buffer");
+    for (int upload = 0; upload < 3000; ++upload)
+        Check(buffer.SetData(payload.data(), static_cast<uint32>(payload.size())),
+              "repeated upload");
+    Check(gpu.GetMemoryStats().pendingStagingBytes <=
+              GpuDeviceConfig{}.stagingFlushBytes * 4 + payload.size(),
+          "repeated buffer uploads keep staging bounded");
+    buffer.Release();
+
+    PerspectiveCamera perspective(ToRadians(60), 16.0f / 9, 0.1f, 100);
+    perspective.SetPosition({0, 4, 14});
+    times = TimedFrames(graphics, 30, [&](int) {
+        Renderer3D::BeginScene(perspective, {});
+        for (int index = 0; index < 1000; ++index)
+            Renderer3D::DrawCube(
+                {float(index % 25) - 12, float(index / 25) * 0.5f - 4, -float(index % 7)},
+                {0.4f, 0.4f, 0.4f}, {});
+        Renderer3D::EndScene();
+    });
+    PrintTimes("1000 cubes", times);
+
+    Random random(7);
+    const auto recreations = gpu.GetCounters().swapchainRecreations;
+    for (int step = 0; step < 40; ++step) {
+        SDL_SetWindowSize(graphics.window.GetNativeHandle(),
+                          static_cast<int>(random.Range(64, 900)),
+                          static_cast<int>(random.Range(64, 700)));
+        graphics.window.PollEvents();
+        gpu.NotifyResize();
+        Check(graphics.Begin(20), "frame during resize storm");
+        Renderer2D::BeginScene(camera);
+        Renderer2D::DrawQuad(Vec2{0, 0}, {4, 4}, {1, 0, 0, 1});
+        Renderer2D::EndScene();
+        Check(gpu.EndFrame(), "resize storm frame submitted");
+    }
+    Check(gpu.GetCounters().swapchainRecreations >= recreations + 20,
+          "swapchain recreated during resize storm");
+    for (auto& texture : textures)
+        texture.Release();
+    Check(gpu.WaitIdle(), "stress drained");
+    graphics.ValidationClean("stress");
+}
+long ResidentKilobytes() {
+#if defined(__linux__)
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line))
+        if (line.rfind("VmRSS:", 0) == 0)
+            return std::stol(line.substr(6));
+#endif
+    return -1;
+}
+void LongRun() {
+    double seconds = 20.0;
+    if (const char* env = std::getenv("LUX_LONGRUN_SECONDS"))
+        seconds = std::clamp(std::atof(env), 1.0, 3600.0);
+    Graphics graphics({}, 640, 360, false);
+    auto& gpu = graphics.gpu;
+    Renderer2D::Init(&gpu);
+    Renderer3D::Init(&gpu);
+    OrthographicCamera camera(-16, 16, -9, 9);
+    PerspectiveCamera perspective(ToRadians(60), 16.0f / 9, 0.1f, 100);
+    perspective.SetPosition({0, 3, 10});
+    std::vector<double> times;
+    long startRss = -1;
+    uint64 startAllocations = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+    int frame = 0;
+    GpuTexture rotating;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (frame % 50 == 0) {
+            const uint32 pixel = 0xff00ff00u + static_cast<uint32>(frame);
+            Check(rotating.Initialize(&gpu, 1, 1, &pixel), "rotating texture upload");
+        }
+        if (frame % 200 == 100) {
+            SDL_SetWindowSize(graphics.window.GetNativeHandle(), 600 + frame % 80,
+                              340 + frame % 40);
+            gpu.NotifyResize();
+        }
+        const auto start = std::chrono::steady_clock::now();
+        Check(graphics.Begin(20), "long-run frame begins");
+        Renderer2D::BeginScene(camera);
+        for (int index = 0; index < 2000; ++index)
+            Renderer2D::DrawRotatedQuad(
+                {float(index % 50) * 0.6f - 15, float(index / 50) * 0.4f - 8}, {0.4f, 0.2f},
+                frame * 0.02f + index, {0.3f, 0.6f, 0.9f, 1});
+        Renderer2D::DrawSprite({0, 0}, {2, 2}, &rotating);
+        Renderer2D::EndScene();
+        Renderer3D::BeginScene(perspective, {});
+        for (int index = 0; index < 100; ++index)
+            Renderer3D::DrawCube({float(index % 10) - 5, float(index / 10) * 0.5f - 2, 0},
+                                 {0.3f, 0.3f, 0.3f}, {});
+        Renderer3D::EndScene();
+        Check(gpu.EndFrame(), "long-run frame submitted");
+        times.push_back(
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                .count());
+        if (frame == 120) {
+            startRss = ResidentKilobytes();
+            startAllocations = gpu.GetMemoryStats().allocationBytes;
+        }
+        ++frame;
+    }
+    Check(frame > 150, "long run rendered enough frames");
+    Check(gpu.WaitIdle(), "long run drained");
+    const long endRss = ResidentKilobytes();
+    const auto memory = gpu.GetMemoryStats();
+    PrintTimes("long run", times);
+    std::cout << "long run: " << frame << " frames, RSS " << startRss << " -> " << endRss
+              << " KB, GPU allocations " << startAllocations << " -> " << memory.allocationBytes
+              << " bytes, swapchain recreations " << gpu.GetCounters().swapchainRecreations << '\n';
+    Check(startRss < 0 || endRss - startRss < 32 * 1024, "resident memory stays bounded");
+    Check(memory.allocationBytes <= startAllocations + (8ull << 20), "GPU memory stays bounded");
+    rotating.Release();
+    graphics.ValidationClean("long run");
+}
+int vulkanValidationMessages = 0;
+SDL_LogOutputFunction defaultLogOutput = nullptr;
+void* defaultLogData = nullptr;
+void SDLCALL CountValidation(void* data, int category, SDL_LogPriority priority,
+                             const char* message) {
+    if (priority >= SDL_LOG_PRIORITY_ERROR && message && std::strstr(message, "[Vulkan]"))
+        ++vulkanValidationMessages;
+    if (defaultLogOutput)
+        defaultLogOutput(data, category, priority, message);
 }
 } // namespace
 int main(int argc, char** argv) {
+    SDL_GetLogOutputFunction(&defaultLogOutput, &defaultLogData);
+    SDL_SetLogOutputFunction(CountValidation, defaultLogData);
     try {
         const std::string_view suite = argc > 1 ? argv[1] : "core";
         if (suite == "core")
@@ -948,10 +1678,24 @@ int main(int argc, char** argv) {
             Gpu();
         else if (suite == "lifecycle")
             Lifecycle();
+        else if (suite == "vulkan")
+            VulkanSystems();
+        else if (suite == "failures")
+            Failures();
+        else if (suite == "stress")
+            Stress();
+        else if (suite == "longrun")
+            LongRun();
         else
             throw std::runtime_error("Unknown suite");
+        if (vulkanValidationMessages != 0)
+            throw std::runtime_error("Vulkan validation reported " +
+                                     std::to_string(vulkanValidationMessages) + " error(s)");
         std::cout << suite << ": " << checks << " checks passed\n";
         return 0;
+    } catch (const SkipTest& skipped) {
+        std::cout << "SKIPPED: " << skipped.what() << '\n';
+        return 77;
     } catch (const std::exception& error) {
         std::cerr << "FAILED: " << error.what() << '\n';
         return 1;

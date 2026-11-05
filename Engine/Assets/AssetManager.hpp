@@ -20,12 +20,7 @@ public:
     static void Init();
     static void Shutdown();
 
-    static Ref<GpuTexture> LoadTexture(const std::string& filepath,
-                                       SDL_GPUDevice* device = nullptr);
-    static Ref<GpuTexture> LoadTexture(const std::string& filepath, GpuDevice* device);
-    static Ref<GpuTexture> LoadTexture(const std::string&, std::nullptr_t) {
-        return {};
-    }
+    static Ref<GpuTexture> LoadTexture(const std::string& filepath, GpuDevice* device = nullptr);
     static bool HasTexture(const std::string& filepath);
     static void UnloadTexture(const std::string& filepath);
 
