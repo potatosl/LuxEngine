@@ -1,6 +1,32 @@
 #include "EditorDocument.hpp"
+#include "Project/PathEncoding.hpp"
+
+#include <chrono>
+#include <filesystem>
 
 namespace LuxEngine {
+namespace {
+// Writes the scene next to the target first and then replaces the target, so a failed save
+// (disk full, crash, unsupported component) never leaves the user's scene file truncated.
+bool SaveSceneAtomically(Scene& scene, const std::string& path) {
+    namespace fs = std::filesystem;
+    const fs::path target = PathFromUtf8(path);
+    fs::path temporary = target;
+    temporary += ".saving-" +
+                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    std::error_code ec;
+    if (!scene.Serialize(PathUtf8(temporary))) {
+        fs::remove(temporary, ec);
+        return false;
+    }
+    fs::rename(temporary, target, ec); // replaces an existing file on Windows and POSIX
+    if (ec) {
+        fs::remove(temporary, ec);
+        return false;
+    }
+    return true;
+}
+} // namespace
 
 EditorDocument::EditorDocument() : scene_(std::make_unique<Scene>()) {}
 
@@ -40,7 +66,7 @@ bool EditorDocument::Recover(const std::string& originalPath, const std::string&
 }
 
 bool EditorDocument::Save() {
-    if (path_.empty() || !scene_->Serialize(path_))
+    if (path_.empty() || !SaveSceneAtomically(*scene_, path_))
         return false;
     dirty_ = false;
     return true;
@@ -50,7 +76,7 @@ bool EditorDocument::SaveAs(const std::string& path) {
     if (path.empty())
         return false;
     std::string newPath = path;
-    if (!scene_->Serialize(newPath))
+    if (!SaveSceneAtomically(*scene_, newPath))
         return false;
     path_.swap(newPath);
     dirty_ = false;
