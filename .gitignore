@@ -8,7 +8,9 @@
 .idea/
 
 # CMake & Build Artifacts
-build/
+# Only the top-level build folder: Windows matches ignore rules case-insensitively, and a bare
+# "build/" also hid the editor's source folder Editor/Build/.
+/build/
 bin/
 out/
 CMakeFiles/
