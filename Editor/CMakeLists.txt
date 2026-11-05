@@ -30,10 +30,12 @@ function(lux_editor_copy_runtime target)
 endfunction()
 
 add_library(LuxEditorUi STATIC
+    Build/ProjectBuild.cpp
     App/EditorWindow.cpp
     App/EditorWindowLayout.cpp
     App/EditorWindowProjects.cpp
     App/EditorWindowPlay.cpp
+    App/EditorWindowBuild.cpp
     Debug/DebugPanel.cpp
     Project/EditorProject.cpp
     Project/ProjectArchive.cpp
@@ -82,6 +84,19 @@ if(LUX_BUILD_TESTS)
     endif()
     lux_editor_copy_runtime(LuxEditorDocumentTests)
     add_test(NAME Editor_document COMMAND LuxEditorDocumentTests)
+    add_executable(LuxEditorBuildTests
+        Build/ProjectBuild.cpp
+        Tests/EditorBuildTest.cpp
+    )
+    target_include_directories(LuxEditorBuildTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(LuxEditorBuildTests PRIVATE libzip::zip)
+    if(MSVC)
+        target_compile_options(LuxEditorBuildTests PRIVATE /utf-8)
+    endif()
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxEditorBuildTests)
+    endif()
+    add_test(NAME Editor_build COMMAND LuxEditorBuildTests)
     add_executable(LuxEditorUiTests Tests/EditorUiTest.cpp)
     target_link_libraries(LuxEditorUiTests PRIVATE LuxEditorUi)
     lux_editor_copy_runtime(LuxEditorUiTests)
