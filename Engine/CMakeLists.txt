@@ -36,6 +36,8 @@ set(LUXENGINE_SOURCES
     Renderer/Renderer3D/Renderer3D.cpp
     Scene/Scene.cpp
     Physics/PhysicsEngine.cpp
+    Physics/PhysicsWorld2D.h
+    Physics/PhysicsWorld2D.cpp
     Audio/AudioEngine.cpp
     Animation/AnimationEngine.cpp
     Assets/AssetManager.cpp
@@ -63,6 +65,7 @@ target_include_directories(LuxEngine PUBLIC
 
 target_link_libraries(LuxEngine PUBLIC
     SDL3::SDL3
+    box2d::box2d
 )
 
 target_compile_features(LuxEngine PUBLIC cxx_std_20)

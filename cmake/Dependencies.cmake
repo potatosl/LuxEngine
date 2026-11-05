@@ -1,5 +1,6 @@
 # Build dependencies are installed by the developer, never downloaded by CMake.
 find_package(SDL3 3.2 CONFIG REQUIRED)
+find_package(box2d 2.4...<3 CONFIG REQUIRED)
 
 # Older configurations cached an empty value before downloading stb.
 # An empty cache entry prevents find_path from searching installed headers.
