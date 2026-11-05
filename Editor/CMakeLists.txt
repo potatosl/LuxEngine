@@ -77,6 +77,9 @@ add_executable(LuxEditor WIN32 MACOSX_BUNDLE App/Main.cpp)
 target_link_libraries(LuxEditor PRIVATE LuxEditorUi)
 lux_editor_copy_runtime(LuxEditor)
 lux_editor_copy_qt_plugins(LuxEditor)
+# With the editor enabled, F5 in Visual Studio should open the editor rather than the demo.
+set_target_properties(LuxEditor PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEditor>")
+set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT LuxEditor)
 if(TARGET LuxPlayer)
     # The editor launches LuxPlayer from its own folder for "run in window".
     add_dependencies(LuxEditor LuxPlayer)
