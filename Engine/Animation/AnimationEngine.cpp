@@ -24,6 +24,13 @@ namespace LuxEngine {
             }
         }
 
+        if (!std::isfinite(clampedTime)) clampedTime = 0.0f;
+        if (clampedTime >= keyframes.back().time) {
+            result.position = keyframes.back().position;
+            result.rotation = keyframes.back().rotation;
+            result.scale = keyframes.back().scale;
+            return result;
+        }
         size_t nextIdx = 0;
         for (size_t i = 0; i < keyframes.size(); ++i) {
             if (keyframes[i].time >= clampedTime) {

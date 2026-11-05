@@ -1,4 +1,30 @@
+set(LUXENGINE_HEADERS
+    Core/Core.hpp
+    Core/Log.hpp
+    Core/Timer.hpp
+    Core/Math.hpp
+    Core/Event.hpp
+    Platform/Branding.hpp
+    Platform/Window.hpp
+    Platform/Input.hpp
+    Renderer/RHI/GpuDevice.hpp
+    Renderer/RHI/Buffer.hpp
+    Renderer/RHI/Texture.hpp
+    Renderer/Renderer2D/Renderer2D.hpp
+    Renderer/Renderer3D/Renderer3D.hpp
+    Scene/Scene.hpp
+    Scene/Entity.hpp
+    ECS/ECS.hpp
+    Physics/PhysicsEngine.hpp
+    Audio/AudioEngine.hpp
+    Animation/AnimationEngine.hpp
+    Assets/AssetManager.hpp
+    Application.hpp
+    LuxEngine.hpp
+)
+
 set(LUXENGINE_SOURCES
+    Platform/Branding.cpp
     Core/Log.cpp
     Core/Timer.cpp
     Platform/Window.cpp
@@ -16,8 +42,12 @@ set(LUXENGINE_SOURCES
     Application.cpp
 )
 
-add_library(LuxEngine STATIC ${LUXENGINE_SOURCES})
+# Organize source files into Visual Studio folders matching the directory structure
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${LUXENGINE_SOURCES} ${LUXENGINE_HEADERS})
+
+add_library(LuxEngine STATIC ${LUXENGINE_SOURCES} ${LUXENGINE_HEADERS})
 add_library(LuxEngine::Engine ALIAS LuxEngine)
+target_sources(LuxEngine PRIVATE "${CMAKE_BINARY_DIR}/generated/Branding.cpp")
 
 target_include_directories(LuxEngine PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
@@ -29,6 +59,7 @@ target_link_libraries(LuxEngine PUBLIC
 )
 
 target_compile_features(LuxEngine PUBLIC cxx_std_20)
+target_include_directories(LuxEngine SYSTEM PRIVATE ${stb_SOURCE_DIR})
 
 lux_set_target_warnings(LuxEngine)
 

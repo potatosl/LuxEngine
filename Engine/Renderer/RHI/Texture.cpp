@@ -1,6 +1,7 @@
 #include "Engine/Renderer/RHI/Texture.hpp"
 #include "Engine/Core/Log.hpp"
 #include <cstring>
+#include <limits>
 
 namespace LuxEngine {
 
@@ -9,7 +10,7 @@ namespace LuxEngine {
     }
 
     GpuTexture::GpuTexture(GpuTexture&& other) noexcept
-        : device_(other.device_),
+        : lifetime_(other.lifetime_), device_(other.device_),
           texture_(other.texture_),
           sampler_(other.sampler_),
           width_(other.width_),
@@ -24,6 +25,7 @@ namespace LuxEngine {
     GpuTexture& GpuTexture::operator=(GpuTexture&& other) noexcept {
         if (this != &other) {
             Release();
+            lifetime_ = other.lifetime_;
             device_ = other.device_;
             texture_ = other.texture_;
             sampler_ = other.sampler_;
@@ -41,10 +43,11 @@ namespace LuxEngine {
     bool GpuTexture::Initialize(SDL_GPUDevice* device, uint32 width, uint32 height, const void* pixelData) {
         Release();
         device_ = device;
+        lifetime_.Bind(device);
         width_ = width;
         height_ = height;
 
-        if (!device_ || width_ == 0 || height_ == 0) return false;
+        if (!device_ || width_ == 0 || height_ == 0 || static_cast<uint64>(width_) * height_ > std::numeric_limits<uint32>::max() / 4) { Release(); return false; }
 
         SDL_GPUTextureCreateInfo texInfo{};
         texInfo.type = SDL_GPU_TEXTURETYPE_2D;
@@ -82,6 +85,7 @@ namespace LuxEngine {
             transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
             transferInfo.size = imageSize;
 
+            bool uploaded = false;
             SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(device_, &transferInfo);
             if (transferBuffer) {
                 void* mapped = SDL_MapGPUTransferBuffer(device_, transferBuffer, false);
@@ -107,19 +111,21 @@ namespace LuxEngine {
 
                             SDL_UploadToGPUTexture(copyPass, &src, &dst, false);
                             SDL_EndGPUCopyPass(copyPass);
+                            uploaded = true;
                         }
-                        SDL_SubmitGPUCommandBuffer(cmd);
+                        uploaded = SDL_SubmitGPUCommandBuffer(cmd) && uploaded;
                     }
                 }
                 SDL_ReleaseGPUTransferBuffer(device_, transferBuffer);
             }
+            if (!uploaded) { Release(); return false; }
         }
 
         return true;
     }
 
     void GpuTexture::Release() {
-        if (device_) {
+        if (device_ && lifetime_.Alive()) {
             if (sampler_) {
                 SDL_ReleaseGPUSampler(device_, sampler_);
                 sampler_ = nullptr;
@@ -130,6 +136,7 @@ namespace LuxEngine {
             }
             device_ = nullptr;
         }
+        texture_ = nullptr; sampler_ = nullptr; device_ = nullptr;
         width_ = 0;
         height_ = 0;
     }

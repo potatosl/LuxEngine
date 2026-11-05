@@ -13,8 +13,8 @@ namespace LuxEngine {
         static void SetMasterVolume(float volume);
         static float GetMasterVolume();
 
-        static void PlaySound(const std::string& soundName, float volume = 1.0f);
-        static void PlayMusic(const std::string& musicName, bool loop = true, float volume = 1.0f);
+        static bool PlaySound(const std::string& soundName, float volume = 1.0f);
+        static bool PlayMusic(const std::string& musicName, bool loop = true, float volume = 1.0f);
         static void StopMusic();
         static bool IsMusicPlaying();
     };

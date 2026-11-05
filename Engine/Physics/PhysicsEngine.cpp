@@ -37,20 +37,22 @@ namespace LuxEngine {
     }
 
     void PhysicsEngine::Step2D(Vec3& position, Rigidbody2DComponent& rb, const BoxCollider2DComponent& collider, double dt) {
-        if (rb.type != BodyType::Dynamic) return;
+        if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.25 || rb.type == BodyType::Static) return;
 
         const float fdt = static_cast<float>(dt);
-        rb.velocity.x += s_PhysicsStorage.gravity2D.x * rb.gravityScale * fdt;
-        rb.velocity.y += s_PhysicsStorage.gravity2D.y * rb.gravityScale * fdt;
+        if (rb.type == BodyType::Dynamic) {
+            rb.velocity.x += s_PhysicsStorage.gravity2D.x * rb.gravityScale * fdt;
+            rb.velocity.y += s_PhysicsStorage.gravity2D.y * rb.gravityScale * fdt;
+        }
 
         position.x += rb.velocity.x * fdt;
         position.y += rb.velocity.y * fdt;
 
         // Ground floor collision plane at y = 0
         const float bottomY = position.y + collider.offset.y - (collider.size.y * 0.5f);
-        if (bottomY < 0.0f) {
+        if (!collider.isTrigger && bottomY <= 0.0f && rb.velocity.y <= 0.0f) {
             position.y = (collider.size.y * 0.5f) - collider.offset.y;
-            rb.velocity.y = 0.0f;
+            if (rb.velocity.y < 0.0f) rb.velocity.y = 0.0f;
             rb.isGrounded = true;
         } else {
             rb.isGrounded = false;
@@ -58,21 +60,23 @@ namespace LuxEngine {
     }
 
     void PhysicsEngine::Step3D(Vec3& position, Rigidbody3DComponent& rb, const BoxCollider3DComponent& collider, double dt) {
-        if (rb.type != BodyType::Dynamic) return;
+        if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.25 || rb.type == BodyType::Static) return;
 
         const float fdt = static_cast<float>(dt);
-        rb.velocity.x += s_PhysicsStorage.gravity3D.x * rb.gravityScale * fdt;
-        rb.velocity.y += s_PhysicsStorage.gravity3D.y * rb.gravityScale * fdt;
-        rb.velocity.z += s_PhysicsStorage.gravity3D.z * rb.gravityScale * fdt;
+        if (rb.type == BodyType::Dynamic) {
+            rb.velocity.x += s_PhysicsStorage.gravity3D.x * rb.gravityScale * fdt;
+            rb.velocity.y += s_PhysicsStorage.gravity3D.y * rb.gravityScale * fdt;
+            rb.velocity.z += s_PhysicsStorage.gravity3D.z * rb.gravityScale * fdt;
+        }
 
         position.x += rb.velocity.x * fdt;
         position.y += rb.velocity.y * fdt;
         position.z += rb.velocity.z * fdt;
 
         const float bottomY = position.y + collider.offset.y - (collider.size.y * 0.5f);
-        if (bottomY < 0.0f) {
+        if (!collider.isTrigger && bottomY <= 0.0f && rb.velocity.y <= 0.0f) {
             position.y = (collider.size.y * 0.5f) - collider.offset.y;
-            rb.velocity.y = 0.0f;
+            if (rb.velocity.y < 0.0f) rb.velocity.y = 0.0f;
         }
     }
 

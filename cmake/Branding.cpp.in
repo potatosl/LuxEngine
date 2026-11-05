@@ -1,0 +1,10 @@
+#include "Engine/Platform/Branding.hpp"
+namespace LuxEngine::Branding {
+namespace {
+constexpr unsigned char darkIcon[] = { @LUX_ICON_dark@ };
+constexpr unsigned char lightIcon[] = { @LUX_ICON_light@ };
+}
+std::span<const unsigned char> WindowIcon(bool dark) {
+    return dark ? std::span<const unsigned char>(darkIcon) : std::span<const unsigned char>(lightIcon);
+}
+}

@@ -9,8 +9,10 @@ struct SDL_Window;
 
 namespace LuxEngine {
 
+    enum class ColorTheme { Light, Dark };
+
     struct WindowProps {
-        std::string title = "LuxEngine | C++20";
+        std::string title = "LuxEngine";
         uint32 width = 1280;
         uint32 height = 720;
         bool resizable = true;
@@ -26,13 +28,15 @@ namespace LuxEngine {
 
         Window(const Window&) = delete;
         Window& operator=(const Window&) = delete;
-        Window(Window&&) noexcept = default;
-        Window& operator=(Window&&) noexcept = default;
+        Window(Window&&) noexcept = delete;
+        Window& operator=(Window&&) noexcept = delete;
 
         bool Initialize(const WindowProps& props = WindowProps{});
         void Shutdown();
         void PollEvents();
 
+        ColorTheme GetColorTheme() const { return colorTheme_; }
+        bool HasWindowIcon() const { return hasWindowIcon_; }
         bool IsRunning() const { return isRunning_; }
         SDL_Window* GetNativeHandle() const { return window_; }
         uint32 GetWidth() const { return props_.width; }
@@ -41,12 +45,17 @@ namespace LuxEngine {
         void SetFullscreen(bool fullscreen);
         bool IsFullscreen() const;
 
-        void SetVSync(bool enabled);
+        bool SetVSync(bool enabled);
+        void SetPresentCallback(std::function<bool(bool)> callback) { presentCallback_ = std::move(callback); }
         bool IsVSync() const { return props_.vsync; }
 
         void SetEventCallback(const EventCallbackFn& callback) { eventCallback_ = callback; }
 
     private:
+        bool ApplySystemTheme();
+        ColorTheme colorTheme_ = ColorTheme::Light;
+        bool hasWindowIcon_ = false;
+        std::function<bool(bool)> presentCallback_;
         SDL_Window* window_ = nullptr;
         WindowProps props_;
         bool isRunning_ = false;

@@ -18,7 +18,7 @@ namespace LuxEngine {
 
         Mat4 GetTransform() const {
             return Mat4::Translate(position) *
-                   Mat4::RotateZ(rotation.z) *
+                   Mat4::RotateZ(rotation.z) * Mat4::RotateY(rotation.y) * Mat4::RotateX(rotation.x) *
                    Mat4::Scale(scale);
         }
     };

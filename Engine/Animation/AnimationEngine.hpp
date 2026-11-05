@@ -5,6 +5,8 @@
 #include "Engine/ECS/ECS.hpp"
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <stdexcept>
 
 namespace LuxEngine {
 
@@ -23,7 +25,10 @@ namespace LuxEngine {
         std::vector<Keyframe> keyframes;
 
         void AddKeyframe(const Keyframe& kf) {
-            keyframes.push_back(kf);
+            if (!std::isfinite(kf.time) || kf.time < 0.0f) throw std::invalid_argument("Invalid keyframe time");
+            auto it = std::lower_bound(keyframes.begin(), keyframes.end(), kf.time, [](const Keyframe& k, float time) { return k.time < time; });
+            if (it != keyframes.end() && it->time == kf.time) *it = kf;
+            else keyframes.insert(it, kf);
         }
 
         TransformComponent Sample(float time) const;

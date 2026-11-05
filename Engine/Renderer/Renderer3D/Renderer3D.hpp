@@ -73,6 +73,7 @@ namespace LuxEngine {
         static void EndScene();
 
         static void DrawMesh(const Mat4& transform, const Material3D& material);
+        static void DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices, const Mat4& transform, const Material3D& material);
         static void DrawCube(const Vec3& position, const Vec3& scale, const Material3D& material);
 
         static void ResetStats();

@@ -38,6 +38,9 @@ endforeach()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Dependencies)
+include(Shaders)
+include(Branding)
+option(LUX_BUILD_TESTS "Build engine tests" ON)
 
 # -------------------------------------------------------------
 # Subdirectories
@@ -46,5 +49,7 @@ add_subdirectory(Engine)
 add_subdirectory(Runtime)
 add_subdirectory(Sandbox)
 
-enable_testing()
-add_subdirectory(Tests)
+if(LUX_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(Tests)
+endif()

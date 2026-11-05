@@ -3,6 +3,7 @@
 #include "Engine/Core/Core.hpp"
 #include <cmath>
 #include <numbers>
+#include <stdexcept>
 
 namespace LuxEngine {
 
@@ -75,6 +76,7 @@ namespace LuxEngine {
         }
 
         static Mat4 Orthographic(float left, float right, float bottom, float top, float nearClip, float farClip) {
+            if (!std::isfinite(left) || !std::isfinite(right) || !std::isfinite(bottom) || !std::isfinite(top) || !std::isfinite(nearClip) || !std::isfinite(farClip) || left == right || bottom == top || nearClip == farClip) throw std::invalid_argument("Invalid orthographic projection");
             Mat4 result{};
             result.elements[0]  = 2.0f / (right - left);
             result.elements[5]  = 2.0f / (top - bottom);
@@ -88,6 +90,7 @@ namespace LuxEngine {
 
         static Mat4 Perspective(float fovRadians, float aspect, float nearClip, float farClip) {
             Mat4 result{};
+            if (!std::isfinite(fovRadians) || !std::isfinite(aspect) || !std::isfinite(nearClip) || !std::isfinite(farClip) || fovRadians <= 0 || fovRadians >= std::numbers::pi_v<float> || aspect <= 0 || nearClip <= 0 || farClip <= nearClip) throw std::invalid_argument("Invalid perspective projection");
             const float tanHalfFov = std::tan(fovRadians / 2.0f);
             result.elements[0]  = 1.0f / (aspect * tanHalfFov);
             result.elements[5]  = 1.0f / tanHalfFov;
@@ -114,6 +117,20 @@ namespace LuxEngine {
             return result;
         }
 
+        static Mat4 RotateX(float angle) {
+            Mat4 result;
+            const float c = std::cos(angle), s = std::sin(angle);
+            result.elements[5] = c; result.elements[6] = s;
+            result.elements[9] = -s; result.elements[10] = c;
+            return result;
+        }
+        static Mat4 RotateY(float angle) {
+            Mat4 result;
+            const float c = std::cos(angle), s = std::sin(angle);
+            result.elements[0] = c; result.elements[2] = -s;
+            result.elements[8] = s; result.elements[10] = c;
+            return result;
+        }
         static Mat4 RotateZ(float angleRadians) {
             Mat4 result = Identity();
             const float c = std::cos(angleRadians);

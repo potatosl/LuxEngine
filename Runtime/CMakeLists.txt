@@ -1,8 +1,13 @@
 # LuxEngine Runtime Library
 
-add_library(LuxRuntime STATIC
+set(LUXRUNTIME_SOURCES
+    Runtime.hpp
     Runtime.cpp
 )
+
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${LUXRUNTIME_SOURCES})
+
+add_library(LuxRuntime STATIC ${LUXRUNTIME_SOURCES})
 add_library(LuxEngine::Runtime ALIAS LuxRuntime)
 
 target_include_directories(LuxRuntime PUBLIC

@@ -1,17 +1,15 @@
-# LuxEngine Unit Tests
-
-add_executable(LuxEngineTests
-    MainTest.cpp
-)
-
-target_link_libraries(LuxEngineTests PRIVATE
-    LuxEngine::Engine
-)
-
+add_executable(LuxEngineTests MainTest.cpp)
+target_link_libraries(LuxEngineTests PRIVATE LuxEngine::Engine)
+target_include_directories(LuxEngineTests SYSTEM PRIVATE ${stb_SOURCE_DIR})
 lux_set_target_warnings(LuxEngineTests)
-
-set_target_properties(LuxEngineTests PROPERTIES
-    VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>"
-)
-
-add_test(NAME EngineSanityTest COMMAND LuxEngineTests)
+lux_copy_runtime(LuxEngineTests)
+foreach(suite core scene assets audio gpu lifecycle)
+    add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
+    set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 30 WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
+endforeach()
+set_tests_properties(Engine_lifecycle PROPERTIES ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
+set_tests_properties(Engine_audio PROPERTIES ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
+add_test(NAME Engine_gpu_vulkan COMMAND LuxEngineTests gpu)
+set_tests_properties(Engine_gpu_vulkan PROPERTIES TIMEOUT 30 WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>" ENVIRONMENT "SDL_GPU_DRIVER=vulkan")
+add_test(NAME Engine_runtime COMMAND LuxEngineDemo --smoke-test)
+set_tests_properties(Engine_runtime PROPERTIES TIMEOUT 30 WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineDemo>" ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")

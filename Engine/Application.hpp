@@ -12,7 +12,7 @@
 namespace LuxEngine {
 
     struct ApplicationSpecification {
-        std::string name = "LuxEngine | C++20";
+        std::string name = "LuxEngine";
         uint32 width = 1280;
         uint32 height = 720;
     };
@@ -55,6 +55,7 @@ namespace LuxEngine {
         Scope<GpuDevice> gpuDevice_;
         bool sdlInitialized_ = false;
         bool running_ = false;
+        bool initHookEntered_ = false;
         double elapsedSeconds_ = 0.0;
     };
 

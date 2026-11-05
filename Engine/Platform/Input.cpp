@@ -16,6 +16,7 @@ namespace LuxEngine {
     }
 
     bool Input::IsMouseButtonPressed(int32 button) {
+        if (button < 1 || button > 32) return false;
         float x = 0.0f;
         float y = 0.0f;
         const SDL_MouseButtonFlags flags = SDL_GetMouseState(&x, &y);

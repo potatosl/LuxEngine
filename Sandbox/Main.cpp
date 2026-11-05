@@ -1,15 +1,18 @@
 #include "Engine/LuxEngine.hpp"
 #include "Runtime/Runtime.hpp"
 #include <SDL3/SDL_main.h>
+#include <stdexcept>
+#include <string_view>
 
 class SandboxApp : public LuxEngine::Application {
 public:
-    SandboxApp()
+    explicit SandboxApp(bool smokeTest = false)
         : LuxEngine::Application(LuxEngine::ApplicationSpecification{
-            .name = "LuxEngine | C++20 (2D & 3D Unified Runtime)",
+            .name = "LuxEngine",
             .width = 1280,
             .height = 720
         }),
+        smokeTest_(smokeTest),
         camera2D_(-6.4f, 6.4f, -3.6f, 3.6f),
         camera3D_(LuxEngine::ToRadians(60.0f), 1280.0f / 720.0f, 0.1f, 100.0f) {}
 
@@ -20,15 +23,14 @@ protected:
         LuxEngine::Renderer2D::Init(&GetGpuDevice());
         LuxEngine::Renderer3D::Init(&GetGpuDevice());
         LuxEngine::PhysicsEngine::Init();
-        LuxEngine::AudioEngine::Init();
+        if (!LuxEngine::AudioEngine::Init()) throw std::runtime_error("Audio initialization failed");
         LuxEngine::AnimationEngine::Init();
         LuxEngine::AssetManager::Init();
 
         // 1. Scene & Entity Setup
         playerEntity_ = scene_.CreateEntity("Player");
         playerEntity_.AddComponent<LuxEngine::SpriteRendererComponent>(LuxEngine::Vec4(0.2f, 0.8f, 0.4f, 1.0f));
-        playerEntity_.AddComponent<LuxEngine::Rigidbody2DComponent>();
-        playerEntity_.AddComponent<LuxEngine::BoxCollider2DComponent>();
+
 
         cubeEntity_ = scene_.CreateEntity("3D_Cube");
         cubeEntity_.AddComponent<LuxEngine::MeshRendererComponent>();
@@ -50,14 +52,15 @@ protected:
         LuxEngine::AnimationEngine::UpdateClip(animClip_, animTime_, static_cast<float>(dt), playerTransform);
 
         // 2D Physics update
-        auto& rb2d = playerEntity_.GetComponent<LuxEngine::Rigidbody2DComponent>();
-        const auto& col2d = playerEntity_.GetComponent<LuxEngine::BoxCollider2DComponent>();
-        LuxEngine::PhysicsEngine::Step2D(playerTransform.position, rb2d, col2d, dt);
+
+
+
 
         // 3D rotation
         cubeRotation_ += static_cast<float>(dt) * 45.0f;
 
         scene_.OnUpdate(dt);
+        if (smokeTest_ && ++frames_ >= 10) Close();
     }
 
     void OnRender(float elapsedSeconds) override {
@@ -85,11 +88,9 @@ protected:
             .metallic = 0.2f,
             .roughness = 0.4f
         };
-        LuxEngine::Renderer3D::DrawCube(
-            LuxEngine::Vec3(0.0f, 0.0f, 0.0f),
-            LuxEngine::Vec3(1.5f, 1.5f, 1.5f),
-            cubeMaterial
-        );
+        LuxEngine::Renderer3D::DrawMesh(
+            LuxEngine::Mat4::Translate({2.0f, 0.0f, 0.0f}) * LuxEngine::Mat4::RotateY(LuxEngine::ToRadians(cubeRotation_)) * LuxEngine::Mat4::Scale({1.5f, 1.5f, 1.5f}), cubeMaterial);
+
         LuxEngine::Renderer3D::EndScene();
 
         (void)elapsedSeconds;
@@ -106,6 +107,8 @@ protected:
     }
 
 private:
+    bool smokeTest_ = false;
+    int frames_ = 0;
     LuxEngine::Scene scene_;
     LuxEngine::Entity playerEntity_;
     LuxEngine::Entity cubeEntity_;
@@ -120,10 +123,12 @@ int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
-    SandboxApp app;
+    SandboxApp app(argc > 1 && std::string_view(argv[1]) == "--smoke-test");
     if (!app.Initialize()) {
         return 1;
     }
 
-    return app.Run();
+    const int result = app.Run();
+    app.Shutdown();
+    return result;
 }
