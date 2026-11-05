@@ -127,6 +127,8 @@ void Core() {
     Check(Near(p.x, before.x), "invalid timestep ignored");
     Check(!Input::IsMouseButtonPressed(0) && !Input::IsMouseButtonPressed(33),
           "invalid mouse buttons");
+    Check(!Input::IsGamepadButtonPressed(static_cast<LuxGamepadButton>(-1)),
+          "invalid gamepad button");
 }
 void Physics2D() {
     PhysicsEngine::Init();
@@ -596,7 +598,8 @@ void Audio() {
 }
 void WindowEvents() {
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
-    Check(SDL_Init(SDL_INIT_VIDEO), "dummy video initializes");
+    Check(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD), "dummy video initializes");
+    Input::Initialize();
     {
         Window window;
         WindowProps props;
@@ -632,6 +635,105 @@ void WindowEvents() {
         window.PollEvents();
         Check(window.IsRunning(), "foreign escape event ignored");
 
+        Check(!Input::BindAction("", LuxKey::A) &&
+                  !Input::BindAction("Jump", static_cast<LuxKey>(-1)),
+              "invalid action bindings rejected");
+        Check(Input::BindAction("Jump", LuxKey::A) && Input::BindAction("Jump", LuxKey::B) &&
+                  Input::BindAction("Jump", LuxMouseButton::Left) &&
+                  Input::BindAction("Jump", LuxGamepadButton::South),
+              "keyboard mouse and gamepad bindings added");
+        Check(!Input::BindAction("Jump", LuxKey::A), "duplicate binding rejected");
+        event = {};
+        event.type = SDL_EVENT_KEY_DOWN;
+        event.key.windowID = SDL_GetWindowID(handle) + 1;
+        event.key.key = SDLK_A;
+        Check(SDL_PushEvent(&event), "foreign bound key queued");
+        window.PollEvents();
+        Check(!Input::IsActionDown("Jump"), "foreign key does not trigger action");
+
+        event.key.windowID = SDL_GetWindowID(handle);
+        Check(SDL_PushEvent(&event), "bound key queued");
+        window.PollEvents();
+        Check(Input::IsActionDown("Jump") && Input::WasActionPressed("Jump"), "key action pressed");
+        Input::AdvanceFrame();
+        Check(Input::IsActionDown("Jump") && !Input::WasActionPressed("Jump"),
+              "held action survives frame advance");
+
+        event.key.key = SDLK_B;
+        Check(SDL_PushEvent(&event), "alternate key queued");
+        event.type = SDL_EVENT_KEY_UP;
+        event.key.key = SDLK_A;
+        Check(SDL_PushEvent(&event), "first key release queued");
+        window.PollEvents();
+        Check(Input::IsActionDown("Jump") && !Input::WasActionReleased("Jump"),
+              "alternate key holds action");
+
+        event = {};
+        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        event.button.windowID = SDL_GetWindowID(handle);
+        event.button.button = SDL_BUTTON_LEFT;
+        Check(SDL_PushEvent(&event), "bound mouse queued");
+        event.type = SDL_EVENT_KEY_UP;
+        event.key.windowID = SDL_GetWindowID(handle);
+        event.key.key = SDLK_B;
+        Check(SDL_PushEvent(&event), "second key release queued");
+        window.PollEvents();
+        Check(Input::IsActionDown("Jump") && !Input::WasActionReleased("Jump"),
+              "mouse holds action after key release");
+        event = {};
+        event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        event.button.windowID = SDL_GetWindowID(handle);
+        event.button.button = SDL_BUTTON_LEFT;
+        Check(SDL_PushEvent(&event), "bound mouse release queued");
+        window.PollEvents();
+        Check(!Input::IsActionDown("Jump") && Input::WasActionReleased("Jump"),
+              "mouse release ends action");
+        Input::AdvanceFrame();
+
+        event = {};
+        event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+        event.gbutton.which = 919;
+        event.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+        Check(SDL_PushEvent(&event), "gamepad press queued");
+        window.PollEvents();
+        Check(Input::IsActionDown("Jump") && Input::WasActionPressed("Jump"),
+              "gamepad button triggers action");
+        event = {};
+        event.type = SDL_EVENT_GAMEPAD_REMOVED;
+        event.gdevice.which = 919;
+        Check(SDL_PushEvent(&event), "gamepad removal queued");
+        window.PollEvents();
+        Check(!Input::IsActionDown("Jump") && Input::WasActionReleased("Jump"),
+              "gamepad removal releases action");
+        Check(Input::UnbindAction("Jump", LuxKey::A) && !Input::UnbindAction("Jump", LuxKey::A) &&
+                  Input::ClearAction("Jump"),
+              "action bindings can be removed");
+        Check(Input::BindAction("Menu", LuxKey::Escape), "escape action bound");
+        event = {};
+        event.type = SDL_EVENT_KEY_DOWN;
+        event.key.windowID = SDL_GetWindowID(handle);
+        event.key.key = SDLK_ESCAPE;
+        Check(SDL_PushEvent(&event), "own escape event queued");
+        window.PollEvents();
+        Check(window.IsRunning() && Input::WasActionPressed("Menu"),
+              "escape belongs to action instead of closing the window");
+        Input::ClearAction("Menu");
+        Check(Input::BindAction("Focus", LuxKey::A), "focus action bound");
+        event = {};
+        event.type = SDL_EVENT_KEY_DOWN;
+        event.key.windowID = SDL_GetWindowID(handle);
+        event.key.key = SDLK_A;
+        Check(SDL_PushEvent(&event), "held key queued");
+        window.PollEvents();
+        event = {};
+        event.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+        event.window.windowID = SDL_GetWindowID(handle);
+        Check(SDL_PushEvent(&event), "focus loss queued");
+        window.PollEvents();
+        Check(!Input::IsActionDown("Focus") && Input::WasActionReleased("Focus"),
+              "focus loss releases held keyboard action");
+        Input::ClearAction("Focus");
+
         event = {};
         event.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
         event.window.windowID = SDL_GetWindowID(handle);
@@ -639,6 +741,7 @@ void WindowEvents() {
         window.PollEvents();
         Check(!window.IsRunning(), "own close event stops window");
     }
+    Input::Shutdown();
     SDL_Quit();
 }
 struct Graphics {

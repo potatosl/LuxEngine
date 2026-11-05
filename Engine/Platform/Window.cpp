@@ -1,6 +1,7 @@
 #include "Engine/Platform/Window.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Platform/Branding.hpp"
+#include "Engine/Platform/Input.hpp"
 #include <SDL3/SDL.h>
 
 namespace LuxEngine {
@@ -104,9 +105,11 @@ void Window::PollEvents() {
             (event.type == SDL_EVENT_MOUSE_WHEEL && event.wheel.windowID != currentWindowID) ||
             ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
               event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
-             event.button.windowID != currentWindowID);
+             event.button.windowID != currentWindowID) ||
+            (event.type == SDL_EVENT_WINDOW_FOCUS_LOST && event.window.windowID != currentWindowID);
         if (foreignInput)
             continue;
+        Input::ProcessEvent(event);
         if (event.type == SDL_EVENT_SYSTEM_THEME_CHANGED) {
             if (!ApplySystemTheme())
                 Log::Warn(std::string("Window icon update failed: ") + SDL_GetError());
@@ -125,9 +128,6 @@ void Window::PollEvents() {
                 }
             }
         } else if (event.type == SDL_EVENT_KEY_DOWN) {
-            if (event.key.key == SDLK_ESCAPE) {
-                isRunning_ = false;
-            }
             if (eventCallback_) {
                 KeyPressedEvent e(static_cast<int32>(event.key.key), event.key.repeat);
                 eventCallback_(e);
