@@ -69,8 +69,8 @@ struct ContactCollector final : b2ContactListener {
     void BeginContact(b2Contact* contact) override {
         if (!events)
             return;
-        const auto* fixtureA = contact->GetFixtureA();
-        const auto* fixtureB = contact->GetFixtureB();
+        auto* fixtureA = contact->GetFixtureA();
+        auto* fixtureB = contact->GetFixtureB();
         Collision2DEvent event;
         event.entityA = static_cast<uint32>(fixtureA->GetBody()->GetUserData().pointer);
         event.entityB = static_cast<uint32>(fixtureB->GetBody()->GetUserData().pointer);
