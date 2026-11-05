@@ -82,6 +82,7 @@ bool Application::Initialize() {
         return false;
     }
     sdlInitialized_ = true;
+    Input::Initialize();
 
     window_ = CreateScope<Window>();
     WindowProps props;
@@ -186,6 +187,7 @@ Application::FrameResult Application::RunFrame() {
         int steps = 0;
         while (running_ && accumulator_ >= fixedStep && steps < 5) {
             OnUpdate(fixedStep);
+            Input::AdvanceFrame();
             accumulator_ -= fixedStep;
             ++steps;
         }
@@ -263,6 +265,7 @@ void Application::Shutdown() noexcept {
     }
 
     if (sdlInitialized_) {
+        Input::Shutdown();
         SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
         if (ownsSdlRoot_)
             SDL_Quit();
