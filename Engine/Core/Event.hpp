@@ -1,183 +1,273 @@
 #pragma once
 
 #include "Engine/Core/Core.hpp"
-#include <string>
 #include <functional>
+#include <string>
 
 namespace LuxEngine {
 
-    enum class EventType {
-        None = 0,
-        WindowClose, WindowResize, WindowFocus, WindowLostFocus,
-        KeyPressed, KeyReleased,
-        MouseButtonPressed, MouseButtonReleased, MouseMoved, MouseScrolled
-    };
+enum class EventType {
+    None = 0,
+    WindowClose,
+    WindowResize,
+    WindowFocus,
+    WindowLostFocus,
+    KeyPressed,
+    KeyReleased,
+    MouseButtonPressed,
+    MouseButtonReleased,
+    MouseMoved,
+    MouseScrolled
+};
 
-    enum EventCategory {
-        None = 0,
-        EventCategoryApplication = 1 << 0,
-        EventCategoryInput       = 1 << 1,
-        EventCategoryKeyboard    = 1 << 2,
-        EventCategoryMouse       = 1 << 3,
-        EventCategoryMouseButton = 1 << 4
-    };
+enum EventCategory {
+    None = 0,
+    EventCategoryApplication = 1 << 0,
+    EventCategoryInput = 1 << 1,
+    EventCategoryKeyboard = 1 << 2,
+    EventCategoryMouse = 1 << 3,
+    EventCategoryMouseButton = 1 << 4
+};
 
-    class Event {
-    public:
-        virtual ~Event() = default;
+class Event {
+public:
+    virtual ~Event() = default;
 
-        bool Handled = false;
+    bool Handled = false;
 
-        virtual EventType GetEventType() const = 0;
-        virtual const char* GetName() const = 0;
-        virtual int GetCategoryFlags() const = 0;
+    virtual EventType GetEventType() const = 0;
+    virtual const char* GetName() const = 0;
+    virtual int GetCategoryFlags() const = 0;
 
-        bool IsInCategory(EventCategory category) const {
-            return (GetCategoryFlags() & category) != 0;
+    bool IsInCategory(EventCategory category) const {
+        return (GetCategoryFlags() & category) != 0;
+    }
+};
+
+class EventDispatcher {
+public:
+    EventDispatcher(Event& event) : event_(event) {}
+
+    template <typename T, typename F> bool Dispatch(const F& func) {
+        if (event_.GetEventType() == T::GetStaticType()) {
+            event_.Handled |= func(static_cast<T&>(event_));
+            return true;
         }
-    };
+        return false;
+    }
 
-    class EventDispatcher {
-    public:
-        EventDispatcher(Event& event) : event_(event) {}
+private:
+    Event& event_;
+};
 
-        template<typename T, typename F>
-        bool Dispatch(const F& func) {
-            if (event_.GetEventType() == T::GetStaticType()) {
-                event_.Handled |= func(static_cast<T&>(event_));
-                return true;
-            }
-            return false;
-        }
+class WindowCloseEvent : public Event {
+public:
+    WindowCloseEvent() = default;
 
-    private:
-        Event& event_;
-    };
+    static EventType GetStaticType() {
+        return EventType::WindowClose;
+    }
+    EventType GetEventType() const override {
+        return GetStaticType();
+    }
+    const char* GetName() const override {
+        return "WindowClose";
+    }
+    int GetCategoryFlags() const override {
+        return EventCategoryApplication;
+    }
+};
 
-    class WindowCloseEvent : public Event {
-    public:
-        WindowCloseEvent() = default;
+class WindowResizeEvent : public Event {
+public:
+    WindowResizeEvent(uint32 width, uint32 height) : width_(width), height_(height) {}
 
-        static EventType GetStaticType() { return EventType::WindowClose; }
-        EventType GetEventType() const override { return GetStaticType(); }
-        const char* GetName() const override { return "WindowClose"; }
-        int GetCategoryFlags() const override { return EventCategoryApplication; }
-    };
+    uint32 GetWidth() const {
+        return width_;
+    }
+    uint32 GetHeight() const {
+        return height_;
+    }
 
-    class WindowResizeEvent : public Event {
-    public:
-        WindowResizeEvent(uint32 width, uint32 height)
-            : width_(width), height_(height) {}
+    static EventType GetStaticType() {
+        return EventType::WindowResize;
+    }
+    EventType GetEventType() const override {
+        return GetStaticType();
+    }
+    const char* GetName() const override {
+        return "WindowResize";
+    }
+    int GetCategoryFlags() const override {
+        return EventCategoryApplication;
+    }
 
-        uint32 GetWidth() const { return width_; }
-        uint32 GetHeight() const { return height_; }
+private:
+    uint32 width_;
+    uint32 height_;
+};
 
-        static EventType GetStaticType() { return EventType::WindowResize; }
-        EventType GetEventType() const override { return GetStaticType(); }
-        const char* GetName() const override { return "WindowResize"; }
-        int GetCategoryFlags() const override { return EventCategoryApplication; }
+class KeyPressedEvent : public Event {
+public:
+    KeyPressedEvent(int32 keycode, bool isRepeat = false)
+        : keycode_(keycode), isRepeat_(isRepeat) {}
 
-    private:
-        uint32 width_;
-        uint32 height_;
-    };
+    int32 GetKeyCode() const {
+        return keycode_;
+    }
+    bool IsRepeat() const {
+        return isRepeat_;
+    }
 
-    class KeyPressedEvent : public Event {
-    public:
-        KeyPressedEvent(int32 keycode, bool isRepeat = false)
-            : keycode_(keycode), isRepeat_(isRepeat) {}
+    static EventType GetStaticType() {
+        return EventType::KeyPressed;
+    }
+    EventType GetEventType() const override {
+        return GetStaticType();
+    }
+    const char* GetName() const override {
+        return "KeyPressed";
+    }
+    int GetCategoryFlags() const override {
+        return EventCategoryInput | EventCategoryKeyboard;
+    }
 
-        int32 GetKeyCode() const { return keycode_; }
-        bool IsRepeat() const { return isRepeat_; }
+private:
+    int32 keycode_;
+    bool isRepeat_;
+};
 
-        static EventType GetStaticType() { return EventType::KeyPressed; }
-        EventType GetEventType() const override { return GetStaticType(); }
-        const char* GetName() const override { return "KeyPressed"; }
-        int GetCategoryFlags() const override { return EventCategoryInput | EventCategoryKeyboard; }
+class KeyReleasedEvent : public Event {
+public:
+    KeyReleasedEvent(int32 keycode) : keycode_(keycode) {}
 
-    private:
-        int32 keycode_;
-        bool isRepeat_;
-    };
+    int32 GetKeyCode() const {
+        return keycode_;
+    }
 
-    class KeyReleasedEvent : public Event {
-    public:
-        KeyReleasedEvent(int32 keycode) : keycode_(keycode) {}
+    static EventType GetStaticType() {
+        return EventType::KeyReleased;
+    }
+    EventType GetEventType() const override {
+        return GetStaticType();
+    }
+    const char* GetName() const override {
+        return "KeyReleased";
+    }
+    int GetCategoryFlags() const override {
+        return EventCategoryInput | EventCategoryKeyboard;
+    }
 
-        int32 GetKeyCode() const { return keycode_; }
+private:
+    int32 keycode_;
+};
 
-        static EventType GetStaticType() { return EventType::KeyReleased; }
-        EventType GetEventType() const override { return GetStaticType(); }
-        const char* GetName() const override { return "KeyReleased"; }
-        int GetCategoryFlags() const override { return EventCategoryInput | EventCategoryKeyboard; }
+class MouseMovedEvent : public Event {
+public:
+    MouseMovedEvent(float x, float y) : mouseX_(x), mouseY_(y) {}
 
-    private:
-        int32 keycode_;
-    };
+    float GetX() const {
+        return mouseX_;
+    }
+    float GetY() const {
+        return mouseY_;
+    }
 
-    class MouseMovedEvent : public Event {
-    public:
-        MouseMovedEvent(float x, float y) : mouseX_(x), mouseY_(y) {}
+    static EventType GetStaticType() {
+        return EventType::MouseMoved;
+    }
+    EventType GetEventType() const override {
+        return GetStaticType();
+    }
+    const char* GetName() const override {
+        return "MouseMoved";
+    }
+    int GetCategoryFlags() const override {
+        return EventCategoryInput | EventCategoryMouse;
+    }
 
-        float GetX() const { return mouseX_; }
-        float GetY() const { return mouseY_; }
+private:
+    float mouseX_;
+    float mouseY_;
+};
 
-        static EventType GetStaticType() { return EventType::MouseMoved; }
-        EventType GetEventType() const override { return GetStaticType(); }
-        const char* GetName() const override { return "MouseMoved"; }
-        int GetCategoryFlags() const override { return EventCategoryInput | EventCategoryMouse; }
+class MouseScrolledEvent : public Event {
+public:
+    MouseScrolledEvent(float xOffset, float yOffset) : xOffset_(xOffset), yOffset_(yOffset) {}
 
-    private:
-        float mouseX_;
-        float mouseY_;
-    };
+    float GetXOffset() const {
+        return xOffset_;
+    }
+    float GetYOffset() const {
+        return yOffset_;
+    }
 
-    class MouseScrolledEvent : public Event {
-    public:
-        MouseScrolledEvent(float xOffset, float yOffset)
-            : xOffset_(xOffset), yOffset_(yOffset) {}
+    static EventType GetStaticType() {
+        return EventType::MouseScrolled;
+    }
+    EventType GetEventType() const override {
+        return GetStaticType();
+    }
+    const char* GetName() const override {
+        return "MouseScrolled";
+    }
+    int GetCategoryFlags() const override {
+        return EventCategoryInput | EventCategoryMouse;
+    }
 
-        float GetXOffset() const { return xOffset_; }
-        float GetYOffset() const { return yOffset_; }
+private:
+    float xOffset_;
+    float yOffset_;
+};
 
-        static EventType GetStaticType() { return EventType::MouseScrolled; }
-        EventType GetEventType() const override { return GetStaticType(); }
-        const char* GetName() const override { return "MouseScrolled"; }
-        int GetCategoryFlags() const override { return EventCategoryInput | EventCategoryMouse; }
+class MouseButtonPressedEvent : public Event {
+public:
+    MouseButtonPressedEvent(int32 button) : button_(button) {}
 
-    private:
-        float xOffset_;
-        float yOffset_;
-    };
+    int32 GetMouseButton() const {
+        return button_;
+    }
 
-    class MouseButtonPressedEvent : public Event {
-    public:
-        MouseButtonPressedEvent(int32 button) : button_(button) {}
+    static EventType GetStaticType() {
+        return EventType::MouseButtonPressed;
+    }
+    EventType GetEventType() const override {
+        return GetStaticType();
+    }
+    const char* GetName() const override {
+        return "MouseButtonPressed";
+    }
+    int GetCategoryFlags() const override {
+        return EventCategoryInput | EventCategoryMouse | EventCategoryMouseButton;
+    }
 
-        int32 GetMouseButton() const { return button_; }
+private:
+    int32 button_;
+};
 
-        static EventType GetStaticType() { return EventType::MouseButtonPressed; }
-        EventType GetEventType() const override { return GetStaticType(); }
-        const char* GetName() const override { return "MouseButtonPressed"; }
-        int GetCategoryFlags() const override { return EventCategoryInput | EventCategoryMouse | EventCategoryMouseButton; }
+class MouseButtonReleasedEvent : public Event {
+public:
+    MouseButtonReleasedEvent(int32 button) : button_(button) {}
 
-    private:
-        int32 button_;
-    };
+    int32 GetMouseButton() const {
+        return button_;
+    }
 
-    class MouseButtonReleasedEvent : public Event {
-    public:
-        MouseButtonReleasedEvent(int32 button) : button_(button) {}
+    static EventType GetStaticType() {
+        return EventType::MouseButtonReleased;
+    }
+    EventType GetEventType() const override {
+        return GetStaticType();
+    }
+    const char* GetName() const override {
+        return "MouseButtonReleased";
+    }
+    int GetCategoryFlags() const override {
+        return EventCategoryInput | EventCategoryMouse | EventCategoryMouseButton;
+    }
 
-        int32 GetMouseButton() const { return button_; }
-
-        static EventType GetStaticType() { return EventType::MouseButtonReleased; }
-        EventType GetEventType() const override { return GetStaticType(); }
-        const char* GetName() const override { return "MouseButtonReleased"; }
-        int GetCategoryFlags() const override { return EventCategoryInput | EventCategoryMouse | EventCategoryMouseButton; }
-
-    private:
-        int32 button_;
-    };
+private:
+    int32 button_;
+};
 
 } // namespace LuxEngine

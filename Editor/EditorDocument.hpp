@@ -17,17 +17,27 @@ public:
     bool Save();
     bool SaveAs(const std::string& path);
 
-    bool IsDirty() const noexcept { return dirty_; }
-    void MarkDirty() noexcept { dirty_ = true; }
-    const std::string& GetPath() const noexcept { return path_; }
+    bool IsDirty() const noexcept {
+        return dirty_;
+    }
+    void MarkDirty() noexcept {
+        dirty_ = true;
+    }
+    const std::string& GetPath() const noexcept {
+        return path_;
+    }
 
     void Select(std::optional<uint32> id);
     Entity GetSelected() const;
     Entity CreateEntity(const std::string& name = "Entity");
     bool DeleteSelected();
 
-    Scene& GetScene() noexcept { return *scene_; }
-    const Scene& GetScene() const noexcept { return *scene_; }
+    Scene& GetScene() noexcept {
+        return *scene_;
+    }
+    const Scene& GetScene() const noexcept {
+        return *scene_;
+    }
 
 private:
     std::unique_ptr<Scene> scene_;

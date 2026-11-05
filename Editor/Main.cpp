@@ -1,4 +1,4 @@
-#include "Editor/EditorFrame.hpp"
+#include "EditorFrame.hpp"
 
 class LuxEditorApp final : public wxApp {
 public:

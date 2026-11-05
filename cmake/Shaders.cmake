@@ -1,4 +1,4 @@
-if(NOT APPLE)
+if(NOT LUX_USE_OGRE AND NOT APPLE)
     if(WIN32)
         file(GLOB LUX_DXC_HINTS "C:/Program Files (x86)/Windows Kits/10/bin/*/x64")
         list(SORT LUX_DXC_HINTS ORDER DESCENDING)
@@ -45,7 +45,7 @@ function(lux_copy_runtime target)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders" "$<TARGET_FILE_DIR:${target}>/shaders")
     endif()
-    if(APPLE)
+    if(APPLE AND NOT LUX_USE_OGRE)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/shaders"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/Shaders/Basic.metal" "$<TARGET_FILE_DIR:${target}>/shaders/Basic.metal")
@@ -53,5 +53,12 @@ function(lux_copy_runtime target)
     if(WIN32 AND TARGET SDL3::SDL3-shared)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:${target}>)
+    endif()
+    if(WIN32 AND LUX_USE_OGRE)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LUX_OGRE_MAIN_DLL}" "${LUX_OGRE_GL_PLUGIN_PATH}"
+                "$<TARGET_FILE_DIR:${target}>"
+            VERBATIM)
     endif()
 endfunction()
