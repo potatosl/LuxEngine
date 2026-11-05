@@ -130,6 +130,9 @@ public:
 private:
     friend class GpuBuffer;
     friend class GpuTexture;
+    friend class Renderer2D;
+    bool DrawTexturedTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection,
+                               uint64 textureHandle, bool depth);
     Ref<Vk::DeviceState> state_;
 };
 

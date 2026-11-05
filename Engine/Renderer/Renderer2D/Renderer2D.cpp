@@ -1,10 +1,12 @@
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include <array>
+#include <memory>
 #include <stdexcept>
 namespace LuxEngine {
 namespace {
 struct Batch {
-    GpuTexture* texture;
+    std::weak_ptr<Vk::DeviceState> owner;
+    uint64 texture = 0;
     std::vector<RenderVertex> vertices;
 };
 GpuDevice* device = nullptr;
@@ -13,15 +15,20 @@ std::vector<Batch> batches;
 size_t usedBatches = 0;
 Renderer2D::Statistics stats;
 bool active = false;
-void Quad(const Vec3& position, const Vec2& size, float angle, GpuTexture* texture,
-          const Vec4& color) {
+bool SameOwner(const std::weak_ptr<Vk::DeviceState>& a, const std::weak_ptr<Vk::DeviceState>& b) {
+    return !a.owner_before(b) && !b.owner_before(a);
+}
+void Quad(const Vec3& position, const Vec2& size, float angle,
+          const std::weak_ptr<Vk::DeviceState>& owner, uint64 texture, const Vec4& color) {
     if (!active)
         return;
     if (!usedBatches || batches[usedBatches - 1].texture != texture ||
+        !SameOwner(batches[usedBatches - 1].owner, owner) ||
         batches[usedBatches - 1].vertices.size() >= 6000) {
         if (usedBatches == batches.size())
-            batches.push_back({texture, {}});
+            batches.emplace_back();
         auto& batch = batches[usedBatches++];
+        batch.owner = owner;
         batch.texture = texture;
         batch.vertices.clear();
         batch.vertices.reserve(6000);
@@ -76,26 +83,29 @@ void Renderer2D::EndScene() {
         return;
     active = false;
     for (size_t i = 0; i < usedBatches; ++i) {
-        const auto& batch = batches[i];
-        if (device && device->DrawTriangles(batch.vertices, viewProjection, batch.texture))
+        auto& batch = batches[i];
+        const bool sameDevice = !batch.texture || (device && batch.owner.lock() == device->state_);
+        if (device && sameDevice &&
+            device->DrawTexturedTriangles(batch.vertices, viewProjection, batch.texture, false))
             ++stats.drawCalls;
+        batch.owner.reset();
     }
     usedBatches = 0;
 }
 void Renderer2D::DrawQuad(const Vec2& p, const Vec2& size, const Vec4& color) {
-    Quad({p.x, p.y, 0}, size, 0, nullptr, color);
+    Quad({p.x, p.y, 0}, size, 0, {}, 0, color);
 }
 void Renderer2D::DrawQuad(const Vec3& p, const Vec2& size, const Vec4& color) {
-    Quad(p, size, 0, nullptr, color);
+    Quad(p, size, 0, {}, 0, color);
 }
 void Renderer2D::DrawRotatedQuad(const Vec2& p, const Vec2& size, float angle, const Vec4& color) {
-    Quad({p.x, p.y, 0}, size, angle, nullptr, color);
+    Quad({p.x, p.y, 0}, size, angle, {}, 0, color);
 }
 void Renderer2D::DrawSprite(const Vec2& p, const Vec2& size, GpuTexture* texture,
                             const Vec4& tint) {
     if (!texture || !texture->IsValid())
         return;
-    Quad({p.x, p.y, 0}, size, 0, texture, tint);
+    Quad({p.x, p.y, 0}, size, 0, texture->owner_, texture->handle_, tint);
 }
 void Renderer2D::ResetStats() {
     stats = {};

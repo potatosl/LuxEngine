@@ -1136,6 +1136,20 @@ void VulkanSystems() {
     Check(!info.deviceName.empty() && info.apiVersion >= ((1u << 22) | (1u << 12)) &&
               info.maxTextureSize >= 4096 && info.framesInFlight == 2,
           "device capabilities reported");
+    {
+        auto transient = std::make_unique<GpuTexture>();
+        const uint32 pixel = 0xff0000ffu;
+        Check(transient->Initialize(&graphics.gpu, 1, 1, &pixel), "transient sprite texture");
+        Check(graphics.Begin(), "transient sprite frame");
+        Renderer2D::BeginScene(camera);
+        Renderer2D::DrawSprite({0, 0}, {1, 1}, transient.get());
+        transient.reset();
+        Renderer2D::DrawQuad(Vec2(1, 0), {1, 1}, {0, 1, 0, 1});
+        Renderer2D::EndScene();
+        Check(Renderer2D::GetStats().drawCalls == 1 && Renderer2D::GetStats().quadCount == 2,
+              "sprite whose texture was destroyed before EndScene is skipped safely");
+        Check(graphics.gpu.EndFrame(), "transient sprite frame submitted");
+    }
     Check(gpu.GetStatus() == GpuStatus::Ready && gpu.IsReady(), "device ready");
 
     Check(!gpu.Clear(0, 0, 0, 1) && !gpu.EndFrame(), "frame commands outside a frame rejected");
