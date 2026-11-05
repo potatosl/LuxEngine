@@ -4,13 +4,16 @@
 #include <QCheckBox>
 #include <QDockWidget>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QSettings>
 #include <QTabWidget>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QUndoStack>
+#include <QPushButton>
 #include <iostream>
 #include <stdexcept>
 
@@ -27,9 +30,25 @@ int main(int argc, char** argv) {
     QTemporaryDir settings;
     if (!settings.isValid())
         return 1;
+    // A modal dialog would block this headless test forever. Dismiss it (No/OK) and say so.
+    int dialogs = 0;
+    QTimer dismiss;
+    dismiss.setInterval(100);
+    QObject::connect(&dismiss, &QTimer::timeout, [&dialogs] {
+        if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            ++dialogs;
+            std::cerr << "dialog dismissed: " << box->text().toStdString() << '\n';
+            if (auto* no = box->button(QMessageBox::No))
+                no->click();
+            else
+                box->reject();
+        }
+    });
+    dismiss.start();
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
     try {
+        std::cerr << "[ui-test] creating window\n";
         LuxEngine::EditorWindow window;
         window.show();
         app.processEvents();
@@ -78,6 +97,7 @@ int main(int argc, char** argv) {
         auto* stepPreview = window.findChild<QAction*>(QStringLiteral("previewStep"));
         auto* stopPreview = window.findChild<QAction*>(QStringLiteral("previewStop"));
         Check(startPreview && stepPreview && stopPreview, "preview controls exist");
+        std::cerr << "[ui-test] preview\n";
         startPreview->trigger();
         stepPreview->trigger();
         auto* debugState = window.findChild<QTreeWidget*>(QStringLiteral("debugState"));
@@ -85,6 +105,7 @@ int main(int argc, char** argv) {
         stopPreview->trigger();
         Check(hierarchy->count() == 2, "preview restores editable scene");
         tabs->setCurrentIndex(0);
+        std::cerr << "[ui-test] render\n";
         QPixmap frame(window.size());
         window.render(&frame);
         const QString screenshot = qEnvironmentVariable("LUX_EDITOR_TEST_SCREENSHOT");
@@ -101,6 +122,7 @@ int main(int argc, char** argv) {
         }
         while (undo->canUndo())
             undo->undo();
+        std::cerr << "[ui-test] closing\n";
         window.close();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

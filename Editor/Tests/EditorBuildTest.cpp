@@ -105,19 +105,19 @@ void TestDetection() {
     Check(!DescribeMissingTools(BuildTools{}).empty(), "missing tools are described");
 
 #ifdef _WIN32
-    env["PATH"] = bin.string() + ";C:/nowhere";
+    env["PATH"] = PathUtf8(bin) + ";C:/nowhere";
 #else
-    env["PATH"] = bin.string() + ":/nowhere";
+    env["PATH"] = PathUtf8(bin) + ":/nowhere";
 #endif
-    env["LUX_ENGINE_DIR"] = sdk.string();
-    env["VCPKG_ROOT"] = (files.path / "vcpkg").string();
+    env["LUX_ENGINE_DIR"] = PathUtf8(sdk);
+    env["VCPKG_ROOT"] = PathUtf8(files.path / "vcpkg");
     tools = DetectBuildTools(files.path / "app", lookup);
     Check(tools.cmake.parent_path() == bin, "cmake found on PATH");
     Check(tools.enginePackage == sdk / "lib/cmake/LuxEngine", "engine package found from SDK root");
     Check(!tools.toolchainFile.empty(), "vcpkg toolchain found");
     Check(DescribeMissingTools(tools).empty(), "complete tools");
 
-    env["LUX_ENGINE_DIR"] = (files.path / "missing").string();
+    env["LUX_ENGINE_DIR"] = PathUtf8(files.path / "missing");
     env.erase("PATH");
     // The editor's own folder is searched when the variable points nowhere.
     Write(files.path / "app/lib/cmake/LuxEngine/LuxEngineConfig.cmake");
@@ -129,7 +129,7 @@ void TestDetection() {
 
 void TestPlan() {
     TempDirectory files;
-    const fs::path project = files.path / "게임 프로젝트";
+    const fs::path project = files.path / PathFromUtf8("게임 프로젝트");
     BuildTools tools;
     tools.cmake = "cmake";
     tools.enginePackage = files.path / "sdk";
@@ -196,7 +196,7 @@ void TestPackage() {
     Write(out / "SDL3.dll", "dll");
     Write(out / "shaders/Basic.spv", "spv");
     Write(out / "Scenes/Main.lux", "scene");
-    Write(out / "한글/자원.png", "png");
+    Write(out / PathFromUtf8("한글/자원.png"), "png");
     Write(out / "LuxGame.pdb", "debug");
     Write(out / "CMakeFiles/x.txt", "skip");
     Write(out / "a.dir/b.obj", "skip");
