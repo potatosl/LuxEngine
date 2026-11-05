@@ -17,12 +17,16 @@ public:
     bool Recover(const std::string& originalPath, const std::string& autosavePath);
     bool Save();
     bool SaveAs(const std::string& path);
+    bool ReplaceScene(const std::string& serializedPath, std::optional<uint32> selectedId);
 
     bool IsDirty() const noexcept {
         return dirty_;
     }
     void MarkDirty() noexcept {
         dirty_ = true;
+    }
+    void SetDirty(bool dirty) noexcept {
+        dirty_ = dirty;
     }
     const std::string& GetPath() const noexcept {
         return path_;

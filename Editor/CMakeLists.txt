@@ -11,8 +11,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     find_package(LuxEngine CONFIG REQUIRED)
 endif()
 
-find_package(wxWidgets REQUIRED COMPONENTS core base aui)
-include(${wxWidgets_USE_FILE})
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(libzip CONFIG REQUIRED)
 
 function(lux_editor_copy_runtime target)
     if(COMMAND lux_copy_runtime)
@@ -36,26 +36,29 @@ function(lux_editor_copy_runtime target)
     endif()
 endfunction()
 
-add_executable(LuxEditor WIN32 MACOSX_BUNDLE
-    App/Main.cpp
-    App/EditorFrame.cpp
-    App/EditorFrameLayout.cpp
-    App/EditorFrameProjects.cpp
+add_library(LuxEditorUi STATIC
+    App/EditorWindow.cpp
+    App/EditorWindowLayout.cpp
+    App/EditorWindowProjects.cpp
+    Debug/DebugPanel.cpp
     Project/EditorProject.cpp
     Project/ProjectArchive.cpp
     Project/ProjectDialog.cpp
     Project/ProjectSettings.cpp
     Project/ProjectTemplates.cpp
     Scene/EditorDocument.cpp
-    Viewport/SceneCanvas.cpp
-    Viewport/SceneCanvas3D.cpp
+    Ui/IconFactory.cpp
+    Viewport/SceneViewport2D.cpp
+    Viewport/SceneViewport3D.cpp
 )
-target_include_directories(LuxEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(LuxEditor PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
-target_link_libraries(LuxEditor PRIVATE LuxEngine::Engine ${wxWidgets_LIBRARIES})
+target_include_directories(LuxEditorUi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(LuxEditorUi PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
+target_link_libraries(LuxEditorUi PUBLIC LuxEngine::Engine Qt6::Widgets libzip::zip)
 if(COMMAND lux_set_target_warnings)
-    lux_set_target_warnings(LuxEditor)
+    lux_set_target_warnings(LuxEditorUi)
 endif()
+add_executable(LuxEditor WIN32 MACOSX_BUNDLE App/Main.cpp)
+target_link_libraries(LuxEditor PRIVATE LuxEditorUi)
 lux_editor_copy_runtime(LuxEditor)
 install(TARGETS LuxEditor RUNTIME DESTINATION bin BUNDLE DESTINATION .)
 
@@ -74,12 +77,17 @@ if(LUX_BUILD_TESTS)
     )
     target_include_directories(LuxEditorDocumentTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(LuxEditorDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
-    target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine ${wxWidgets_LIBRARIES})
+    target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui libzip::zip)
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorDocumentTests)
     endif()
     lux_editor_copy_runtime(LuxEditorDocumentTests)
     add_test(NAME Editor_document COMMAND LuxEditorDocumentTests)
+    add_executable(LuxEditorUiTests Tests/EditorUiTest.cpp)
+    target_link_libraries(LuxEditorUiTests PRIVATE LuxEditorUi)
+    lux_editor_copy_runtime(LuxEditorUiTests)
+    add_test(NAME Editor_ui COMMAND LuxEditorUiTests)
+    set_tests_properties(Editor_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 get_target_property(_lux_engine_type LuxEngine::Engine TYPE)

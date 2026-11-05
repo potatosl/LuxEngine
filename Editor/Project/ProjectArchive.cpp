@@ -4,24 +4,16 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
-#include <memory>
 #include <set>
 #include <vector>
-#include <wx/filefn.h>
-#include <wx/filename.h>
-#include <wx/wfstream.h>
-#include <wx/zipstrm.h>
+#include <zip.h>
 
 namespace LuxEngine {
 namespace {
 constexpr uint64_t MaxArchiveBytes = 1024ull * 1024ull * 1024ull;
 constexpr size_t MaxEntries = 10000;
-
-wxString W(const std::filesystem::path& path) {
-    const auto utf8 = path.u8string();
-    return wxString::FromUTF8(reinterpret_cast<const char*>(utf8.data()), utf8.size());
-}
 
 std::filesystem::path TemporarySibling(const std::filesystem::path& target) {
     auto path = target;
@@ -44,69 +36,88 @@ bool SafeArchivePath(const std::filesystem::path& relative) {
     return true;
 }
 
-bool CopyStream(wxInputStream& input, wxOutputStream& output, uint64_t& total) {
-    std::array<char, 65536> buffer{};
-    while (input.IsOk() && !input.Eof()) {
-        input.Read(buffer.data(), buffer.size());
-        const auto count = input.LastRead();
-        if (count == 0)
-            break;
-        if (total > MaxArchiveBytes - count)
-            return false;
-        output.Write(buffer.data(), count);
-        if (output.LastWrite() != count)
-            return false;
-        total += count;
-    }
-    return input.Eof() || input.IsOk();
-}
-
 bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem::path& staging,
                     std::string& error) {
-    wxFFileInputStream file(W(archive));
-    if (!file.IsOk()) {
+    int zipError = 0;
+    zip_t* zip = zip_open(PathUtf8(archive).c_str(), ZIP_RDONLY, &zipError);
+    if (!zip) {
         error = "프로젝트 압축 파일을 열 수 없습니다.";
         return false;
     }
-    wxZipInputStream zip(file, wxConvUTF8);
+    const auto count = zip_get_num_entries(zip, 0);
+    if (count <= 0 || count > static_cast<zip_int64_t>(MaxEntries)) {
+        error = "압축 파일의 파일 수가 올바르지 않습니다.";
+        zip_close(zip);
+        return false;
+    }
     std::set<std::string> names;
     uint64_t total = 0;
-    size_t entries = 0;
-    while (auto entry = std::unique_ptr<wxZipEntry>(zip.GetNextEntry())) {
-        const std::string name = entry->GetName(wxPATH_UNIX).ToStdString(wxConvUTF8);
+    for (zip_uint64_t index = 0; index < static_cast<zip_uint64_t>(count); ++index) {
+        zip_stat_t stat;
+        zip_stat_init(&stat);
+        if (zip_stat_index(zip, index, ZIP_FL_ENC_GUESS, &stat) != 0 || !stat.name) {
+            error = "압축 파일의 항목을 읽을 수 없습니다.";
+            break;
+        }
+        const std::string name(stat.name);
+        const bool directory = !name.empty() && name.back() == '/';
         const auto relative = PathFromUtf8(name);
-        if (++entries > MaxEntries || !SafeArchivePath(relative) || !names.insert(name).second ||
-            (entry->GetSize() != wxInvalidOffset &&
-             static_cast<uint64_t>(entry->GetSize()) > MaxArchiveBytes)) {
+        zip_uint8_t opsys = 0;
+        zip_uint32_t attributes = 0;
+        if (!SafeArchivePath(relative) || !names.insert(name).second ||
+            stat.size > MaxArchiveBytes - total ||
+            zip_file_get_external_attributes(zip, index, 0, &opsys, &attributes) != 0 ||
+            (opsys == ZIP_OPSYS_UNIX && ((attributes >> 16) & 0170000) == 0120000)) {
             error = "압축 파일의 경로 또는 크기가 올바르지 않습니다.";
-            return false;
+            break;
         }
         const auto target = staging / relative;
         std::error_code ec;
-        if (entry->IsDir()) {
-            std::filesystem::create_directories(target, ec);
-            if (ec) {
-                error = "압축 파일의 폴더를 만들 수 없습니다.";
-                return false;
-            }
-            continue;
-        }
-        std::filesystem::create_directories(target.parent_path(), ec);
+        std::filesystem::create_directories(directory ? target : target.parent_path(), ec);
         if (ec) {
             error = "압축 파일의 폴더를 만들 수 없습니다.";
-            return false;
+            break;
         }
-        wxFFileOutputStream output(W(target));
-        if (!output.IsOk() || !CopyStream(zip, output, total)) {
-            error = "압축 파일의 내용을 읽을 수 없거나 크기 제한을 넘었습니다.";
-            return false;
+        if (directory)
+            continue;
+        zip_file_t* input = zip_fopen_index(zip, index, 0);
+        std::ofstream output(target, std::ios::binary | std::ios::trunc);
+        if (!input || !output) {
+            if (input)
+                zip_fclose(input);
+            error = "압축 파일의 내용을 읽을 수 없습니다.";
+            break;
         }
+        std::array<char, 65536> buffer{};
+        uint64_t readTotal = 0;
+        while (true) {
+            const zip_int64_t amount = zip_fread(input, buffer.data(), buffer.size());
+            if (amount < 0 ||
+                (amount > 0 && (static_cast<uint64_t>(amount) > MaxArchiveBytes - total ||
+                                static_cast<uint64_t>(amount) > stat.size - readTotal))) {
+                error = "압축 파일의 내용이 손상되었거나 크기 제한을 넘었습니다.";
+                break;
+            }
+            if (amount == 0)
+                break;
+            output.write(buffer.data(), amount);
+            if (!output) {
+                error = "압축 파일의 내용을 저장할 수 없습니다.";
+                break;
+            }
+            readTotal += static_cast<uint64_t>(amount);
+            total += static_cast<uint64_t>(amount);
+        }
+        zip_fclose(input);
+        if (readTotal != stat.size && error.empty())
+            error = "압축 파일의 내용이 손상되었습니다.";
+        if (!error.empty())
+            break;
     }
-    if (zip.GetLastError() != wxSTREAM_EOF && zip.GetLastError() != wxSTREAM_NO_ERROR) {
-        error = "압축 파일이 손상되었습니다.";
+    zip_close(zip);
+    if (!error.empty())
         return false;
-    }
-    if (entries == 0 || !std::filesystem::is_regular_file(staging / EditorProject::FileName)) {
+    if (!std::filesystem::is_regular_file(staging / EditorProject::FileName)) {
         error = "프로젝트 파일이 압축 파일에 없습니다.";
         return false;
     }
@@ -147,12 +158,12 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
         return false;
     }
     const auto temporary = TemporarySibling(archive);
-    wxFFileOutputStream file(W(temporary));
-    if (!file.IsOk()) {
+    int zipError = 0;
+    zip_t* zip = zip_open(PathUtf8(temporary).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipError);
+    if (!zip) {
         error = "압축 파일을 만들 수 없습니다.";
         return false;
     }
-    wxZipOutputStream zip(file);
     uint64_t total = 0;
     size_t entries = 0;
     std::filesystem::recursive_directory_iterator iterator(
@@ -160,9 +171,8 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
     const std::filesystem::recursive_directory_iterator end;
     for (; !ec && iterator != end; iterator.increment(ec)) {
         const auto relative = iterator->path().lexically_relative(root);
-        if (relative.empty() || *relative.begin() == ".lux" ||
-            *relative.begin() == ".git" || iterator->path() == archive ||
-            iterator->path() == temporary) {
+        if (relative.empty() || *relative.begin() == ".lux" || *relative.begin() == ".git" ||
+            iterator->path() == archive || iterator->path() == temporary) {
             if (iterator->is_directory(ec))
                 iterator.disable_recursion_pending();
             continue;
@@ -173,29 +183,60 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
         }
         if (!iterator->is_regular_file(ec))
             continue;
-        if (++entries > MaxEntries || !SafeArchivePath(relative) ||
-            iterator->file_size(ec) > MaxArchiveBytes - total) {
+        const uint64_t size = iterator->file_size(ec);
+        if (ec || ++entries > MaxEntries || !SafeArchivePath(relative) ||
+            size > MaxArchiveBytes - total) {
             error = "프로젝트 파일 수 또는 크기가 제한을 넘었습니다.";
             break;
         }
-        wxFFileInputStream input(W(iterator->path()));
-        if (!input.IsOk() || !zip.PutNextEntry(wxString::FromUTF8(GenericPathUtf8(relative))) ||
-            !CopyStream(input, zip, total)) {
+        const std::string sourcePath = PathUtf8(iterator->path());
+        zip_source_t* source = zip_source_file(zip, sourcePath.c_str(), 0, -1);
+        if (!source ||
+            zip_file_add(zip, GenericPathUtf8(relative).c_str(), source, ZIP_FL_ENC_UTF_8) < 0) {
+            if (source)
+                zip_source_free(source);
             error = "프로젝트 파일을 압축하지 못했습니다.";
             break;
         }
+        total += size;
     }
     if (ec && error.empty())
         error = "프로젝트 파일을 읽지 못했습니다.";
-    if (!zip.Close() && error.empty())
-        error = "압축 파일을 완성하지 못했습니다.";
-    file.Close();
+    if (error.empty()) {
+        if (zip_close(zip) != 0) {
+            error = "압축 파일을 완성하지 못했습니다.";
+            zip_discard(zip);
+        }
+    } else {
+        zip_discard(zip);
+    }
     if (!error.empty()) {
         std::filesystem::remove(temporary, ec);
         return false;
     }
-    if (!wxRenameFile(W(temporary), W(archive), true)) {
-        error = "압축 파일을 최종 위치로 옮기지 못했습니다.";
+    std::filesystem::rename(temporary, archive, ec);
+    if (ec && std::filesystem::is_regular_file(archive)) {
+        const auto previous = TemporarySibling(archive);
+        std::error_code moveError;
+        std::filesystem::rename(archive, previous, moveError);
+        if (!moveError) {
+            ec.clear();
+            std::filesystem::rename(temporary, archive, ec);
+            if (ec) {
+                std::error_code rollback;
+                std::filesystem::rename(previous, archive, rollback);
+                if (rollback)
+                    error =
+                        "압축 파일 교체에 실패했습니다. 이전 파일은 임시 위치에 보존했습니다: " +
+                        PathUtf8(previous);
+            } else {
+                std::filesystem::remove(previous, moveError);
+            }
+        }
+    }
+    if (ec) {
+        if (error.empty())
+            error = "압축 파일을 최종 위치로 옮기지 못했습니다.";
         std::filesystem::remove(temporary, ec);
         return false;
     }

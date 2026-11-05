@@ -3,6 +3,8 @@
 #include "Project/PathEncoding.hpp"
 #include "Project/ProjectArchive.hpp"
 
+#include <QImage>
+#include <QString>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -10,9 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
-#include <wx/image.h>
-#include <wx/wfstream.h>
-#include <wx/zipstrm.h>
+#include <zip.h>
 
 namespace {
 
@@ -136,6 +136,53 @@ void Test3DEditorEntity() {
           "3D transform and material values survive scene roundtrip");
 }
 
+void Test2DEditorComponents() {
+    using namespace LuxEngine;
+    TempDirectory files;
+    EditorDocument document;
+    auto entity = document.CreateEntity("Editable World");
+    auto& map = entity.AddComponent<TilemapComponent>();
+    Check(map.Resize(4, 3) && map.Set(2, 1, 4), "tilemap can be painted");
+    map.tileSize = .5f;
+    auto& body = entity.AddComponent<Rigidbody2DComponent>();
+    body.type = BodyType::Kinematic;
+    body.gravityScale = .25f;
+    auto& collider = entity.AddComponent<BoxCollider2DComponent>();
+    collider.size = {2.0f, 3.0f};
+    collider.offset = {.25f, -.5f};
+    collider.isTrigger = true;
+    auto& animation = entity.AddComponent<AnimationComponent>();
+    animation.clip.name = "Move";
+    animation.clip.duration = 2.0f;
+    animation.clip.loop = false;
+    animation.clip.AddKeyframe({0.0f, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}});
+    animation.clip.AddKeyframe({2.0f, {2, 3, 0}, {0, 0, 0}, {1, 1, 1}});
+    const auto path = (files.path / "world.lux").string();
+    Check(document.SaveAs(path), "scene saves editor components");
+    const auto id = entity.GetId();
+    Check(document.Open(path), "scene with editor components reopens");
+    auto restored = document.GetScene().GetEntities();
+    Check(restored.size() == 1 && restored[0].GetId() == id,
+          "scene roundtrip preserves stable entity IDs");
+    const auto& restoredMap = restored[0].GetComponent<TilemapComponent>();
+    Check(restoredMap.width == 4 && restoredMap.height == 3 && restoredMap.Get(2, 1) == 4 &&
+              restoredMap.tileSize == .5f,
+          "tilemap cells survive scene roundtrip");
+    const auto& restoredBody = restored[0].GetComponent<Rigidbody2DComponent>();
+    const auto& restoredCollider = restored[0].GetComponent<BoxCollider2DComponent>();
+    Check(restoredBody.type == BodyType::Kinematic && restoredBody.gravityScale == .25f &&
+              restoredCollider.isTrigger && restoredCollider.size.y == 3.0f &&
+              restoredCollider.offset.x == .25f,
+          "physics settings survive scene roundtrip");
+    const auto& restoredClip = restored[0].GetComponent<AnimationComponent>().clip;
+    Check(restoredClip.name == "Move" && !restoredClip.loop && restoredClip.keyframes.size() == 2 &&
+              restoredClip.keyframes[1].position.y == 3.0f,
+          "animation keyframes survive scene roundtrip");
+    restored[0].GetComponent<TilemapComponent>().tiles[0] = 255;
+    Check(!document.GetScene().Serialize((files.path / "invalid-world.lux").string()),
+          "invalid tilemap is rejected before serialization");
+}
+
 void TestProjectManagement() {
     using namespace LuxEngine;
     TempDirectory files;
@@ -229,11 +276,9 @@ void TestProjectOperations() {
     Check(project->BumpVersion(1, error) && project->GetSettings().version == "1.3.0",
           "minor version resets patch");
     const auto icon = files.path / "icon.png";
-    wxInitAllImageHandlers();
-    wxImage iconImage(1, 1);
-    iconImage.SetRGB(0, 0, 255, 100, 50);
-    Check(iconImage.SaveFile(wxString::FromUTF8(icon.string()), wxBITMAP_TYPE_PNG),
-          "icon fixture saves as PNG");
+    QImage iconImage(1, 1, QImage::Format_RGB32);
+    iconImage.fill(QColor(255, 100, 50));
+    Check(iconImage.save(QString::fromUtf8(PathUtf8(icon)), "PNG"), "icon fixture saves as PNG");
     Check(project->SetIcon(icon, error) &&
               std::filesystem::is_regular_file(files.path / "original" / project->GetIcon()),
           "project icon is copied into assets");
@@ -339,11 +384,13 @@ void TestProjectOperations() {
 
     const auto malicious = files.path / "malicious.luxpack";
     {
-        wxFFileOutputStream output(wxString::FromUTF8(malicious.string()));
-        wxZipOutputStream zip(output);
-        Check(zip.PutNextEntry("../outside.txt"), "malicious archive fixture creates");
-        zip.Write("bad", 3);
-        Check(zip.Close(), "malicious archive fixture closes");
+        int code = 0;
+        zip_t* zip = zip_open(PathUtf8(malicious).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &code);
+        Check(zip != nullptr, "malicious archive fixture creates");
+        zip_source_t* source = zip_source_buffer(zip, "bad", 3, 0);
+        Check(source && zip_file_add(zip, "../outside.txt", source, 0) >= 0,
+              "malicious archive entry creates");
+        Check(zip_close(zip) == 0, "malicious archive fixture closes");
     }
     Check(!ImportProject(malicious, files.path / "unsafe", error) &&
               !std::filesystem::exists(files.path / "outside.txt") &&
@@ -389,6 +436,7 @@ int main() {
     try {
         TestDocument();
         Test3DEditorEntity();
+        Test2DEditorComponents();
         TestProjectManagement();
         TestProjectOperations();
         TestUnicodeProjectPaths();

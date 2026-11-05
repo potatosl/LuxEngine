@@ -2,6 +2,8 @@
 #include "PathEncoding.hpp"
 
 #include "Engine/Scene/Scene.hpp"
+#include <QImageReader>
+#include <QString>
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -10,7 +12,6 @@
 #include <iomanip>
 #include <string_view>
 #include <system_error>
-#include <wx/image.h>
 
 namespace LuxEngine {
 namespace {
@@ -42,9 +43,8 @@ bool EditorProject::SetIcon(const std::filesystem::path& image, std::string& err
         error = "PNG, JPEG, ICO 또는 ICNS 이미지를 선택해 주세요.";
         return false;
     }
-    wxInitAllImageHandlers();
-    wxImage decoded;
-    if (extension != ".icns" && !decoded.LoadFile(wxString::FromUTF8(PathUtf8(image)))) {
+    QImageReader reader(QString::fromUtf8(PathUtf8(image)));
+    if (extension != ".icns" && !reader.canRead()) {
         error = "아이콘 이미지 파일을 읽을 수 없습니다.";
         return false;
     }

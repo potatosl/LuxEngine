@@ -1,13 +1,12 @@
-#include "EditorFrame.hpp"
+#include "EditorWindow.hpp"
+#include <QApplication>
+#include <QCoreApplication>
 
-class LuxEditorApp final : public wxApp {
-public:
-    bool OnInit() override {
-        wxInitAllImageHandlers();
-        auto* frame = new LuxEngine::EditorFrame();
-        frame->Show(true);
-        return true;
-    }
-};
-
-wxIMPLEMENT_APP(LuxEditorApp);
+int main(int argc, char** argv) {
+    QApplication app(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("LuxEngine"));
+    QCoreApplication::setApplicationName(QStringLiteral("LuxEditor"));
+    LuxEngine::EditorWindow window;
+    window.show();
+    return app.exec();
+}

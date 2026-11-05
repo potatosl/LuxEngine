@@ -5,7 +5,7 @@
 #include <optional>
 #include <string>
 
-class wxWindow;
+class QWidget;
 
 namespace LuxEngine {
 
@@ -21,10 +21,10 @@ struct ProjectSettingsRequest {
     bool clearIcon = false;
 };
 
-std::optional<ProjectCreationRequest> ShowNewProjectDialog(wxWindow* parent);
-std::optional<ProjectSettingsRequest> ShowProjectSettingsDialog(wxWindow* parent,
+std::optional<ProjectCreationRequest> ShowNewProjectDialog(QWidget* parent);
+std::optional<ProjectSettingsRequest> ShowProjectSettingsDialog(QWidget* parent,
                                                                 const ProjectSettings& current);
 std::optional<std::filesystem::path>
-ShowProjectDestinationDialog(wxWindow* parent, const char* title, const std::string& suggested);
+ShowProjectDestinationDialog(QWidget* parent, const char* title, const std::string& suggested);
 
 } // namespace LuxEngine
