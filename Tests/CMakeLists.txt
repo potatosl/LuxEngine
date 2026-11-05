@@ -3,12 +3,30 @@ target_link_libraries(LuxEngineTests PRIVATE LuxEngine::Engine)
 target_include_directories(LuxEngineTests SYSTEM PRIVATE ${stb_SOURCE_DIR})
 lux_set_target_warnings(LuxEngineTests)
 lux_copy_runtime(LuxEngineTests)
-foreach(suite core physics2d scene assets audio window gpu lifecycle)
+
+# Headless suites need no display or GPU.
+foreach(suite core physics2d scene assets audio window)
     add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
-    set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 30 WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
+    set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 30 LABELS headless
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
 endforeach()
-set_tests_properties(Engine_lifecycle PROPERTIES ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
 set_tests_properties(Engine_audio PROPERTIES ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
 set_tests_properties(Engine_window PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+
+# GPU suites need a display and a Vulkan driver; they exit with 77 (skipped) when either is missing.
+set(LUX_GPU_TEST_ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")
+foreach(suite gpu vulkan failures stress lifecycle)
+    add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
+    set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 120 LABELS gpu SKIP_RETURN_CODE 77
+        ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}"
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
+endforeach()
+add_test(NAME Engine_longrun COMMAND LuxEngineTests longrun)
+set_tests_properties(Engine_longrun PROPERTIES TIMEOUT 600 LABELS "gpu;long" SKIP_RETURN_CODE 77
+    ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=off"
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
+
 add_test(NAME Engine_runtime COMMAND LuxEngineDemo --smoke-test)
-set_tests_properties(Engine_runtime PROPERTIES TIMEOUT 30 WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineDemo>" ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
+set_tests_properties(Engine_runtime PROPERTIES TIMEOUT 60 LABELS gpu
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineDemo>"
+    ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}")
