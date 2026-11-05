@@ -809,7 +809,8 @@ struct Graphics {
         }
         if (checkTheme) {
             const bool iconAvailable = window.HasWindowIcon();
-            Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland",
+            Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland" ||
+                      std::string_view(SDL_GetCurrentVideoDriver()) == "offscreen",
                   "window icon applied when supported");
             const auto expected = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK ? ColorTheme::Dark
                                                                                 : ColorTheme::Light;
