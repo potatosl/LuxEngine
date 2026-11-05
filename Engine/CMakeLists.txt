@@ -1,5 +1,3 @@
-# LuxEngine Core Library
-
 set(LUXENGINE_SOURCES
     Core/Log.cpp
     Core/Timer.cpp
@@ -23,6 +21,14 @@ target_include_directories(LuxEngine PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(LuxEngine PUBLIC SDL3::SDL3)
+target_link_libraries(LuxEngine PUBLIC
+    SDL3::SDL3
+)
+
+target_compile_features(LuxEngine PUBLIC cxx_std_20)
 
 lux_set_target_warnings(LuxEngine)
+
+if(MSVC)
+    target_compile_options(LuxEngine PRIVATE /utf-8)
+endif()

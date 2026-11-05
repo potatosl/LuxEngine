@@ -1,10 +1,3 @@
-<#
-.SYNOPSIS
-    LuxEngine Build Helper Script
-.DESCRIPTION
-    Configures and builds LuxEngine with Visual Studio 2026 (MSVC v145) or Ninja.
-    Avoids PATH collision with MSYS2 cmake.
-#>
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Config = "Debug",
@@ -15,12 +8,15 @@ param(
 $ErrorActionPreference = "Stop"
 $rootDir = (Get-Item $PSScriptRoot).Parent.FullName
 
-# Determine Windows Native CMake (prefer VS bundled or system native over MSYS2)
+$wingetCmake = "C:\Users\eunso\AppData\Local\Microsoft\WinGet\Links\cmake.exe"
 $vsCmake = "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-if (Test-Path $vsCmake) {
+
+if (Test-Path $wingetCmake) {
+    $cmakeExe = $wingetCmake
+} elseif (Test-Path $vsCmake) {
     $cmakeExe = $vsCmake
 } else {
-    $cmakeExe = (Get-Command cmake.exe | Select-Object -ExpandProperty Source)
+    $cmakeExe = "cmake.exe"
 }
 
 Write-Host "========================================" -ForegroundColor Cyan

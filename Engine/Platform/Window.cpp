@@ -46,9 +46,13 @@ namespace LuxEngine {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                 isRunning_ = false;
-            }
-            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
+            } else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
                 isRunning_ = false;
+            } else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || event.type == SDL_EVENT_WINDOW_RESIZED) {
+                if (event.window.windowID == SDL_GetWindowID(window_)) {
+                    props_.width = static_cast<uint32>(event.window.data1);
+                    props_.height = static_cast<uint32>(event.window.data2);
+                }
             }
 
             if (eventCallback_) {
