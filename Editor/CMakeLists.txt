@@ -29,6 +29,25 @@ function(lux_editor_copy_runtime target)
     endif()
 endfunction()
 
+# Qt needs its platform plugin (platforms/qwindows.dll) next to the executable; vcpkg does not copy it.
+function(lux_editor_copy_qt_plugins target)
+    if(WIN32 AND TARGET Qt6::QWindowsIntegrationPlugin)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/platforms"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:Qt6::QWindowsIntegrationPlugin>
+                "$<TARGET_FILE_DIR:${target}>/platforms"
+            VERBATIM)
+        if(TARGET Qt6::QOffscreenIntegrationPlugin)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>
+                    "$<TARGET_FILE_DIR:${target}>/platforms"
+                VERBATIM)
+        endif()
+    endif()
+endfunction()
+
 add_library(LuxEditorUi STATIC
     Build/ProjectBuild.cpp
     App/EditorWindow.cpp
@@ -57,11 +76,15 @@ endif()
 add_executable(LuxEditor WIN32 MACOSX_BUNDLE App/Main.cpp)
 target_link_libraries(LuxEditor PRIVATE LuxEditorUi)
 lux_editor_copy_runtime(LuxEditor)
+lux_editor_copy_qt_plugins(LuxEditor)
 if(TARGET LuxPlayer)
     # The editor launches LuxPlayer from its own folder for "run in window".
     add_dependencies(LuxEditor LuxPlayer)
 endif()
 install(TARGETS LuxEditor RUNTIME DESTINATION bin BUNDLE DESTINATION .)
+if(WIN32 AND TARGET Qt6::QWindowsIntegrationPlugin)
+    install(FILES $<TARGET_FILE:Qt6::QWindowsIntegrationPlugin> DESTINATION bin/platforms)
+endif()
 
 if(MSVC)
     target_compile_options(LuxEditor PRIVATE /utf-8)
@@ -100,6 +123,7 @@ if(LUX_BUILD_TESTS)
     add_executable(LuxEditorUiTests Tests/EditorUiTest.cpp)
     target_link_libraries(LuxEditorUiTests PRIVATE LuxEditorUi)
     lux_editor_copy_runtime(LuxEditorUiTests)
+    lux_editor_copy_qt_plugins(LuxEditorUiTests)
     add_test(NAME Editor_ui COMMAND LuxEditorUiTests)
     set_tests_properties(Editor_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(Editor_document Editor_build PROPERTIES TIMEOUT 120)
