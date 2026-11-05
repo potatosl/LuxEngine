@@ -28,6 +28,10 @@ using namespace LuxEngine;
 void Core() {
     static_assert(!std::is_move_constructible_v<Window>);
     static_assert(!std::is_move_constructible_v<GpuDevice>);
+    GpuDevice uninitializedGpu;
+    Check(uninitializedGpu.BeginFrame()==GpuDevice::FrameStart::Error,"uninitialized GPU frame rejected");
+    Check(!uninitializedGpu.Clear(0,0,0,1),"uninitialized GPU clear rejected");
+    Check(!uninitializedGpu.EndFrame(),"uninitialized GPU submission rejected");
     Timer timer;
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     Check(timer.ElapsedSeconds() > 0,"timer");
@@ -176,19 +180,55 @@ void Audio() {
     AudioEngine::Shutdown(); AudioEngine::Shutdown();
     Check(!AudioEngine::IsMusicPlaying(),"audio shutdown");
 }
+void WindowEvents() {
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER,"dummy");
+    Check(SDL_Init(SDL_INIT_VIDEO),"dummy video initializes");
+    {
+        Window window;
+        WindowProps props; props.title="LuxEngine window test"; props.width=320; props.height=240;
+        Check(window.Initialize(props),"window initializes");
+        auto* handle=window.GetNativeHandle();
+        Check(!window.Initialize() && window.GetNativeHandle()==handle,"duplicate initialization preserves window");
+        Check(window.GetWidth()==320 && window.GetHeight()==240,"initial window dimensions");
+        Check(SDL_SetWindowSize(handle,400,300),"window resizes");
+        Check(window.GetWidth()==400 && window.GetHeight()==300,"window dimensions stay current");
+
+        SDL_Event event{};
+        event.type=SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+        event.window.windowID=SDL_GetWindowID(handle)+1;
+        Check(SDL_PushEvent(&event),"foreign close event queued");
+        window.PollEvents();
+        Check(window.IsRunning(),"foreign close event ignored");
+
+        event={}; event.type=SDL_EVENT_KEY_DOWN;
+        event.key.windowID=SDL_GetWindowID(handle)+1;
+        event.key.key=SDLK_ESCAPE;
+        Check(SDL_PushEvent(&event),"foreign escape event queued");
+        window.PollEvents();
+        Check(window.IsRunning(),"foreign escape event ignored");
+
+        event={}; event.type=SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+        event.window.windowID=SDL_GetWindowID(handle);
+        Check(SDL_PushEvent(&event),"own close event queued");
+        window.PollEvents();
+        Check(!window.IsRunning(),"own close event stops window");
+    }
+    SDL_Quit();
+}
 struct Graphics {
     Window window; GpuDevice gpu;
     Graphics() {
         if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
         WindowProps props; props.width=320; props.height=240; props.title="LuxEngine GPU verification";
         Check(window.Initialize(props),"GPU test window");
-        Check(window.HasWindowIcon(),"embedded window icon applied");
+        const bool iconAvailable=window.HasWindowIcon();
+        Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver())=="wayland","window icon applied when supported");
         const auto expected = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK ? ColorTheme::Dark : ColorTheme::Light;
-        Check(window.GetColorTheme()==expected,"window icon follows system theme");
+        if(iconAvailable) Check(window.GetColorTheme()==expected,"window icon follows system theme");
         SDL_Event changed{}; changed.type=SDL_EVENT_SYSTEM_THEME_CHANGED;
         Check(SDL_PushEvent(&changed),"theme event queued");
         window.PollEvents();
-        Check(window.HasWindowIcon() && window.GetColorTheme()==expected,"theme event preserves correct icon");
+        if(iconAvailable) Check(window.HasWindowIcon() && window.GetColorTheme()==expected,"theme event preserves correct icon");
         Check(gpu.Initialize(window.GetNativeHandle()),SDL_GetError());
     }
     ~Graphics() { AssetManager::Shutdown(); Renderer2D::Shutdown(); Renderer3D::Shutdown(); gpu.Shutdown(); window.Shutdown(); SDL_Quit(); }
@@ -196,12 +236,28 @@ struct Graphics {
 void Lifecycle() {
     struct Probe : Application {
         int shutdowns=0;
-        bool failInit=false, failRender=false;
+        bool failInit=false, failRender=false, closeOnUpdate=true;
         void OnInit() override { if (failInit) throw std::runtime_error("init failure"); }
-        void OnUpdate(double) override { if (!failRender) Close(); }
+        void OnUpdate(double) override { if (closeOnUpdate && !failRender) Close(); }
         void OnRender(float) override { if (failRender) throw std::runtime_error("render failure"); }
         void OnShutdown() override { ++shutdowns; }
     };
+    Throws([] { Application::Get(); },"application singleton absent before construction");
+    {
+        Probe app; app.closeOnUpdate=false;
+        Check(&Application::Get()==&app,"application singleton available");
+        Throws([] { Probe duplicate; },"duplicate application rejected");
+        Check(app.RunFrame()==Application::FrameResult::Error,"frame before initialization rejected");
+        Throws([&] { app.GetWindow(); },"window unavailable before initialization");
+        Throws([&] { app.GetGpuDevice(); },"GPU unavailable before initialization");
+        Check(app.Initialize(),"single-frame lifecycle init");
+        const auto frame=app.RunFrame();
+        Check(frame==Application::FrameResult::Continue || frame==Application::FrameResult::Skipped,"single-frame API advances");
+        app.Close();
+        Check(app.RunFrame()==Application::FrameResult::Stopped && app.shutdowns==1,"single-frame API stops cleanly");
+        Throws([&] { app.GetWindow(); },"window unavailable after shutdown");
+    }
+    Throws([] { Application::Get(); },"application singleton cleared after destruction");
     {
         Probe app;
         Check(app.Initialize(),"lifecycle init");
@@ -218,6 +274,15 @@ void Lifecycle() {
         Throws([&] { app.Run(); },"render failure propagated");
         Check(app.shutdowns==1,"render exception cleanup");
     }
+    Check(SDL_Init(SDL_INIT_VIDEO),"host SDL initialization");
+    {
+        Probe app;
+        Check(app.Initialize(),"engine initializes with host SDL");
+        app.Shutdown();
+        Check(app.shutdowns==1,"hosted shutdown hook");
+        Check((SDL_WasInit(SDL_INIT_VIDEO)&SDL_INIT_VIDEO)!=0,"host SDL video stays initialized");
+    }
+    SDL_Quit();
 }
 void Gpu() {
     Graphics graphics;
@@ -234,8 +299,8 @@ void Gpu() {
     OrthographicCamera camera(-2,2,-2,2); PerspectiveCamera perspective(ToRadians(60),4.0f/3,0.1f,100);
     for(int frame=0;frame<3;++frame) {
         graphics.window.PollEvents();
-        Check(graphics.gpu.BeginFrame(),"begin frame");
-        graphics.gpu.Clear(0,0,0,1);
+        Check(graphics.gpu.BeginFrame()==GpuDevice::FrameStart::Ready,"begin frame");
+        Check(graphics.gpu.Clear(0,0,0,1),"clear frame");
         Renderer2D::BeginScene(camera);
         Renderer2D::DrawSprite({-1,0},{1,1},texture.get());
         Renderer2D::DrawQuad(Vec2(0,0),{1,1},{0,1,0,1});
@@ -245,7 +310,7 @@ void Gpu() {
         Renderer3D::DrawCube({1,0,0},{1,1,1},{});
         Renderer3D::EndScene();
         Check(Renderer3D::GetStats().drawCalls==1 && Renderer3D::GetStats().meshCount==1,"real 3D draw call");
-        graphics.gpu.EndFrame();
+        Check(graphics.gpu.EndFrame(),"submit frame");
     }
     Check(SDL_WaitForGPUIdle(graphics.gpu.GetHandle()),"GPU completion");
     texture.reset(); AssetManager::Shutdown();
@@ -266,7 +331,7 @@ void Gpu() {
 int main(int argc, char** argv) {
     try {
         const std::string_view suite=argc>1?argv[1]:"core";
-        if(suite=="core") Core(); else if(suite=="scene") Scenes(); else if(suite=="assets") Assets(); else if(suite=="audio") Audio(); else if(suite=="gpu") Gpu(); else if(suite=="lifecycle") Lifecycle(); else throw std::runtime_error("Unknown suite");
+        if(suite=="core") Core(); else if(suite=="scene") Scenes(); else if(suite=="assets") Assets(); else if(suite=="audio") Audio(); else if(suite=="window") WindowEvents(); else if(suite=="gpu") Gpu(); else if(suite=="lifecycle") Lifecycle(); else throw std::runtime_error("Unknown suite");
         std::cout << suite << ": " << checks << " checks passed\n";
         return 0;
     } catch(const std::exception& error) { std::cerr << "FAILED: " << error.what() << '\n'; return 1; }

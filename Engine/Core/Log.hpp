@@ -13,7 +13,7 @@ namespace LuxEngine {
         Fatal
     };
 
-    class Log {
+    class LUX_API Log {
     public:
         static void Init();
         static void Shutdown();

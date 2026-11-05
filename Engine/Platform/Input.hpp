@@ -5,7 +5,7 @@
 
 namespace LuxEngine {
 
-    class Input {
+    class LUX_API Input {
     public:
         static bool IsKeyPressed(int32 keycode);
         static bool IsMouseButtonPressed(int32 button);

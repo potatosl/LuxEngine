@@ -41,6 +41,7 @@ include(Dependencies)
 include(Shaders)
 include(Branding)
 option(LUX_BUILD_TESTS "Build engine tests" ON)
+option(LUX_BUILD_EDITOR "Build the separate wxWidgets editor" OFF)
 
 # -------------------------------------------------------------
 # Subdirectories
@@ -48,8 +49,45 @@ option(LUX_BUILD_TESTS "Build engine tests" ON)
 add_subdirectory(Engine)
 add_subdirectory(Runtime)
 add_subdirectory(Sandbox)
+if(LUX_BUILD_EDITOR)
+    add_subdirectory(Editor)
+endif()
 
 if(LUX_BUILD_TESTS)
     enable_testing()
     add_subdirectory(Tests)
 endif()
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LuxEngineConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/LuxEngine
+)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(TARGETS LuxEngine LuxRuntime EXPORT LuxEngineTargets
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+    INCLUDES DESTINATION include
+)
+install(DIRECTORY Engine/ DESTINATION include/Engine FILES_MATCHING PATTERN "*.hpp")
+install(DIRECTORY Runtime/ DESTINATION include/Runtime FILES_MATCHING PATTERN "*.hpp")
+if(APPLE)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/Basic.metal"
+        DESTINATION share/LuxEngine/shaders)
+else()
+    install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders/"
+        DESTINATION share/LuxEngine/shaders)
+endif()
+install(EXPORT LuxEngineTargets NAMESPACE LuxEngine:: DESTINATION lib/cmake/LuxEngine)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfigVersion.cmake"
+    DESTINATION lib/cmake/LuxEngine
+)

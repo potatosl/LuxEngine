@@ -9,8 +9,8 @@
 namespace LuxEngine {
 GpuDevice::~GpuDevice() { Shutdown(); }
 bool GpuDevice::Initialize(SDL_Window* window) {
+    if (device_ || !window) return false;
     Shutdown();
-    if (!window) return false;
     window_ = window;
     const SDL_GPUShaderFormat formats = SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL;
 #ifdef LUX_DEBUG
@@ -95,8 +95,11 @@ bool GpuDevice::CreatePipelines() {
 }
 void GpuDevice::Shutdown() {
     if (currentCommandBuffer_) {
-        if (currentSwapchainTexture_) SDL_SubmitGPUCommandBuffer(currentCommandBuffer_);
-        else SDL_CancelGPUCommandBuffer(currentCommandBuffer_);
+        if (currentSwapchainTexture_) EndFrame();
+        else {
+            if (!SDL_CancelGPUCommandBuffer(currentCommandBuffer_)) Log::Error(SDL_GetError());
+            currentCommandBuffer_ = nullptr;
+        }
     }
     currentCommandBuffer_ = nullptr; currentSwapchainTexture_ = nullptr;
     if (device_) {
@@ -124,26 +127,36 @@ bool GpuDevice::ResizeDepth(uint32 width, uint32 height) {
     depth_ = replacement; depthWidth_ = width; depthHeight_ = height;
     return true;
 }
-bool GpuDevice::BeginFrame() {
-    if (!IsReady() || currentCommandBuffer_) return false;
+GpuDevice::FrameStart GpuDevice::BeginFrame() {
+    if (!IsReady() || currentCommandBuffer_) return FrameStart::Error;
     currentCommandBuffer_ = SDL_AcquireGPUCommandBuffer(device_);
-    if (!currentCommandBuffer_) return false;
+    if (!currentCommandBuffer_) { Log::Error(SDL_GetError()); return FrameStart::Error; }
+    currentSwapchainTexture_ = nullptr;
     uint32 width = 0, height = 0;
     if (!SDL_WaitAndAcquireGPUSwapchainTexture(currentCommandBuffer_, window_, &currentSwapchainTexture_, &width, &height)) {
-        SDL_CancelGPUCommandBuffer(currentCommandBuffer_); currentCommandBuffer_ = nullptr; return false;
+        Log::Error(SDL_GetError());
+        SDL_CancelGPUCommandBuffer(currentCommandBuffer_); currentCommandBuffer_ = nullptr;
+        currentSwapchainTexture_ = nullptr;
+        return FrameStart::Error;
     }
-    if (!currentSwapchainTexture_) { EndFrame(); return false; }
-    if (!ResizeDepth(width, height)) { EndFrame(); return false; }
+    if (!currentSwapchainTexture_) return EndFrame() ? FrameStart::Skipped : FrameStart::Error;
+    if (!ResizeDepth(width, height)) {
+        Log::Error(SDL_GetError());
+        EndFrame();
+        return FrameStart::Error;
+    }
     depthCleared_ = false;
-    return true;
+    return FrameStart::Ready;
 }
-void GpuDevice::Clear(float r, float g, float b, float a) {
-    if (!currentCommandBuffer_ || !currentSwapchainTexture_) return;
+bool GpuDevice::Clear(float r, float g, float b, float a) {
+    if (!currentCommandBuffer_ || !currentSwapchainTexture_) return false;
     SDL_GPUColorTargetInfo color{};
     color.texture = currentSwapchainTexture_; color.clear_color = {r,g,b,a};
     color.load_op = SDL_GPU_LOADOP_CLEAR; color.store_op = SDL_GPU_STOREOP_STORE;
     auto* pass = SDL_BeginGPURenderPass(currentCommandBuffer_, &color, 1, nullptr);
-    if (pass) SDL_EndGPURenderPass(pass);
+    if (!pass) { Log::Error(SDL_GetError()); return false; }
+    SDL_EndGPURenderPass(pass);
+    return true;
 }
 bool GpuDevice::DrawTriangles(std::span<const RenderVertex> data, const Mat4& vp, GpuTexture* texture, bool depth) {
     if (!currentCommandBuffer_ || !currentSwapchainTexture_ || data.empty() || data.size() % 3 != 0 || data.size_bytes() > std::numeric_limits<uint32>::max()) return false;
@@ -175,9 +188,12 @@ bool GpuDevice::DrawTriangles(std::span<const RenderVertex> data, const Mat4& vp
     if (depth) depthCleared_ = true;
     return true;
 }
-void GpuDevice::EndFrame() {
-    if (currentCommandBuffer_ && !SDL_SubmitGPUCommandBuffer(currentCommandBuffer_)) Log::Error(SDL_GetError());
+bool GpuDevice::EndFrame() {
+    if (!currentCommandBuffer_) return false;
+    const bool submitted = SDL_SubmitGPUCommandBuffer(currentCommandBuffer_);
+    if (!submitted) Log::Error(SDL_GetError());
     currentCommandBuffer_ = nullptr; currentSwapchainTexture_ = nullptr;
+    return submitted;
 }
 bool GpuDevice::SetVSync(bool enabled) {
     if (!IsReady() || currentCommandBuffer_) return false;

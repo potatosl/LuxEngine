@@ -17,8 +17,10 @@ namespace LuxEngine {
         uint32 height = 720;
     };
 
-    class Application {
+    class LUX_API Application {
     public:
+        enum class FrameResult { Continue, Skipped, Stopped, Error };
+
         Application(const ApplicationSpecification& spec = ApplicationSpecification{});
         virtual ~Application();
 
@@ -29,14 +31,15 @@ namespace LuxEngine {
 
         bool Initialize();
         int Run();
-        void Shutdown();
+        FrameResult RunFrame();
+        void Shutdown() noexcept;
 
         void Close() { running_ = false; }
         virtual void OnEvent(Event& e);
 
-        static Application& Get() { return *s_Instance; }
-        Window& GetWindow() { return *window_; }
-        GpuDevice& GetGpuDevice() { return *gpuDevice_; }
+        static Application& Get();
+        Window& GetWindow();
+        GpuDevice& GetGpuDevice();
 
     protected:
         virtual void OnInit() {}
@@ -54,8 +57,12 @@ namespace LuxEngine {
         Scope<Window> window_;
         Scope<GpuDevice> gpuDevice_;
         bool sdlInitialized_ = false;
+        bool ownsSdlRoot_ = false;
+        bool shuttingDown_ = false;
         bool running_ = false;
         bool initHookEntered_ = false;
+        uint64 lastTicksNs_ = 0;
+        double accumulator_ = 0.0;
         double elapsedSeconds_ = 0.0;
     };
 

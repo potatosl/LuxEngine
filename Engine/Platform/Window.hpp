@@ -19,13 +19,12 @@ namespace LuxEngine {
         bool vsync = true;
     };
 
-    class Window {
+    class LUX_API Window {
     public:
         using EventCallbackFn = std::function<void(Event&)>;
 
         Window() = default;
         ~Window();
-
         Window(const Window&) = delete;
         Window& operator=(const Window&) = delete;
         Window(Window&&) noexcept = delete;
@@ -39,8 +38,8 @@ namespace LuxEngine {
         bool HasWindowIcon() const { return hasWindowIcon_; }
         bool IsRunning() const { return isRunning_; }
         SDL_Window* GetNativeHandle() const { return window_; }
-        uint32 GetWidth() const { return props_.width; }
-        uint32 GetHeight() const { return props_.height; }
+        uint32 GetWidth() const;
+        uint32 GetHeight() const;
 
         void SetFullscreen(bool fullscreen);
         bool IsFullscreen() const;

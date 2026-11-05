@@ -9,7 +9,7 @@
 
 namespace LuxEngine {
 class Entity;
-class Scene {
+class LUX_API Scene {
 public:
     Scene();
     ~Scene();

@@ -13,6 +13,16 @@
     #define LUX_PLATFORM_MACOS 1
 #endif
 
+#if defined(_WIN32) && defined(LUX_ENGINE_SHARED)
+    #if defined(LUX_ENGINE_BUILD)
+        #define LUX_API __declspec(dllexport)
+    #else
+        #define LUX_API __declspec(dllimport)
+    #endif
+#else
+    #define LUX_API
+#endif
+
 namespace LuxEngine {
 
     using int8   = std::int8_t;
