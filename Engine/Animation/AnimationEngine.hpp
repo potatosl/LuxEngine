@@ -17,7 +17,7 @@ namespace LuxEngine {
         Vec3 scale{ 1.0f, 1.0f, 1.0f };
     };
 
-    class AnimationClip {
+    class LUX_API AnimationClip {
     public:
         std::string name;
         float duration = 1.0f;
@@ -34,7 +34,7 @@ namespace LuxEngine {
         TransformComponent Sample(float time) const;
     };
 
-    class AnimationEngine {
+    class LUX_API AnimationEngine {
     public:
         static void Init();
         static void Shutdown();

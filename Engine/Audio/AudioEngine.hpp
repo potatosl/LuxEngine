@@ -5,7 +5,7 @@
 
 namespace LuxEngine {
 
-    class AudioEngine {
+    class LUX_API AudioEngine {
     public:
         static bool Init();
         static void Shutdown();

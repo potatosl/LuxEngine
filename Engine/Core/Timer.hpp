@@ -4,7 +4,7 @@
 
 namespace LuxEngine {
 
-    class Timer {
+    class LUX_API Timer {
     public:
         Timer();
         void Reset();

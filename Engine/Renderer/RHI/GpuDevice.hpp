@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine/Core/Core.hpp"
 #include "Engine/Core/Math.hpp"
 #include "Engine/Renderer/RHI/Texture.hpp"
 #include "Engine/Renderer/RHI/Buffer.hpp"
@@ -6,8 +7,10 @@
 
 namespace LuxEngine {
 struct RenderVertex { Vec3 position; Vec4 color; Vec2 uv; };
-class GpuDevice {
+class LUX_API GpuDevice {
 public:
+    enum class FrameStart { Ready, Skipped, Error };
+
     GpuDevice() = default;
     ~GpuDevice();
     GpuDevice(const GpuDevice&) = delete;
@@ -16,9 +19,9 @@ public:
     GpuDevice& operator=(GpuDevice&&) = delete;
     bool Initialize(SDL_Window* window);
     void Shutdown();
-    bool BeginFrame();
-    void Clear(float r, float g, float b, float a);
-    void EndFrame();
+    FrameStart BeginFrame();
+    bool Clear(float r, float g, float b, float a);
+    bool EndFrame();
     bool DrawTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection, GpuTexture* texture = nullptr, bool depth = false);
     bool SetVSync(bool enabled);
     SDL_GPUDevice* GetHandle() const { return device_; }

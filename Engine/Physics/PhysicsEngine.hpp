@@ -45,7 +45,7 @@ namespace LuxEngine {
         Vec2 normal{ 0.0f, 0.0f };
     };
 
-    class PhysicsEngine {
+    class LUX_API PhysicsEngine {
     public:
         static void Init();
         static void Shutdown();

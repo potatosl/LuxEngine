@@ -12,7 +12,8 @@ namespace LuxEngine {
 
     bool Window::Initialize(const WindowProps& props) {
         if (window_) {
-            Shutdown();
+            Log::Error("Window is already initialized");
+            return false;
         }
 
         props_ = props;
@@ -144,8 +145,11 @@ namespace LuxEngine {
                 }
             } else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || event.type == SDL_EVENT_WINDOW_RESIZED) {
                 if (event.window.windowID == currentWindowID) {
-                    props_.width = static_cast<uint32>(event.window.data1);
-                    props_.height = static_cast<uint32>(event.window.data2);
+                    int width = 0, height = 0;
+                    if (SDL_GetWindowSize(window_, &width, &height)) {
+                        props_.width = static_cast<uint32>(width);
+                        props_.height = static_cast<uint32>(height);
+                    }
                     if (eventCallback_) {
                         WindowResizeEvent e(props_.width, props_.height);
                         eventCallback_(e);
@@ -153,6 +157,18 @@ namespace LuxEngine {
                 }
             }
         }
+    }
+
+    uint32 Window::GetWidth() const {
+        int width = 0;
+        return window_ && SDL_GetWindowSize(window_, &width, nullptr)
+            ? static_cast<uint32>(width) : props_.width;
+    }
+
+    uint32 Window::GetHeight() const {
+        int height = 0;
+        return window_ && SDL_GetWindowSize(window_, nullptr, &height)
+            ? static_cast<uint32>(height) : props_.height;
     }
 
 } // namespace LuxEngine
