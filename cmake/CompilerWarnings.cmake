@@ -1,16 +1,17 @@
+# Compiler Warnings and Strict Flags Configuration for LuxEngine
+
 function(lux_set_target_warnings target_name)
     target_compile_features(${target_name} PUBLIC cxx_std_20)
 
     if(MSVC)
         target_compile_options(${target_name} PRIVATE
             /W4
-            /FS
-            /MP
             /permissive-
             /utf-8
             /Zc:__cplusplus
             /Zc:preprocessor
         )
+        # Release optimizations & Debug configs
         target_compile_definitions(${target_name} PRIVATE
             $<$<CONFIG:Debug>:LUX_DEBUG>
             $<$<CONFIG:Release>:LUX_RELEASE>

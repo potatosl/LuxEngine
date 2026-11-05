@@ -12,20 +12,17 @@ namespace LuxEngine {
     }
 
     void Log::Print(LogLevel level, std::string_view message) {
-        const char* msgStr = message.empty() ? "" : message.data();
-        const int msgLen = static_cast<int>(message.length());
-
         switch (level) {
             case LogLevel::Trace:
             case LogLevel::Info:
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[LuxEngine] %.*s", msgLen, msgStr);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[LuxEngine] %.*s", static_cast<int>(message.length()), message.data());
                 break;
             case LogLevel::Warn:
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "[LuxEngine WARN] %.*s", msgLen, msgStr);
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "[LuxEngine WARN] %.*s", static_cast<int>(message.length()), message.data());
                 break;
             case LogLevel::Error:
             case LogLevel::Fatal:
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "[LuxEngine ERROR] %.*s", msgLen, msgStr);
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "[LuxEngine ERROR] %.*s", static_cast<int>(message.length()), message.data());
                 break;
         }
     }
