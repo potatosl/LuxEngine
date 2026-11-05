@@ -1,11 +1,9 @@
-#include <wx/wx.h>
+#include "Editor/EditorFrame.hpp"
 
 class LuxEditorApp final : public wxApp {
 public:
     bool OnInit() override {
-        auto* frame = new wxFrame(nullptr, wxID_ANY, "LuxEditor", wxDefaultPosition, wxSize(1280, 800));
-        frame->CreateStatusBar();
-        frame->SetStatusText("Ready");
+        auto* frame = new LuxEngine::EditorFrame();
         frame->Show(true);
         return true;
     }
