@@ -1,12 +1,21 @@
 @PACKAGE_INIT@
-set(LuxEngine_SHADER_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/shaders")
+set(LuxEngine_USE_OGRE @LUX_USE_OGRE@)
+if(NOT LuxEngine_USE_OGRE)
+    set(LuxEngine_SHADER_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/shaders")
+endif()
 
 include(CMakeFindDependencyMacro)
 find_dependency(SDL3 3.2 CONFIG)
 find_dependency(box2d 2.4...<3 CONFIG)
+if(LuxEngine_USE_OGRE)
+    include("${CMAKE_CURRENT_LIST_DIR}/LuxOgreDependency.cmake")
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/LuxEngineTargets.cmake")
 
 function(lux_copy_shaders target)
+    if(LuxEngine_USE_OGRE)
+        return()
+    endif()
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${LuxEngine_SHADER_DIR}"

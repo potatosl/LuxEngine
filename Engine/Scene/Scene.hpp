@@ -58,12 +58,28 @@ public:
             throw std::out_of_range("Component does not exist");
         return static_cast<const Pool<T>&>(*it->second).values.at(id);
     }
+    template <class T> T* TryGetComponent(uint32 id) {
+        return const_cast<T*>(std::as_const(*this).TryGetComponent<T>(id));
+    }
+    template <class T> const T* TryGetComponent(uint32 id) const {
+        if (!IsAlive(id))
+            return nullptr;
+        auto it = pools_.find(typeid(T));
+        if (it == pools_.end())
+            return nullptr;
+        auto& values = static_cast<const Pool<T>&>(*it->second).values;
+        auto component = values.find(id);
+        return component == values.end() ? nullptr : &component->second;
+    }
     template <class T> bool HasComponent(uint32 id) const {
         auto it = pools_.find(typeid(T));
         return IsAlive(id) && it != pools_.end() &&
                static_cast<const Pool<T>&>(*it->second).values.contains(id);
     }
     template <class T> void RemoveComponent(uint32 id) {
+        RequireAlive(id);
+        if (!HasComponent<T>(id))
+            return;
         auto it = pools_.find(typeid(T));
         if (it != pools_.end()) {
             it->second->Erase(id);
