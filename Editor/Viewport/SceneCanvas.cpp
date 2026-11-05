@@ -102,6 +102,16 @@ void SceneCanvas::RefreshScene() {
     Refresh(false);
 }
 
+void SceneCanvas::FocusSelection() {
+    const Entity selected = document_.GetSelected();
+    if (!selected || !selected.HasComponent<TransformComponent>())
+        return;
+    const auto& position = selected.GetComponent<TransformComponent>().position;
+    panX_ = -position.x * pixelsPerUnit_;
+    panY_ = position.y * pixelsPerUnit_;
+    RefreshScene();
+}
+
 void SceneCanvas::SetSnapToGrid(bool enabled) {
     snapToGrid_ = enabled;
     RefreshScene();

@@ -114,6 +114,28 @@ void TestDocument() {
           "new scene clears path and dirty state");
 }
 
+void Test3DEditorEntity() {
+    using namespace LuxEngine;
+    TempDirectory files;
+    EditorDocument document;
+    auto entity = document.CreateEntity("3D Mesh");
+    auto& transform = entity.GetComponent<TransformComponent>();
+    transform.position = {2.0f, 3.0f, 4.0f};
+    auto& material = entity.AddComponent<MeshRendererComponent>().material;
+    material.metallic = 0.75f;
+    material.roughness = 0.25f;
+    document.MarkDirty();
+    Check(document.SaveAs((files.path / "mesh-scene.lux").string()), "3D editor entity saves");
+    Check(document.Open((files.path / "mesh-scene.lux").string()), "3D editor entity reopens");
+    const auto entities = document.GetScene().GetEntities();
+    Check(entities.size() == 1 && entities[0].HasComponent<MeshRendererComponent>(),
+          "3D mesh component survives scene roundtrip");
+    const auto& restored = entities[0].GetComponent<MeshRendererComponent>().material;
+    Check(restored.metallic == 0.75f && restored.roughness == 0.25f &&
+              entities[0].GetComponent<TransformComponent>().position.z == 4.0f,
+          "3D transform and material values survive scene roundtrip");
+}
+
 void TestProjectManagement() {
     using namespace LuxEngine;
     TempDirectory files;
@@ -366,6 +388,7 @@ void TestUnicodeProjectPaths() {
 int main() {
     try {
         TestDocument();
+        Test3DEditorEntity();
         TestProjectManagement();
         TestProjectOperations();
         TestUnicodeProjectPaths();

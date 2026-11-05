@@ -4,15 +4,15 @@
 #include "Project/ProjectArchive.hpp"
 #include "Project/ProjectDialog.hpp"
 #include "Viewport/SceneCanvas.hpp"
+#include "Viewport/SceneCanvas3D.hpp"
 #include <algorithm>
+#include <functional>
 #include <numbers>
 #include <string>
+#include <wx/choicdlg.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
 #include <wx/image.h>
-#include <wx/notebook.h>
-#include <wx/scrolwin.h>
-#include <wx/splitter.h>
 #include <wx/stdpaths.h>
 #include <wx/textdlg.h>
 
@@ -20,6 +20,7 @@ namespace LuxEngine {
 namespace {
 enum : int {
     AddEntityId = wxID_HIGHEST + 100,
+    AddMeshEntityId,
     DeleteEntityId,
     SnapGridId,
     NewProjectId,
@@ -31,19 +32,20 @@ enum : int {
     BackupProjectId,
     RestoreProjectId,
     RescanResourcesId,
+    View2DId,
+    View3DId,
+    FocusSelectionId,
+    FullScreenId,
+    CommandPaletteId,
+    ShowHierarchyId,
+    ShowProjectId,
+    ShowInspectorId,
+    ShowConsoleId,
+    ResetLayoutId,
     RecentProjectFirstId
 };
 constexpr int MaxRecentProjects = 10;
 constexpr int AutoSaveTimerId = wxID_HIGHEST + 150;
-
-wxSpinCtrlDouble* MakeNumber(wxWindow* parent, double low, double high, double initial,
-                             double step) {
-    auto* control =
-        new wxSpinCtrlDouble(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(78, -1),
-                             wxSP_ARROW_KEYS | wxTE_PROCESS_ENTER, low, high, initial, step);
-    control->SetDigits(3);
-    return control;
-}
 
 std::string Utf8(const wxString& value) {
     return value.ToStdString(wxConvUTF8);
@@ -59,7 +61,7 @@ EditorFrame::EditorFrame()
       recentProjects_(PathFromUtf8(Utf8(wxStandardPaths::Get().GetUserDataDir())) /
                       "recent-projects.txt") {
     SetMinSize(wxSize(960, 600));
-    CreateStatusBar();
+    CreateStatusBar(2);
     recentProjects_.Load();
     autoSaveTimer_.SetOwner(this, AutoSaveTimerId);
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) { AutoSaveScene(); }, AutoSaveTimerId);
@@ -70,9 +72,14 @@ EditorFrame::EditorFrame()
             event.Veto();
             return;
         }
+        SaveWorkspaceLayout();
         event.Skip();
     });
     RefreshAll();
+}
+
+EditorFrame::~EditorFrame() {
+    aui_.UnInit();
 }
 
 void EditorFrame::BuildMenus() {
@@ -99,16 +106,33 @@ void EditorFrame::BuildMenus() {
 
     auto* edit = new wxMenu;
     edit->Append(AddEntityId, Ui("엔티티 추가\tCtrl+E"));
+    edit->Append(AddMeshEntityId, Ui("3D 메시 엔티티 추가"));
     edit->Append(DeleteEntityId, Ui("선택 삭제\tDel"));
 
     auto* view = new wxMenu;
     view->AppendCheckItem(SnapGridId, Ui("격자에 맞춤"));
     view->Check(SnapGridId, true);
+    view->AppendSeparator();
+    view->Append(View2DId, Ui("2D 작업 화면"));
+    view->Append(View3DId, Ui("3D 배치 화면"));
+    view->Append(FocusSelectionId, Ui("선택 항목에 초점\tF"));
+    view->Append(FullScreenId, Ui("전체 화면\tF11"));
+
+    auto* window = new wxMenu;
+    window->Append(CommandPaletteId, Ui("명령 검색...\tCtrl+P"));
+    window->AppendSeparator();
+    window->Append(ShowHierarchyId, Ui("장면 계층 표시/숨기기"));
+    window->Append(ShowProjectId, Ui("프로젝트 파일 표시/숨기기"));
+    window->Append(ShowInspectorId, Ui("속성 표시/숨기기"));
+    window->Append(ShowConsoleId, Ui("콘솔 표시/숨기기"));
+    window->AppendSeparator();
+    window->Append(ResetLayoutId, Ui("기본 배치 복원"));
 
     auto* bar = new wxMenuBar;
     bar->Append(file, Ui("파일"));
     bar->Append(edit, Ui("편집"));
     bar->Append(view, Ui("보기"));
+    bar->Append(window, Ui("창"));
     SetMenuBar(bar);
     UpdateRecentMenu();
 
@@ -163,7 +187,26 @@ void EditorFrame::BuildMenus() {
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { SaveScene(true); }, wxID_SAVEAS);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { Close(); }, wxID_EXIT);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { AddEntity(); }, AddEntityId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { AddMeshEntity(); }, AddMeshEntityId);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { DeleteEntity(); }, DeleteEntityId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { viewportTabs_->SetSelection(0); }, View2DId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { viewportTabs_->SetSelection(1); }, View3DId);
+    Bind(
+        wxEVT_MENU,
+        [this](wxCommandEvent&) {
+            if (viewportTabs_->GetSelection() == 1)
+                canvas3D_->FocusSelection();
+            else
+                canvas_->FocusSelection();
+        },
+        FocusSelectionId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowFullScreen(!IsFullScreen()); }, FullScreenId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { OpenCommandPalette(); }, CommandPaletteId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowWorkspacePane("hierarchy"); }, ShowHierarchyId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowWorkspacePane("project"); }, ShowProjectId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowWorkspacePane("inspector"); }, ShowInspectorId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowWorkspacePane("console"); }, ShowConsoleId);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { ResetWorkspaceLayout(); }, ResetLayoutId);
     Bind(
         wxEVT_MENU,
         [this](wxCommandEvent& event) {
@@ -192,6 +235,45 @@ void EditorFrame::UpdateRecentMenu() {
         const auto label = wxString::FromUTF8(PathUtf8(files[index]));
         recentMenu_->Append(RecentProjectFirstId + static_cast<int>(index), label);
     }
+}
+
+void EditorFrame::OpenCommandPalette() {
+    wxTextEntryDialog search(this, Ui("실행할 명령 이름을 입력해 주세요."), Ui("명령 검색"));
+    if (search.ShowModal() != wxID_OK)
+        return;
+    struct Command {
+        wxString label;
+        std::function<void()> run;
+    };
+    const std::vector<Command> commands{{Ui("새 프로젝트"), [this] { NewProject(); }},
+                                        {Ui("프로젝트 열기"), [this] { OpenProjectDialog(); }},
+                                        {Ui("장면 저장"), [this] { SaveScene(false); }},
+                                        {Ui("엔티티 추가"), [this] { AddEntity(); }},
+                                        {Ui("3D 메시 엔티티 추가"), [this] { AddMeshEntity(); }},
+                                        {Ui("선택 삭제"), [this] { DeleteEntity(); }},
+                                        {Ui("2D 작업"), [this] { viewportTabs_->SetSelection(0); }},
+                                        {Ui("3D 배치"), [this] { viewportTabs_->SetSelection(1); }},
+                                        {Ui("기본 배치 복원"), [this] { ResetWorkspaceLayout(); }}};
+    wxArrayString matches;
+    std::vector<size_t> indices;
+    const auto query = search.GetValue().Lower();
+    for (size_t index = 0; index < commands.size(); ++index)
+        if (query.empty() || commands[index].label.Lower().Find(query) != wxNOT_FOUND) {
+            matches.Add(commands[index].label);
+            indices.push_back(index);
+        }
+    if (matches.empty()) {
+        wxMessageBox(Ui("일치하는 명령이 없습니다."), Ui("명령 검색"), wxOK | wxICON_INFORMATION,
+                     this);
+        return;
+    }
+    if (matches.size() == 1) {
+        commands[indices.front()].run();
+        return;
+    }
+    wxSingleChoiceDialog choose(this, Ui("실행할 명령을 선택해 주세요."), Ui("명령 검색"), matches);
+    if (choose.ShowModal() == wxID_OK)
+        commands[indices[static_cast<size_t>(choose.GetSelection())]].run();
 }
 
 void EditorFrame::NewProject() {
@@ -341,165 +423,12 @@ void EditorFrame::AutoSaveScene() {
         SetStatusText(wxString::FromUTF8(error));
 }
 
-void EditorFrame::BuildLayout() {
-    auto* outer =
-        new wxSplitterWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxSP_LIVE_UPDATE);
-    outer->SetMinimumPaneSize(190);
-    outer->SetSashGravity(0.0);
-    auto* sidebar = new wxNotebook(outer, wxID_ANY);
-    auto* hierarchyPanel = new wxPanel(sidebar);
-    auto* inner =
-        new wxSplitterWindow(outer, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxSP_LIVE_UPDATE);
-    inner->SetMinimumPaneSize(280);
-    inner->SetSashGravity(1.0);
-
-    auto* hierarchySizer = new wxBoxSizer(wxVERTICAL);
-    hierarchySizer->Add(new wxStaticText(hierarchyPanel, wxID_ANY, Ui("장면 계층")), 0, wxALL, 10);
-    hierarchy_ = new wxListBox(hierarchyPanel, wxID_ANY);
-    hierarchySizer->Add(hierarchy_, 1, wxEXPAND | wxLEFT | wxRIGHT, 8);
-    auto* actions = new wxBoxSizer(wxHORIZONTAL);
-    auto* add = new wxButton(hierarchyPanel, wxID_ANY, Ui("추가"));
-    auto* remove = new wxButton(hierarchyPanel, wxID_ANY, Ui("삭제"));
-    actions->Add(add, 1, wxRIGHT, 5);
-    actions->Add(remove, 1);
-    hierarchySizer->Add(actions, 0, wxEXPAND | wxALL, 8);
-    hierarchyPanel->SetSizer(hierarchySizer);
-    sidebar->AddPage(hierarchyPanel, Ui("장면 계층"));
-    auto* projectPanel = new wxPanel(sidebar);
-    auto* projectSizer = new wxBoxSizer(wxVERTICAL);
-    projectSizer->Add(new wxStaticText(projectPanel, wxID_ANY, Ui("프로젝트 파일")), 0, wxALL, 10);
-    projectFiles_ = new wxListBox(projectPanel, wxID_ANY);
-    projectSizer->Add(projectFiles_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
-    projectPanel->SetSizer(projectSizer);
-    sidebar->AddPage(projectPanel, Ui("프로젝트"));
-    projectFiles_->Bind(wxEVT_LISTBOX_DCLICK, [this](wxCommandEvent&) {
-        const int selection = projectFiles_->GetSelection();
-        if (selection == wxNOT_FOUND ||
-            static_cast<size_t>(selection) >= projectFilePaths_.size() ||
-            projectFilePaths_[static_cast<size_t>(selection)].extension() != ".lux")
-            return;
-        OpenProjectScene(projectFilePaths_[static_cast<size_t>(selection)]);
-    });
-    add->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { AddEntity(); });
-    remove->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { DeleteEntity(); });
-    hierarchy_->Bind(wxEVT_LISTBOX, [this](wxCommandEvent&) {
-        if (refreshingHierarchy_)
-            return;
-        const int index = hierarchy_->GetSelection();
-        SelectEntity(index == wxNOT_FOUND
-                         ? std::nullopt
-                         : std::optional<uint32>(hierarchyIds_.at(static_cast<size_t>(index))));
-    });
-
-    canvas_ = new SceneCanvas(
-        inner, document_, [this](std::optional<uint32> id) { SelectEntity(id); },
-        [this](uint32 id, double x, double y) {
-            if (!document_.GetScene().HasComponent<TransformComponent>(id))
-                return;
-            auto& position = document_.GetScene().GetComponent<TransformComponent>(id).position;
-            const float nextX = static_cast<float>(std::clamp(x, -100000.0, 100000.0));
-            const float nextY = static_cast<float>(std::clamp(y, -100000.0, 100000.0));
-            if (position.x == nextX && position.y == nextY)
-                return;
-            position.x = nextX;
-            position.y = nextY;
-            document_.MarkDirty();
-            RefreshInspector();
-            canvas_->RefreshScene();
-            UpdateChrome();
-        });
-    auto* inspector = new wxScrolledWindow(inner, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                                           wxVSCROLL | wxTAB_TRAVERSAL);
-    inspector->SetScrollRate(0, 12);
-    auto* inspectorSizer = new wxBoxSizer(wxVERTICAL);
-    inspectorSizer->Add(new wxStaticText(inspector, wxID_ANY, Ui("속성")), 0, wxALL, 10);
-    selectionLabel_ = new wxStaticText(inspector, wxID_ANY, Ui("선택된 엔티티 없음"));
-    inspectorSizer->Add(selectionLabel_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 10);
-    inspectorBody_ = new wxPanel(inspector);
-    auto* bodySizer = new wxBoxSizer(wxVERTICAL);
-    bodySizer->Add(new wxStaticText(inspectorBody_, wxID_ANY, Ui("이름")), 0, wxBOTTOM, 4);
-    name_ = new wxTextCtrl(inspectorBody_, wxID_ANY);
-    bodySizer->Add(name_, 0, wxEXPAND | wxBOTTOM, 16);
-    name_->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { OnNameChanged(); });
-
-    auto* transformBox = new wxStaticBoxSizer(wxVERTICAL, inspectorBody_, Ui("변환"));
-    auto* grid = new wxFlexGridSizer(4, 5, 5);
-    for (int col = 1; col < 4; ++col)
-        grid->AddGrowableCol(col, 1);
-    grid->Add(new wxStaticText(inspectorBody_, wxID_ANY, wxEmptyString));
-    for (const char* axis : {"X", "Y", "Z"})
-        grid->Add(new wxStaticText(inspectorBody_, wxID_ANY, axis), 0, wxALIGN_CENTER);
-    const std::array<wxString, 3> labels{Ui("위치"), Ui("회전 °"), Ui("크기")};
-    for (size_t row = 0; row < labels.size(); ++row) {
-        grid->Add(new wxStaticText(inspectorBody_, wxID_ANY, labels[row]), 0,
-                  wxALIGN_CENTER_VERTICAL);
-        for (size_t col = 0; col < 3; ++col) {
-            const double initial = row == 2 ? 1.0 : 0.0;
-            auto* control =
-                MakeNumber(inspectorBody_, -100000.0, 100000.0, initial, row == 1 ? 5.0 : 0.1);
-            transform_[row][col] = control;
-            grid->Add(control, 1, wxEXPAND);
-            control->Bind(wxEVT_SPINCTRLDOUBLE,
-                          [this](wxSpinDoubleEvent&) { OnTransformChanged(); });
-            control->Bind(wxEVT_TEXT_ENTER, [this](wxCommandEvent&) { OnTransformChanged(); });
-        }
-    }
-    transformBox->Add(grid, 1, wxEXPAND | wxALL, 6);
-    bodySizer->Add(transformBox, 0, wxEXPAND | wxBOTTOM, 15);
-
-    auto* spriteBox = new wxStaticBoxSizer(wxVERTICAL, inspectorBody_, Ui("2D 스프라이트"));
-    spriteEnabled_ = new wxCheckBox(inspectorBody_, wxID_ANY, Ui("스프라이트 사용"));
-    spriteBox->Add(spriteEnabled_, 0, wxALL, 6);
-    spriteEnabled_->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { OnSpriteChanged(); });
-    auto* colorGrid = new wxFlexGridSizer(4, 5, 5);
-    for (int col = 0; col < 4; ++col)
-        colorGrid->AddGrowableCol(col, 1);
-    for (const char* channel : {"R", "G", "B", "A"})
-        colorGrid->Add(new wxStaticText(inspectorBody_, wxID_ANY, channel), 0, wxALIGN_CENTER);
-    for (auto& control : color_) {
-        control = MakeNumber(inspectorBody_, 0.0, 1.0, 1.0, 0.05);
-        colorGrid->Add(control, 1, wxEXPAND);
-        control->Bind(wxEVT_SPINCTRLDOUBLE, [this](wxSpinDoubleEvent&) { OnColorChanged(); });
-        control->Bind(wxEVT_TEXT_ENTER, [this](wxCommandEvent&) { OnColorChanged(); });
-    }
-    spriteBox->Add(colorGrid, 0, wxEXPAND | wxALL, 6);
-    bodySizer->Add(spriteBox, 0, wxEXPAND);
-    inspectorBody_->SetSizer(bodySizer);
-    inspectorSizer->Add(inspectorBody_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-    inspector->SetSizer(inspectorSizer);
-
-    inner->SplitVertically(canvas_, inspector, -335);
-    outer->SplitVertically(sidebar, inner, 250);
-    auto* rootSizer = new wxBoxSizer(wxVERTICAL);
-    auto* commandBar = new wxPanel(this, wxID_ANY);
-    commandBar->SetBackgroundColour(wxColour(41, 46, 55));
-    auto* commands = new wxBoxSizer(wxHORIZONTAL);
-    auto addCommand = [commandBar, commands](const char* label, auto action) {
-        auto* button = new wxButton(commandBar, wxID_ANY, Ui(label), wxDefaultPosition,
-                                    wxDefaultSize, wxBORDER_NONE);
-        button->Bind(wxEVT_BUTTON, action);
-        commands->Add(button, 0, wxRIGHT, 6);
-    };
-    addCommand("새 프로젝트", [this](wxCommandEvent&) { NewProject(); });
-    addCommand("프로젝트 열기", [this](wxCommandEvent&) { OpenProjectDialog(); });
-    addCommand("장면 저장", [this](wxCommandEvent&) { SaveScene(false); });
-    addCommand("엔티티 추가", [this](wxCommandEvent&) { AddEntity(); });
-    projectLabel_ = new wxStaticText(commandBar, wxID_ANY, Ui("프로젝트 없음"), wxDefaultPosition,
-                                     wxSize(240, -1), wxST_ELLIPSIZE_END);
-    projectLabel_->SetForegroundColour(wxColour(232, 235, 240));
-    commands->AddStretchSpacer();
-    commands->Add(projectLabel_, 0, wxALIGN_CENTER_VERTICAL);
-    commandBar->SetSizer(commands);
-    rootSizer->Add(commandBar, 0, wxEXPAND | wxALL, 0);
-    rootSizer->Add(outer, 1, wxEXPAND);
-    SetSizer(rootSizer);
-}
-
 void EditorFrame::RefreshAll() {
     RefreshHierarchy();
     RefreshProjectExplorer();
     RefreshInspector();
     canvas_->RefreshScene();
+    canvas3D_->RefreshScene();
     UpdateChrome();
 }
 
@@ -515,12 +444,22 @@ void EditorFrame::RefreshProjectExplorer() {
     std::filesystem::recursive_directory_iterator iterator(
         root, std::filesystem::directory_options::skip_permission_denied, error);
     const std::filesystem::recursive_directory_iterator end;
+    const wxString filter = projectSearch_->GetValue().Lower();
     while (!error && iterator != end && projectFilePaths_.size() < 500) {
+        const auto relative = iterator->path().lexically_relative(root);
+        if (!relative.empty() && (*relative.begin() == ".git" || *relative.begin() == ".lux")) {
+            if (iterator->is_directory(error))
+                iterator.disable_recursion_pending();
+            iterator.increment(error);
+            continue;
+        }
         if (iterator->is_regular_file(error)) {
             const auto path = iterator->path();
-            projectFilePaths_.push_back(path);
-            projectFiles_->Append(
-                wxString::FromUTF8(GenericPathUtf8(path.lexically_relative(root))));
+            const wxString label = wxString::FromUTF8(GenericPathUtf8(relative));
+            if (filter.empty() || label.Lower().Find(filter) != wxNOT_FOUND) {
+                projectFilePaths_.push_back(path);
+                projectFiles_->Append(label);
+            }
         }
         iterator.increment(error);
     }
@@ -532,14 +471,17 @@ void EditorFrame::RefreshHierarchy() {
     hierarchy_->Clear();
     hierarchyIds_.clear();
     const Entity selected = document_.GetSelected();
+    const wxString filter = hierarchySearch_->GetValue().Lower();
     for (Entity entity : document_.GetScene().GetEntities()) {
         const uint32 id = entity.GetId();
         const std::string tag = entity.HasComponent<TagComponent>()
                                     ? entity.GetComponent<TagComponent>().tag
                                     : "Entity";
+        const wxString label = wxString::FromUTF8(tag.c_str());
+        if (!filter.empty() && label.Lower().Find(filter) == wxNOT_FOUND)
+            continue;
         hierarchyIds_.push_back(id);
-        hierarchy_->Append(wxString::Format("%u  ", static_cast<unsigned>(id)) +
-                           wxString::FromUTF8(tag.c_str()));
+        hierarchy_->Append(wxString::Format("%u  ", static_cast<unsigned>(id)) + label);
         if (selected && selected.GetId() == id)
             hierarchy_->SetSelection(static_cast<int>(hierarchyIds_.size() - 1));
     }
@@ -581,6 +523,14 @@ void EditorFrame::RefreshInspector() {
             color_[i]->SetValue(std::clamp(static_cast<double>(channels[i]), 0.0, 1.0));
             color_[i]->Enable(hasSprite);
         }
+        const bool hasMesh = selected.HasComponent<MeshRendererComponent>();
+        meshEnabled_->SetValue(hasMesh);
+        const Material3D material =
+            hasMesh ? selected.GetComponent<MeshRendererComponent>().material : Material3D{};
+        metallic_->SetValue(std::clamp(static_cast<double>(material.metallic), 0.0, 1.0));
+        roughness_->SetValue(std::clamp(static_cast<double>(material.roughness), 0.0, 1.0));
+        metallic_->Enable(hasMesh);
+        roughness_->Enable(hasMesh);
     }
     refreshingInspector_ = false;
 }
@@ -597,6 +547,7 @@ void EditorFrame::UpdateChrome() {
                                      : Ui("프로젝트 없음"));
     SetStatusText(wxString::Format(Ui("%s엔티티 %u개"), projectName.c_str(),
                                    static_cast<unsigned>(document_.GetScene().GetEntityCount())));
+    SetStatusText(viewportTabs_->GetSelection() == 1 ? Ui("3D 배치 미리보기") : Ui("2D 장면"), 1);
     GetMenuBar()->Enable(ProjectSettingsId, project_.has_value());
     for (int id :
          {CloneProjectId, ExportProjectId, BackupProjectId, RestoreProjectId, RescanResourcesId})
@@ -656,6 +607,15 @@ void EditorFrame::AddEntity() {
     RefreshAll();
 }
 
+void EditorFrame::AddMeshEntity() {
+    const std::string name =
+        "3D Entity " + std::to_string(document_.GetScene().GetEntityCount() + 1);
+    Entity entity = document_.CreateEntity(name);
+    entity.AddComponent<MeshRendererComponent>();
+    viewportTabs_->SetSelection(1);
+    RefreshAll();
+}
+
 void EditorFrame::DeleteEntity() {
     if (document_.DeleteSelected())
         RefreshAll();
@@ -666,6 +626,7 @@ void EditorFrame::SelectEntity(std::optional<uint32> id) {
     RefreshHierarchy();
     RefreshInspector();
     canvas_->RefreshScene();
+    canvas3D_->RefreshScene();
 }
 
 void EditorFrame::OnNameChanged() {
@@ -682,6 +643,7 @@ void EditorFrame::OnNameChanged() {
     document_.MarkDirty();
     RefreshHierarchy();
     canvas_->RefreshScene();
+    canvas3D_->RefreshScene();
     UpdateChrome();
 }
 
@@ -705,6 +667,7 @@ void EditorFrame::OnTransformChanged() {
                    static_cast<float>(transform_[2][2]->GetValue())};
     document_.MarkDirty();
     canvas_->RefreshScene();
+    canvas3D_->RefreshScene();
     UpdateChrome();
 }
 
@@ -721,6 +684,7 @@ void EditorFrame::OnSpriteChanged() {
     document_.MarkDirty();
     RefreshInspector();
     canvas_->RefreshScene();
+    canvas3D_->RefreshScene();
     UpdateChrome();
 }
 
@@ -735,6 +699,28 @@ void EditorFrame::OnColorChanged() {
         static_cast<float>(color_[2]->GetValue()), static_cast<float>(color_[3]->GetValue())};
     document_.MarkDirty();
     canvas_->RefreshScene();
+    canvas3D_->RefreshScene();
+    UpdateChrome();
+}
+
+void EditorFrame::OnMeshChanged() {
+    if (refreshingInspector_)
+        return;
+    Entity selected = document_.GetSelected();
+    if (!selected)
+        return;
+    if (meshEnabled_->GetValue() && !selected.HasComponent<MeshRendererComponent>())
+        selected.AddComponent<MeshRendererComponent>();
+    else if (!meshEnabled_->GetValue() && selected.HasComponent<MeshRendererComponent>())
+        selected.RemoveComponent<MeshRendererComponent>();
+    if (selected.HasComponent<MeshRendererComponent>()) {
+        auto& material = selected.GetComponent<MeshRendererComponent>().material;
+        material.metallic = static_cast<float>(metallic_->GetValue());
+        material.roughness = static_cast<float>(roughness_->GetValue());
+    }
+    document_.MarkDirty();
+    RefreshInspector();
+    canvas3D_->RefreshScene();
     UpdateChrome();
 }
 

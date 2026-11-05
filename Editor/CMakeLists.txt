@@ -11,7 +11,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     find_package(LuxEngine CONFIG REQUIRED)
 endif()
 
-find_package(wxWidgets REQUIRED COMPONENTS core base)
+find_package(wxWidgets REQUIRED COMPONENTS core base aui)
 include(${wxWidgets_USE_FILE})
 
 function(lux_editor_copy_runtime target)
@@ -39,6 +39,7 @@ endfunction()
 add_executable(LuxEditor WIN32 MACOSX_BUNDLE
     App/Main.cpp
     App/EditorFrame.cpp
+    App/EditorFrameLayout.cpp
     App/EditorFrameProjects.cpp
     Project/EditorProject.cpp
     Project/ProjectArchive.cpp
@@ -47,6 +48,7 @@ add_executable(LuxEditor WIN32 MACOSX_BUNDLE
     Project/ProjectTemplates.cpp
     Scene/EditorDocument.cpp
     Viewport/SceneCanvas.cpp
+    Viewport/SceneCanvas3D.cpp
 )
 target_include_directories(LuxEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(LuxEditor PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")

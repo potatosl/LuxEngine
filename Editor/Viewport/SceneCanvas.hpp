@@ -19,6 +19,7 @@ public:
                 std::function<void(uint32, double, double)> onMove);
 
     void RefreshScene();
+    void FocusSelection();
     void SetSnapToGrid(bool enabled);
 
 private:
