@@ -1,4 +1,4 @@
-#include "Editor/EditorDocument.hpp"
+#include "EditorDocument.hpp"
 
 namespace LuxEngine {
 
@@ -13,10 +13,12 @@ void EditorDocument::NewScene() {
 }
 
 bool EditorDocument::Open(const std::string& path) {
-    if (path.empty()) return false;
+    if (path.empty())
+        return false;
     std::string newPath = path;
     auto replacement = std::make_unique<Scene>();
-    if (!replacement->Deserialize(newPath)) return false;
+    if (!replacement->Deserialize(newPath))
+        return false;
     scene_.swap(replacement);
     selectedId_.reset();
     path_.swap(newPath);
@@ -25,15 +27,18 @@ bool EditorDocument::Open(const std::string& path) {
 }
 
 bool EditorDocument::Save() {
-    if (path_.empty() || !scene_->Serialize(path_)) return false;
+    if (path_.empty() || !scene_->Serialize(path_))
+        return false;
     dirty_ = false;
     return true;
 }
 
 bool EditorDocument::SaveAs(const std::string& path) {
-    if (path.empty()) return false;
+    if (path.empty())
+        return false;
     std::string newPath = path;
-    if (!scene_->Serialize(newPath)) return false;
+    if (!scene_->Serialize(newPath))
+        return false;
     path_.swap(newPath);
     dirty_ = false;
     return true;
@@ -44,7 +49,8 @@ void EditorDocument::Select(std::optional<uint32> id) {
 }
 
 Entity EditorDocument::GetSelected() const {
-    if (!selectedId_ || !scene_->IsAlive(*selectedId_)) return {};
+    if (!selectedId_ || !scene_->IsAlive(*selectedId_))
+        return {};
     return {*selectedId_, scene_.get()};
 }
 
@@ -58,7 +64,8 @@ Entity EditorDocument::CreateEntity(const std::string& name) {
 bool EditorDocument::DeleteSelected() {
     Entity selected = GetSelected();
     selectedId_.reset();
-    if (!selected) return false;
+    if (!selected)
+        return false;
     scene_->DestroyEntity(selected);
     dirty_ = true;
     return true;
