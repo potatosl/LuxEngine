@@ -6,9 +6,9 @@ A starter runtime for Windows, Linux and macOS. It creates an SDL3 window and cl
 
 - CMake 3.24 or later
 - C++20 compiler (MSVC, Clang or GCC)
-- Git and network access for fetching SDL 3.4.18
+- An installed SDL3 development package with `SDL3Config.cmake`
 - A GPU and driver supported by SDL3 GPU API (Vulkan, D3D12 or Metal)
-- On Linux, SDL development dependencies and a suitable Vulkan driver may be required.
+- On Linux, a suitable GPU driver may be required to run the demo.
 
 ## Build
 
@@ -27,7 +27,7 @@ cmake --build build --config Debug
 .\build\bin\Debug\AsterSandbox.exe
 ```
 
-This project downloads a pinned SDL3 tag with CMake FetchContent. The compiler/OS dependency installation is deliberately not automated.
+This project uses the installed SDL3 CMake package and does not download dependencies during configuration or build. If SDL3 is in a custom location, pass `-DSDL3_DIR=/path/to/SDL3Config.cmake/directory` to CMake.
 
 ## Architecture
 

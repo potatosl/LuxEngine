@@ -28,11 +28,4 @@ if(WIN32 AND TARGET SDL3::SDL3-shared)
             $<TARGET_FILE_DIR:LuxEngineDemo>
         COMMENT "Copying SDL3.dll to demo output directory"
     )
-elseif(WIN32 AND TARGET SDL3::SDL3)
-    add_custom_command(TARGET LuxEngineDemo POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:SDL3::SDL3>
-            $<TARGET_FILE_DIR:LuxEngineDemo>
-        COMMENT "Copying SDL3 binary to demo output directory"
-    )
 endif()

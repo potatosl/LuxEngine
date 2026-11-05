@@ -9,11 +9,19 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Config = "Debug",
     [switch]$Ninja,
-    [switch]$Clean
+    [switch]$Clean,
+    [string]$SDL3Dir = ""
 )
 
 $ErrorActionPreference = "Stop"
 $rootDir = (Get-Item $PSScriptRoot).Parent.FullName
+$sdl3CMakeArg = @()
+if ($SDL3Dir) {
+    if (-not (Test-Path -LiteralPath (Join-Path $SDL3Dir "SDL3Config.cmake"))) {
+        throw "SDL3Config.cmake not found in: $SDL3Dir"
+    }
+    $sdl3CMakeArg = @("-DSDL3_DIR=$SDL3Dir")
+}
 
 # Determine Windows Native CMake (prefer VS bundled or system native over MSYS2)
 $vsCmake = "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
@@ -34,7 +42,7 @@ if ($Ninja) {
     if ($Clean -and (Test-Path $buildDir)) {
         Remove-Item -Recurse -Force $buildDir
     }
-    & $cmakeExe -S $rootDir -B $buildDir -G "Ninja" -D CMAKE_BUILD_TYPE=$Config
+    & $cmakeExe -S $rootDir -B $buildDir -G "Ninja" -D CMAKE_BUILD_TYPE=$Config @sdl3CMakeArg
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
     & $cmakeExe --build $buildDir
 } else {
@@ -42,7 +50,7 @@ if ($Ninja) {
     if ($Clean -and (Test-Path $buildDir)) {
         Remove-Item -Recurse -Force $buildDir
     }
-    & $cmakeExe -S $rootDir -B $buildDir -G "Visual Studio 18 2026" -A x64
+    & $cmakeExe -S $rootDir -B $buildDir -G "Visual Studio 18 2026" -A x64 @sdl3CMakeArg
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
     & $cmakeExe --build $buildDir --config $Config
 }

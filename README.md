@@ -8,25 +8,16 @@ LuxEngine은 C++20을 기반으로 2D와 3D를 모두 지원하는 독립적인 
 - **IDE**: Visual Studio 2026 Community (Dev18)
 - **컴파일러**: MSVC v145 (`14.51.36231`)
 - **언어 표준**: C++20 (`cxx_std_20`)
-- **빌드 시스템**: CMake 4.4.3+
+- **빌드 시스템**: CMake 3.24+
 - **빌드 도구**: Ninja 1.13.2 / MSBuild
 - **형상 관리**: Git
 - **플랫폼 지원 목표**: Windows, Linux, macOS
 
 ## 2. 라이브러리 아키텍처
 
-- **SDL3** (`release-3.4.18`): 창 생성, 입력 이벤트, SDL GPU 백엔드 (필수 통합 완료)
-- **EnTT**: ECS (의존성 모듈 준비)
-- **GLM**: 수학 연산 (의존성 모듈 준비)
-- **Box2D**: 2D 물리 엔진 (의존성 모듈 준비)
-- **Jolt Physics**: 3D 물리 엔진 (의존성 모듈 준비)
-- **miniaudio**: 크로스플랫폼 오디오 엔진 (의존성 모듈 준비)
-- **spdlog**: 고성능 로깅 (의존성 모듈 준비)
-- **stb_image**: 텍스처/이미지 로딩 (의존성 모듈 준비)
-- **cgltf**: glTF 3D 모델 및 씬 로딩 (의존성 모듈 준비)
-- **Catch2**: 단위 테스트 프레임워크 (의존성 모듈 준비)
+- **SDL3**: 창 생성, 입력 이벤트, SDL GPU 백엔드에 필요한 유일한 외부 빌드 의존성입니다.
 
-`cmake/Dependencies.cmake`에서 `LUX_ENABLE_*` 옵션을 활성화하여 즉시 통합할 수 있습니다.
+EnTT, GLM, Box2D, Jolt Physics, miniaudio, spdlog, stb_image, cgltf, Catch2는 아직 엔진 코드에 통합되지 않았습니다. CMake 구성 및 빌드 과정에서는 라이브러리를 다운로드하지 않습니다.
 
 ## 3. 디렉터리 구조
 
@@ -61,7 +52,41 @@ LuxEngine/
 └── cmake/                      # 컴파일러 경고 및 의존성 모듈
 ```
 
-## 4. 빌드 및 실행 방법
+## 4. SDL3 설치 및 빌드
+
+SDL3 개발 패키지를 먼저 설치해야 합니다. CMake는 `SDL3Config.cmake`와 `SDL3::SDL3` 타깃을 찾습니다. 이 설정은 SDL3 자체를 소스에서 빌드하지 않으므로 Linux에서 SDL3 소스 빌드용 XSCRNSAVER 등의 개발 패키지는 필요하지 않습니다.
+
+### Fedora Linux
+
+```sh
+sudo dnf install SDL3-devel cmake ninja-build gcc-c++
+cmake -S . -B build/ninja-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/ninja-debug
+ctest --test-dir build/ninja-debug --output-on-failure
+```
+
+### macOS (Homebrew)
+
+```sh
+brew install sdl3 cmake ninja
+cmake -S . -B build/ninja-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="$(brew --prefix sdl3)"
+cmake --build build/ninja-debug
+ctest --test-dir build/ninja-debug --output-on-failure
+```
+
+### Windows
+
+SDL3 개발용 패키지를 설치하고, `SDL3Config.cmake`가 들어 있는 디렉터리를 CMake에 지정합니다. 예를 들어 패키지에 `C:\SDL3\lib\cmake\SDL3\SDL3Config.cmake`가 있다면:
+
+```powershell
+cmake --preset vs2026-x64-debug -DSDL3_DIR="C:\SDL3\lib\cmake\SDL3"
+cmake --build --preset vs2026-debug
+ctest --preset vs2026-debug-test --output-on-failure
+```
+
+CLion이나 Visual Studio에서 구성할 때도 `SDL3_DIR`을 같은 경로로 설정할 수 있습니다. 이미 CMake가 검색하는 경로에 SDL3가 있다면 이 옵션은 생략합니다. SDL3 설치 자체에는 패키지 관리자의 네트워크 연결이 필요할 수 있지만, 설치 후 이 프로젝트의 CMake 구성과 빌드는 네트워크에 접근하지 않습니다.
+
+## 5. 실행 방법
 
 ### 방법 A: Visual Studio 2026으로 열기 (권장)
 1. 바탕화면의 **LuxEngine** 바로가기를 더블클릭합니다.
@@ -78,6 +103,9 @@ LuxEngine/
 
 # Ninja 빌드
 .\Tools\Build.ps1 -Ninja -Config Debug
+
+# SDL3를 사용자 지정 위치에 설치한 경우
+.\Tools\Build.ps1 -Config Debug -SDL3Dir "C:\SDL3\lib\cmake\SDL3"
 ```
 
 ### 방법 C: CMake CLI 직접 사용
@@ -90,7 +118,7 @@ cmake --build --preset vs2026-debug
 .\build\vs2026\bin\Debug\LuxEngineDemo.exe
 ```
 
-## 5. 네임스페이스 및 타깃 규약
+## 6. 네임스페이스 및 타깃 규약
 
 - C++ 네임스페이스: `LuxEngine`
 - 엔진 타깃: `LuxEngine` (별칭: `LuxEngine::Engine`)
