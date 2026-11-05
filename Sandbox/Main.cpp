@@ -151,6 +151,10 @@ protected:
         le::PhysicsEngine::Init();
         if (!le::AudioEngine::Init())
             throw std::runtime_error("Audio initialization failed");
+        le::Input::BindAction("Jump", le::LuxKey::Space);
+        le::Input::BindAction("Jump", le::LuxMouseButton::Left);
+        le::Input::BindAction("Jump", le::LuxGamepadButton::South);
+        le::Input::BindAction("Quit", le::LuxKey::Escape);
 
         constexpr int landscapeWidth = 320;
         constexpr int landscapeHeight = 180;
@@ -195,11 +199,14 @@ protected:
         time_ += static_cast<float>(dt);
         jumpTimer_ += static_cast<float>(dt);
         if (auto* body = crate_.TryGetComponent<le::Rigidbody2DComponent>();
-            body && body->isGrounded && jumpTimer_ >= 2.4f) {
+            body && body->isGrounded &&
+            (le::Input::WasActionPressed("Jump") || jumpTimer_ >= 2.4f)) {
             body->velocity.y = 6.0f;
             jumpTimer_ = 0.0f;
         }
         scene_.OnUpdate(dt);
+        if (le::Input::WasActionPressed("Quit"))
+            Close();
         if (smokeTest_ && ++frames_ >= 10)
             Close();
     }
@@ -215,6 +222,8 @@ protected:
     }
 
     void OnShutdown() override {
+        le::Input::ClearAction("Jump");
+        le::Input::ClearAction("Quit");
         glow_.Release();
         landscape_.Release();
         le::AudioEngine::Shutdown();
