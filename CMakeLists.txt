@@ -33,6 +33,12 @@ foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG_UPPER} "${CMAKE_BINARY_DIR}/lib/${OUTPUTCONFIG}")
 endforeach()
 
+# Debug and Release engine libraries are installed side by side into one SDK; without a suffix the
+# second install overwrites the first and games fail to link (MSVC runtime mismatch).
+if(NOT DEFINED CMAKE_DEBUG_POSTFIX)
+    set(CMAKE_DEBUG_POSTFIX d)
+endif()
+
 # -------------------------------------------------------------
 # Include Custom CMake Modules
 # -------------------------------------------------------------
