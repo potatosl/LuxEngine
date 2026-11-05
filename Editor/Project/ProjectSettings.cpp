@@ -37,7 +37,7 @@ bool EditorProject::SetIcon(const std::filesystem::path& image, std::string& err
         error = "아이콘 이미지 파일을 찾을 수 없습니다.";
         return false;
     }
-    const auto extension = image.extension().string();
+    const auto extension = PathUtf8(image.extension());
     if (extension != ".png" && extension != ".jpg" && extension != ".jpeg" && extension != ".ico" &&
         extension != ".icns") {
         error = "PNG, JPEG, ICO 또는 ICNS 이미지를 선택해 주세요.";
