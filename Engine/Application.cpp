@@ -42,6 +42,10 @@ namespace LuxEngine {
             return false;
         }
 
+        window_->SetEventCallback([this](Event& e) {
+            OnEvent(e);
+        });
+
         gpuDevice_ = CreateScope<GpuDevice>();
         if (!gpuDevice_->Initialize(window_->GetNativeHandle())) {
             Log::Error("Failed to initialize GPU Device.");
@@ -51,6 +55,23 @@ namespace LuxEngine {
         OnInit();
         running_ = true;
         return true;
+    }
+
+    void Application::OnEvent(Event& e) {
+        EventDispatcher dispatcher(e);
+        dispatcher.Dispatch<WindowCloseEvent>([this](WindowCloseEvent& ev) { return OnWindowClose(ev); });
+        dispatcher.Dispatch<WindowResizeEvent>([this](WindowResizeEvent& ev) { return OnWindowResize(ev); });
+    }
+
+    bool Application::OnWindowClose(WindowCloseEvent& /*e*/) {
+        running_ = false;
+        return true;
+    }
+
+    bool Application::OnWindowResize(WindowResizeEvent& e) {
+        spec_.width = e.GetWidth();
+        spec_.height = e.GetHeight();
+        return false;
     }
 
     int Application::Run() {

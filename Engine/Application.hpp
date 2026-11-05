@@ -3,7 +3,9 @@
 #include "Engine/Core/Core.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Core/Timer.hpp"
+#include "Engine/Core/Event.hpp"
 #include "Engine/Platform/Window.hpp"
+#include "Engine/Platform/Input.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include <string>
 
@@ -30,6 +32,7 @@ namespace LuxEngine {
         void Shutdown();
 
         void Close() { running_ = false; }
+        virtual void OnEvent(Event& e);
 
         static Application& Get() { return *s_Instance; }
         Window& GetWindow() { return *window_; }
@@ -42,6 +45,9 @@ namespace LuxEngine {
         virtual void OnShutdown() {}
 
     private:
+        bool OnWindowClose(WindowCloseEvent& e);
+        bool OnWindowResize(WindowResizeEvent& e);
+
         static Application* s_Instance;
 
         ApplicationSpecification spec_;

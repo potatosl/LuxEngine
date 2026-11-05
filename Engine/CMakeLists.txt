@@ -2,7 +2,10 @@ set(LUXENGINE_SOURCES
     Core/Log.cpp
     Core/Timer.cpp
     Platform/Window.cpp
+    Platform/Input.cpp
     Renderer/RHI/GpuDevice.cpp
+    Renderer/RHI/Buffer.cpp
+    Renderer/RHI/Texture.cpp
     Renderer/Renderer2D/Renderer2D.cpp
     Renderer/Renderer3D/Renderer3D.cpp
     Scene/Scene.cpp
