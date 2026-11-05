@@ -207,7 +207,7 @@ GpuDevice::FrameStart GpuDevice::BeginFrame() {
             return FrameStart::Skipped;
         }
         s.swapchainFailures = 0;
-        if (!s.swapchain.handle) {
+        if (!s.swapchain.handle || s.swapchainDirty) {
             ++s.counters.framesSkipped;
             return FrameStart::Skipped;
         }

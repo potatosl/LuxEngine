@@ -73,6 +73,8 @@ SwapchainResult DeviceState::CreateSwapchain() {
         extent.height =
             std::clamp(pixelHeight, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
+    if (ConsumeFault(Fault::SurfaceZeroExtent))
+        extent = {0, 0};
     if (extent.width == 0 || extent.height == 0)
         return SwapchainResult::Minimized;
 

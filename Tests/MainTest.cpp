@@ -1391,6 +1391,13 @@ void Failures() {
 
         Check(gpu.Initialize(window), "device for device-lost");
         GpuTexture survivor;
+        Vk::InjectFault(Vk::Fault::SurfaceZeroExtent);
+        gpu.NotifyResize();
+        window.PollEvents();
+        Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped && gpu.IsReady(),
+              "zero surface extent skips instead of acquiring from the stale swapchain");
+        Check(graphics.Begin() && gpu.EndFrame(), "swapchain recreated once the surface has size");
+
         Check(survivor.Initialize(&gpu, 4, 4), "resource before device loss");
         Vk::InjectFault(Vk::Fault::DeviceLost);
         Check(graphics.Begin() && !gpu.EndFrame(), "device loss reported at submission");
