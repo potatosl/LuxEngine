@@ -353,6 +353,8 @@ std::optional<EditorProject> EditorProject::Open(const std::filesystem::path& fi
         error = "프로젝트 메타데이터 값이 올바르지 않습니다.";
         return std::nullopt;
     }
+    // Windows cannot replace a file that is still open, and the v1 migration below rewrites it.
+    input.close();
     if (fileVersion[0] != currentVersion[0] || fileVersion[1] != currentVersion[1]) {
         error = "프로젝트와 현재 엔진의 주·부 버전이 다릅니다. 호환되는 엔진으로 열어 주세요.";
         return std::nullopt;
