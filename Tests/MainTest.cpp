@@ -17,6 +17,17 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#undef PlaySound
+#undef small
+#endif
 
 namespace {
 int checks = 0;
@@ -508,6 +519,78 @@ void Scenes() {
     custom.AddComponent<Custom>();
     Check(!scene.Serialize(files.Path("unsupported.lux")),
           "custom components never silently discarded");
+
+    // --- Data Safety & Serialization Reliability Verification ---
+    {
+        scene.DestroyEntity(custom);
+
+        // 1. Normal save to new file
+        const std::string newScenePath = files.Path("safe_new.lux");
+        Check(scene.Serialize(newScenePath), "normal save to new file");
+        Check(std::filesystem::exists(newScenePath), "new scene file created on disk");
+
+        // 2. Overwrite existing file
+        const std::string originalContent = bytes(newScenePath);
+        Check(!originalContent.empty(), "original scene content non-empty");
+        auto added = scene.CreateEntity("added_entity");
+        Check(scene.Serialize(newScenePath), "overwrite existing scene file");
+        const std::string updatedContent = bytes(newScenePath);
+        Check(updatedContent != originalContent, "content updated after overwrite");
+        scene.DestroyEntity(added);
+
+        // 3. Invalid directory / empty path failure
+        const std::string nonExistentDirPath = files.Path("non_existent_folder/sub/scene.lux");
+        Check(!scene.Serialize(nonExistentDirPath), "save to non-existent directory fails safely");
+        Check(!scene.Serialize(""), "empty path fails safely");
+
+        // 4. Failed save with unsupported component leaves original completely untouched
+        {
+            auto invalidEnt = scene.CreateEntity("temp_unsupported");
+            invalidEnt.AddComponent<Custom>();
+            const std::string beforeAttempt = bytes(newScenePath);
+            Check(!scene.Serialize(newScenePath), "unsupported component save fails");
+            const std::string afterAttempt = bytes(newScenePath);
+            Check(beforeAttempt == afterAttempt, "original scene file preserved 100% on failed save");
+            scene.DestroyEntity(invalidEnt);
+        }
+
+#ifdef _WIN32
+        // 5. Target file locked exclusively (Windows Win32 file lock / sharing violation)
+        {
+            const std::string lockedPath = files.Path("locked_scene.lux");
+            Check(scene.Serialize(lockedPath), "initial save before lock");
+            const std::string beforeLockContent = bytes(lockedPath);
+
+            HANDLE hFile = CreateFileA(lockedPath.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                       0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                Check(!scene.Serialize(lockedPath), "save to exclusively locked file fails safely");
+                CloseHandle(hFile);
+
+                const std::string afterLockContent = bytes(lockedPath);
+                Check(beforeLockContent == afterLockContent,
+                      "original scene file preserved when target is locked");
+            }
+        }
+#endif
+
+        // 6. Rapid consecutive saves (verifies collision-free temp paths)
+        const std::string rapidPath = files.Path("rapid_save.lux");
+        for (int i = 0; i < 20; ++i) {
+            Check(scene.Serialize(rapidPath), "rapid consecutive save");
+        }
+
+        // 7. Verify no temporary .saving- files are leaked in directory
+        size_t leftoverTempFiles = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(files.root)) {
+            const auto name = entry.path().string();
+            if (name.find(".saving-") != std::string::npos ||
+                name.find(".lux-bak-") != std::string::npos) {
+                ++leftoverTempFiles;
+            }
+        }
+        Check(leftoverTempFiles == 0, "zero temporary or backup files leaked after operations");
+    }
 }
 void Assets() {
     double brightness[2]{};

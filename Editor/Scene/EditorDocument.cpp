@@ -6,31 +6,10 @@
 
 namespace LuxEngine {
 namespace {
-// Writes the scene next to the target first and then replaces the target, so a failed save
-// (disk full, crash, unsupported component) never leaves the user's scene file truncated.
+// Writes the scene next to the target first and then atomically replaces the target,
+// so a failed save never leaves the user's scene file truncated or destroyed.
 bool SaveSceneAtomically(Scene& scene, const std::string& path) {
-    namespace fs = std::filesystem;
-    const fs::path target = PathFromUtf8(path);
-    fs::path temporary = target;
-    temporary += ".saving-" +
-                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-    std::error_code ec;
-    if (!scene.Serialize(PathUtf8(temporary))) {
-        fs::remove(temporary, ec);
-        return false;
-    }
-    fs::rename(temporary, target, ec); // replaces an existing file on Windows and POSIX
-    if (ec) {
-        std::error_code removeEc;
-        fs::remove(target, removeEc);
-        ec.clear();
-        fs::rename(temporary, target, ec);
-    }
-    if (ec) {
-        fs::remove(temporary, ec);
-        return false;
-    }
-    return true;
+    return scene.Serialize(path);
 }
 } // namespace
 

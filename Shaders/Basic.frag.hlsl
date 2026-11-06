@@ -21,7 +21,9 @@ struct Input {
 float4 main(Input input) : SV_Target0 {
     float4 color = input.color * image.Sample(imageSampler, input.uv);
     if (lit) {
-        const float3 normal = normalize(cross(ddy(input.world), ddx(input.world)));
+        const float3 faceNormal = cross(ddy(input.world), ddx(input.world));
+        const float lenSq = dot(faceNormal, faceNormal);
+        const float3 normal = lenSq > 1e-10 ? faceNormal * rsqrt(lenSq) : float3(0.0, 1.0, 0.0);
         float3 light = lights.colorIntensity.rgb * (max(0.0, dot(normal, -lights.direction.xyz)) *
                                                     max(0.0, lights.colorIntensity.w));
         for (uint index = 0; index < min(lights.count.x, 16u); ++index) {

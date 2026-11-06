@@ -28,30 +28,23 @@ TransformComponent AnimationClip::Sample(float time) const {
 
     if (!std::isfinite(clampedTime))
         clampedTime = 0.0f;
-    if (clampedTime >= keyframes.back().time) {
+    auto it = std::lower_bound(keyframes.begin(), keyframes.end(), clampedTime,
+                               [](const Keyframe& k, float t) { return k.time < t; });
+    if (it == keyframes.end()) {
         result.position = keyframes.back().position;
         result.rotation = keyframes.back().rotation;
         result.scale = keyframes.back().scale;
         return result;
     }
-    size_t nextIdx = 0;
-    for (size_t i = 0; i < keyframes.size(); ++i) {
-        if (keyframes[i].time >= clampedTime) {
-            nextIdx = i;
-            break;
-        }
-    }
-
-    if (nextIdx == 0) {
+    if (it == keyframes.begin()) {
         result.position = keyframes[0].position;
         result.rotation = keyframes[0].rotation;
         result.scale = keyframes[0].scale;
         return result;
     }
 
-    const size_t prevIdx = nextIdx - 1;
-    const auto& kf0 = keyframes[prevIdx];
-    const auto& kf1 = keyframes[nextIdx];
+    const auto& kf0 = *(it - 1);
+    const auto& kf1 = *it;
 
     const float segmentDuration = kf1.time - kf0.time;
     const float factor =

@@ -4,12 +4,21 @@
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace LuxEngine {
 Scene::Scene() = default;
@@ -136,6 +145,54 @@ std::filesystem::path Utf8Path(const std::string& text) {
         std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
 }
 
+bool AtomicReplaceFile(const std::filesystem::path& tempPath, const std::filesystem::path& targetPath) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(targetPath, ec)) {
+        fs::rename(tempPath, targetPath, ec);
+        if (ec) {
+            fs::remove(tempPath, ec);
+            return false;
+        }
+        return true;
+    }
+
+#ifdef _WIN32
+    const std::wstring targetW = targetPath.wstring();
+    const std::wstring tempW = tempPath.wstring();
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const std::wstring backupW = (targetPath.wstring() + L".lux-bak-" + std::to_wstring(timestamp));
+
+    if (ReplaceFileW(targetW.c_str(), tempW.c_str(), backupW.c_str(),
+                     REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS, nullptr, nullptr)) {
+        std::error_code removeEc;
+        fs::remove(backupW, removeEc);
+        return true;
+    }
+
+    std::error_code backupEc;
+    if (fs::exists(backupW, backupEc)) {
+        ReplaceFileW(targetW.c_str(), backupW.c_str(), nullptr,
+                     REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS, nullptr, nullptr);
+        fs::remove(backupW, backupEc);
+    }
+
+    if (MoveFileExW(tempW.c_str(), targetW.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        return true;
+    }
+
+    fs::remove(tempPath, ec);
+    return false;
+#else
+    fs::rename(tempPath, targetPath, ec);
+    if (ec) {
+        fs::remove(tempPath, ec);
+        return false;
+    }
+    return true;
+#endif
+}
+
 std::ostream& operator<<(std::ostream& o, const Vec2& v) {
     return o << v.x << ' ' << v.y << ' ';
 }
@@ -192,12 +249,21 @@ bool Scene::Serialize(const std::string& filepath) {
                     return false;
         }
     }
+    if (filepath.empty())
+        return false;
     namespace fs = std::filesystem;
     const fs::path targetPath = Utf8Path(filepath);
+    std::error_code ec;
+    const fs::path parentDir = targetPath.parent_path();
+    if (!parentDir.empty() && !fs::is_directory(parentDir, ec))
+        return false;
+
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto threadId = std::hash<std::thread::id>{}(std::this_thread::get_id());
     fs::path tempPath = targetPath;
-    tempPath += ".tmp";
+    tempPath += ".saving-" + std::to_string(now) + "-" + std::to_string(threadId);
     {
-        std::ofstream out(tempPath, std::ios::trunc);
+        std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
         if (!out)
             return false;
         out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 2 "
@@ -250,24 +316,17 @@ bool Scene::Serialize(const std::string& filepath) {
         }
         out.flush();
         if (!out) {
-            std::error_code ec;
+            out.close();
+            fs::remove(tempPath, ec);
+            return false;
+        }
+        out.close();
+        if (!out) {
             fs::remove(tempPath, ec);
             return false;
         }
     }
-    std::error_code ec;
-    fs::rename(tempPath, targetPath, ec);
-    if (ec) {
-        std::error_code removeEc;
-        fs::remove(targetPath, removeEc);
-        ec.clear();
-        fs::rename(tempPath, targetPath, ec);
-    }
-    if (ec) {
-        fs::remove(tempPath, ec);
-        return false;
-    }
-    return true;
+    return AtomicReplaceFile(tempPath, targetPath);
 }
 bool Scene::Deserialize(const std::string& filepath) {
     std::ifstream in(Utf8Path(filepath));

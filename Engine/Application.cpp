@@ -2,6 +2,7 @@
 #include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Audio/AudioEngine.hpp"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
+#include "Engine/Physics/PhysicsEngine.hpp"
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -247,6 +248,7 @@ void Application::Shutdown() noexcept {
     }
     AttemptShutdown([] { AssetManager::Shutdown(); }, "AssetManager shutdown failed");
     AttemptShutdown([] { AudioEngine::Shutdown(); }, "AudioEngine shutdown failed");
+    AttemptShutdown([] { PhysicsEngine::Shutdown(); }, "PhysicsEngine shutdown failed");
     AttemptShutdown([] { Renderer3D::Shutdown(); }, "Renderer3D shutdown failed");
     AttemptShutdown([] { Renderer2D::Shutdown(); }, "Renderer2D shutdown failed");
 
