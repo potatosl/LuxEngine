@@ -123,5 +123,6 @@ private:
     std::unordered_map<std::type_index, std::unique_ptr<PoolBase>> pools_;
     std::unique_ptr<PhysicsWorld2D> physics2D_;
     std::vector<Collision2DEvent> collisionEvents2D_;
+    std::vector<uint32> updateBuffer_;
 };
 } // namespace LuxEngine

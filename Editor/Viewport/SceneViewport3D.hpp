@@ -1,6 +1,7 @@
 #pragma once
 #include "EditorTool.hpp"
 #include "Engine/Core/Math.hpp"
+#include <QImage>
 #include <QPointF>
 #include <QWidget>
 #include <functional>
@@ -50,5 +51,6 @@ private:
     bool orbiting_ = false, panning_ = false, dragging_ = false;
     std::shared_ptr<EngineSceneRenderer> engineRenderer_;
     bool engineFrame_ = false;
+    QImage cachedFrame_;
 };
 } // namespace LuxEngine

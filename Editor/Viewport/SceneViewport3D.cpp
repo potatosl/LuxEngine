@@ -59,12 +59,11 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         if (!engineRenderer_)
             engineRenderer_ = std::make_shared<EngineSceneRenderer>();
         const qreal ratio = devicePixelRatioF();
-        QImage frame;
         if (engineRenderer_->Render3D(document_.GetScene(),
                                      static_cast<int>(std::lround(width() * ratio)),
                                      static_cast<int>(std::lround(height() * ratio)),
-                                     focus_, yaw_, pitch_, distance_, frame)) {
-            painter.drawImage(rect(), frame);
+                                     focus_, yaw_, pitch_, distance_, cachedFrame_)) {
+            painter.drawImage(rect(), cachedFrame_);
             engineFrame_ = true;
         }
     }

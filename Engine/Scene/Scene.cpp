@@ -60,8 +60,8 @@ std::vector<Entity> Scene::GetEntities() {
 void Scene::OnUpdate(double dt) {
     if (!std::isfinite(dt) || dt <= 0.0)
         return;
-    const std::vector<uint32> animationIds(entities_.begin(), entities_.end());
-    for (auto id : animationIds) {
+    updateBuffer_.assign(entities_.begin(), entities_.end());
+    for (auto id : updateBuffer_) {
         if (!entities_.contains(id))
             continue;
         if (!HasComponent<AnimationComponent>(id) || !HasComponent<TransformComponent>(id))
@@ -75,8 +75,8 @@ void Scene::OnUpdate(double dt) {
     if (!physics2D_)
         physics2D_ = std::make_unique<PhysicsWorld2D>();
     physics2D_->Step(*this, dt, collisionEvents2D_);
-    const std::vector<uint32> physicsIds(entities_.begin(), entities_.end());
-    for (auto id : physicsIds) {
+    updateBuffer_.assign(entities_.begin(), entities_.end());
+    for (auto id : updateBuffer_) {
         if (!entities_.contains(id))
             continue;
         if (!HasComponent<TransformComponent>(id))

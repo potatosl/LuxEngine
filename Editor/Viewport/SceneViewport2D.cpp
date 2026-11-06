@@ -114,11 +114,10 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         const qreal ratio = devicePixelRatioF();
         const QPointF topLeft = ScreenToWorld(QPointF(0, 0));
         const QPointF bottomRight = ScreenToWorld(QPointF(width(), height()));
-        QImage frame;
         if (engineRenderer_->Render(document_.GetScene(), static_cast<int>(std::lround(width() * ratio)),
                                     static_cast<int>(std::lround(height() * ratio)),
-                                    QRectF(topLeft, bottomRight), frame)) {
-            painter.drawImage(rect(), frame);
+                                    QRectF(topLeft, bottomRight), cachedFrame_)) {
+            painter.drawImage(rect(), cachedFrame_);
             engineFrame_ = true;
         }
     }

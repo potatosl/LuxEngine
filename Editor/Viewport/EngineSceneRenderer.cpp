@@ -20,6 +20,7 @@ struct EngineSceneRenderer::State {
     bool renderer = false;
     uint32 width = 0;
     uint32 height = 0;
+    GpuFrameCapture capture;
 
     ~State() {
         if (renderer) {
@@ -142,19 +143,25 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
         error_ = QString::fromStdString(s.gpu.GetLastError());
         return false;
     }
-    GpuFrameCapture capture;
-    if (!s.gpu.ReadFrameCapture(capture) || capture.width == 0 || capture.height == 0 ||
-        capture.rgba.size() != static_cast<size_t>(capture.width) * capture.height * 4) {
+    if (!s.gpu.ReadFrameCapture(s.capture) || s.capture.width == 0 || s.capture.height == 0 ||
+        s.capture.rgba.size() != static_cast<size_t>(s.capture.width) * s.capture.height * 4) {
         error_ = QStringLiteral("엔진 프레임을 읽지 못했습니다.");
         return false;
     }
-    QImage image(static_cast<int>(capture.width), static_cast<int>(capture.height),
-                 QImage::Format_RGBA8888);
-    const auto rowBytes = static_cast<size_t>(capture.width) * 4;
-    for (uint32 y = 0; y < capture.height; ++y)
-        std::memcpy(image.scanLine(static_cast<int>(y)), capture.rgba.data() + y * rowBytes,
-                    rowBytes);
-    output = std::move(image);
+    const auto captureWidth = static_cast<int>(s.capture.width);
+    const auto captureHeight = static_cast<int>(s.capture.height);
+    if (output.size() != QSize(captureWidth, captureHeight) ||
+        output.format() != QImage::Format_RGBA8888) {
+        output = QImage(captureWidth, captureHeight, QImage::Format_RGBA8888);
+    }
+    const auto rowBytes = static_cast<size_t>(s.capture.width) * 4;
+    if (static_cast<size_t>(output.bytesPerLine()) == rowBytes) {
+        std::memcpy(output.bits(), s.capture.rgba.data(), s.capture.rgba.size());
+    } else {
+        for (uint32 y = 0; y < s.capture.height; ++y)
+            std::memcpy(output.scanLine(static_cast<int>(y)), s.capture.rgba.data() + y * rowBytes,
+                        rowBytes);
+    }
     return true;
 }
 
@@ -245,19 +252,25 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
         error_ = QString::fromStdString(s.gpu.GetLastError());
         return false;
     }
-    GpuFrameCapture capture;
-    if (!s.gpu.ReadFrameCapture(capture) || capture.width == 0 || capture.height == 0 ||
-        capture.rgba.size() != static_cast<size_t>(capture.width) * capture.height * 4) {
+    if (!s.gpu.ReadFrameCapture(s.capture) || s.capture.width == 0 || s.capture.height == 0 ||
+        s.capture.rgba.size() != static_cast<size_t>(s.capture.width) * s.capture.height * 4) {
         error_ = QStringLiteral("엔진 프레임을 읽지 못했습니다.");
         return false;
     }
-    QImage image(static_cast<int>(capture.width), static_cast<int>(capture.height),
-                 QImage::Format_RGBA8888);
-    const auto rowBytes = static_cast<size_t>(capture.width) * 4;
-    for (uint32 y = 0; y < capture.height; ++y)
-        std::memcpy(image.scanLine(static_cast<int>(y)), capture.rgba.data() + y * rowBytes,
-                    rowBytes);
-    output = std::move(image);
+    const auto captureWidth = static_cast<int>(s.capture.width);
+    const auto captureHeight = static_cast<int>(s.capture.height);
+    if (output.size() != QSize(captureWidth, captureHeight) ||
+        output.format() != QImage::Format_RGBA8888) {
+        output = QImage(captureWidth, captureHeight, QImage::Format_RGBA8888);
+    }
+    const auto rowBytes = static_cast<size_t>(s.capture.width) * 4;
+    if (static_cast<size_t>(output.bytesPerLine()) == rowBytes) {
+        std::memcpy(output.bits(), s.capture.rgba.data(), s.capture.rgba.size());
+    } else {
+        for (uint32 y = 0; y < s.capture.height; ++y)
+            std::memcpy(output.scanLine(static_cast<int>(y)), s.capture.rgba.data() + y * rowBytes,
+                        rowBytes);
+    }
     return true;
 }
 } // namespace LuxEngine

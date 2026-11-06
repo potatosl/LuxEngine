@@ -17,6 +17,7 @@ void PhysicsEngine::Init() {
 }
 
 void PhysicsEngine::Shutdown() {
+    s_PhysicsStorage = PhysicsStorage{};
     Log::Info("PhysicsEngine shutdown.");
 }
 

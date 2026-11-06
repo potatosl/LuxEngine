@@ -1,6 +1,7 @@
 #pragma once
 #include "EditorTool.hpp"
 #include "Engine/Core/Core.hpp"
+#include <QImage>
 #include <QPointF>
 #include <QWidget>
 #include <array>
@@ -74,5 +75,6 @@ private:
     void DrawGrid(class QPainter& painter, int alpha) const;
     std::shared_ptr<EngineSceneRenderer> engineRenderer_;
     bool engineFrame_ = false;
+    QImage cachedFrame_;
 };
 } // namespace LuxEngine
