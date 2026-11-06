@@ -360,29 +360,29 @@ bool DeviceState::SelectPhysicalDevice() {
         preferred = env;
     Candidate best;
     std::string rejected;
-    for (VkPhysicalDevice device : devices) {
+    for (VkPhysicalDevice physDevice : devices) {
         Candidate candidate;
-        candidate.device = device;
-        vkGetPhysicalDeviceProperties(device, &candidate.properties);
+        candidate.device = physDevice;
+        vkGetPhysicalDeviceProperties(physDevice, &candidate.properties);
         const std::string name = candidate.properties.deviceName;
         auto reject = [&](const char* reason) { rejected += " [" + name + ": " + reason + "]"; };
         if (candidate.properties.apiVersion < VK_API_VERSION_1_1) {
             reject("Vulkan 1.1 unsupported");
             continue;
         }
-        const auto extensions = DeviceExtensions(device);
+        const auto extensions = DeviceExtensions(physDevice);
         if (!HasExtension(extensions, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
             reject("no VK_KHR_swapchain");
             continue;
         }
         uint32 familyCount = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(device, &familyCount, nullptr);
+        vkGetPhysicalDeviceQueueFamilyProperties(physDevice, &familyCount, nullptr);
         std::vector<VkQueueFamilyProperties> families(familyCount);
-        vkGetPhysicalDeviceQueueFamilyProperties(device, &familyCount, families.data());
+        vkGetPhysicalDeviceQueueFamilyProperties(physDevice, &familyCount, families.data());
         for (uint32 index = 0; index < familyCount; ++index) {
             const auto flags = families[index].queueFlags;
             VkBool32 present = VK_FALSE;
-            if (vkGetPhysicalDeviceSurfaceSupportKHR(device, index, surface, &present) !=
+            if (vkGetPhysicalDeviceSurfaceSupportKHR(physDevice, index, surface, &present) !=
                 VK_SUCCESS)
                 present = VK_FALSE;
             const bool graphics = (flags & VK_QUEUE_GRAPHICS_BIT) != 0;
@@ -416,8 +416,8 @@ bool DeviceState::SelectPhysicalDevice() {
         if (candidate.transfer == UINT32_MAX)
             candidate.transfer = candidate.graphics;
         uint32 formatCount = 0, modeCount = 0;
-        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
-        vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &modeCount, nullptr);
+        vkGetPhysicalDeviceSurfaceFormatsKHR(physDevice, surface, &formatCount, nullptr);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(physDevice, surface, &modeCount, nullptr);
         if (formatCount == 0 || modeCount == 0) {
             reject("surface has no formats or present modes");
             continue;

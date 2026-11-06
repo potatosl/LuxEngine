@@ -4,17 +4,20 @@
 #include <QPointF>
 #include <QWidget>
 #include <functional>
+#include <memory>
 #include <optional>
 
 namespace LuxEngine {
 class EditorDocument;
+class EngineSceneRenderer;
 struct TransformComponent;
 class SceneViewport3D final : public QWidget {
 public:
     SceneViewport3D(QWidget* parent, EditorDocument& document,
                     std::function<void(std::optional<uint32>)> onSelect,
                     std::function<void(uint32, const TransformComponent&)> onTransform,
-                    std::function<void()> onBeginEdit, std::function<void()> onEndEdit);
+                    std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
+                    std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
     void RefreshScene() {
         update();
     }
@@ -45,5 +48,7 @@ private:
     uint32 dragId_ = 0;
     EditorTool tool_ = EditorTool::Select;
     bool orbiting_ = false, panning_ = false, dragging_ = false;
+    std::shared_ptr<EngineSceneRenderer> engineRenderer_;
+    bool engineFrame_ = false;
 };
 } // namespace LuxEngine

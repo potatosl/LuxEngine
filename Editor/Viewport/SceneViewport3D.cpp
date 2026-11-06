@@ -1,4 +1,5 @@
 #include "SceneViewport3D.hpp"
+#include "EngineSceneRenderer.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Scene/EditorDocument.hpp"
 #include <QMouseEvent>
@@ -13,10 +14,11 @@ namespace LuxEngine {
 SceneViewport3D::SceneViewport3D(QWidget* parent, EditorDocument& document,
                                  std::function<void(std::optional<uint32>)> onSelect,
                                  std::function<void(uint32, const TransformComponent&)> onTransform,
-                                 std::function<void()> onBeginEdit, std::function<void()> onEndEdit)
+                                 std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
+                                 std::shared_ptr<EngineSceneRenderer> renderer)
     : QWidget(parent), document_(document), onSelect_(std::move(onSelect)),
       onTransform_(std::move(onTransform)), onBeginEdit_(std::move(onBeginEdit)),
-      onEndEdit_(std::move(onEndEdit)) {
+      onEndEdit_(std::move(onEndEdit)), engineRenderer_(std::move(renderer)) {
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(300, 200);
 }
@@ -52,10 +54,29 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.fillRect(rect(), QColor(27, 33, 42));
     painter.setRenderHint(QPainter::Antialiasing);
+    engineFrame_ = false;
+    if (EngineSceneRenderer::Allowed()) {
+        if (!engineRenderer_)
+            engineRenderer_ = std::make_shared<EngineSceneRenderer>();
+        const qreal ratio = devicePixelRatioF();
+        QImage frame;
+        if (engineRenderer_->Render3D(document_.GetScene(),
+                                     static_cast<int>(std::lround(width() * ratio)),
+                                     static_cast<int>(std::lround(height() * ratio)),
+                                     focus_, yaw_, pitch_, distance_, frame)) {
+            painter.drawImage(rect(), frame);
+            engineFrame_ = true;
+        }
+    }
+    const int gridAlpha = engineFrame_ ? 75 : 255;
+    auto line = [gridAlpha](QColor color) {
+        color.setAlpha(gridAlpha);
+        return color;
+    };
     for (int unit = -20; unit <= 20; ++unit) {
-        painter.setPen(QPen(unit == 0       ? QColor(95, 108, 124)
-                            : unit % 5 == 0 ? QColor(70, 81, 95)
-                                            : QColor(56, 66, 78),
+        painter.setPen(QPen(line(unit == 0       ? QColor(95, 108, 124)
+                                : unit % 5 == 0 ? QColor(70, 81, 95)
+                                                : QColor(56, 66, 78)),
                             unit == 0 ? 2 : 1));
         auto a = Project({static_cast<float>(unit), 0, -20}),
              b = Project({static_cast<float>(unit), 0, 20});
@@ -90,10 +111,12 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         const bool sprite = entity.HasComponent<SpriteRendererComponent>();
         const bool mesh = entity.HasComponent<MeshRendererComponent>();
         const bool active = selected && selected.GetId() == entity.GetId();
-        const QColor color = active   ? QColor(248, 197, 91)
-                             : mesh   ? QColor(117, 183, 223)
-                             : sprite ? QColor(130, 205, 158)
-                                      : QColor(176, 187, 201);
+        QColor color = active   ? QColor(248, 197, 91)
+                       : mesh   ? QColor(117, 183, 223)
+                       : sprite ? QColor(130, 205, 158)
+                                : QColor(176, 187, 201);
+        if (engineFrame_ && !active)
+            color.setAlpha(120);
         Vec3 boxCenter = t.position;
         Vec3 half{std::max(.05f, std::abs(t.scale.x) * .5f),
                   std::max(.05f, std::abs(t.scale.y) * .5f),

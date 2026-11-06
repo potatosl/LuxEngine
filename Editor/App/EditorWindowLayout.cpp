@@ -3,6 +3,7 @@
 #include "Engine/ECS/ECS.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Ui/IconFactory.hpp"
+#include "Viewport/EngineSceneRenderer.hpp"
 #include "Viewport/SceneViewport2D.hpp"
 #include "Viewport/SceneViewport3D.hpp"
 #include <QAbstractItemView>
@@ -118,9 +119,11 @@ void EditorWindow::BuildLayout() {
     sceneLayout->addWidget(sceneBar);
     viewportTabs_ = new QTabWidget(sceneFrame);
     viewportTabs_->tabBar()->hide();
-    canvas3D_ = new SceneViewport3D(viewportTabs_, document_, select, transform, begin, end);
-    canvas_ =
-        new SceneViewport2D(viewportTabs_, document_, select, transform, paintTile, begin, end);
+    auto sharedRenderer = std::make_shared<EngineSceneRenderer>();
+    canvas3D_ = new SceneViewport3D(viewportTabs_, document_, select, transform, begin, end,
+                                    sharedRenderer);
+    canvas_ = new SceneViewport2D(viewportTabs_, document_, select, transform, paintTile, begin,
+                                  end, sharedRenderer);
     canvas_->setObjectName(QStringLiteral("sceneViewport2D"));
     viewportTabs_->addTab(canvas3D_, QStringLiteral("3D 장면"));
     viewportTabs_->addTab(canvas_, QStringLiteral("2D 장면"));

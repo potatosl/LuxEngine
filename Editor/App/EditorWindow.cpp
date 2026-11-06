@@ -464,8 +464,8 @@ void EditorWindow::ImportEditorSettings() {
         return;
     }
     QJsonParseError parse;
-    const auto data = QJsonDocument::fromJson(file.readAll(), &parse);
-    const auto object = data.object();
+    const auto doc = QJsonDocument::fromJson(file.readAll(), &parse);
+    const auto object = doc.object();
     const QString theme = object.value(QStringLiteral("theme")).toString();
     const double scale = object.value(QStringLiteral("uiScale")).toDouble(-1);
     if (parse.error != QJsonParseError::NoError ||
@@ -1305,11 +1305,11 @@ void EditorWindow::PasteEntity() {
     if (!mime->hasFormat(QStringLiteral("application/x-lux-entity")))
         return;
     QJsonParseError parse;
-    const auto data =
+    const auto doc =
         QJsonDocument::fromJson(mime->data(QStringLiteral("application/x-lux-entity")), &parse);
-    if (parse.error != QJsonParseError::NoError || !data.isObject())
+    if (parse.error != QJsonParseError::NoError || !doc.isObject())
         return;
-    const auto object = data.object();
+    const auto object = doc.object();
     const QString name = object.value(QStringLiteral("name")).toString();
     if (name.isEmpty())
         return;

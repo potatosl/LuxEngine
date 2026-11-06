@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine/Core/Core.hpp"
+#include "Engine/Core/Math.hpp"
 #include <QImage>
 #include <QRectF>
 #include <QString>
@@ -8,8 +9,8 @@
 namespace LuxEngine {
 class Scene;
 
-// Renders a Scene with the engine's Vulkan Renderer2D into an image the Qt viewport can show.
-// The engine needs an SDL window for its swapchain, so a hidden window is used and every
+// Renders a Scene with the engine's Vulkan Renderer2D and Renderer3D into images the Qt viewport
+// can show. The engine needs an SDL window for its swapchain, so a hidden window is used and every
 // frame is read back with the GpuDevice frame capture.
 class EngineSceneRenderer final {
 public:
@@ -25,6 +26,9 @@ public:
     // worldBounds: left, top (larger y), right, bottom in world units.
     bool Render(Scene& scene, int pixelWidth, int pixelHeight, const QRectF& worldBounds,
                 QImage& output);
+    // 3D perspective rendering with native Vulkan Renderer3D.
+    bool Render3D(Scene& scene, int pixelWidth, int pixelHeight, const Vec3& focus, double yaw,
+                  double pitch, double distance, QImage& output);
     const QString& LastError() const {
         return error_;
     }

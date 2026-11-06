@@ -40,10 +40,12 @@ SceneViewport2D::SceneViewport2D(QWidget* parent, EditorDocument& document,
                                  std::function<void(std::optional<uint32>)> onSelect,
                                  std::function<void(uint32, const TransformComponent&)> onTransform,
                                  std::function<void(uint32, uint32, uint32, uint8_t)> onPaintTile,
-                                 std::function<void()> onBeginEdit, std::function<void()> onEndEdit)
+                                 std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
+                                 std::shared_ptr<EngineSceneRenderer> renderer)
     : QWidget(parent), document_(document), onSelect_(std::move(onSelect)),
       onTransform_(std::move(onTransform)), onPaintTile_(std::move(onPaintTile)),
-      onBeginEdit_(std::move(onBeginEdit)), onEndEdit_(std::move(onEndEdit)) {
+      onBeginEdit_(std::move(onBeginEdit)), onEndEdit_(std::move(onEndEdit)),
+      engineRenderer_(std::move(renderer)) {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(300, 200);
@@ -108,7 +110,7 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
     engineFrame_ = false;
     if (EngineSceneRenderer::Allowed()) {
         if (!engineRenderer_)
-            engineRenderer_ = std::make_unique<EngineSceneRenderer>();
+            engineRenderer_ = std::make_shared<EngineSceneRenderer>();
         const qreal ratio = devicePixelRatioF();
         const QPointF topLeft = ScreenToWorld(QPointF(0, 0));
         const QPointF bottomRight = ScreenToWorld(QPointF(width(), height()));

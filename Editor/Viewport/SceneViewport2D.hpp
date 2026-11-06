@@ -18,7 +18,8 @@ public:
                     std::function<void(std::optional<uint32>)> onSelect,
                     std::function<void(uint32, const TransformComponent&)> onTransform,
                     std::function<void(uint32, uint32, uint32, uint8_t)> onPaintTile,
-                    std::function<void()> onBeginEdit, std::function<void()> onEndEdit);
+                    std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
+                    std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
     ~SceneViewport2D() override;
     void RefreshScene() {
         update();
@@ -71,7 +72,7 @@ private:
     uint8_t tileId_ = 1;
     void PaintAt(QPointF point);
     void DrawGrid(class QPainter& painter, int alpha) const;
-    std::unique_ptr<EngineSceneRenderer> engineRenderer_;
+    std::shared_ptr<EngineSceneRenderer> engineRenderer_;
     bool engineFrame_ = false;
 };
 } // namespace LuxEngine

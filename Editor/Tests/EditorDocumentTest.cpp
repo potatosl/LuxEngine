@@ -410,8 +410,8 @@ void TestProjectOperations() {
         int code = 0;
         zip_t* zip = zip_open(PathUtf8(malicious).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &code);
         Check(zip != nullptr, "malicious archive fixture creates");
-        zip_source_t* source = zip_source_buffer(zip, "bad", 3, 0);
-        Check(source && zip_file_add(zip, "../outside.txt", source, 0) >= 0,
+        zip_source_t* zipSource = zip_source_buffer(zip, "bad", 3, 0);
+        Check(zipSource && zip_file_add(zip, "../outside.txt", zipSource, 0) >= 0,
               "malicious archive entry creates");
         Check(zip_close(zip) == 0, "malicious archive fixture closes");
     }

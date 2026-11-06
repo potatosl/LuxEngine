@@ -1,10 +1,14 @@
 #include "EngineSceneRenderer.hpp"
+#include "Engine/ECS/ECS.hpp"
 #include "Engine/Platform/Window.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
+#include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
+#include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/Scene.hpp"
 #include <QGuiApplication>
 #include <SDL3/SDL.h>
+#include <cmath>
 #include <cstring>
 #include <exception>
 
@@ -18,8 +22,10 @@ struct EngineSceneRenderer::State {
     uint32 height = 0;
 
     ~State() {
-        if (renderer)
+        if (renderer) {
             Renderer2D::Shutdown();
+            Renderer3D::Shutdown();
+        }
         gpu.Shutdown();
         window.Shutdown();
         if (sdlVideo)
@@ -78,6 +84,7 @@ bool EngineSceneRenderer::EnsureReady() {
         return false;
     }
     Renderer2D::Init(&state->gpu);
+    Renderer3D::Init(&state->gpu);
     state->renderer = true;
     state->width = props.width;
     state->height = props.height;
@@ -129,6 +136,106 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
         Renderer2D::Init(&s.gpu);
         s.gpu.EndFrame();
         error_ = QStringLiteral("엔진 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+        return false;
+    }
+    if (!s.gpu.EndFrame()) {
+        error_ = QString::fromStdString(s.gpu.GetLastError());
+        return false;
+    }
+    GpuFrameCapture capture;
+    if (!s.gpu.ReadFrameCapture(capture) || capture.width == 0 || capture.height == 0 ||
+        capture.rgba.size() != static_cast<size_t>(capture.width) * capture.height * 4) {
+        error_ = QStringLiteral("엔진 프레임을 읽지 못했습니다.");
+        return false;
+    }
+    QImage image(static_cast<int>(capture.width), static_cast<int>(capture.height),
+                 QImage::Format_RGBA8888);
+    const auto rowBytes = static_cast<size_t>(capture.width) * 4;
+    for (uint32 y = 0; y < capture.height; ++y)
+        std::memcpy(image.scanLine(static_cast<int>(y)), capture.rgba.data() + y * rowBytes,
+                    rowBytes);
+    output = std::move(image);
+    return true;
+}
+
+bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight,
+                                   const Vec3& focus, double yaw, double pitch, double distance,
+                                   QImage& output) {
+    if (!EnsureReady() || pixelWidth <= 0 || pixelHeight <= 0)
+        return false;
+    auto& s = *state_;
+    const auto width = static_cast<uint32>(pixelWidth);
+    const auto height = static_cast<uint32>(pixelHeight);
+    if (width != s.width || height != s.height) {
+        if (!s.window.SetSize(width, height)) {
+            error_ = QStringLiteral("엔진 창 크기를 바꾸지 못했습니다.");
+            return false;
+        }
+        s.gpu.NotifyResize();
+        s.width = width;
+        s.height = height;
+    }
+    if (!s.gpu.RequestFrameCapture()) {
+        error_ = QString::fromStdString(s.gpu.GetLastError());
+        return false;
+    }
+    if (s.gpu.BeginFrame() != GpuDevice::FrameStart::Ready) {
+        error_ = QStringLiteral("엔진 프레임을 시작하지 못했습니다: %1")
+                     .arg(QString::fromStdString(s.gpu.GetLastError()));
+        return false;
+    }
+    // Background clear for 3D viewport
+    s.gpu.Clear(27.0f / 255.0f, 33.0f / 255.0f, 42.0f / 255.0f, 1.0f);
+
+    const double cy = std::cos(yaw);
+    const double sy = std::sin(yaw);
+    const double cp = std::cos(pitch);
+    const double sp = std::sin(pitch);
+    const Vec3 eye{static_cast<float>(focus.x + distance * sy * cp),
+                   static_cast<float>(focus.y - distance * sp),
+                   static_cast<float>(focus.z + distance * cy * cp)};
+    const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
+    constexpr float fovRadians = 60.0f * 3.14159265358979323846f / 180.0f;
+    PerspectiveCamera camera(fovRadians, aspect, 0.1f, 1000.0f);
+    camera.SetPosition(eye);
+    camera.SetTarget(focus);
+    camera.SetUp({0.0f, 1.0f, 0.0f});
+
+    DirectionalLight sun;
+    sun.direction = Vec3(0.5f, -1.0f, 0.5f).Normalized();
+    sun.color = {1.0f, 0.98f, 0.95f};
+    sun.intensity = 1.0f;
+
+    Renderer3D::Init(&s.gpu);
+    try {
+        Renderer3D::BeginScene(camera, sun);
+        for (Entity entity : scene.GetEntities()) {
+            if (!entity.HasComponent<TransformComponent>())
+                continue;
+            const auto& transform = entity.GetComponent<TransformComponent>();
+            if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
+                !std::isfinite(transform.position.z) || !std::isfinite(transform.scale.x) ||
+                !std::isfinite(transform.scale.y) || !std::isfinite(transform.scale.z))
+                continue;
+
+            if (entity.HasComponent<MeshRendererComponent>()) {
+                const auto& meshComp = entity.GetComponent<MeshRendererComponent>();
+                Renderer3D::DrawMesh(transform.GetTransform(), meshComp.material);
+            } else if (entity.HasComponent<SpriteRendererComponent>()) {
+                const auto& sprite = entity.GetComponent<SpriteRendererComponent>();
+                Material3D mat;
+                mat.albedoColor = sprite.color;
+                Renderer3D::DrawMesh(
+                    Mat4::Translate(transform.position) * Mat4::RotateZ(transform.rotation.z) *
+                        Mat4::Scale(Vec3{transform.scale.x, transform.scale.y, 0.02f}),
+                    mat);
+            }
+        }
+        Renderer3D::EndScene();
+    } catch (const std::exception& exception) {
+        Renderer3D::Init(&s.gpu);
+        s.gpu.EndFrame();
+        error_ = QStringLiteral("엔진 3D 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
         return false;
     }
     if (!s.gpu.EndFrame()) {

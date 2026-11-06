@@ -152,10 +152,10 @@ void EditorWindow::RunNextBuildStep() {
     buildProcess_->start(Q(step.program), arguments);
 }
 
-void EditorWindow::HandleBuildOutput(const QByteArray& data) {
-    buildLineBuffer_ += data;
-    // data is empty when flushing: treat the remaining text as a final line.
-    const bool flush = data.isEmpty();
+void EditorWindow::HandleBuildOutput(const QByteArray& chunk) {
+    buildLineBuffer_ += chunk;
+    // chunk is empty when flushing: treat the remaining text as a final line.
+    const bool flush = chunk.isEmpty();
     while (true) {
         int end = buildLineBuffer_.indexOf('\n');
         if (end < 0) {
