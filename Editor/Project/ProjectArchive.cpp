@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -24,15 +25,31 @@ std::filesystem::path TemporarySibling(const std::filesystem::path& target) {
 
 bool SafeArchivePath(const std::filesystem::path& relative) {
     const auto name = GenericPathUtf8(relative);
-    if (relative.empty() || relative.is_absolute() || name.find('\\') != std::string::npos ||
+    if (relative.empty() || relative.is_absolute() || relative.has_root_directory() ||
+        relative.has_root_name() || name.starts_with('/') || name.find('\\') != std::string::npos ||
         name.find(':') != std::string::npos || name.find('\0') != std::string::npos ||
         name.find("//") != std::string::npos)
         return false;
     if (*relative.begin() == ".git" || *relative.begin() == ".lux")
         return false;
-    for (const auto& part : relative)
-        if (part == ".." || part == ".")
+    for (const auto& part : relative) {
+        const auto p = GenericPathUtf8(part);
+        if (p == ".." || p == "." || p.empty())
             return false;
+        std::string stem = p;
+        const auto dot = stem.find('.');
+        if (dot != std::string::npos)
+            stem = stem.substr(0, dot);
+        std::string upperStem;
+        upperStem.reserve(stem.size());
+        for (char c : stem)
+            upperStem.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        if (upperStem == "CON" || upperStem == "PRN" || upperStem == "AUX" || upperStem == "NUL")
+            return false;
+        if (upperStem.size() == 4 && (upperStem.starts_with("COM") || upperStem.starts_with("LPT")) &&
+            upperStem[3] >= '1' && upperStem[3] <= '9')
+            return false;
+    }
     return true;
 }
 
@@ -71,7 +88,13 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
             error = "압축 파일의 경로 또는 크기가 올바르지 않습니다.";
             break;
         }
-        const auto target = staging / relative;
+        const auto target = (staging / relative).lexically_normal();
+        const auto stagingNorm = staging.lexically_normal();
+        auto [itStaging, itTarget] = std::mismatch(stagingNorm.begin(), stagingNorm.end(), target.begin(), target.end());
+        if (itStaging != stagingNorm.end()) {
+            error = "압축 파일의 경로가 허용된 범위를 벗어났습니다.";
+            break;
+        }
         std::error_code ec;
         std::filesystem::create_directories(directory ? target : target.parent_path(), ec);
         if (ec) {
@@ -358,7 +381,12 @@ bool RestoreProjectBackup(const EditorProject& project, const std::filesystem::p
     if (ec) {
         std::error_code rollback;
         std::filesystem::rename(previous, root, rollback);
-        error = "백업 복구에 실패했습니다. 이전 프로젝트를 복원했습니다.";
+        if (rollback) {
+            error = "백업 복구 및 이전 프로젝트 롤백에 실패했습니다. 이전 프로젝트는 임시 위치에 보존되었습니다: " +
+                    PathUtf8(previous);
+        } else {
+            error = "백업 복구에 실패했습니다. 이전 프로젝트를 정상 복원했습니다.";
+        }
         std::filesystem::remove_all(staging, rollback);
         return false;
     }

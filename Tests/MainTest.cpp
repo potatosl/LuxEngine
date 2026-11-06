@@ -1169,6 +1169,24 @@ void RenderOutput(Graphics& graphics) {
               IsColor(outOfRange, ambient[0], ambient[1], ambient[2], 2),
           "point light behind a face or beyond its radius adds nothing");
 
+    // Point lights boundary: 17 lights clamped to 16 safely, invalid/negative/NaN sanitized
+    std::vector<PointLight> seventeenLights(17);
+    for (size_t i = 0; i < 17; ++i) {
+        seventeenLights[i].position = {static_cast<float>(i), 0, 2};
+        seventeenLights[i].color = {0.1f, 0.1f, 0.1f};
+        seventeenLights[i].intensity = 0.5f;
+        seventeenLights[i].radius = 5.0f;
+    }
+    const auto seventeenFrame = pointLit(seventeenLights);
+    Check(seventeenFrame.width > 0, "17 point lights clamped to 16 safely without overflow");
+
+    PointLight invalidLight;
+    invalidLight.position = {0, 0, 2};
+    invalidLight.radius = -5.0f;
+    invalidLight.intensity = -1.0f;
+    const auto invalidFrame = pointLit(std::span(&invalidLight, 1));
+    Check(invalidFrame.width > 0, "negative/invalid point light parameters safely sanitized");
+
     const std::array<Vec3, 8> corners{{{-0.5f, -0.5f, -0.5f},
                                        {0.5f, -0.5f, -0.5f},
                                        {0.5f, 0.5f, -0.5f},
@@ -1185,6 +1203,12 @@ void RenderOutput(Graphics& graphics) {
     Check(!mesh.Upload(&graphics.gpu, corners, std::array<uint32, 2>{0, 1}) &&
               !mesh.Upload(nullptr, corners, cubeIndices),
           "mesh needs whole triangles and a device");
+
+    std::array<Vec3, 8> nanCorners = corners;
+    nanCorners[0].x = std::numeric_limits<float>::quiet_NaN();
+    Check(!mesh.Upload(&graphics.gpu, nanCorners, cubeIndices), "mesh with NaN vertex position rejected");
+    nanCorners[0].x = std::numeric_limits<float>::infinity();
+    Check(!mesh.Upload(&graphics.gpu, nanCorners, cubeIndices), "mesh with infinite vertex position rejected");
     Check(mesh.Upload(&graphics.gpu, corners, cubeIndices) && mesh.IsValid() &&
               mesh.GetIndexCount() == 36,
           "GPU mesh uploaded");

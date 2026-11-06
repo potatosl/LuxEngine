@@ -453,6 +453,52 @@ void TestUnicodeProjectPaths() {
           "unicode recent project reloads");
 }
 
+void TestArchiveSecurityAndFuzzing() {
+    using namespace LuxEngine;
+    TempDirectory files;
+    std::string error;
+
+    // 1. Corrupted / truncated ZIP archive
+    const auto corruptZip = files.path / "corrupt.luxpack";
+    {
+        std::ofstream out(corruptZip, std::ios::binary);
+        out << "PK\x03\x04truncated_and_corrupt_data";
+    }
+    Check(!ImportProject(corruptZip, files.path / "corrupt_imported", error),
+          "corrupted archive safely rejected");
+
+    // 2. Non-existent archive
+    Check(!ImportProject(files.path / "does_not_exist.luxpack", files.path / "none", error),
+          "non-existent archive fails safely");
+
+    // 3. Zip with malicious path traversal (leading slash / root escape)
+    const auto escapeZip = files.path / "escape.luxpack";
+    int zipErr = 0;
+    zip_t* z = zip_open(PathUtf8(escapeZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "fixture zip created");
+    zip_source_t* src1 = zip_source_buffer(z, "malicious", 9, 0);
+    Check(zip_file_add(z, "/escape.txt", src1, ZIP_FL_ENC_UTF_8) >= 0, "root escape entry added");
+    zip_source_t* src2 = zip_source_buffer(z, "LUXPROJECT 2\nname \"Escape\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 71, 0);
+    Check(zip_file_add(z, EditorProject::FileName, src2, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "escape fixture zip finalized");
+
+    Check(!ImportProject(escapeZip, files.path / "escape_imported", error),
+          "root escape / Zip Slip attempt safely rejected");
+
+    // 4. Zip with Windows reserved name (e.g. CON.txt or AUX.json)
+    const auto conZip = files.path / "reserved.luxpack";
+    z = zip_open(PathUtf8(conZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "reserved zip created");
+    zip_source_t* src3 = zip_source_buffer(z, "reserved", 8, 0);
+    Check(zip_file_add(z, "CON.txt", src3, ZIP_FL_ENC_UTF_8) >= 0, "CON entry added");
+    zip_source_t* src4 = zip_source_buffer(z, "LUXPROJECT 2\nname \"Reserved\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 73, 0);
+    Check(zip_file_add(z, EditorProject::FileName, src4, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "reserved fixture zip finalized");
+
+    Check(!ImportProject(conZip, files.path / "reserved_imported", error),
+          "Windows reserved device name (CON) in zip safely rejected");
+}
+
 } // namespace
 
 int main() {
@@ -463,6 +509,7 @@ int main() {
         TestProjectManagement();
         TestProjectOperations();
         TestUnicodeProjectPaths();
+        TestArchiveSecurityAndFuzzing();
         std::cout << "Editor document checks passed\n";
         return 0;
     } catch (const std::exception& error) {

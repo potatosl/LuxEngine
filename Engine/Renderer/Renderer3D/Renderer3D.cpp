@@ -62,8 +62,11 @@ bool Mesh3D::Upload(GpuDevice* gpu, std::span<const Vec3> positions,
             return false;
     std::vector<RenderVertex> data;
     data.reserve(positions.size());
-    for (const Vec3& position : positions)
+    for (const Vec3& position : positions) {
+        if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+            return false;
         data.push_back({position, {1, 1, 1, 1}, {0, 0}});
+    }
     const auto vertexBytes = static_cast<uint32>(data.size() * sizeof(RenderVertex));
     const auto indexBytes = static_cast<uint32>(indices.size_bytes());
     if (!vertices_.Initialize(gpu, BufferType::Vertex, vertexBytes) ||
@@ -105,17 +108,29 @@ void Renderer3D::BeginScene(const PerspectiveCamera& camera, const DirectionalLi
     if (active)
         throw std::logic_error("3D scene already active");
     viewProjection = camera.GetViewProjectionMatrix();
-    light = sun;
+    const float sunIntensity = std::isfinite(sun.intensity) ? std::max(0.0f, sun.intensity) : 0.0f;
+    const Vec3 sunDir = (std::isfinite(sun.direction.x) && std::isfinite(sun.direction.y) && std::isfinite(sun.direction.z))
+                            ? sun.direction : Vec3{0.0f, -1.0f, 0.0f};
+    const Vec3 sunColor = (std::isfinite(sun.color.x) && std::isfinite(sun.color.y) && std::isfinite(sun.color.z))
+                              ? sun.color : Vec3{1.0f, 1.0f, 1.0f};
+    light = {sunDir, sunColor, sunIntensity};
     if (points.size() > MaxPointLights)
         Log::Warn("Renderer3D uses the first " + std::to_string(MaxPointLights) + " of " +
                   std::to_string(points.size()) + " point lights");
     pointLights.assign(points.begin(), points.begin() + std::min(points.size(), MaxPointLights));
     if (device) {
         std::array<GpuPointLight, MaxPointLights> gpuPoints{};
-        for (size_t index = 0; index < pointLights.size(); ++index)
-            gpuPoints[index] = {pointLights[index].position, pointLights[index].radius,
-                                pointLights[index].color, pointLights[index].intensity};
-        device->SetLighting({sun.direction, sun.color, sun.intensity,
+        for (size_t index = 0; index < pointLights.size(); ++index) {
+            const auto& pt = pointLights[index];
+            const float r = std::isfinite(pt.radius) ? std::max(0.0f, pt.radius) : 0.0f;
+            const float inten = std::isfinite(pt.intensity) ? std::max(0.0f, pt.intensity) : 0.0f;
+            const Vec3 pos = (std::isfinite(pt.position.x) && std::isfinite(pt.position.y) && std::isfinite(pt.position.z))
+                                 ? pt.position : Vec3{0.0f, 0.0f, 0.0f};
+            const Vec3 col = (std::isfinite(pt.color.x) && std::isfinite(pt.color.y) && std::isfinite(pt.color.z))
+                                 ? pt.color : Vec3{1.0f, 1.0f, 1.0f};
+            gpuPoints[index] = {pos, r, col, inten};
+        }
+        device->SetLighting({light.direction, light.color, light.intensity,
                              std::span(gpuPoints.data(), pointLights.size())});
     }
     vertices.clear();
@@ -159,12 +174,13 @@ void Renderer3D::DrawMesh(std::span<const Vec3> positions, std::span<const uint3
         const Vec3 center = (triangle[0] + triangle[1] + triangle[2]) * (1.0f / 3.0f);
         for (const auto& point : pointLights) {
             const Vec3 toLight = point.position - center;
-            const float distance = std::sqrt(toLight.Dot(toLight));
-            if (point.radius <= 0.0f || distance >= point.radius)
+            const float distanceSq = toLight.Dot(toLight);
+            if (!std::isfinite(distanceSq) || point.radius <= 0.0f || distanceSq >= point.radius * point.radius)
                 continue;
+            const float distance = std::sqrt(distanceSq);
             const float facing =
                 distance > 0.00001f ? std::max(0.0f, normal.Dot(toLight * (1.0f / distance))) : 1.0f;
-            const float falloff = 1.0f - distance / point.radius;
+            const float falloff = std::max(0.0f, 1.0f - distance / point.radius);
             lit += point.color * (facing * falloff * falloff * std::max(0.0f, point.intensity));
         }
         const auto& c = material.albedoColor;
