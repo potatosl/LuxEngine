@@ -43,10 +43,23 @@ jobs:
       - name: Configure Engine & Tests
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DLUX_BUILD_TESTS=ON -DLUX_BUILD_EDITOR=OFF `
-            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows `
-            -DCMAKE_PREFIX_PATH="C:/LuxDeps"
+          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif (Test-Path "C:/vcpkg") { "C:/vcpkg" } else { (Split-Path (Split-Path (Get-Command vcpkg).Source)) }
+          Write-Host "Configuring Engine with vcpkg root: $vcpkgRoot"
+          $cmakeArgs = @(
+            "-S", ".",
+            "-B", "build",
+            "-A", "x64",
+            "-DLUX_BUILD_TESTS=ON",
+            "-DLUX_BUILD_EDITOR=OFF",
+            "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
+            "-DVCPKG_TARGET_TRIPLET=x64-windows",
+            "-DCMAKE_PREFIX_PATH=C:/LuxDeps"
+          )
+          & cmake @cmakeArgs
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path build/CMakeFiles/CMakeError.log) { Get-Content build/CMakeFiles/CMakeError.log -Tail 100 }
+            exit 1
+          }
 
       - name: Build Engine (Debug)
         shell: pwsh
@@ -94,11 +107,17 @@ jobs:
           }
           '@ | Out-File consumer/main.cpp -Encoding utf8
           $sdkCmakeDir = (Resolve-Path "./installed_sdk/lib/cmake/LuxEngine").Path
-          cmake -S consumer -B consumer/build -A x64 `
-            "-DLuxEngine_DIR=$sdkCmakeDir" `
-            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows `
-            -DCMAKE_PREFIX_PATH="C:/LuxDeps"
+          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif (Test-Path "C:/vcpkg") { "C:/vcpkg" } else { (Split-Path (Split-Path (Get-Command vcpkg).Source)) }
+          $consumerArgs = @(
+            "-S", "consumer",
+            "-B", "consumer/build",
+            "-A", "x64",
+            "-DLuxEngine_DIR=$sdkCmakeDir",
+            "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
+            "-DVCPKG_TARGET_TRIPLET=x64-windows",
+            "-DCMAKE_PREFIX_PATH=C:/LuxDeps"
+          )
+          & cmake @consumerArgs
           cmake --build consumer/build --config Debug
           $consumerExe = (Get-ChildItem -Path consumer/build -Filter "ConsumerApp.exe" -Recurse | Select-Object -First 1).FullName
           Write-Host "Running ConsumerApp: $consumerExe"
