@@ -1717,6 +1717,45 @@ void Stress() {
     });
     PrintTimes("1000 cubes", times);
 
+    constexpr uint32 cells = 128;
+    std::vector<Vec3> gridPositions;
+    std::vector<uint32> gridIndices;
+    for (uint32 y = 0; y <= cells; ++y)
+        for (uint32 x = 0; x <= cells; ++x)
+            gridPositions.push_back({float(x) / cells - 0.5f, float(y) / cells - 0.5f,
+                                     0.05f * std::sin(float(x + y) * 0.3f)});
+    for (uint32 y = 0; y < cells; ++y)
+        for (uint32 x = 0; x < cells; ++x) {
+            const uint32 corner = y * (cells + 1) + x;
+            for (uint32 index : {corner, corner + 1, corner + cells + 2, corner,
+                                 corner + cells + 2, corner + cells + 1})
+                gridIndices.push_back(index);
+        }
+    Mesh3D grid;
+    Check(grid.Upload(&gpu, gridPositions, gridIndices), "grid mesh uploaded");
+    for (bool resident : {false, true}) {
+        times = TimedFrames(graphics, 30, [&](int) {
+            Renderer3D::BeginScene(perspective, {});
+            for (int copy = 0; copy < 8; ++copy) {
+                const Mat4 transform = Mat4::Translate({float(copy % 4) * 3 - 4.5f,
+                                                        float(copy / 4) * 3 - 1.5f, 0}) *
+                                       Mat4::Scale({2.5f, 2.5f, 2.5f});
+                if (resident)
+                    Renderer3D::DrawMesh(grid, transform, {});
+                else
+                    Renderer3D::DrawMesh(gridPositions, gridIndices, transform, {});
+            }
+            Renderer3D::EndScene();
+        });
+        const auto stats = gpu.GetFrameStats();
+        PrintTimes(resident ? "8 grid meshes (262k triangles), GPU mesh path"
+                            : "8 grid meshes (262k triangles), CPU path",
+                   times);
+        std::cout << "  per frame: " << stats.drawCalls << " draws, " << stats.vertexBytes
+                  << " vertex bytes streamed, " << stats.cpuWaitMs << " ms waiting for the GPU\n";
+    }
+    grid.Release();
+
     Random random(7);
     const auto recreations = gpu.GetCounters().swapchainRecreations;
     for (int step = 0; step < 40; ++step) {
