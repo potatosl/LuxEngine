@@ -1085,6 +1085,86 @@ void RenderOutput(Graphics& graphics) {
     Check(IsColor(behind, ambient[0], ambient[1], ambient[2], 2) &&
               IsColor(outOfRange, ambient[0], ambient[1], ambient[2], 2),
           "point light behind a face or beyond its radius adds nothing");
+
+    const std::array<Vec3, 8> corners{{{-0.5f, -0.5f, -0.5f},
+                                       {0.5f, -0.5f, -0.5f},
+                                       {0.5f, 0.5f, -0.5f},
+                                       {-0.5f, 0.5f, -0.5f},
+                                       {-0.5f, -0.5f, 0.5f},
+                                       {0.5f, -0.5f, 0.5f},
+                                       {0.5f, 0.5f, 0.5f},
+                                       {-0.5f, 0.5f, 0.5f}}};
+    const std::array<uint32, 36> cubeIndices{{0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 4, 7, 0, 7, 3,
+                                              1, 2, 6, 1, 6, 5, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2}};
+    Mesh3D mesh;
+    Check(!mesh.Upload(&graphics.gpu, corners, std::array<uint32, 3>{0, 1, 8}) && !mesh.IsValid(),
+          "mesh with an out-of-range index rejected");
+    Check(!mesh.Upload(&graphics.gpu, corners, std::array<uint32, 2>{0, 1}) &&
+              !mesh.Upload(nullptr, corners, cubeIndices),
+          "mesh needs whole triangles and a device");
+    Check(mesh.Upload(&graphics.gpu, corners, cubeIndices) && mesh.IsValid() &&
+              mesh.GetIndexCount() == 36,
+          "GPU mesh uploaded");
+    const Mat4 turned = Mat4::RotateY(0.6f) * Mat4::RotateX(0.4f);
+    DirectionalLight angled;
+    angled.direction = {-0.4f, -0.7f, -1.0f};
+    auto drawCube = [&](bool resident, const Mat4& transform, const DirectionalLight& sun,
+                        std::span<const PointLight> points) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            PerspectiveCamera camera(ToRadians(60), 4.0f / 3, 0.1f, 100);
+            camera.SetPosition({0, 0, 5});
+            Renderer3D::BeginScene(camera, sun, points);
+            if (resident)
+                Renderer3D::DrawMesh(mesh, transform, {});
+            else
+                Renderer3D::DrawMesh(corners, cubeIndices, transform, {});
+            Renderer3D::EndScene();
+            Check(Renderer3D::GetStats().drawCalls == 1, "one draw per cube");
+        });
+    };
+    const auto cpuFrame = drawCube(false, turned, angled, {});
+    const auto gpuFrame = drawCube(true, turned, angled, {});
+    size_t differing = 0, covered = 0;
+    for (size_t index = 0; index < cpuFrame.rgba.size(); index += 4) {
+        int delta = 0;
+        for (size_t channel = 0; channel < 3; ++channel)
+            delta = std::max(delta, std::abs(int(cpuFrame.rgba[index + channel]) -
+                                             int(gpuFrame.rgba[index + channel])));
+        differing += delta > 3;
+        covered += cpuFrame.rgba[index] + cpuFrame.rgba[index + 1] + cpuFrame.rgba[index + 2] > 0;
+    }
+    std::cout << "mesh path vs CPU path: " << differing << " of " << covered
+              << " covered pixels differ\n";
+    Check(covered > cpuFrame.rgba.size() / 4 / 50 && differing * 200 <= covered,
+          "GPU mesh lighting matches the CPU path within one pixel in 200");
+
+    PointLight warm;
+    warm.position = {0, 0, 2};
+    warm.color = {1, 0, 0};
+    DirectionalLight dark;
+    dark.intensity = 0.0f;
+    const auto gpuFront = Pixel(drawCube(true, Mat4{}, dark, std::span(&warm, 1)), 0.5f, 0.5f);
+    warm.position = {0, 0, -3};
+    const auto gpuBehind = Pixel(drawCube(true, Mat4{}, dark, std::span(&warm, 1)), 0.5f, 0.5f);
+    Check(gpuFront[0] > 200 && gpuFront[1] < 60 &&
+              IsColor(gpuBehind, ambient[0], ambient[1], ambient[2], 2),
+          "GPU mesh point lighting matches the CPU path at the face center");
+
+    const auto released = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        PerspectiveCamera camera(ToRadians(60), 4.0f / 3, 0.1f, 100);
+        camera.SetPosition({0, 0, 5});
+        Renderer3D::BeginScene(camera, {});
+        Renderer3D::DrawMesh(mesh, Mat4{}, {});
+        mesh.Release();
+        Renderer3D::DrawMesh(mesh, Mat4{}, {});
+        Renderer3D::EndScene();
+        Check(Renderer3D::GetStats().drawCalls == 1 && !mesh.IsValid(),
+              "released mesh is not drawn again");
+    });
+    Check(Pixel(released, 0.5f, 0.5f)[0] > 0,
+          "mesh released mid-frame stays alive until the frame finishes");
     texture.Release();
     empty.Release();
     graphics.ValidationClean("render output checks");
@@ -1323,7 +1403,7 @@ void Failures() {
         Vk::Fault::InstanceCreation, Vk::Fault::SurfaceCreation, Vk::Fault::DeviceSelection,
         Vk::Fault::DeviceCreation,   Vk::Fault::SyncObject,      Vk::Fault::ShaderModule,
         Vk::Fault::PipelineCreation, Vk::Fault::CommandBuffer,   Vk::Fault::SwapchainCreation,
-        Vk::Fault::ImageAllocation,  Vk::Fault::Submit};
+        Vk::Fault::ImageAllocation,  Vk::Fault::Submit,          Vk::Fault::BufferAllocation};
     for (Vk::Fault fault : initFaults) {
         FaultScope scope;
         Vk::InjectFault(fault);
@@ -1423,6 +1503,26 @@ void Failures() {
         Check(Renderer3D::GetStats().drawCalls == 2 && gpu.IsReady(),
               "3D scene over the vertex budget keeps the chunks that fit");
         Check(gpu.EndFrame(), "over-budget 3D frame submitted");
+
+        Mesh3D triangle;
+        const std::array<Vec3, 3> corners{{{-1, -1, 0}, {1, -1, 0}, {0, 1, 0}}};
+        const std::array<uint32, 3> order{{0, 1, 2}};
+        Check(triangle.Upload(&gpu, corners, order), "mesh for the uniform budget");
+        Check(graphics.Begin(), "uniform budget frame");
+        Renderer3D::BeginScene(camera, {});
+        for (int draw = 0; draw < 30000; ++draw)
+            Renderer3D::DrawMesh(triangle, Mat4{}, {});
+        Renderer3D::EndScene();
+        const auto meshStats = Renderer3D::GetStats();
+        std::cout << "uniform budget: " << meshStats.drawCalls << " of " << meshStats.meshCount
+                  << " mesh draws accepted\n";
+        Check(meshStats.meshCount == 30000 && meshStats.drawCalls > 1000 &&
+                  meshStats.drawCalls < 30000 && gpu.IsReady() &&
+                  gpu.GetLastFailure() == GpuStatus::OutOfMemory,
+              "per-frame uniform budget bounds GPU mesh draws without stopping the device");
+        Check(gpu.EndFrame() && graphics.Begin() && gpu.EndFrame(),
+              "frames continue after the uniform budget is exhausted");
+        triangle.Release();
         Renderer3D::Shutdown();
         graphics.ValidationClean("recoverable failures");
 
@@ -1616,6 +1716,45 @@ void Stress() {
         Renderer3D::EndScene();
     });
     PrintTimes("1000 cubes", times);
+
+    constexpr uint32 cells = 128;
+    std::vector<Vec3> gridPositions;
+    std::vector<uint32> gridIndices;
+    for (uint32 y = 0; y <= cells; ++y)
+        for (uint32 x = 0; x <= cells; ++x)
+            gridPositions.push_back({float(x) / cells - 0.5f, float(y) / cells - 0.5f,
+                                     0.05f * std::sin(float(x + y) * 0.3f)});
+    for (uint32 y = 0; y < cells; ++y)
+        for (uint32 x = 0; x < cells; ++x) {
+            const uint32 corner = y * (cells + 1) + x;
+            for (uint32 index : {corner, corner + 1, corner + cells + 2, corner,
+                                 corner + cells + 2, corner + cells + 1})
+                gridIndices.push_back(index);
+        }
+    Mesh3D grid;
+    Check(grid.Upload(&gpu, gridPositions, gridIndices), "grid mesh uploaded");
+    for (bool resident : {false, true}) {
+        times = TimedFrames(graphics, 30, [&](int) {
+            Renderer3D::BeginScene(perspective, {});
+            for (int copy = 0; copy < 8; ++copy) {
+                const Mat4 transform = Mat4::Translate({float(copy % 4) * 3 - 4.5f,
+                                                        float(copy / 4) * 3 - 1.5f, 0}) *
+                                       Mat4::Scale({2.5f, 2.5f, 2.5f});
+                if (resident)
+                    Renderer3D::DrawMesh(grid, transform, {});
+                else
+                    Renderer3D::DrawMesh(gridPositions, gridIndices, transform, {});
+            }
+            Renderer3D::EndScene();
+        });
+        const auto stats = gpu.GetFrameStats();
+        PrintTimes(resident ? "8 grid meshes (262k triangles), GPU mesh path"
+                            : "8 grid meshes (262k triangles), CPU path",
+                   times);
+        std::cout << "  per frame: " << stats.drawCalls << " draws, " << stats.vertexBytes
+                  << " vertex bytes streamed, " << stats.cpuWaitMs << " ms waiting for the GPU\n";
+    }
+    grid.Release();
 
     Random random(7);
     const auto recreations = gpu.GetCounters().swapchainRecreations;

@@ -163,10 +163,11 @@ bool DeviceState::CreatePipelines() {
     }
     if (!pipelineLayout) {
         const VkPushConstantRange range{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4::elements)};
+        const VkDescriptorSetLayout setLayouts[2] = {setLayout, frameSetLayout};
         VkPipelineLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layoutInfo.setLayoutCount = 1;
-        layoutInfo.pSetLayouts = &setLayout;
+        layoutInfo.setLayoutCount = 2;
+        layoutInfo.pSetLayouts = setLayouts;
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &range;
         if (const VkResult result =
@@ -288,15 +289,26 @@ bool DeviceState::CreatePipelines() {
                      : vkCreateGraphicsPipelines(device, pipelineCache, 1, &create, nullptr,
                                                  &pipeline3D);
     }
+    if (result == VK_SUCCESS) {
+        const VkBool32 lit = VK_TRUE;
+        const VkSpecializationMapEntry entry{0, 0, sizeof(lit)};
+        const VkSpecializationInfo specialization{1, &entry, sizeof(lit), &lit};
+        stages[1].pSpecializationInfo = &specialization;
+        result = ConsumeFault(Fault::PipelineCreation)
+                     ? VK_ERROR_OUT_OF_DEVICE_MEMORY
+                     : vkCreateGraphicsPipelines(device, pipelineCache, 1, &create, nullptr,
+                                                 &pipelineMesh);
+    }
     vkDestroyShaderModule(device, modules[0], nullptr);
     vkDestroyShaderModule(device, modules[1], nullptr);
     if (result != VK_SUCCESS) {
-        if (pipeline2D)
-            vkDestroyPipeline(device, pipeline2D, nullptr);
-        pipeline2D = pipeline3D = VK_NULL_HANDLE;
+        for (VkPipeline pipeline : {pipeline2D, pipeline3D})
+            if (pipeline)
+                vkDestroyPipeline(device, pipeline, nullptr);
+        pipeline2D = pipeline3D = pipelineMesh = VK_NULL_HANDLE;
         return Fail(result, "vkCreateGraphicsPipelines");
     }
-    counters.pipelinesCreated += 2;
+    counters.pipelinesCreated += 3;
     return true;
 }
 
@@ -307,9 +319,11 @@ void DeviceState::DestroyPipelines() {
         vkDestroyPipeline(device, pipeline2D, nullptr);
     if (pipeline3D)
         vkDestroyPipeline(device, pipeline3D, nullptr);
+    if (pipelineMesh)
+        vkDestroyPipeline(device, pipelineMesh, nullptr);
     if (renderPass)
         vkDestroyRenderPass(device, renderPass, nullptr);
-    pipeline2D = pipeline3D = VK_NULL_HANDLE;
+    pipeline2D = pipeline3D = pipelineMesh = VK_NULL_HANDLE;
     renderPass = VK_NULL_HANDLE;
     renderPassFormat = VK_FORMAT_UNDEFINED;
 }

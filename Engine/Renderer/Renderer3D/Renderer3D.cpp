@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 namespace LuxEngine {
@@ -13,6 +14,16 @@ GpuDevice* device = nullptr;
 Mat4 viewProjection;
 DirectionalLight light;
 std::vector<PointLight> pointLights;
+constexpr std::array<Vec3, 8> CubePositions{{{-0.5f, -0.5f, -0.5f},
+                                             {0.5f, -0.5f, -0.5f},
+                                             {0.5f, 0.5f, -0.5f},
+                                             {-0.5f, 0.5f, -0.5f},
+                                             {-0.5f, -0.5f, 0.5f},
+                                             {0.5f, -0.5f, 0.5f},
+                                             {0.5f, 0.5f, 0.5f},
+                                             {-0.5f, 0.5f, 0.5f}}};
+constexpr std::array<uint32, 36> CubeIndices{{0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 4, 7, 0, 7, 3,
+                                              1, 2, 6, 1, 6, 5, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2}};
 std::vector<RenderVertex> vertices;
 Renderer3D::Statistics stats;
 bool active = false;
@@ -37,6 +48,41 @@ void PerspectiveCamera::SetPerspective(float fovRadians, float aspect, float nea
 void PerspectiveCamera::RecalculateMatrix() {
     viewMatrix_ = Mat4::LookAt(position_, target_, up_);
     viewProjectionMatrix_ = projectionMatrix_ * viewMatrix_;
+}
+
+bool Mesh3D::Upload(GpuDevice* gpu, std::span<const Vec3> positions,
+                    std::span<const uint32> indices) {
+    Release();
+    if (!gpu || positions.empty() || indices.empty() || indices.size() % 3 != 0 ||
+        positions.size() > std::numeric_limits<uint32>::max() / sizeof(RenderVertex) ||
+        indices.size() > std::numeric_limits<uint32>::max() / sizeof(uint32))
+        return false;
+    for (uint32 index : indices)
+        if (index >= positions.size())
+            return false;
+    std::vector<RenderVertex> data;
+    data.reserve(positions.size());
+    for (const Vec3& position : positions)
+        data.push_back({position, {1, 1, 1, 1}, {0, 0}});
+    const auto vertexBytes = static_cast<uint32>(data.size() * sizeof(RenderVertex));
+    const auto indexBytes = static_cast<uint32>(indices.size_bytes());
+    if (!vertices_.Initialize(gpu, BufferType::Vertex, vertexBytes) ||
+        !vertices_.SetData(data.data(), vertexBytes) ||
+        !indices_.Initialize(gpu, BufferType::Index, indexBytes) ||
+        !indices_.SetData(indices.data(), indexBytes)) {
+        Release();
+        return false;
+    }
+    indexCount_ = static_cast<uint32>(indices.size());
+    return true;
+}
+void Mesh3D::Release() {
+    vertices_.Release();
+    indices_.Release();
+    indexCount_ = 0;
+}
+bool Mesh3D::IsValid() const {
+    return indexCount_ != 0 && vertices_.IsValid() && indices_.IsValid();
 }
 
 void Renderer3D::Init(GpuDevice* gpu) {
@@ -64,6 +110,14 @@ void Renderer3D::BeginScene(const PerspectiveCamera& camera, const DirectionalLi
         Log::Warn("Renderer3D uses the first " + std::to_string(MaxPointLights) + " of " +
                   std::to_string(points.size()) + " point lights");
     pointLights.assign(points.begin(), points.begin() + std::min(points.size(), MaxPointLights));
+    if (device) {
+        std::array<GpuPointLight, MaxPointLights> gpuPoints{};
+        for (size_t index = 0; index < pointLights.size(); ++index)
+            gpuPoints[index] = {pointLights[index].position, pointLights[index].radius,
+                                pointLights[index].color, pointLights[index].intensity};
+        device->SetLighting({sun.direction, sun.color, sun.intensity,
+                             std::span(gpuPoints.data(), pointLights.size())});
+    }
     vertices.clear();
     stats = {};
     active = true;
@@ -121,18 +175,15 @@ void Renderer3D::DrawMesh(std::span<const Vec3> positions, std::span<const uint3
     ++stats.meshCount;
 }
 void Renderer3D::DrawMesh(const Mat4& transform, const Material3D& material) {
-    static const std::array<Vec3, 8> cube{{{-0.5f, -0.5f, -0.5f},
-                                           {0.5f, -0.5f, -0.5f},
-                                           {0.5f, 0.5f, -0.5f},
-                                           {-0.5f, 0.5f, -0.5f},
-                                           {-0.5f, -0.5f, 0.5f},
-                                           {0.5f, -0.5f, 0.5f},
-                                           {0.5f, 0.5f, 0.5f},
-                                           {-0.5f, 0.5f, 0.5f}}};
-    static const std::array<uint32, 36> indices{{0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
-                                                 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5,
-                                                 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2}};
-    DrawMesh(cube, indices, transform, material);
+    DrawMesh(CubePositions, CubeIndices, transform, material);
+}
+void Renderer3D::DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material) {
+    if (!active || !device || !mesh.IsValid())
+        return;
+    if (device->DrawIndexed(mesh.vertices_, mesh.indices_, mesh.indexCount_, viewProjection,
+                            transform, material.albedoColor))
+        ++stats.drawCalls;
+    ++stats.meshCount;
 }
 void Renderer3D::DrawCube(const Vec3& p, const Vec3& scale, const Material3D& material) {
     DrawMesh(Mat4::Translate(p) * Mat4::Scale(scale), material);

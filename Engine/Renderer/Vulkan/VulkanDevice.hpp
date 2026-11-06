@@ -14,6 +14,9 @@
 namespace LuxEngine::Vk {
 
 constexpr uint32 MaxFramesInFlight = 3;
+constexpr uint32 MaxPointLights = 16;
+constexpr VkDeviceSize UniformObjectBytes = 80;
+constexpr VkDeviceSize UniformLightBytes = 48 + 32 * MaxPointLights;
 
 const char* ResultString(VkResult result);
 
@@ -123,6 +126,8 @@ struct FrameData {
     bool queriesWritten = false;
     uint64 serial = 0;
     VertexRing ring;
+    VertexRing uniforms;
+    VkDescriptorSet uniformSet = VK_NULL_HANDLE;
 };
 
 struct UploadBatch {
@@ -204,6 +209,10 @@ struct DeviceState {
     VkPipelineCache pipelineCache = VK_NULL_HANDLE;
     VkPipeline pipeline2D = VK_NULL_HANDLE;
     VkPipeline pipeline3D = VK_NULL_HANDLE;
+    VkPipeline pipelineMesh = VK_NULL_HANDLE;
+    VkDescriptorSetLayout frameSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool framePool = VK_NULL_HANDLE;
+    VkDeviceSize uniformAlignment = 256;
     VkSampler sampler = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> descriptorPools;
 
@@ -234,6 +243,10 @@ struct DeviceState {
     VkPipeline boundPipeline = VK_NULL_HANDLE;
     VkDescriptorSet boundSet = VK_NULL_HANDLE;
     VkBuffer boundVertexBuffer = VK_NULL_HANDLE;
+    VkBuffer boundIndexBuffer = VK_NULL_HANDLE;
+    uint32 lightOffset = 0;
+    uint32 boundObjectOffset = UINT32_MAX;
+    uint32 boundLightOffset = UINT32_MAX;
     Mat4 boundMatrix;
     bool matrixBound = false;
     Capture capture;
@@ -290,6 +303,9 @@ struct DeviceState {
                                TextureRecord& record);
     bool EnsureVertexCapacity(FrameData& frame, VkDeviceSize bytes);
     bool EnsureCaptureBuffer(VkDeviceSize size);
+    bool PushUniform(const void* data, VkDeviceSize size, uint32& offset);
+    void BindFrameSet(uint32 objectOffset);
+    bool ResetFrameUniforms();
 
     bool CreateFrames();
     void DestroyFrames();

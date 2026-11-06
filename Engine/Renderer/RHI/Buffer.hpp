@@ -35,6 +35,7 @@ public:
     bool BelongsTo(const GpuDevice& device) const;
 
 private:
+    friend class GpuDevice;
     std::weak_ptr<Vk::DeviceState> owner_;
     uint64 handle_ = 0;
     BufferType type_ = BufferType::Vertex;

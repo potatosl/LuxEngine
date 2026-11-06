@@ -58,6 +58,7 @@ struct GpuFrameStats {
     uint32 pipelineBinds = 0;
     uint32 descriptorBinds = 0;
     uint32 pushConstantUpdates = 0;
+    uint32 uniformBinds = 0;
     uint32 submissions = 0;
     uint64 vertexBytes = 0;
     uint64 uploadBytes = 0;
@@ -85,6 +86,20 @@ struct GpuMemoryStats {
     uint32 pendingDestructions = 0;
     uint32 descriptorPools = 0;
     uint64 pendingStagingBytes = 0;
+};
+
+struct GpuPointLight {
+    Vec3 position;
+    float radius = 0.0f;
+    Vec3 color;
+    float intensity = 0.0f;
+};
+
+struct GpuLighting {
+    Vec3 direction;
+    Vec3 color;
+    float intensity = 0.0f;
+    std::span<const GpuPointLight> points;
 };
 
 struct GpuFrameCapture {
@@ -131,6 +146,10 @@ private:
     friend class GpuBuffer;
     friend class GpuTexture;
     friend class Renderer2D;
+    friend class Renderer3D;
+    bool SetLighting(const GpuLighting& lighting);
+    bool DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices, uint32 indexCount,
+                     const Mat4& viewProjection, const Mat4& model, const Vec4& albedo);
     bool DrawTexturedTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection,
                                uint64 textureHandle, bool depth);
     Ref<Vk::DeviceState> state_;

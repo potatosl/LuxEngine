@@ -78,6 +78,23 @@ private:
     Vec3 up_{0.0f, 1.0f, 0.0f};
 };
 
+class LUX_API Mesh3D {
+public:
+    bool Upload(GpuDevice* device, std::span<const Vec3> positions,
+                std::span<const uint32> indices);
+    void Release();
+    bool IsValid() const;
+    uint32 GetIndexCount() const {
+        return IsValid() ? indexCount_ : 0;
+    }
+
+private:
+    friend class Renderer3D;
+    GpuBuffer vertices_;
+    GpuBuffer indices_;
+    uint32 indexCount_ = 0;
+};
+
 class LUX_API Renderer3D {
 public:
     struct Statistics {
@@ -94,6 +111,7 @@ public:
     static void EndScene();
 
     static void DrawMesh(const Mat4& transform, const Material3D& material);
+    static void DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material);
     static void DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
                          const Mat4& transform, const Material3D& material);
     static void DrawCube(const Vec3& position, const Vec3& scale, const Material3D& material);
