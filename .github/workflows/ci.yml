@@ -100,4 +100,6 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DCMAKE_PREFIX_PATH="C:/LuxDeps"
           cmake --build consumer/build --config Debug
-          & "./consumer/build/bin/Debug/ConsumerApp.exe"
+          $consumerExe = (Get-ChildItem -Path consumer/build -Filter "ConsumerApp.exe" -Recurse | Select-Object -First 1).FullName
+          Write-Host "Running ConsumerApp: $consumerExe"
+          & $consumerExe
