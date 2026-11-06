@@ -6,6 +6,7 @@
 namespace LuxEngine::Vk {
 namespace {
 constexpr VkDeviceSize InitialVertexRing = 1ull << 20;
+constexpr VkDeviceSize FrameUniformBytes = 2ull << 20;
 constexpr size_t MaxUploadBatches = 64;
 constexpr VkPipelineStageFlags ResourceReadStages = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
                                                     VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
@@ -471,13 +472,11 @@ bool DeviceState::CreateTextureResource(uint32 width, uint32 height, const void*
 }
 
 bool DeviceState::EnsureVertexCapacity(FrameData& frame, VkDeviceSize bytes) {
-    const VkDeviceSize needed = frame.ring.used + bytes;
     if (frameStats.vertexBytes + bytes > config.maxFrameVertexBytes)
         return Fail(GpuStatus::OutOfMemory, "Per-frame vertex budget exceeded");
+    const VkDeviceSize needed = frame.ring.used + bytes;
     if (needed <= frame.ring.capacity)
         return true;
-    if (needed > config.maxFrameVertexBytes)
-        return Fail(GpuStatus::OutOfMemory, "Per-frame vertex budget exceeded");
     const VkDeviceSize capacity = std::min<VkDeviceSize>(
         config.maxFrameVertexBytes, std::max({needed, InitialVertexRing, frame.ring.capacity * 2}));
     if (ConsumeFault(Fault::BufferAllocation))
@@ -505,6 +504,17 @@ bool DeviceState::EnsureVertexCapacity(FrameData& frame, VkDeviceSize bytes) {
         Retire({0, frame.ring.buffer, VK_NULL_HANDLE, VK_NULL_HANDLE, frame.ring.allocation});
     }
     frame.ring = next;
+    return true;
+}
+
+bool DeviceState::PushUniform(const void* data, VkDeviceSize size, uint32& offset) {
+    VertexRing& ring = frames[frameSlot].uniforms;
+    const VkDeviceSize aligned = (ring.used + uniformAlignment - 1) / uniformAlignment * uniformAlignment;
+    if (!ring.mapped || aligned + size > ring.capacity)
+        return Fail(GpuStatus::OutOfMemory, "Per-frame uniform budget exceeded");
+    std::memcpy(ring.mapped + aligned, data, static_cast<size_t>(size));
+    ring.used = aligned + size;
+    offset = static_cast<uint32>(aligned);
     return true;
 }
 
@@ -537,6 +547,38 @@ bool DeviceState::EnsureCaptureBuffer(VkDeviceSize size) {
 }
 
 bool DeviceState::CreateFrames() {
+    uniformAlignment = std::max<VkDeviceSize>(properties.limits.minUniformBufferOffsetAlignment, 16);
+    VkDescriptorSetLayoutBinding bindings[2]{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    bindings[1] = bindings[0];
+    bindings[1].binding = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 2;
+    layoutInfo.pBindings = bindings;
+    if (const VkResult result =
+            vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &frameSetLayout);
+        result != VK_SUCCESS) {
+        frameSetLayout = VK_NULL_HANDLE;
+        return Fail(result, "Frame descriptor set layout");
+    }
+    const VkDescriptorPoolSize uniformSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                                           2 * frameCount};
+    VkDescriptorPoolCreateInfo framePoolInfo{};
+    framePoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    framePoolInfo.maxSets = frameCount;
+    framePoolInfo.poolSizeCount = 1;
+    framePoolInfo.pPoolSizes = &uniformSize;
+    if (const VkResult result = vkCreateDescriptorPool(device, &framePoolInfo, nullptr, &framePool);
+        result != VK_SUCCESS) {
+        framePool = VK_NULL_HANDLE;
+        return Fail(result, "Frame descriptor pool");
+    }
+
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.queueFamilyIndex = info.graphicsQueueFamily;
@@ -568,6 +610,46 @@ bool DeviceState::CreateFrames() {
             frame.imageAvailable = VK_NULL_HANDLE;
             return Fail(result, "Image-available semaphore");
         }
+        if (ConsumeFault(Fault::BufferAllocation))
+            return Fail(VK_ERROR_OUT_OF_DEVICE_MEMORY, "Frame uniform buffer");
+        VkBufferCreateInfo uniformInfo{};
+        uniformInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        uniformInfo.size = FrameUniformBytes;
+        uniformInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        VmaAllocationCreateInfo uniformAllocation{};
+        uniformAllocation.usage = VMA_MEMORY_USAGE_AUTO;
+        uniformAllocation.flags =
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationInfo mapped{};
+        if (const VkResult result = vmaCreateBuffer(allocator, &uniformInfo, &uniformAllocation,
+                                                    &frame.uniforms.buffer,
+                                                    &frame.uniforms.allocation, &mapped);
+            result != VK_SUCCESS) {
+            frame.uniforms = {};
+            return Fail(result, "Frame uniform buffer");
+        }
+        frame.uniforms.mapped = static_cast<uint8*>(mapped.pMappedData);
+        frame.uniforms.capacity = FrameUniformBytes;
+        VkDescriptorSetAllocateInfo setInfo{};
+        setInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        setInfo.descriptorPool = framePool;
+        setInfo.descriptorSetCount = 1;
+        setInfo.pSetLayouts = &frameSetLayout;
+        if (const VkResult result = vkAllocateDescriptorSets(device, &setInfo, &frame.uniformSet);
+            result != VK_SUCCESS)
+            return Fail(result, "Frame descriptor set");
+        const VkDescriptorBufferInfo objectRange{frame.uniforms.buffer, 0, UniformObjectBytes};
+        const VkDescriptorBufferInfo lightRange{frame.uniforms.buffer, 0, UniformLightBytes};
+        VkWriteDescriptorSet writes[2]{};
+        for (uint32 binding = 0; binding < 2; ++binding) {
+            writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[binding].dstSet = frame.uniformSet;
+            writes[binding].dstBinding = binding;
+            writes[binding].descriptorCount = 1;
+            writes[binding].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+            writes[binding].pBufferInfo = binding == 0 ? &objectRange : &lightRange;
+        }
+        vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
         if (info.gpuTimestamps) {
             VkQueryPoolCreateInfo queryInfo{};
             queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
@@ -592,6 +674,8 @@ void DeviceState::DestroyFrames() {
     for (FrameData& frame : frames) {
         if (frame.ring.buffer)
             vmaDestroyBuffer(allocator, frame.ring.buffer, frame.ring.allocation);
+        if (frame.uniforms.buffer)
+            vmaDestroyBuffer(allocator, frame.uniforms.buffer, frame.uniforms.allocation);
         if (frame.queries)
             vkDestroyQueryPool(device, frame.queries, nullptr);
         if (frame.imageAvailable)
@@ -605,6 +689,12 @@ void DeviceState::DestroyFrames() {
     uploadPool = VK_NULL_HANDLE;
     uploadBatches.clear();
     uploadRecording = VK_NULL_HANDLE;
+    if (framePool)
+        vkDestroyDescriptorPool(device, framePool, nullptr);
+    if (frameSetLayout)
+        vkDestroyDescriptorSetLayout(device, frameSetLayout, nullptr);
+    framePool = VK_NULL_HANDLE;
+    frameSetLayout = VK_NULL_HANDLE;
 }
 
 void DeviceState::Shutdown() {

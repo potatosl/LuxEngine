@@ -15,6 +15,23 @@ constexpr uint32 MaxFrameFailures = 3;
 const std::string NoError;
 const GpuDeviceInfo NoInfo;
 
+struct ObjectUniform {
+    float model[16];
+    float albedo[4];
+};
+static_assert(sizeof(ObjectUniform) == Vk::UniformObjectBytes);
+
+struct LightUniform {
+    float direction[4];
+    float colorIntensity[4];
+    uint32 count[4];
+    struct {
+        float positionRadius[4];
+        float colorIntensity[4];
+    } points[Vk::MaxPointLights];
+};
+static_assert(sizeof(LightUniform) == Vk::UniformLightBytes);
+
 VkResult SubmitRecoveryFrame(Vk::DeviceState& s, Vk::FrameData& frame, uint64& serial) {
     VkResult result = vkResetCommandPool(s.device, frame.pool, 0);
     VkCommandBufferBeginInfo begin{};
@@ -275,11 +292,17 @@ GpuDevice::FrameStart GpuDevice::BeginFrame() {
         vkCmdWriteTimestamp(frame.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, frame.queries, 0);
     }
     frame.ring.used = 0;
+    if (!s.ResetFrameUniforms()) {
+        s.commandsOpen = false;
+        EndFrame();
+        return s.Usable() ? FrameStart::Skipped : FrameStart::Error;
+    }
     s.frameStats.frameIndex = ++s.frameIndex;
     s.clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
     s.boundPipeline = VK_NULL_HANDLE;
     s.boundSet = VK_NULL_HANDLE;
     s.boundVertexBuffer = VK_NULL_HANDLE;
+    s.boundIndexBuffer = VK_NULL_HANDLE;
     s.matrixBound = false;
     return FrameStart::Ready;
 }
@@ -305,6 +328,30 @@ bool Vk::DeviceState::BeginRenderPass() {
     vkCmdSetScissor(frame.cmd, 0, 1, &scissor);
     renderPassActive = true;
     return true;
+}
+
+bool Vk::DeviceState::ResetFrameUniforms() {
+    frames[frameSlot].uniforms.used = 0;
+    boundObjectOffset = boundLightOffset = UINT32_MAX;
+    ObjectUniform object{};
+    const Mat4 identity;
+    std::memcpy(object.model, identity.elements, sizeof(object.model));
+    object.albedo[0] = object.albedo[1] = object.albedo[2] = object.albedo[3] = 1.0f;
+    uint32 objectOffset = 0;
+    const LightUniform lights{};
+    return PushUniform(&object, sizeof(object), objectOffset) &&
+           PushUniform(&lights, sizeof(lights), lightOffset);
+}
+
+void Vk::DeviceState::BindFrameSet(uint32 objectOffset) {
+    if (objectOffset == boundObjectOffset && lightOffset == boundLightOffset)
+        return;
+    const uint32 offsets[2] = {objectOffset, lightOffset};
+    vkCmdBindDescriptorSets(frames[frameSlot].cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
+                            1, 1, &frames[frameSlot].uniformSet, 2, offsets);
+    boundObjectOffset = objectOffset;
+    boundLightOffset = lightOffset;
+    ++frameStats.uniformBinds;
 }
 
 bool GpuDevice::Clear(float r, float g, float b, float a) {
@@ -376,9 +423,100 @@ bool GpuDevice::DrawTexturedTriangles(std::span<const RenderVertex> vertices,
         s.matrixBound = true;
         ++s.frameStats.pushConstantUpdates;
     }
+    s.BindFrameSet(0);
     vkCmdDraw(cmd, static_cast<uint32>(vertices.size()), 1, firstVertex, 0);
     ++s.frameStats.drawCalls;
     s.frameStats.vertexBytes += bytes;
+    return true;
+}
+
+bool GpuDevice::SetLighting(const GpuLighting& lighting) {
+    if (!state_ || !state_->frameActive || !state_->commandsOpen)
+        return false;
+    LightUniform lights{};
+    const Vec3 direction = lighting.direction.Normalized();
+    lights.direction[0] = direction.x;
+    lights.direction[1] = direction.y;
+    lights.direction[2] = direction.z;
+    lights.colorIntensity[0] = lighting.color.x;
+    lights.colorIntensity[1] = lighting.color.y;
+    lights.colorIntensity[2] = lighting.color.z;
+    lights.colorIntensity[3] = lighting.intensity;
+    const size_t count = std::min<size_t>(lighting.points.size(), Vk::MaxPointLights);
+    lights.count[0] = static_cast<uint32>(count);
+    for (size_t index = 0; index < count; ++index) {
+        const GpuPointLight& point = lighting.points[index];
+        auto& target = lights.points[index];
+        target.positionRadius[0] = point.position.x;
+        target.positionRadius[1] = point.position.y;
+        target.positionRadius[2] = point.position.z;
+        target.positionRadius[3] = point.radius;
+        target.colorIntensity[0] = point.color.x;
+        target.colorIntensity[1] = point.color.y;
+        target.colorIntensity[2] = point.color.z;
+        target.colorIntensity[3] = point.intensity;
+    }
+    return state_->PushUniform(&lights, sizeof(lights), state_->lightOffset);
+}
+
+bool GpuDevice::DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices, uint32 indexCount,
+                            const Mat4& viewProjection, const Mat4& model, const Vec4& albedo) {
+    if (!state_ || !state_->frameActive || !state_->commandsOpen || indexCount == 0 ||
+        indexCount % 3 != 0 || vertices.type_ != BufferType::Vertex ||
+        indices.type_ != BufferType::Index || !vertices.BelongsTo(*this) ||
+        !indices.BelongsTo(*this) ||
+        static_cast<uint64>(indexCount) * sizeof(uint32) > indices.sizeBytes_)
+        return false;
+    auto& s = *state_;
+    Vk::BufferRecord* vertexRecord = s.buffers.Get(vertices.handle_);
+    Vk::BufferRecord* indexRecord = s.buffers.Get(indices.handle_);
+    Vk::TextureRecord* white = s.textures.Get(s.whiteTexture);
+    if (!vertexRecord || !indexRecord || !white)
+        return false;
+    ObjectUniform object{};
+    std::memcpy(object.model, model.elements, sizeof(object.model));
+    object.albedo[0] = albedo.x;
+    object.albedo[1] = albedo.y;
+    object.albedo[2] = albedo.z;
+    object.albedo[3] = albedo.w;
+    uint32 objectOffset = 0;
+    if (!s.PushUniform(&object, sizeof(object), objectOffset))
+        return false;
+
+    if (!s.renderPassActive)
+        s.BeginRenderPass();
+    VkCommandBuffer cmd = s.frames[s.frameSlot].cmd;
+    if (s.pipelineMesh != s.boundPipeline) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelineMesh);
+        s.boundPipeline = s.pipelineMesh;
+        ++s.frameStats.pipelineBinds;
+    }
+    if (vertexRecord->buffer != s.boundVertexBuffer) {
+        const VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vertexRecord->buffer, &offset);
+        s.boundVertexBuffer = vertexRecord->buffer;
+    }
+    if (indexRecord->buffer != s.boundIndexBuffer) {
+        vkCmdBindIndexBuffer(cmd, indexRecord->buffer, 0, VK_INDEX_TYPE_UINT32);
+        s.boundIndexBuffer = indexRecord->buffer;
+    }
+    if (white->set != s.boundSet) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelineLayout, 0, 1,
+                                &white->set, 0, nullptr);
+        s.boundSet = white->set;
+        ++s.frameStats.descriptorBinds;
+    }
+    if (!s.matrixBound ||
+        std::memcmp(s.boundMatrix.elements, viewProjection.elements, sizeof(Mat4::elements)) != 0) {
+        vkCmdPushConstants(cmd, s.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(Mat4::elements), viewProjection.elements);
+        s.boundMatrix = viewProjection;
+        s.matrixBound = true;
+        ++s.frameStats.pushConstantUpdates;
+    }
+    s.BindFrameSet(objectOffset);
+    vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+    ++s.frameStats.drawCalls;
     return true;
 }
 
@@ -458,6 +596,8 @@ bool GpuDevice::EndFrame() {
         }
         if (frame.ring.used)
             vmaFlushAllocation(s.allocator, frame.ring.allocation, 0, frame.ring.used);
+        if (frame.uniforms.used)
+            vmaFlushAllocation(s.allocator, frame.uniforms.allocation, 0, frame.uniforms.used);
     }
 
     VkResult result = recording ? vkEndCommandBuffer(cmd) : VK_ERROR_UNKNOWN;
