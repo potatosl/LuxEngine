@@ -1,11 +1,23 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$ArchivePath
+    [Parameter(Mandatory = $false)]
+    [string]$ArchivePath = ""
 )
 
 $ErrorActionPreference = "Stop"
-$archive = (Resolve-Path -LiteralPath $ArchivePath -ErrorAction Stop).Path
+$dxcUrl = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/dxc_2026_09_29.zip"
 $expected = "ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1"
+
+$tempZip = $false
+if (-not $ArchivePath -or -not (Test-Path $ArchivePath)) {
+    $ArchivePath = Join-Path $env:TEMP "dxc_2026_09_29.zip"
+    Write-Host "Downloading DXC from $dxcUrl..."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $dxcUrl -OutFile $ArchivePath
+    $tempZip = $true
+}
+
+$archive = (Resolve-Path -LiteralPath $ArchivePath -ErrorAction Stop).Path
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "DXC checksum mismatch" }
 Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $PSScriptRoot "dxc") -Force
+if ($tempZip -and (Test-Path $archive)) { Remove-Item $archive -Force }
 Write-Host "Portable DXC installed in Tools/dxc"

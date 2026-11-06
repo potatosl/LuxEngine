@@ -52,3 +52,10 @@ set_tests_properties(Runtime_player PROPERTIES TIMEOUT 60 LABELS gpu
     FIXTURES_REQUIRED lux_player_scene
     WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxPlayer>"
     ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}")
+
+# Dedicated fuzz target for coverage-guided fuzzing and seed corpus verification
+add_executable(LuxFuzzScene FuzzScene.cpp)
+target_link_libraries(LuxFuzzScene PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxFuzzScene)
+lux_copy_runtime(LuxFuzzScene)
+

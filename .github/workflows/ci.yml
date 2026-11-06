@@ -8,30 +8,96 @@ on:
 
 jobs:
   build-and-test:
-    name: Windows Build & Test
+    name: Windows Build, Test & SDK Consumer
     runs-on: windows-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Vulkan SDK
-        uses: humbletim/setup-vulkan-sdk@v1.2.0
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
-          vulkan-query-version: 1.3.268.0
-          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-query-version: 1.3.296.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, SPIRV-Tools
+          vulkan-use-cache: false
 
-      - name: Configure Engine
+      - name: Setup Portable DXC Shader Compiler
+        shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DLUX_BUILD_TESTS=ON -DLUX_BUILD_EDITOR=OFF
+          & powershell -ExecutionPolicy Bypass -File Tools/SetupShaderCompiler.ps1
+
+      - name: Install Dependencies via vcpkg
+        shell: pwsh
+        run: |
+          vcpkg install --triplet x64-windows sdl3 stb vulkan-memory-allocator
+
+      - name: Build and Install Box2D 2.4.1
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path C:/LuxDeps/src -Force | Out-Null
+          git clone --depth 1 -b v2.4.1 https://github.com/erincatto/box2d C:/LuxDeps/src/box2d
+          cmake -S C:/LuxDeps/src/box2d -B C:/LuxDeps/build/box2d -A x64 -DBOX2D_BUILD_UNIT_TESTS=OFF -DBOX2D_BUILD_TESTBED=OFF -DBOX2D_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX=C:/LuxDeps -DCMAKE_DEBUG_POSTFIX=d
+          cmake --build C:/LuxDeps/build/box2d --config Debug -- /m /v:minimal
+          cmake --install C:/LuxDeps/build/box2d --config Debug
+
+      - name: Configure Engine & Tests
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 -DLUX_BUILD_TESTS=ON -DLUX_BUILD_EDITOR=OFF `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DCMAKE_PREFIX_PATH="C:/LuxDeps"
 
       - name: Build Engine (Debug)
+        shell: pwsh
         run: |
           cmake --build build --config Debug -- /m /v:minimal
 
       - name: Run Headless Tests
+        shell: pwsh
         run: |
           ctest --test-dir build -C Debug --output-on-failure -L headless
 
+      - name: Run Fuzz Seed Corpus
+        shell: pwsh
+        run: |
+          & "./build/bin/Debug/LuxFuzzScene.exe"
+
       - name: Install SDK (Debug)
+        shell: pwsh
         run: |
           cmake --install build --config Debug --prefix ./installed_sdk
+
+      - name: Build & Run SDK Consumer Project
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path consumer -Force | Out-Null
+          @'
+          cmake_minimum_required(VERSION 3.24)
+          project(ConsumerTest LANGUAGES CXX)
+          set(CMAKE_CXX_STANDARD 20)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          find_package(LuxEngine CONFIG REQUIRED)
+          add_executable(ConsumerApp main.cpp)
+          target_link_libraries(ConsumerApp PRIVATE LuxEngine::Engine LuxEngine::Runtime)
+          lux_copy_shaders(ConsumerApp)
+          '@ | Out-File consumer/CMakeLists.txt -Encoding utf8
+          @'
+          #include "Engine/Core/Math.hpp"
+          #include "Engine/Scene/Scene.hpp"
+          #include <iostream>
+          int main() {
+              LuxEngine::Scene scene;
+              auto e = scene.CreateEntity("TestEntity");
+              std::cout << "ConsumerApp entity count: " << scene.GetEntityCount() << std::endl;
+              return (scene.GetEntityCount() == 1) ? 0 : 1;
+          }
+          '@ | Out-File consumer/main.cpp -Encoding utf8
+          $sdkCmakeDir = (Resolve-Path "./installed_sdk/lib/cmake/LuxEngine").Path
+          cmake -S consumer -B consumer/build -A x64 `
+            "-DLuxEngine_DIR=$sdkCmakeDir" `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DCMAKE_PREFIX_PATH="C:/LuxDeps"
+          cmake --build consumer/build --config Debug
+          & "./consumer/build/bin/Debug/ConsumerApp.exe"
