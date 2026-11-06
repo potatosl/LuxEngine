@@ -472,6 +472,8 @@ bool DeviceState::CreateTextureResource(uint32 width, uint32 height, const void*
 
 bool DeviceState::EnsureVertexCapacity(FrameData& frame, VkDeviceSize bytes) {
     const VkDeviceSize needed = frame.ring.used + bytes;
+    if (frameStats.vertexBytes + bytes > config.maxFrameVertexBytes)
+        return Fail(GpuStatus::OutOfMemory, "Per-frame vertex budget exceeded");
     if (needed <= frame.ring.capacity)
         return true;
     if (needed > config.maxFrameVertexBytes)

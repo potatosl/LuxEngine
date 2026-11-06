@@ -809,7 +809,8 @@ struct Graphics {
         }
         if (checkTheme) {
             const bool iconAvailable = window.HasWindowIcon();
-            Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland",
+            Check(iconAvailable || std::string_view(SDL_GetCurrentVideoDriver()) == "wayland" ||
+                      std::string_view(SDL_GetCurrentVideoDriver()) == "offscreen",
                   "window icon applied when supported");
             const auto expected = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK ? ColorTheme::Dark
                                                                                 : ColorTheme::Light;
@@ -1056,6 +1057,34 @@ void RenderOutput(Graphics& graphics) {
     Check(center[0] > 200 && center[1] > 200 && center[2] > 200 &&
               IsColor(Pixel(capture, 0.05f, 0.05f), 0, 0, 0),
           "perspective cube faces the camera and is lit");
+
+    auto pointLit = [&](std::span<const PointLight> points) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            PerspectiveCamera camera(ToRadians(60), 4.0f / 3, 0.1f, 100);
+            camera.SetPosition({0, 0, 5});
+            DirectionalLight dark;
+            dark.intensity = 0.0f;
+            Renderer3D::BeginScene(camera, dark, points);
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+            Renderer3D::EndScene();
+        });
+    };
+    PointLight red;
+    red.position = {0, 0, 2};
+    red.color = {1, 0, 0};
+    const auto ambient = Pixel(pointLit({}), 0.5f, 0.5f);
+    const auto front = Pixel(pointLit(std::span(&red, 1)), 0.5f, 0.5f);
+    red.position = {0, 0, -3};
+    const auto behind = Pixel(pointLit(std::span(&red, 1)), 0.5f, 0.5f);
+    red.position = {0, 0, 2};
+    red.radius = 1.0f;
+    const auto outOfRange = Pixel(pointLit(std::span(&red, 1)), 0.5f, 0.5f);
+    Check(ambient[0] < 60 && front[0] > 200 && front[1] < 60,
+          "point light in front of a face lights it with its own color");
+    Check(IsColor(behind, ambient[0], ambient[1], ambient[2], 2) &&
+              IsColor(outOfRange, ambient[0], ambient[1], ambient[2], 2),
+          "point light behind a face or beyond its radius adds nothing");
     texture.Release();
     empty.Release();
     graphics.ValidationClean("render output checks");
@@ -1107,6 +1136,20 @@ void Gpu() {
         Check(stats.drawCalls == 3 && stats.pipelineBinds == 2 && stats.descriptorBinds == 2 &&
                   stats.pushConstantUpdates == 2 && stats.submissions >= 1,
               "frame statistics count recorded GPU commands");
+    }
+    {
+        auto transient = std::make_unique<GpuTexture>();
+        const uint32 pixel = 0xff0000ffu;
+        Check(transient->Initialize(&graphics.gpu, 1, 1, &pixel), "transient sprite texture");
+        Check(graphics.Begin(), "transient sprite frame");
+        Renderer2D::BeginScene(camera);
+        Renderer2D::DrawSprite({0, 0}, {1, 1}, transient.get());
+        transient.reset();
+        Renderer2D::DrawQuad(Vec2(1, 0), {1, 1}, {0, 1, 0, 1});
+        Renderer2D::EndScene();
+        Check(Renderer2D::GetStats().drawCalls == 1 && Renderer2D::GetStats().quadCount == 2,
+              "sprite whose texture was destroyed before EndScene is skipped safely");
+        Check(graphics.gpu.EndFrame(), "transient sprite frame submitted");
     }
     Check(graphics.gpu.WaitIdle(), "GPU completion");
     texture.reset();
@@ -1349,6 +1392,13 @@ void Failures() {
               "swapchain recreation failure skips the frame");
         Check(graphics.Begin() && gpu.EndFrame(), "swapchain recreation retried");
 
+        Vk::InjectFault(Vk::Fault::SurfaceZeroExtent);
+        gpu.NotifyResize();
+        window.PollEvents();
+        Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped && gpu.IsReady(),
+              "zero surface extent skips instead of acquiring from the stale swapchain");
+        Check(graphics.Begin() && gpu.EndFrame(), "swapchain recreated once the surface has size");
+
         GpuDeviceConfig small;
         small.maxFrameVertexBytes = 1 << 16;
         gpu.Shutdown();
@@ -1358,6 +1408,22 @@ void Failures() {
         Check(!gpu.DrawTriangles(many, Mat4{}) && gpu.GetLastFailure() == GpuStatus::OutOfMemory,
               "per-frame vertex budget enforced");
         Check(gpu.EndFrame() && gpu.IsReady(), "frame survives an over-budget draw");
+
+        GpuDeviceConfig medium;
+        medium.maxFrameVertexBytes = 4ull << 20;
+        gpu.Shutdown();
+        Check(gpu.Initialize(window, medium), "device with a 4 MiB vertex budget");
+        Renderer3D::Init(&gpu);
+        PerspectiveCamera camera(ToRadians(60), 4.0f / 3, 0.1f, 100);
+        Check(graphics.Begin(), "over-budget 3D frame");
+        Renderer3D::BeginScene(camera, {});
+        for (int cube = 0; cube < 3300; ++cube)
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+        Renderer3D::EndScene();
+        Check(Renderer3D::GetStats().drawCalls == 2 && gpu.IsReady(),
+              "3D scene over the vertex budget keeps the chunks that fit");
+        Check(gpu.EndFrame(), "over-budget 3D frame submitted");
+        Renderer3D::Shutdown();
         graphics.ValidationClean("recoverable failures");
 
         Vk::InjectFault(Vk::Fault::CommandBuffer, 3);

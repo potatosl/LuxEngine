@@ -19,6 +19,7 @@ enum class Fault : uint32 {
     Submit,
     DeviceLost,
     AcquireOutOfDate,
+    SurfaceZeroExtent,
     GpuTimeout,
     Count
 };

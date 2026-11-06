@@ -1,12 +1,18 @@
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
+#include "Engine/Core/Log.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <stdexcept>
+#include <string>
 namespace LuxEngine {
 namespace {
+constexpr size_t MaxSubmitVertices = 3 * 16384;
+constexpr size_t MaxPointLights = 16;
 GpuDevice* device = nullptr;
 Mat4 viewProjection;
 DirectionalLight light;
+std::vector<PointLight> pointLights;
 std::vector<RenderVertex> vertices;
 Renderer3D::Statistics stats;
 bool active = false;
@@ -40,15 +46,24 @@ void Renderer3D::Init(GpuDevice* gpu) {
 }
 void Renderer3D::Shutdown() {
     vertices.clear();
+    pointLights.clear();
     device = nullptr;
     active = false;
     stats = {};
 }
 void Renderer3D::BeginScene(const PerspectiveCamera& camera, const DirectionalLight& sun) {
+    BeginScene(camera, sun, {});
+}
+void Renderer3D::BeginScene(const PerspectiveCamera& camera, const DirectionalLight& sun,
+                            std::span<const PointLight> points) {
     if (active)
         throw std::logic_error("3D scene already active");
     viewProjection = camera.GetViewProjectionMatrix();
     light = sun;
+    if (points.size() > MaxPointLights)
+        Log::Warn("Renderer3D uses the first " + std::to_string(MaxPointLights) + " of " +
+                  std::to_string(points.size()) + " point lights");
+    pointLights.assign(points.begin(), points.begin() + std::min(points.size(), MaxPointLights));
     vertices.clear();
     stats = {};
     active = true;
@@ -57,9 +72,18 @@ void Renderer3D::EndScene() {
     if (!active)
         return;
     active = false;
-    if (device && !vertices.empty() &&
-        device->DrawTriangles(vertices, viewProjection, nullptr, true))
-        ++stats.drawCalls;
+    if (device) {
+        const std::span<const RenderVertex> all(vertices);
+        for (size_t first = 0; first < all.size(); first += MaxSubmitVertices) {
+            const auto chunk = all.subspan(first, std::min(MaxSubmitVertices, all.size() - first));
+            if (!device->DrawTriangles(chunk, viewProjection, nullptr, true)) {
+                Log::Warn("Renderer3D dropped " + std::to_string((all.size() - first) / 3) +
+                          " of " + std::to_string(all.size() / 3) + " triangles this frame");
+                break;
+            }
+            ++stats.drawCalls;
+        }
+    }
     vertices.clear();
 }
 void Renderer3D::DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
@@ -77,10 +101,20 @@ void Renderer3D::DrawMesh(std::span<const Vec3> positions, std::span<const uint3
             (triangle[1] - triangle[0]).Cross(triangle[2] - triangle[0]).Normalized();
         const float diffuse = std::max(0.0f, normal.Dot(light.direction.Normalized() * -1.0f)) *
                               std::max(0.0f, light.intensity);
+        Vec3 lit = light.color * diffuse;
+        const Vec3 center = (triangle[0] + triangle[1] + triangle[2]) * (1.0f / 3.0f);
+        for (const auto& point : pointLights) {
+            const Vec3 toLight = point.position - center;
+            const float distance = std::sqrt(toLight.Dot(toLight));
+            if (point.radius <= 0.0f || distance >= point.radius)
+                continue;
+            const float facing =
+                distance > 0.00001f ? std::max(0.0f, normal.Dot(toLight * (1.0f / distance))) : 1.0f;
+            const float falloff = 1.0f - distance / point.radius;
+            lit += point.color * (facing * falloff * falloff * std::max(0.0f, point.intensity));
+        }
         const auto& c = material.albedoColor;
-        const Vec4 color{c.x * (0.15f + diffuse * light.color.x),
-                         c.y * (0.15f + diffuse * light.color.y),
-                         c.z * (0.15f + diffuse * light.color.z), c.w};
+        const Vec4 color{c.x * (0.15f + lit.x), c.y * (0.15f + lit.y), c.z * (0.15f + lit.z), c.w};
         for (const auto& p : triangle)
             vertices.push_back({p, color, {0, 0}});
     }

@@ -207,7 +207,7 @@ GpuDevice::FrameStart GpuDevice::BeginFrame() {
             return FrameStart::Skipped;
         }
         s.swapchainFailures = 0;
-        if (!s.swapchain.handle) {
+        if (!s.swapchain.handle || s.swapchainDirty) {
             ++s.counters.framesSkipped;
             return FrameStart::Skipped;
         }
@@ -325,18 +325,19 @@ bool GpuDevice::Clear(float r, float g, float b, float a) {
 
 bool GpuDevice::DrawTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection,
                               GpuTexture* texture, bool depth) {
+    if (texture && !texture->BelongsTo(*this))
+        return false;
+    return DrawTexturedTriangles(vertices, viewProjection, texture ? texture->handle_ : 0, depth);
+}
+
+bool GpuDevice::DrawTexturedTriangles(std::span<const RenderVertex> vertices,
+                                      const Mat4& viewProjection, uint64 textureHandle,
+                                      bool depth) {
     if (!state_ || !state_->frameActive || vertices.empty() || vertices.size() % 3 != 0 ||
         vertices.size() > std::numeric_limits<uint32>::max())
         return false;
     auto& s = *state_;
-    Vk::TextureRecord* record = nullptr;
-    if (texture) {
-        if (!texture->BelongsTo(*this))
-            return false;
-        record = s.textures.Get(texture->handle_);
-    } else {
-        record = s.textures.Get(s.whiteTexture);
-    }
+    Vk::TextureRecord* record = s.textures.Get(textureHandle ? textureHandle : s.whiteTexture);
     if (!record)
         return false;
     Vk::FrameData& frame = s.frames[s.frameSlot];
