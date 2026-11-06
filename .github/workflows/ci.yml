@@ -39,6 +39,8 @@ jobs:
           cmake -S C:/LuxDeps/src/box2d -B C:/LuxDeps/build/box2d -A x64 -DBOX2D_BUILD_UNIT_TESTS=OFF -DBOX2D_BUILD_TESTBED=OFF -DBOX2D_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX=C:/LuxDeps -DCMAKE_DEBUG_POSTFIX=d
           cmake --build C:/LuxDeps/build/box2d --config Debug -- /m /v:minimal
           cmake --install C:/LuxDeps/build/box2d --config Debug
+          cmake --build C:/LuxDeps/build/box2d --config Release -- /m /v:minimal
+          cmake --install C:/LuxDeps/build/box2d --config Release
 
       - name: Configure Engine & Tests
         shell: pwsh
@@ -98,6 +100,7 @@ jobs:
           @'
           #include "Engine/Core/Math.hpp"
           #include "Engine/Scene/Scene.hpp"
+          #include "Engine/Scene/Entity.hpp"
           #include <iostream>
           int main() {
               LuxEngine::Scene scene;
