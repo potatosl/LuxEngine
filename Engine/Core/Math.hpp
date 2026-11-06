@@ -168,8 +168,16 @@ struct Mat4 {
     }
 
     static Mat4 LookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
-        const Vec3 forward = (target - eye).Normalized();
-        const Vec3 right = forward.Cross(up).Normalized();
+        Vec3 forward = (target - eye).Normalized();
+        if (forward.x == 0.0f && forward.y == 0.0f && forward.z == 0.0f) {
+            forward = {0.0f, 0.0f, -1.0f};
+        }
+        Vec3 right = forward.Cross(up).Normalized();
+        if (right.x == 0.0f && right.y == 0.0f && right.z == 0.0f) {
+            const Vec3 alt =
+                std::abs(forward.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
+            right = forward.Cross(alt).Normalized();
+        }
         const Vec3 trueUp = right.Cross(forward);
 
         Mat4 result = Identity();

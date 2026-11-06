@@ -21,6 +21,12 @@ bool SaveSceneAtomically(Scene& scene, const std::string& path) {
     }
     fs::rename(temporary, target, ec); // replaces an existing file on Windows and POSIX
     if (ec) {
+        std::error_code removeEc;
+        fs::remove(target, removeEc);
+        ec.clear();
+        fs::rename(temporary, target, ec);
+    }
+    if (ec) {
         fs::remove(temporary, ec);
         return false;
     }

@@ -146,7 +146,7 @@ void Renderer3D::DrawMesh(std::span<const Vec3> positions, std::span<const uint3
         return;
     for (auto index : indices)
         if (index >= positions.size())
-            throw std::out_of_range("Mesh index out of range");
+            return;
     for (size_t i = 0; i < indices.size(); i += 3) {
         std::array<Vec3, 3> triangle;
         for (size_t j = 0; j < 3; ++j)

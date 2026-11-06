@@ -49,7 +49,12 @@ std::vector<Entity> Scene::GetEntities() {
     return result;
 }
 void Scene::OnUpdate(double dt) {
-    for (auto id : entities_) {
+    if (!std::isfinite(dt) || dt <= 0.0)
+        return;
+    const std::vector<uint32> animationIds(entities_.begin(), entities_.end());
+    for (auto id : animationIds) {
+        if (!entities_.contains(id))
+            continue;
         if (!HasComponent<AnimationComponent>(id) || !HasComponent<TransformComponent>(id))
             continue;
         auto& animation = GetComponent<AnimationComponent>(id);
@@ -61,7 +66,10 @@ void Scene::OnUpdate(double dt) {
     if (!physics2D_)
         physics2D_ = std::make_unique<PhysicsWorld2D>();
     physics2D_->Step(*this, dt, collisionEvents2D_);
-    for (auto id : entities_) {
+    const std::vector<uint32> physicsIds(entities_.begin(), entities_.end());
+    for (auto id : physicsIds) {
+        if (!entities_.contains(id))
+            continue;
         if (!HasComponent<TransformComponent>(id))
             continue;
         auto& transform = GetComponent<TransformComponent>(id);
@@ -184,59 +192,82 @@ bool Scene::Serialize(const std::string& filepath) {
                     return false;
         }
     }
-    std::ofstream out(Utf8Path(filepath), std::ios::trunc);
-    if (!out)
-        return false;
-    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 2 "
-        << entities_.size() << '\n';
-    std::vector<uint32> ids(entities_.begin(), entities_.end());
-    std::sort(ids.begin(), ids.end());
-    for (auto id : ids) {
-        out << id << '\n';
-        auto save = [&]<class T>(auto write) {
-            const bool present = HasComponent<T>(id);
-            out << present << ' ';
-            if (present)
-                write(GetComponent<T>(id));
-            out << '\n';
-        };
-        save.operator()<TagComponent>([&](const auto& c) { out << std::quoted(c.tag); });
-        save.operator()<TransformComponent>(
-            [&](const auto& c) { out << c.position << c.rotation << c.scale; });
-        save.operator()<SpriteRendererComponent>([&](const auto& c) { out << c.color; });
-        save.operator()<MeshRendererComponent>([&](const auto& c) {
-            out << c.material.albedoColor << c.material.metallic << ' ' << c.material.roughness;
-        });
-        save.operator()<CameraComponent>([&](const auto& c) {
-            out << c.isPrimary << ' ' << c.isPerspective << ' ' << c.fov << ' ' << c.orthoSize;
-        });
-        save.operator()<Rigidbody2DComponent>([&](const auto& c) {
-            out << static_cast<int>(c.type) << ' ' << c.velocity << c.mass << ' ' << c.gravityScale
-                << ' ' << c.isGrounded;
-        });
-        save.operator()<BoxCollider2DComponent>(
-            [&](const auto& c) { out << c.size << c.offset << c.isTrigger; });
-        save.operator()<Rigidbody3DComponent>([&](const auto& c) {
-            out << static_cast<int>(c.type) << ' ' << c.velocity << c.mass << ' ' << c.gravityScale;
-        });
-        save.operator()<BoxCollider3DComponent>(
-            [&](const auto& c) { out << c.size << c.offset << c.isTrigger; });
-        save.operator()<TilemapComponent>([&](const auto& c) {
-            std::string cells;
-            cells.reserve(c.tiles.size());
-            for (uint8_t tile : c.tiles)
-                cells.push_back(static_cast<char>('0' + tile));
-            out << c.width << ' ' << c.height << ' ' << c.tileSize << ' ' << std::quoted(cells);
-        });
-        save.operator()<AnimationComponent>([&](const auto& c) {
-            out << std::quoted(c.clip.name) << ' ' << c.clip.duration << ' ' << c.clip.loop << ' '
-                << c.playing << ' ' << c.clip.keyframes.size();
-            for (const auto& key : c.clip.keyframes)
-                out << ' ' << key.time << ' ' << key.position << key.rotation << key.scale;
-        });
+    namespace fs = std::filesystem;
+    const fs::path targetPath = Utf8Path(filepath);
+    fs::path tempPath = targetPath;
+    tempPath += ".tmp";
+    {
+        std::ofstream out(tempPath, std::ios::trunc);
+        if (!out)
+            return false;
+        out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 2 "
+            << entities_.size() << '\n';
+        std::vector<uint32> ids(entities_.begin(), entities_.end());
+        std::sort(ids.begin(), ids.end());
+        for (auto id : ids) {
+            out << id << '\n';
+            auto save = [&]<class T>(auto write) {
+                const bool present = HasComponent<T>(id);
+                out << present << ' ';
+                if (present)
+                    write(GetComponent<T>(id));
+                out << '\n';
+            };
+            save.operator()<TagComponent>([&](const auto& c) { out << std::quoted(c.tag); });
+            save.operator()<TransformComponent>(
+                [&](const auto& c) { out << c.position << c.rotation << c.scale; });
+            save.operator()<SpriteRendererComponent>([&](const auto& c) { out << c.color; });
+            save.operator()<MeshRendererComponent>([&](const auto& c) {
+                out << c.material.albedoColor << c.material.metallic << ' ' << c.material.roughness;
+            });
+            save.operator()<CameraComponent>([&](const auto& c) {
+                out << c.isPrimary << ' ' << c.isPerspective << ' ' << c.fov << ' ' << c.orthoSize;
+            });
+            save.operator()<Rigidbody2DComponent>([&](const auto& c) {
+                out << static_cast<int>(c.type) << ' ' << c.velocity << c.mass << ' ' << c.gravityScale
+                    << ' ' << c.isGrounded;
+            });
+            save.operator()<BoxCollider2DComponent>(
+                [&](const auto& c) { out << c.size << c.offset << c.isTrigger; });
+            save.operator()<Rigidbody3DComponent>([&](const auto& c) {
+                out << static_cast<int>(c.type) << ' ' << c.velocity << c.mass << ' ' << c.gravityScale;
+            });
+            save.operator()<BoxCollider3DComponent>(
+                [&](const auto& c) { out << c.size << c.offset << c.isTrigger; });
+            save.operator()<TilemapComponent>([&](const auto& c) {
+                std::string cells;
+                cells.reserve(c.tiles.size());
+                for (uint8_t tile : c.tiles)
+                    cells.push_back(static_cast<char>('0' + tile));
+                out << c.width << ' ' << c.height << ' ' << c.tileSize << ' ' << std::quoted(cells);
+            });
+            save.operator()<AnimationComponent>([&](const auto& c) {
+                out << std::quoted(c.clip.name) << ' ' << c.clip.duration << ' ' << c.clip.loop << ' '
+                    << c.playing << ' ' << c.clip.keyframes.size();
+                for (const auto& key : c.clip.keyframes)
+                    out << ' ' << key.time << ' ' << key.position << key.rotation << key.scale;
+            });
+        }
+        out.flush();
+        if (!out) {
+            std::error_code ec;
+            fs::remove(tempPath, ec);
+            return false;
+        }
     }
-    out.flush();
-    return static_cast<bool>(out);
+    std::error_code ec;
+    fs::rename(tempPath, targetPath, ec);
+    if (ec) {
+        std::error_code removeEc;
+        fs::remove(targetPath, removeEc);
+        ec.clear();
+        fs::rename(tempPath, targetPath, ec);
+    }
+    if (ec) {
+        fs::remove(tempPath, ec);
+        return false;
+    }
+    return true;
 }
 bool Scene::Deserialize(const std::string& filepath) {
     std::ifstream in(Utf8Path(filepath));

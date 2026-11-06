@@ -271,6 +271,8 @@ void PhysicsWorld2D::Step(Scene& scene, double dt, std::vector<Collision2DEvent>
     impl_->contacts.events = nullptr;
 
     for (auto& [id, state] : impl_->bodies) {
+        if (!scene.HasComponent<TransformComponent>(id))
+            continue;
         auto& transform = scene.GetComponent<TransformComponent>(id);
         const b2Vec2 center = state.body->GetPosition();
         transform.rotation.z = state.body->GetAngle();

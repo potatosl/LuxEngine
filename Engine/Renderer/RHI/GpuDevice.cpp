@@ -718,6 +718,8 @@ bool GpuDevice::ReadFrameCapture(GpuFrameCapture& capture) {
     VmaAllocationInfo allocation{};
     vmaGetAllocationInfo(s.allocator, s.capture.allocation, &allocation);
     const auto* source = static_cast<const uint8*>(allocation.pMappedData);
+    if (!source)
+        return false;
     capture.width = s.capture.width;
     capture.height = s.capture.height;
     capture.rgba.assign(source,

@@ -55,7 +55,8 @@ Ref<GpuTexture> AssetManager::LoadTexture(const std::string& filepath, GpuDevice
         return {};
     const auto key = Key(filepath);
     auto it = s_TextureCache.find(key);
-    if (it != s_TextureCache.end() && it->second->BelongsTo(*device))
+    if (it != s_TextureCache.end() && it->second && it->second->IsValid() &&
+        it->second->BelongsTo(*device))
         return it->second;
     int width = 0, height = 0;
     stbi_uc* pixels = DecodeTexture(filepath, width, height);

@@ -191,10 +191,13 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
     const double sy = std::sin(yaw);
     const double cp = std::cos(pitch);
     const double sp = std::sin(pitch);
-    const Vec3 eye{static_cast<float>(focus.x + distance * sy * cp),
-                   static_cast<float>(focus.y - distance * sp),
-                   static_cast<float>(focus.z + distance * cy * cp)};
-    const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
+    const double safeDistance = std::max(0.1, std::isfinite(distance) ? distance : 5.0);
+    const Vec3 eye{static_cast<float>(focus.x + safeDistance * sy * cp),
+                   static_cast<float>(focus.y - safeDistance * sp),
+                   static_cast<float>(focus.z + safeDistance * cy * cp)};
+    const float rawAspect =
+        height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
+    const float aspect = (std::isfinite(rawAspect) && rawAspect > 0.001f) ? rawAspect : 1.0f;
     constexpr float fovRadians = 60.0f * 3.14159265358979323846f / 180.0f;
     PerspectiveCamera camera(fovRadians, aspect, 0.1f, 1000.0f);
     camera.SetPosition(eye);
