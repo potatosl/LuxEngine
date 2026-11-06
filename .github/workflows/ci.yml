@@ -1,0 +1,37 @@
+name: LuxEngine CI
+
+on:
+  push:
+    branches: [ main, refactor/*, feat/*, fix/*, audit/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Windows Build & Test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Vulkan SDK
+        uses: humbletim/setup-vulkan-sdk@v1.2.0
+        with:
+          vulkan-query-version: 1.3.268.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
+
+      - name: Configure Engine
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DLUX_BUILD_TESTS=ON -DLUX_BUILD_EDITOR=OFF
+
+      - name: Build Engine (Debug)
+        run: |
+          cmake --build build --config Debug -- /m /v:minimal
+
+      - name: Run Headless Tests
+        run: |
+          ctest --test-dir build -C Debug --output-on-failure -L headless
+
+      - name: Install SDK (Debug)
+        run: |
+          cmake --install build --config Debug --prefix ./installed_sdk
