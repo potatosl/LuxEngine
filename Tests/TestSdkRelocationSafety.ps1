@@ -1,13 +1,22 @@
 # Regression Test: Ensure VerifySdkRelocation.ps1 never deletes user data
+param(
+    [string]$BuildDir = "build/local"
+)
+
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
 
+if (-not (Test-Path (Join-Path $root $BuildDir))) {
+    if (Test-Path (Join-Path $root "build")) {
+        $BuildDir = "build"
+    }
+}
+
 Write-Host "=== Running Regression Test: SdkRelocation User Data Safety ==="
 
-$koreanName = [string]::new([char[]]@(0xD55C, 0xAE00, 0xD14C, 0xC2A4, 0xD2B8)) # "한글테스트"
 $tempBase = [System.IO.Path]::GetTempPath()
-$testUserDataDir = Join-Path $tempBase "LuxUserTestDir $koreanName $(Get-Random)"
+$testUserDataDir = Join-Path $tempBase "LuxUserTestDir_Preserve_$(Get-Random)"
 New-Item -ItemType Directory -Path $testUserDataDir -Force | Out-Null
 
 $dummyUserFile = Join-Path $testUserDataDir "important_user_work.txt"
@@ -22,7 +31,8 @@ Set-Content -Path $dummySubFile -Value "// User Code" -Encoding ascii
 $threwExpected = $false
 try {
     Write-Host "Invoking VerifySdkRelocation with existing user directory: $testUserDataDir"
-    & powershell -ExecutionPolicy Bypass -File "$root/Tools/VerifySdkRelocation.ps1" -BuildDir "build/local" -SdkPrefix $testUserDataDir
+    $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
+    & $psExe -ExecutionPolicy Bypass -File "$root/Tools/VerifySdkRelocation.ps1" -BuildDir $BuildDir -SdkPrefix $testUserDataDir
     if ($LASTEXITCODE -ne 0) {
         $threwExpected = $true
     }

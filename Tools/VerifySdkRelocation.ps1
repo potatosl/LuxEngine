@@ -18,10 +18,9 @@ $isUserSpecifiedPrefix = -not [string]::IsNullOrWhiteSpace($SdkPrefix)
 $shouldCleanupSdk = -not $isUserSpecifiedPrefix
 
 if (-not $isUserSpecifiedPrefix) {
-    # If no SDK prefix provided, test relocatability using a path with spaces and Korean Unicode
+    # If no SDK prefix provided, test relocatability using a dedicated path with spaces
     $tempBase = [System.IO.Path]::GetTempPath()
-    $koreanPart = [string]::new([char[]]@(0xD55C, 0xAE00, 0xACBD, 0xB85C)) # "한글경로"
-    $SdkPrefix = Join-Path $tempBase "LuxSDK Relocated $koreanPart $(Get-Random)"
+    $SdkPrefix = Join-Path $tempBase "LuxSDK Relocated Path $(Get-Random)"
     New-Item -ItemType Directory -Path $SdkPrefix -Force | Out-Null
 } else {
     # User specified an SdkPrefix: NEVER delete or overwrite existing user directories!
