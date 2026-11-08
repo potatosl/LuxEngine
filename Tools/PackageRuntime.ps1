@@ -47,6 +47,21 @@ if (Test-Path $sdlDll) {
     throw "Packaging failure: SDL3.dll not found in $binSource or $BuildDir/bin"
 }
 
+# Copy Vulkan loader DLL if available in system, Vulkan SDK, or PATH
+$vulkanSource = $null
+$vCmd = Get-Command vulkan-1.dll -ErrorAction SilentlyContinue
+if ($vCmd) {
+    $vulkanSource = $vCmd.Source
+} elseif (Test-Path "C:\Windows\System32\vulkan-1.dll") {
+    $vulkanSource = "C:\Windows\System32\vulkan-1.dll"
+} elseif ($env:VULKAN_SDK -and (Test-Path (Join-Path $env:VULKAN_SDK "bin/vulkan-1.dll"))) {
+    $vulkanSource = Join-Path $env:VULKAN_SDK "bin/vulkan-1.dll"
+}
+if ($vulkanSource -and (Test-Path $vulkanSource)) {
+    Copy-Item -Path $vulkanSource -Destination $playerStaging -Force
+    Write-Host "Bundled vulkan-1.dll from $vulkanSource"
+}
+
 # Copy shaders
 $shadersDir = Join-Path $playerStaging "shaders"
 New-Item -ItemType Directory -Path $shadersDir -Force | Out-Null

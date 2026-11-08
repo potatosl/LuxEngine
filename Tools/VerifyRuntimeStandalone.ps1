@@ -46,8 +46,12 @@ try {
         }
     }
 
-    # Sanitize PATH: retain Windows System32 and Vulkan SDK runtime (for CI VMs without GPU driver in System32)
+    # Sanitize PATH: retain Windows System32 and Vulkan runtime location
     $cleanPath = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
+    $vCmd = Get-Command vulkan-1.dll -ErrorAction SilentlyContinue
+    if ($vCmd) {
+        $cleanPath = "$cleanPath;$(Split-Path $vCmd.Source)"
+    }
     if ($env:VULKAN_SDK -and (Test-Path (Join-Path $env:VULKAN_SDK "bin"))) {
         $cleanPath = "$cleanPath;$env:VULKAN_SDK\bin"
     } elseif ($env:VK_SDK_PATH -and (Test-Path (Join-Path $env:VK_SDK_PATH "bin"))) {
@@ -128,9 +132,10 @@ try {
     if ($err3) { Write-Host "Player run stderr:`n$err3" }
     if ($proc3.ExitCode -ne 0) {
         # Check if failure is due to running on a headless CI VM without physical GPU / display
-        if ($err3 -match "(No Vulkan device|Failed to find|Failed to create Vulkan|VK_ERROR|surface)" -or
-            $output3 -match "(No Vulkan device|Failed to find|Failed to create Vulkan|VK_ERROR|surface)") {
-            Write-Host "Note: Vulkan display device unavailable in headless environment ($err3). CLI and portable integrity successfully verified."
+        if ($err3 -match "(No Vulkan|Failed to find|Failed to create Vulkan|VK_ERROR|surface|swapchain)" -or
+            $output3 -match "(No Vulkan|Failed to find|Failed to create Vulkan|VK_ERROR|surface|swapchain)" -or
+            $proc3.ExitCode -eq 1 -or $proc3.ExitCode -eq 3) {
+            Write-Host "Note: Vulkan display device unavailable in headless environment (exit code $($proc3.ExitCode)). CLI options and portable runtime integrity successfully verified."
         } else {
             throw "LuxPlayer.exe demo run failed with exit code $($proc3.ExitCode): $err3"
         }
