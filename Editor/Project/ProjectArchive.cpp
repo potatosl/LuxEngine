@@ -56,6 +56,8 @@ bool IsValidUtf8Filename(std::string_view str) {
                 return false;
             i += 3;
         } else if ((c & 0xF8) == 0xF0) {
+            if (c > 0xF4) // RFC 3629: UTF-8 code points above U+10FFFF (0xF4 0x8F 0xBF 0xBF) are strictly invalid
+                return false;
             if (i + 3 >= str.size())
                 return false;
             const auto c1 = static_cast<unsigned char>(str[i + 1]);
@@ -63,9 +65,9 @@ bool IsValidUtf8Filename(std::string_view str) {
             const auto c3 = static_cast<unsigned char>(str[i + 3]);
             if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
                 return false;
-            if (c == 0xF0 && c1 < 0x90)
+            if (c == 0xF0 && c1 < 0x90) // Overlong encoding for U+0000..U+FFFF
                 return false;
-            if (c == 0xF4 && c1 > 0x8F)
+            if (c == 0xF4 && c1 > 0x8F) // Code points beyond U+10FFFF
                 return false;
             i += 4;
         } else {
@@ -103,7 +105,7 @@ std::filesystem::path TemporarySibling(const std::filesystem::path& target) {
     return path;
 }
 
-bool SafeArchivePath(const std::filesystem::path& relative) {
+bool SafeArchivePath(const std::filesystem::path& relative, bool isDirectory = false) {
     const auto name = GenericPathUtf8(relative);
     if (relative.empty() || relative.is_absolute() || relative.has_root_directory() ||
         relative.has_root_name() || name.starts_with('/') || name.find('\\') != std::string::npos ||
@@ -115,14 +117,28 @@ bool SafeArchivePath(const std::filesystem::path& relative) {
     if (name.find_first_of("<>\"|?*") != std::string::npos)
         return false;
 
+    // A non-directory entry cannot end with '/'
+    if (!isDirectory && name.back() == '/')
+        return false;
+
     // Case-insensitive check for VCS and engine private directories (.git, .lux, .GIT, .Lux, etc.)
     const auto firstPartLower = ToLowerAscii(GenericPathUtf8(*relative.begin()));
     if (firstPartLower == ".git" || firstPartLower == ".lux")
         return false;
 
+    size_t partIndex = 0;
+    const size_t totalParts = std::distance(relative.begin(), relative.end());
     for (const auto& part : relative) {
+        ++partIndex;
         const auto p = GenericPathUtf8(part);
-        if (p == ".." || p == "." || p.empty())
+        if (p.empty()) {
+            // In C++ std::filesystem::path, a trailing slash produces an empty final component.
+            // This is valid ONLY for directory entries where the original name ended with '/'.
+            if (isDirectory && partIndex == totalParts && name.back() == '/' && totalParts > 1)
+                continue;
+            return false;
+        }
+        if (p == ".." || p == ".")
             return false;
 
         const auto partLower = ToLowerAscii(p);
@@ -199,8 +215,19 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
         }
 
         const std::string name(stat.name);
+        if (!IsValidUtf8Filename(name)) {
+            error = "압축 파일 내 파일명이 유효한 UTF-8 문자열이 아닙니다: " + name;
+            break;
+        }
+
         const bool directory = !name.empty() && name.back() == '/';
-        const auto relative = PathFromUtf8(name);
+        std::filesystem::path relative;
+        try {
+            relative = PathFromUtf8(name);
+        } catch (...) {
+            error = "압축 파일 내 파일명의 인코딩을 변환할 수 없습니다: " + name;
+            break;
+        }
 
         // Disallow symlinks: check Unix symlink attributes and Windows reparse/link attributes
         zip_uint8_t opsys = 0;
@@ -214,7 +241,7 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
             break;
         }
 
-        if (!SafeArchivePath(relative)) {
+        if (!SafeArchivePath(relative, directory)) {
             error = "압축 파일의 경로 또는 파일명이 올바르지 않거나 보안 규칙을 위반했습니다: " + name;
             break;
         }

@@ -2,16 +2,24 @@
 param(
     [string]$BuildDir = "build/local",
     [string]$OutputDir = "dist",
-    [string]$Version = "0.1.0"
+    [string]$Version = "0.1.0",
+    [string]$Configuration = "Release"
 )
 
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
 
-Write-Host "=== Packaging LuxPlayer Runtime (v$Version) ==="
-$playerStaging = Join-Path $root "$OutputDir/LuxPlayer-Portable-$Version-x64"
-$playerZip = Join-Path $root "$OutputDir/LuxPlayer-Portable-$Version-x64.zip"
+if ($Configuration -ne "Release" -and $Configuration -ne "Debug") {
+    throw "Packaging failure: Unsupported configuration '$Configuration'. Must be 'Release' or 'Debug'."
+}
+
+$suffix = if ($Configuration -eq "Release") { "" } else { "-Debug" }
+$outDirResolved = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $root $OutputDir }
+$playerStaging = Join-Path $outDirResolved "LuxPlayer-Portable-$Version$suffix-x64"
+$playerZip = Join-Path $outDirResolved "LuxPlayer-Portable-$Version$suffix-x64.zip"
+
+Write-Host "=== Packaging LuxPlayer Runtime (v$Version, Configuration=$Configuration) ==="
 
 if (Test-Path $playerStaging) {
     Remove-Item -Recurse -Force $playerStaging
@@ -22,29 +30,32 @@ if (Test-Path $playerZip) {
 New-Item -ItemType Directory -Path $playerStaging -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path $playerZip) -Force | Out-Null
 
-$binSource = Join-Path $root "$BuildDir/bin/Release"
-if (-not (Test-Path $binSource)) {
-    $binSource = Join-Path $root "$BuildDir/bin/Debug"
+$buildDirResolved = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
+$binSource = Join-Path $buildDirResolved "bin/$Configuration"
+$playerExe = Join-Path $binSource "LuxPlayer.exe"
+if (-not (Test-Path $playerExe)) {
+    throw "Packaging failure: $Configuration executable LuxPlayer.exe not found in $binSource. Build $Configuration first. Silent fallback to other configurations is forbidden for public release packaging."
 }
-if (-not (Test-Path (Join-Path $binSource "LuxPlayer.exe"))) {
-    throw "Packaging failure: LuxPlayer.exe not found in $binSource. Build LuxPlayer first."
+
+# Verify no debug CRT runtime DLLs in Release package
+if ($Configuration -eq "Release") {
+    $debugDlls = Get-ChildItem -Path $binSource -Filter "*d.dll" -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match "^(vcruntime.*d|msvcp.*d|ucrtbase.*d|ucrtbased|Qt6.*d|SDL3d)\.dll$"
+    }
+    if ($debugDlls) {
+        throw "Packaging failure: Debug runtime DLLs detected in Release binary directory: $($debugDlls.Name -join ', ')"
+    }
 }
 
 # Copy executable
-Copy-Item -Path (Join-Path $binSource "LuxPlayer.exe") -Destination $playerStaging -Force
+Copy-Item -Path $playerExe -Destination $playerStaging -Force
 
 # Copy SDL3 runtime DLL
 $sdlDll = Join-Path $binSource "SDL3.dll"
-if (-not (Test-Path $sdlDll)) {
-    $sdlDll = Join-Path $root "$BuildDir/bin/Release/SDL3.dll"
-}
-if (-not (Test-Path $sdlDll)) {
-    $sdlDll = Join-Path $root "$BuildDir/bin/Debug/SDL3.dll"
-}
 if (Test-Path $sdlDll) {
     Copy-Item -Path $sdlDll -Destination $playerStaging -Force
 } else {
-    throw "Packaging failure: SDL3.dll not found in $binSource or $BuildDir/bin"
+    throw "Packaging failure: SDL3.dll not found in $binSource"
 }
 
 # Copy Vulkan loader DLL strictly from verified system or official Vulkan SDK locations

@@ -458,6 +458,14 @@ void TestArchiveSecurityAndFuzzing() {
     TempDirectory files;
     std::string error;
 
+    auto makeValidProj = [](const std::string& name, const std::string& sceneRel) {
+        return "LUXPROJECT 2\nname \"" + name + "\"\nengine_version \"" +
+               std::string(EditorProject::CurrentEngineVersion()) +
+               "\"\nproject_version \"1.0.0\"\ntemplate \"empty\"\nstart_scene \"" + sceneRel +
+               "\"\nicon \"\"\nautosave_seconds 300\nbackup_limit 5\nsnap_to_grid 0\ndependency_count 0\n";
+    };
+    const std::string validSceneData = "LuxEngineScene 2 0\n";
+
     // 1. Corrupted / truncated ZIP archive
     const auto corruptZip = files.path / "corrupt.luxpack";
     {
@@ -617,6 +625,93 @@ void TestArchiveSecurityAndFuzzing() {
     std::string rmCmd = "cmd /c rmdir \"" + junctionLink.string() + "\" >nul 2>nul";
     system(rmCmd.c_str());
 #endif
+
+    // 13. Valid ZIP directory entries (Assets/, Scenes/) and traversal rejection (BUG-01)
+    const auto dirEntriesZip = files.path / "valid_dir_entries.luxpack";
+    z = zip_open(PathUtf8(dirEntriesZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "dir entries zip created");
+    Check(zip_dir_add(z, "Assets", ZIP_FL_ENC_UTF_8) >= 0, "Assets/ dir entry added");
+    Check(zip_dir_add(z, "Scenes", ZIP_FL_ENC_UTF_8) >= 0, "Scenes/ dir entry added");
+    zip_source_t* srcTex = zip_source_buffer(z, "texture data", 12, 0);
+    Check(zip_file_add(z, "Assets/texture.txt", srcTex, ZIP_FL_ENC_UTF_8) >= 0, "Assets/texture.txt added");
+    zip_source_t* srcScene = zip_source_buffer(z, validSceneData.c_str(), validSceneData.size(), 0);
+    Check(zip_file_add(z, "Scenes/Main.lux", srcScene, ZIP_FL_ENC_UTF_8) >= 0, "Scenes/Main.lux added");
+    const std::string projStr = makeValidProj("DirSuccess", "Scenes/Main.lux");
+    zip_source_t* srcProjDir = zip_source_buffer(z, projStr.c_str(), projStr.size(), 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjDir, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "dir entries zip finalized");
+
+    auto dirImported = ImportProject(dirEntriesZip, files.path / "dir_success_imported", error);
+    Check(dirImported.has_value(), "Archive with standard directory entries (Assets/, Scenes/) imported successfully");
+    Check(std::filesystem::is_directory(files.path / "dir_success_imported" / "Assets"), "Assets directory created");
+    Check(std::filesystem::is_directory(files.path / "dir_success_imported" / "Scenes"), "Scenes directory created");
+    Check(std::filesystem::is_regular_file(files.path / "dir_success_imported" / "Assets" / "texture.txt"), "nested asset file preserved");
+
+    // Attack ZIP with leading slash directory entry
+    const auto slashDirZip = files.path / "slash_dir.luxpack";
+    z = zip_open(PathUtf8(slashDirZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    zip_source_t* srcSlashDir = zip_source_buffer(z, "data", 4, 0);
+    zip_file_add(z, "/absolute.txt", srcSlashDir, ZIP_FL_ENC_UTF_8);
+    zip_close(z);
+    Check(!ImportProject(slashDirZip, files.path / "slash_dir_imported", error), "leading slash entry rejected");
+
+    // Attack ZIP with drive letter entry
+    const auto driveZip = files.path / "drive.luxpack";
+    z = zip_open(PathUtf8(driveZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    zip_source_t* srcDrive = zip_source_buffer(z, "data", 4, 0);
+    zip_file_add(z, "C:/Windows/test.txt", srcDrive, ZIP_FL_ENC_UTF_8);
+    zip_close(z);
+    Check(!ImportProject(driveZip, files.path / "drive_imported", error), "drive letter entry rejected");
+
+    // Attack ZIP with double slash
+    const auto doubleSlashZip = files.path / "double_slash.luxpack";
+    z = zip_open(PathUtf8(doubleSlashZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    zip_source_t* srcDoubleSlash = zip_source_buffer(z, "data", 4, 0);
+    zip_file_add(z, "folder//unexpected.txt", srcDoubleSlash, ZIP_FL_ENC_UTF_8);
+    zip_close(z);
+    Check(!ImportProject(doubleSlashZip, files.path / "double_slash_imported", error), "double slash entry rejected");
+
+    // 14. UTF-8 Boundary and Code Point Validation (BUG-04)
+    // 14.1. Invalid 4-byte sequence > U+10FFFF (e.g. \xF5\x80\x80\x80)
+    const auto overUnicodeZip = files.path / "over_unicode.luxpack";
+    z = zip_open(PathUtf8(overUnicodeZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    zip_source_t* srcOver = zip_source_buffer(z, "bad", 3, 0);
+    zip_file_add(z, "\xF5\x80\x80\x80.txt", srcOver, ZIP_FL_ENC_UTF_8);
+    zip_close(z);
+    Check(!ImportProject(overUnicodeZip, files.path / "over_unicode_imported", error),
+          "UTF-8 code point > U+10FFFF (0xF5 lead byte) strictly rejected");
+
+    // 14.2. Overlong UTF-8 sequence (e.g. 0xC0 0xAF)
+    const auto overlongZip = files.path / "overlong.luxpack";
+    z = zip_open(PathUtf8(overlongZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    zip_source_t* srcOverlong = zip_source_buffer(z, "bad", 3, 0);
+    zip_file_add(z, "\xC0\xAF.txt", srcOverlong, ZIP_FL_ENC_UTF_8);
+    zip_close(z);
+    Check(!ImportProject(overlongZip, files.path / "overlong_imported", error),
+          "Overlong UTF-8 sequence strictly rejected");
+
+    // 14.3. UTF-16 surrogate in UTF-8 (0xED 0xA0 0x80)
+    const auto surrogateZip = files.path / "surrogate.luxpack";
+    z = zip_open(PathUtf8(surrogateZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    zip_source_t* srcSurrogate = zip_source_buffer(z, "bad", 3, 0);
+    zip_file_add(z, "\xED\xA0\x80.txt", srcSurrogate, ZIP_FL_ENC_UTF_8);
+    zip_close(z);
+    Check(!ImportProject(surrogateZip, files.path / "surrogate_imported", error),
+          "UTF-16 surrogate in UTF-8 strictly rejected");
+
+    // 14.4. Valid 4-byte Unicode U+10FFFF (\xF4\x8F\xBF\xBF) - allowed
+    const auto maxUnicodeZip = files.path / "max_unicode.luxpack";
+    z = zip_open(PathUtf8(maxUnicodeZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    zip_source_t* srcMax = zip_source_buffer(z, "good", 4, 0);
+    zip_file_add(z, "max_\xF4\x8F\xBF\xBF.txt", srcMax, ZIP_FL_ENC_UTF_8);
+    zip_source_t* srcSceneMax = zip_source_buffer(z, validSceneData.c_str(), validSceneData.size(), 0);
+    zip_file_add(z, "Scene.lux", srcSceneMax, ZIP_FL_ENC_UTF_8);
+    const std::string projMaxStr = makeValidProj("MaxU", "Scene.lux");
+    zip_source_t* srcProjMax = zip_source_buffer(z, projMaxStr.c_str(), projMaxStr.size(), 0);
+    zip_file_add(z, EditorProject::FileName, srcProjMax, ZIP_FL_ENC_UTF_8);
+    zip_close(z);
+    Check(ImportProject(maxUnicodeZip, files.path / "max_unicode_imported", error).has_value(),
+          "Maximum valid Unicode U+10FFFF accepted");
 }
 
 } // namespace

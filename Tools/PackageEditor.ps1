@@ -2,16 +2,24 @@
 param(
     [string]$BuildDir = "build/local",
     [string]$OutputDir = "dist",
-    [string]$Version = "0.1.0"
+    [string]$Version = "0.1.0",
+    [string]$Configuration = "Release"
 )
 
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
 
-Write-Host "=== Packaging LuxEditor Standalone Portable (v$Version) ==="
-$editorStaging = Join-Path $root "$OutputDir/LuxEditor-Portable-$Version-x64"
-$editorZip = Join-Path $root "$OutputDir/LuxEditor-Portable-$Version-x64.zip"
+if ($Configuration -ne "Release" -and $Configuration -ne "Debug") {
+    throw "Packaging failure: Unsupported configuration '$Configuration'. Must be 'Release' or 'Debug'."
+}
+
+$suffix = if ($Configuration -eq "Release") { "" } else { "-Debug" }
+$outDirResolved = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $root $OutputDir }
+$editorStaging = Join-Path $outDirResolved "LuxEditor-Portable-$Version$suffix-x64"
+$editorZip = Join-Path $outDirResolved "LuxEditor-Portable-$Version$suffix-x64.zip"
+
+Write-Host "=== Packaging LuxEditor Standalone Portable (v$Version, Configuration=$Configuration) ==="
 
 if (Test-Path $editorStaging) {
     Remove-Item -Recurse -Force $editorStaging
@@ -22,16 +30,24 @@ if (Test-Path $editorZip) {
 New-Item -ItemType Directory -Path $editorStaging -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path $editorZip) -Force | Out-Null
 
-$binSource = Join-Path $root "$BuildDir/bin/Release"
-if (-not (Test-Path $binSource)) {
-    $binSource = Join-Path $root "$BuildDir/bin/Debug"
+$buildDirResolved = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
+$binSource = Join-Path $buildDirResolved "bin/$Configuration"
+$editorExe = Join-Path $binSource "LuxEditor.exe"
+if (-not (Test-Path $editorExe)) {
+    throw "Packaging failure: $Configuration executable LuxEditor.exe not found in $binSource. Build $Configuration first. Silent fallback to other configurations is forbidden for public release packaging."
 }
-if (-not (Test-Path (Join-Path $binSource "LuxEditor.exe"))) {
-    throw "LuxEditor.exe not found in $binSource. Build LuxEditor first."
+
+if ($Configuration -eq "Release") {
+    $debugDlls = Get-ChildItem -Path $binSource -Filter "*d.dll" -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match "^(vcruntime.*d|msvcp.*d|ucrtbase.*d|ucrtbased|Qt6.*d|SDL3d)\.dll$"
+    }
+    if ($debugDlls) {
+        throw "Packaging failure: Debug runtime DLLs detected in Release binary directory: $($debugDlls.Name -join ', ')"
+    }
 }
 
 # Copy executables
-Copy-Item -Path (Join-Path $binSource "LuxEditor.exe") -Destination $editorStaging -Force
+Copy-Item -Path $editorExe -Destination $editorStaging -Force
 if (Test-Path (Join-Path $binSource "LuxPlayer.exe")) {
     Copy-Item -Path (Join-Path $binSource "LuxPlayer.exe") -Destination $editorStaging -Force
 }

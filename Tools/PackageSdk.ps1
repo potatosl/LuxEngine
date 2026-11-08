@@ -10,8 +10,9 @@ $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
 
 Write-Host "=== Packaging LuxEngine SDK (v$Version) ==="
-$sdkStaging = Join-Path $root "$OutputDir/LuxEngine-SDK-$Version-x64"
-$sdkZip = Join-Path $root "$OutputDir/LuxEngine-SDK-$Version-x64.zip"
+$outDirResolved = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $root $OutputDir }
+$sdkStaging = Join-Path $outDirResolved "LuxEngine-SDK-$Version-x64"
+$sdkZip = Join-Path $outDirResolved "LuxEngine-SDK-$Version-x64.zip"
 
 if (Test-Path $sdkStaging) {
     Remove-Item -Recurse -Force $sdkStaging
@@ -31,16 +32,13 @@ Write-Host "Installing Debug SDK to staging..."
 & cmake --install $BuildDir --config Debug --prefix $sdkStaging
 if ($LASTEXITCODE -ne 0) { throw "cmake --install Debug failed" }
 
-# Copy SDL3 runtime DLL into bin if available in build directory
+# Copy SDL3 runtime DLL into bin from Release build
 $sdlDll = Join-Path $root "$BuildDir/bin/Release/SDL3.dll"
-if (-not (Test-Path $sdlDll)) {
-    $sdlDll = Join-Path $root "$BuildDir/bin/Debug/SDL3.dll"
-}
 if (Test-Path $sdlDll) {
     Copy-Item -Path $sdlDll -Destination "$sdkStaging/bin/SDL3.dll" -Force
     Write-Host "Copied SDL3.dll to SDK bin/"
 } else {
-    throw "Packaging failure: SDL3.dll not found in $BuildDir"
+    throw "Packaging failure: Release SDL3.dll not found in $BuildDir/bin/Release. Build Release first."
 }
 
 # Bundle Box2D headers, libraries and CMake configuration
