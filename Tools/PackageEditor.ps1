@@ -136,6 +136,39 @@ if ($windeployqt -and (Test-Path $windeployqt)) {
     & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw (Join-Path $editorStaging "LuxEditor.exe")
 }
 
+# Verify essential files strictly (throw immediately on missing file)
+$requiredEditorFiles = @(
+    "LuxEditor.exe",
+    "SDL3.dll",
+    "Qt6Core.dll",
+    "Qt6Gui.dll",
+    "Qt6Widgets.dll",
+    "platforms/qwindows.dll",
+    "shaders/Basic.vert.spv",
+    "shaders/Basic.frag.spv",
+    "licenses/LICENSE-LuxEngine.txt",
+    "licenses/LICENSE-Qt6.txt",
+    "licenses/LICENSE-LGPLv3.txt",
+    "licenses/DEPENDENCIES.md"
+)
+
+foreach ($f in $requiredEditorFiles) {
+    $targetPath = Join-Path $editorStaging $f
+    if (-not (Test-Path $targetPath)) {
+        throw "Packaging integrity failure: required Editor file missing: $f"
+    }
+}
+
+# Verify no debug runtime DLLs are accidentally packaged in Release build
+if ($binSource -like "*Release*") {
+    $debugDlls = Get-ChildItem -Path $editorStaging -Filter "*d.dll" -Recurse | Where-Object {
+        $_.Name -match "^(ucrtbase|vcruntime140|msvcp140|Qt6Core|Qt6Gui|Qt6Widgets|SDL3)d\.dll$"
+    }
+    if ($debugDlls -and $debugDlls.Count -gt 0) {
+        throw "Packaging integrity failure: Debug DLLs found in Release Editor package: $($debugDlls.Name -join ', ')"
+    }
+}
+
 # Create ZIP archive
 Write-Host "Creating Editor archive: $editorZip"
 Compress-Archive -Path "$editorStaging/*" -DestinationPath $editorZip -CompressionLevel Optimal

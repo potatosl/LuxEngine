@@ -147,6 +147,11 @@ jobs:
         run: |
           & pwsh Tools/VerifySdkRelocation.ps1 -BuildDir build
 
+      - name: Verify SDK Relocation Safety & Data Preservation
+        shell: pwsh
+        run: |
+          & pwsh Tests/TestSdkRelocationSafety.ps1
+
       - name: Package LuxEditor Standalone Portable
         shell: pwsh
         run: |
@@ -161,6 +166,11 @@ jobs:
         shell: pwsh
         run: |
           & pwsh Tools/PackageRuntime.ps1 -BuildDir build -OutputDir dist
+
+      - name: Verify Standalone LuxPlayer in Isolated Environment
+        shell: pwsh
+        run: |
+          & pwsh Tools/VerifyRuntimeStandalone.ps1
 
       - name: Upload Distribution Artifacts
         uses: actions/upload-artifact@v4

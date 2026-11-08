@@ -5,25 +5,88 @@ set(LuxEngine_LICENSES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/licenses")
 set(LuxEngine_EXAMPLES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/examples")
 
 include(CMakeFindDependencyMacro)
-# The hints point at the packages the engine was built with, as well as the SDK prefix directory,
-# so games find them even when relocated or without the same CMAKE_PREFIX_PATH or vcpkg toolchain.
-find_dependency(SDL3 3.2 CONFIG HINTS
-    "@SDL3_DIR@"
-    "${PACKAGE_PREFIX_DIR}"
-    "${PACKAGE_PREFIX_DIR}/lib/cmake/SDL3"
-    "${PACKAGE_PREFIX_DIR}/share/sdl3"
-)
-find_dependency(box2d 2.4...<3 CONFIG HINTS
-    "@box2d_DIR@"
-    "${PACKAGE_PREFIX_DIR}"
-    "${PACKAGE_PREFIX_DIR}/lib/cmake/box2d"
-)
+# The hints prioritize the SDK prefix directory so relocated packages find their bundled dependencies,
+# followed by the paths the engine was built with as fallback.
+
+# 1. Resolve SDL3
+if(NOT TARGET SDL3::SDL3-shared)
+    find_package(SDL3 3.2 CONFIG QUIET HINTS
+        "${PACKAGE_PREFIX_DIR}"
+        "${PACKAGE_PREFIX_DIR}/lib/cmake/SDL3"
+        "${PACKAGE_PREFIX_DIR}/share/sdl3"
+        "@SDL3_DIR@"
+    )
+endif()
+if(NOT TARGET SDL3::SDL3-shared AND EXISTS "${PACKAGE_PREFIX_DIR}/lib/SDL3.lib")
+    add_library(SDL3::SDL3-shared SHARED IMPORTED)
+    set_target_properties(SDL3::SDL3-shared PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include"
+        IMPORTED_IMPLIB "${PACKAGE_PREFIX_DIR}/lib/SDL3.lib"
+    )
+    if(EXISTS "${PACKAGE_PREFIX_DIR}/bin/SDL3.dll")
+        set_target_properties(SDL3::SDL3-shared PROPERTIES
+            IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/bin/SDL3.dll"
+        )
+    endif()
+endif()
+if(NOT TARGET SDL3::SDL3-shared)
+    find_dependency(SDL3 3.2 CONFIG REQUIRED HINTS
+        "${PACKAGE_PREFIX_DIR}"
+        "${PACKAGE_PREFIX_DIR}/lib/cmake/SDL3"
+        "${PACKAGE_PREFIX_DIR}/share/sdl3"
+        "@SDL3_DIR@"
+    )
+endif()
+
+# 2. Resolve Box2D
+if(NOT TARGET box2d::box2d)
+    find_package(box2d 2.4...<3 CONFIG QUIET HINTS
+        "${PACKAGE_PREFIX_DIR}"
+        "${PACKAGE_PREFIX_DIR}/lib/cmake/box2d"
+        "@box2d_DIR@"
+    )
+endif()
+if(NOT TARGET box2d::box2d AND (EXISTS "${PACKAGE_PREFIX_DIR}/lib/box2d.lib" OR EXISTS "${PACKAGE_PREFIX_DIR}/lib/box2dd.lib"))
+    add_library(box2d::box2d STATIC IMPORTED)
+    set_target_properties(box2d::box2d PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include"
+    )
+    if(EXISTS "${PACKAGE_PREFIX_DIR}/lib/box2d.lib")
+        set_property(TARGET box2d::box2d APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
+        set_target_properties(box2d::box2d PROPERTIES
+            IMPORTED_LOCATION_RELEASE "${PACKAGE_PREFIX_DIR}/lib/box2d.lib"
+        )
+    endif()
+    if(EXISTS "${PACKAGE_PREFIX_DIR}/lib/box2dd.lib")
+        set_property(TARGET box2d::box2d APPEND PROPERTY IMPORTED_CONFIGURATIONS DEBUG)
+        set_target_properties(box2d::box2d PROPERTIES
+            IMPORTED_LOCATION_DEBUG "${PACKAGE_PREFIX_DIR}/lib/box2dd.lib"
+        )
+    endif()
+    if(NOT EXISTS "${PACKAGE_PREFIX_DIR}/lib/box2dd.lib" AND EXISTS "${PACKAGE_PREFIX_DIR}/lib/box2d.lib")
+        set_target_properties(box2d::box2d PROPERTIES
+            IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/lib/box2d.lib"
+        )
+    endif()
+endif()
+if(NOT TARGET box2d::box2d)
+    find_dependency(box2d 2.4...<3 CONFIG REQUIRED HINTS
+        "${PACKAGE_PREFIX_DIR}"
+        "${PACKAGE_PREFIX_DIR}/lib/cmake/box2d"
+        "@box2d_DIR@"
+    )
+endif()
+
 if(TARGET box2d::box2d)
     set_target_properties(box2d::box2d PROPERTIES
         MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
         MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
+        MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
+        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
     )
 endif()
+
+# 3. Resolve Vulkan
 find_dependency(Vulkan 1.1)
 include("${CMAKE_CURRENT_LIST_DIR}/LuxEngineTargets.cmake")
 

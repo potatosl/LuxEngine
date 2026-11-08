@@ -17,7 +17,8 @@ if ([string]::IsNullOrWhiteSpace($testStaging)) {
     if (-not (Test-Path $zipPath)) {
         throw "Editor package zip not found: $zipPath. Run PackageEditor.ps1 first."
     }
-    $testStaging = Join-Path ([System.IO.Path]::GetTempPath()) "LuxEditorTest-$(Get-Random)"
+    $koreanPart = [string]::new([char[]]@(0xD55C, 0xAE00, 0xD14C, 0xC2A4, 0xD2B8)) # "한글테스트"
+    $testStaging = Join-Path ([System.IO.Path]::GetTempPath()) "LuxEditorTest $koreanPart $(Get-Random)"
     New-Item -ItemType Directory -Path $testStaging -Force | Out-Null
     Write-Host "Extracting $zipPath to $testStaging..."
     Expand-Archive -Path $zipPath -DestinationPath $testStaging -Force
@@ -31,17 +32,31 @@ try {
     }
 
     # Verify essential dependencies inside package
-    $essentialDlls = @("SDL3.dll", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qwindows.dll")
-    foreach ($dll in $essentialDlls) {
-        $p = Join-Path $testStaging $dll
+    $essentialFiles = @(
+        "SDL3.dll",
+        "Qt6Core.dll",
+        "Qt6Gui.dll",
+        "Qt6Widgets.dll",
+        "platforms/qwindows.dll",
+        "shaders/Basic.vert.spv",
+        "shaders/Basic.frag.spv",
+        "licenses/LICENSE-LuxEngine.txt",
+        "licenses/LICENSE-Qt6.txt",
+        "licenses/LICENSE-LGPLv3.txt",
+        "licenses/DEPENDENCIES.md"
+    )
+    foreach ($f in $essentialFiles) {
+        $p = Join-Path $testStaging $f
         if (-not (Test-Path $p)) {
-            throw "Package missing essential DLL/plugin: $dll"
+            throw "Package missing essential file/dependency: $f"
         }
     }
 
-    Write-Host "1. Testing 'LuxEditor.exe --version'..."
     # Sanitize PATH: retain only Windows System32 so host Qt/vcpkg cannot interfere
     $cleanPath = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
+
+    # 1. Test 'LuxEditor.exe --version'
+    Write-Host "1. Testing 'LuxEditor.exe --version'..."
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $editorExe
     $psi.Arguments = "--version"
@@ -62,11 +77,36 @@ try {
     $err = $stdErrTask1.Result
     Write-Host "Version output: $output"
     if ($err) { Write-Host "Version stderr: $err" }
-    if ($proc.ExitCode -ne 0) {
+    if ($proc.ExitCode -ne 0 -or -not ($output -like "*LuxEditor*")) {
         throw "LuxEditor.exe --version failed with exit code $($proc.ExitCode): $err (output: $output)"
     }
 
-    Write-Host "2. Testing 'LuxEditor.exe --smoke-test' in clean environment..."
+    # 2. Test 'LuxEditor.exe --help'
+    Write-Host "2. Testing 'LuxEditor.exe --help'..."
+    $psiHelp = New-Object System.Diagnostics.ProcessStartInfo
+    $psiHelp.FileName = $editorExe
+    $psiHelp.Arguments = "--help"
+    $psiHelp.WorkingDirectory = $testStaging
+    $psiHelp.EnvironmentVariables["PATH"] = $cleanPath
+    $psiHelp.UseShellExecute = $false
+    $psiHelp.RedirectStandardOutput = $true
+    $psiHelp.RedirectStandardError = $true
+
+    $procHelp = [System.Diagnostics.Process]::Start($psiHelp)
+    $stdOutTaskHelp = $procHelp.StandardOutput.ReadToEndAsync()
+    $stdErrTaskHelp = $procHelp.StandardError.ReadToEndAsync()
+    if (-not $procHelp.WaitForExit(10000)) {
+        $procHelp.Kill()
+        throw "LuxEditor.exe --help timed out after 10 seconds"
+    }
+    $outputHelp = $stdOutTaskHelp.Result
+    Write-Host "Help output: $outputHelp"
+    if ($procHelp.ExitCode -ne 0 -or -not ($outputHelp -like "*Usage: LuxEditor.exe*")) {
+        throw "LuxEditor.exe --help failed with exit code $($procHelp.ExitCode)"
+    }
+
+    # 3. Test 'LuxEditor.exe --smoke-test' in clean environment
+    Write-Host "3. Testing 'LuxEditor.exe --smoke-test' in clean environment..."
     $psi2 = New-Object System.Diagnostics.ProcessStartInfo
     $psi2.FileName = $editorExe
     $psi2.Arguments = "--smoke-test"
