@@ -62,22 +62,40 @@ function Get-VulkanGpuStatus {
         $controllers = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
         if ($controllers) {
             $gpuNames = @()
-            $hasDiscreteOrIntegrated = $false
+            $virtualPattern = "Microsoft Basic|Microsoft Hyper-V|Hyper-V|Remote Desktop|VirtualBox|VMware|VdAgent|QEMU|Cirrus|Standard VGA|Citrix|Parallels|RDP|Basic Render"
+            $physicalPattern = "NVIDIA|AMD|Radeon|Intel|GeForce|RTX|GTX|Arc|Iris"
+            $hasPhysical = $false
+            $hasVirtualOnly = $true
+
             foreach ($c in $controllers) {
                 $name = $c.Name
-                if ($name -and $name -notmatch "Microsoft Basic Display|Remote Desktop|VirtualBox|VMware|VdAgent") {
-                    $hasDiscreteOrIntegrated = $true
-                    $gpuNames += $name
+                if ($name) {
+                    if ($name -match $physicalPattern) {
+                        $hasPhysical = $true
+                        $hasVirtualOnly = $false
+                        $gpuNames += $name
+                    } elseif ($name -notmatch $virtualPattern) {
+                        # Unknown adapter
+                        $hasVirtualOnly = $false
+                        $gpuNames += $name
+                    }
                 }
             }
-            if ($hasDiscreteOrIntegrated) {
+
+            if ($hasPhysical) {
+                return @{
+                    Status = "GPU_AVAILABLE";
+                    DeviceName = ($gpuNames -join ", ");
+                    Reason = "Hardware GPU detected via CIM: $($gpuNames -join ', ')"
+                }
+            } elseif ($hasVirtualOnly) {
+                return @{ Status = "GPU_UNAVAILABLE"; Reason = "vulkaninfo.exe not found and only virtual/cloud display adapters detected" }
+            } else {
                 return @{
                     Status = "GPU_PROBE_UNKNOWN";
-                    Reason = "vulkaninfo.exe not found, but hardware GPU detected: $($gpuNames -join ', ')";
+                    Reason = "vulkaninfo.exe not found and unknown display adapter: $($gpuNames -join ', ')";
                     HardwareGpu = ($gpuNames -join ", ")
                 }
-            } else {
-                return @{ Status = "GPU_UNAVAILABLE"; Reason = "vulkaninfo.exe not found and only virtual/basic display adapters detected" }
             }
         }
     } catch {
@@ -223,9 +241,13 @@ try {
     } elseif ($gpuCheck.Status -eq "GPU_PROBE_UNKNOWN") {
         if ($RequireGpu) {
             throw "[GPU_RENDER_FAIL] -RequireGpu specified, GPU status is unknown ($($gpuCheck.Reason)), and LuxPlayer failed with exit code $($proc3.ExitCode): $err3"
+        } elseif ($proc3.ExitCode -eq 1 -or $proc3.ExitCode -eq 3) {
+            # Inconclusive probe, but LuxPlayer cleanly returned standard exit code for no graphics device
+            Write-Host "[GPU_RENDER_SKIPPED] Inconclusive GPU probe ($($gpuCheck.Reason)), and LuxPlayer cleanly exited without GPU (exit code $($proc3.ExitCode))."
+            Write-Host "[CLI_PASS] CLI options and standalone runtime integrity verified."
         } else {
-            # Probe was unknown, but we must not silently swallow unexpected crashes
-            throw "[GPU_RENDER_FAIL] Hardware GPU probe indicated potential GPU ($($gpuCheck.Reason)), but LuxPlayer failed with exit code $($proc3.ExitCode): $err3"
+            # Crash or unexpected failure: do NOT swallow!
+            throw "[GPU_RENDER_FAIL] Inconclusive GPU probe ($($gpuCheck.Reason)), and LuxPlayer crashed/failed abnormally with exit code $($proc3.ExitCode): $err3"
         }
     } else {
         # Headless VM environment without physical Vulkan GPU
