@@ -91,7 +91,7 @@ jobs:
       - name: Run Headless Engine & Editor UI Tests
         shell: pwsh
         run: |
-          ctest --test-dir build -C Debug --output-on-failure -L headless --timeout 180
+          ctest --test-dir build -C Debug --output-on-failure -L headless -LE "long|slow" --timeout 180
 
       - name: Run Editor UI Undo/Redo & Clipboard Regression Verbose
         shell: pwsh

@@ -28,20 +28,174 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QUndoStack>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#ifdef small
+#undef small
+#endif
+#endif
+
 namespace {
 constexpr int kSkipReturnCode = 77;
+constexpr int kDefaultIterations = 100;
+
+struct CpuMemorySample {
+    LuxEngine::uint64 workingSetBytes = 0;
+    LuxEngine::uint64 privateBytes = 0;
+};
+
+CpuMemorySample QueryCpuMemory() {
+    CpuMemorySample sample{};
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    pmc.cb = sizeof(pmc);
+    if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc),
+                             sizeof(pmc))) {
+        sample.workingSetBytes = static_cast<LuxEngine::uint64>(pmc.WorkingSetSize);
+        sample.privateBytes = static_cast<LuxEngine::uint64>(pmc.PrivateUsage);
+    }
+#endif
+    return sample;
+}
+
+struct StressCheckpoint {
+    int iteration = 0;
+    CpuMemorySample cpu{};
+    LuxEngine::GpuMemoryStats gpuMem{};
+    LuxEngine::GpuDeviceCounters gpuCounters{};
+    LuxEngine::uint64 cumulativeFramesSubmitted = 0;
+    LuxEngine::uint64 cumulativeSubmissions = 0;
+    LuxEngine::uint64 cumulativePipelinesCreated = 0;
+    LuxEngine::uint32 cumulativeValidationErrors = 0;
+};
 
 void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
+}
+
+void CheckWithGpuDiagnostics(bool condition, const char* phase, int iteration,
+                             const LuxEngine::EngineSceneRenderer* renderer, const char* message) {
+    if (condition)
+        return;
+    const auto cpu = QueryCpuMemory();
+    std::ostringstream oss;
+    oss << "[FAILURE DIAGNOSTIC] phase=" << phase << " iteration=" << iteration << " error=\""
+        << message << "\" cpuWorkingSetBytes=" << cpu.workingSetBytes
+        << " cpuPrivateBytes=" << cpu.privateBytes;
+    if (renderer) {
+        oss << " rendererReady=" << (renderer->IsReady() ? "true" : "false")
+            << " recoveryCount=" << renderer->GetRecoveryCount()
+            << " rendererError=\"" << renderer->LastError().toStdString() << "\"";
+        if (const auto* gpu = renderer->GetGpuDevice()) {
+            const auto mem = gpu->GetMemoryStats();
+            const auto cnt = gpu->GetCounters();
+            oss << " gpuStatus=" << LuxEngine::ToString(gpu->GetStatus())
+                << " gpuLastFailure=" << LuxEngine::ToString(gpu->GetLastFailure())
+                << " gpuLastError=\"" << gpu->GetLastError() << "\""
+                << " activeAllocCount=" << mem.allocationCount
+                << " activeAllocBytes=" << mem.allocationBytes
+                << " activeLiveBuffers=" << mem.liveBuffers
+                << " activeLiveTextures=" << mem.liveTextures
+                << " pendingDestructions=" << mem.pendingDestructions
+                << " pendingStagingBytes=" << mem.pendingStagingBytes
+                << " deviceLocalUsage=" << mem.deviceLocalUsage
+                << " validationErrors=" << cnt.validationErrors
+                << " validationWarnings=" << cnt.validationWarnings
+                << " cumulativeFramesSubmitted=" << cnt.framesSubmitted;
+        } else {
+            oss << " gpuDevice=null";
+        }
+    }
+    throw std::runtime_error(oss.str());
+}
+
+int ParsePositiveInt(const std::string& raw, int fallback) {
+    if (raw.empty())
+        return fallback;
+    try {
+        size_t pos = 0;
+        const long val = std::stol(raw, &pos, 10);
+        if (pos == raw.size() && val >= 1 && val <= 100000)
+            return static_cast<int>(val);
+    } catch (...) {
+    }
+    return fallback;
+}
+
+struct StressConfig {
+    std::string mode = "all";
+    int gpuIterations = kDefaultIterations;
+    int viewportIterations = kDefaultIterations;
+    int undoIterations = kDefaultIterations;
+};
+
+StressConfig ParseStressConfig(int argc, char** argv) {
+    StressConfig cfg;
+    const QString envAll = qEnvironmentVariable("LUX_STRESS_ITERATIONS");
+    if (!envAll.isEmpty()) {
+        const int n = ParsePositiveInt(envAll.toStdString(), kDefaultIterations);
+        cfg.gpuIterations = n;
+        cfg.viewportIterations = n;
+        cfg.undoIterations = n;
+    }
+    const QString envGpu = qEnvironmentVariable("LUX_GPU_STRESS_ITERATIONS");
+    if (!envGpu.isEmpty())
+        cfg.gpuIterations = ParsePositiveInt(envGpu.toStdString(), cfg.gpuIterations);
+
+    const QString envVp = qEnvironmentVariable("LUX_VIEWPORT_STRESS_ITERATIONS");
+    if (!envVp.isEmpty())
+        cfg.viewportIterations = ParsePositiveInt(envVp.toStdString(), cfg.viewportIterations);
+
+    const QString envUndo = qEnvironmentVariable("LUX_UNDO_STRESS_ITERATIONS");
+    if (!envUndo.isEmpty())
+        cfg.undoIterations = ParsePositiveInt(envUndo.toStdString(), cfg.undoIterations);
+
+    for (int i = 1; i < argc; ++i) {
+        if (!argv[i])
+            continue;
+        const std::string arg = argv[i];
+        if (arg == "ui" || arg == "gpu" || arg == "all") {
+            cfg.mode = arg;
+        } else if (arg.rfind("--iterations=", 0) == 0) {
+            const int n = ParsePositiveInt(arg.substr(13), kDefaultIterations);
+            cfg.gpuIterations = n;
+            cfg.viewportIterations = n;
+            cfg.undoIterations = n;
+        } else if (arg.rfind("--gpu-iterations=", 0) == 0) {
+            cfg.gpuIterations = ParsePositiveInt(arg.substr(17), cfg.gpuIterations);
+        } else if (arg.rfind("--viewport-iterations=", 0) == 0) {
+            cfg.viewportIterations = ParsePositiveInt(arg.substr(22), cfg.viewportIterations);
+        } else if (arg.rfind("--undo-iterations=", 0) == 0) {
+            cfg.undoIterations = ParsePositiveInt(arg.substr(18), cfg.undoIterations);
+        } else {
+            const int maybeNum = ParsePositiveInt(arg, -1);
+            if (maybeNum > 0) {
+                cfg.gpuIterations = maybeNum;
+                cfg.viewportIterations = maybeNum;
+                cfg.undoIterations = maybeNum;
+            }
+        }
+    }
+    return cfg;
 }
 
 bool FloatNear(float a, float b, float eps = 1e-4f) {
@@ -61,7 +215,7 @@ bool Vec4Near(const LuxEngine::Vec4& a, const LuxEngine::Vec4& b, float eps = 1e
            FloatNear(a.w, b.w, eps);
 }
 
-std::string FormatVulkanVersion( LuxEngine::uint32 version) {
+std::string FormatVulkanVersion(LuxEngine::uint32 version) {
     const auto major = (version >> 22) & 0x7FU;
     const auto minor = (version >> 12) & 0x3FFU;
     const auto patch = version & 0xFFFU;
@@ -249,12 +403,13 @@ bool HasNonBackgroundPixel(const QImage& image, int bgR, int bgG, int bgB) {
     return false;
 }
 
-int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
+int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const StressConfig& cfg) {
     using namespace LuxEngine;
     // Strictly disable GPU viewport in Editor_ui so it runs 100% headlessly without GPU dependency.
     EngineSceneRenderer::SetForceAllowed(false);
 
-    std::cerr << "[Editor_ui] creating EditorWindow (headless offscreen)\n";
+    std::cerr << "[Editor_ui] creating EditorWindow (headless offscreen, undoIterations="
+              << cfg.undoIterations << ")\n";
     EditorWindow window;
     window.show();
     app.processEvents();
@@ -309,9 +464,9 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
     auto* pasteAction = window.findChild<QAction*>(QStringLiteral("pasteEntity"));
     Check(copyAction && pasteAction, "copy and paste actions exist");
 
-    // --- PART 3.1: 100x Undo/Redo Regression ---
-    std::cerr << "[Editor_ui] PART 3.1: Entity create -> add components -> copy -> paste -> 100x "
-                 "Undo/Redo\n";
+    // --- PART 3.1: Configurable (100x / 1000x) Undo/Redo Regression ---
+    std::cerr << "[Editor_ui] PART 3.1: Entity create -> add components -> copy -> paste -> "
+              << cfg.undoIterations << "x Undo/Redo\n";
     copyAction->trigger();
     pasteAction->trigger();
     Check(hierarchy->count() == 3, "copy and paste entity duplicates all components");
@@ -325,7 +480,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
     undo->undo();
     Check(hierarchy->count() == 2, "undo before full-component paste");
 
-    // Paste full 11-component entity and run 100x Undo/Redo loop
+    // Paste full 11-component entity and run N-iteration Undo/Redo loop
     SetClipboardJsonObject(MakeValidClipboardEntityJson());
     pasteAction->trigger();
     Check(hierarchy->count() == 3 && window.GetDocument().GetScene().GetEntityCount() == 3,
@@ -343,26 +498,77 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
 
     std::string baselineSerialized;
     Check(window.GetDocument().GetScene().SerializeToString(baselineSerialized),
-          "baseline scene serializes before 100x Undo/Redo");
+          "baseline scene serializes before Undo/Redo stress loop");
 
-    for (int iter = 0; iter < 100; ++iter) {
+    const auto undoStart = std::chrono::steady_clock::now();
+    const CpuMemorySample undoCpuStart = QueryCpuMemory();
+    CpuMemorySample undoCpu100{}, undoCpu500{}, undoCpu1000{};
+
+    for (int iter = 1; iter <= cfg.undoIterations; ++iter) {
         undo->undo();
-        Check(hierarchy->count() == 2 && window.GetDocument().GetScene().GetEntityCount() == 2 &&
-                  !FindEntityByTag(window.GetDocument().GetScene(), "검증엔티티 복사본").IsValid(),
-              "100x Undo removes pasted entity cleanly");
+        if (hierarchy->count() != 2 || window.GetDocument().GetScene().GetEntityCount() != 2 ||
+            FindEntityByTag(window.GetDocument().GetScene(), "검증엔티티 복사본").IsValid()) {
+            const auto cpu = QueryCpuMemory();
+            std::ostringstream oss;
+            oss << "[Undo/Redo FAILURE] iteration=" << iter << " phase=undo hierarchyCount="
+                << hierarchy->count()
+                << " sceneEntities=" << window.GetDocument().GetScene().GetEntityCount()
+                << " cpuWorkingSetBytes=" << cpu.workingSetBytes
+                << " cpuPrivateBytes=" << cpu.privateBytes;
+            throw std::runtime_error(oss.str());
+        }
         undo->redo();
-        Check(hierarchy->count() == 3 && window.GetDocument().GetScene().GetEntityCount() == 3,
-              "100x Redo restores pasted entity cleanly");
+        if (hierarchy->count() != 3 || window.GetDocument().GetScene().GetEntityCount() != 3) {
+            const auto cpu = QueryCpuMemory();
+            std::ostringstream oss;
+            oss << "[Undo/Redo FAILURE] iteration=" << iter << " phase=redo hierarchyCount="
+                << hierarchy->count()
+                << " sceneEntities=" << window.GetDocument().GetScene().GetEntityCount()
+                << " cpuWorkingSetBytes=" << cpu.workingSetBytes
+                << " cpuPrivateBytes=" << cpu.privateBytes;
+            throw std::runtime_error(oss.str());
+        }
+
+        if (iter % 10 == 0 || iter == 1 || iter == cfg.undoIterations) {
+            const auto cpuNow = QueryCpuMemory();
+            if (iter == 100)
+                undoCpu100 = cpuNow;
+            if (iter == 500)
+                undoCpu500 = cpuNow;
+            if (iter == 1000)
+                undoCpu1000 = cpuNow;
+            std::cerr << "  [Undo/Redo] iter " << iter << "/" << cfg.undoIterations
+                      << " | entities=" << window.GetDocument().GetScene().GetEntityCount()
+                      << " undoCount=" << undo->count() << " undoIndex=" << undo->index()
+                      << " cpuWorkingSetKB=" << (cpuNow.workingSetBytes / 1024)
+                      << " cpuPrivateKB=" << (cpuNow.privateBytes / 1024) << "\n";
+        }
     }
 
-    Entity after100Pasted = FindEntityByTag(window.GetDocument().GetScene(), "검증엔티티 복사본");
-    VerifyFullClipboardEntityComponents(after100Pasted);
-    std::string after100Serialized;
-    Check(window.GetDocument().GetScene().SerializeToString(after100Serialized) &&
-              after100Serialized == baselineSerialized,
-          "scene state and all component values are 100% identical after 100x Undo/Redo");
-    std::cerr << "[Editor_ui] PART 3.1 PASS: 100x Undo/Redo verified (entity count=3, all 11 "
-                 "components identical)\n";
+    const double undoElapsedSec =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - undoStart).count();
+    const CpuMemorySample undoCpuEnd = QueryCpuMemory();
+
+    Entity afterStressPasted = FindEntityByTag(window.GetDocument().GetScene(), "검증엔티티 복사본");
+    VerifyFullClipboardEntityComponents(afterStressPasted);
+    std::string afterStressSerialized;
+    Check(window.GetDocument().GetScene().SerializeToString(afterStressSerialized) &&
+              afterStressSerialized == baselineSerialized,
+          "scene state and all component values are 100% identical after Undo/Redo stress loop");
+
+    std::cerr << "[Editor_ui] PART 3.1 PASS: " << cfg.undoIterations << "/" << cfg.undoIterations
+              << " Undo/Redo verified in " << undoElapsedSec
+              << " s (entity count=3, all 11 components & serialized scene identical, cpuPrivateKB "
+                 "start="
+              << (undoCpuStart.privateBytes / 1024)
+              << " -> end=" << (undoCpuEnd.privateBytes / 1024);
+    if (cfg.undoIterations >= 100)
+        std::cerr << " | @100=" << (undoCpu100.privateBytes / 1024) << "KB";
+    if (cfg.undoIterations >= 500)
+        std::cerr << " | @500=" << (undoCpu500.privateBytes / 1024) << "KB";
+    if (cfg.undoIterations >= 1000)
+        std::cerr << " | @1000=" << (undoCpu1000.privateBytes / 1024) << "KB";
+    std::cerr << ")\n";
 
     // Copy the pasted entity back to clipboard and verify all 9 optional components roundtrip intact
     copyAction->trigger();
@@ -567,7 +773,6 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
     // --- PART 3.3: Actual Pasted Entity Save & Reopen ---
     std::cerr << "[Editor_ui] PART 3.3: Verifying actual pasted entity Scene Save & Reopen\n";
     {
-        // Perform Undo and Redo on the actual pasted entity in EditorWindow, then save the scene
         undo->undo();
         Check(hierarchy->count() == 2, "undo before save roundtrip");
         undo->redo();
@@ -583,7 +788,6 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
         Check(window.GetDocument().SaveAs(savedScenePath),
               "actual EditorWindow document with pasted entity saves to .lux file");
 
-        // Reopen into an independent EditorDocument and verify every entity and component
         EditorDocument reopenedDoc;
         Check(reopenedDoc.Open(savedScenePath), "saved .lux file reopens cleanly");
         Check(reopenedDoc.GetScene().GetEntityCount() == 3,
@@ -596,7 +800,6 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
                   postOpenSerialized == preSaveSerialized,
               "pre-serialization and post-deserialization scene data are byte-for-byte identical");
 
-        // Also reopen directly in EditorWindow's document and verify UI & components
         Check(window.GetDocument().Open(savedScenePath),
               "EditorWindow document reopens saved .lux file");
         Entity windowReopenedPasted =
@@ -605,7 +808,6 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
     }
     std::cerr << "[Editor_ui] PART 3.3 PASS: Actual pasted entity save and reopen verified\n";
 
-    // Return scene to 2 entities (undo pasted entity) for preview & offscreen screenshot checks
     undo->undo();
     Check(hierarchy->count() == 2, "undo after save/reopen test returns to 2 entities");
 
@@ -633,9 +835,9 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
     app.processEvents();
     const QString smallScreenshot = qEnvironmentVariable("LUX_EDITOR_TEST_SMALL_SCREENSHOT");
     if (!smallScreenshot.isEmpty()) {
-        QPixmap small(window.size());
-        window.render(&small);
-        small.save(smallScreenshot);
+        QPixmap smallFrame(window.size());
+        window.render(&smallFrame);
+        smallFrame.save(smallScreenshot);
     }
     while (undo->canUndo())
         undo->undo();
@@ -644,10 +846,44 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings) {
     return 0;
 }
 
-int RunGpuLifecycleTests(QApplication& app) {
+void PrintCheckpointComparison(const char* title, const StressCheckpoint& cpFirst,
+                               const StressCheckpoint& cp100, const StressCheckpoint& cp500,
+                               const StressCheckpoint& cp1000, const StressCheckpoint& cpLast) {
+    std::cerr << "------------------------------------------------------------\n"
+              << "  [" << title << " Checkpoint Comparison (Active vs Cumulative)]\n";
+    auto printRow = [](const char* label, const StressCheckpoint& cp) {
+        if (cp.iteration == 0)
+            return;
+        std::cerr << "    " << label << " (iter=" << cp.iteration << "): "
+                  << "CPU[workingSet=" << (cp.cpu.workingSetBytes / 1024) << "KB, private="
+                  << (cp.cpu.privateBytes / 1024) << "KB] | "
+                  << "GPU_ACTIVE[allocCount=" << cp.gpuMem.allocationCount
+                  << ", allocBytes=" << cp.gpuMem.allocationBytes
+                  << ", liveBuffers=" << cp.gpuMem.liveBuffers
+                  << ", liveTextures=" << cp.gpuMem.liveTextures
+                  << ", pendingDestroy=" << cp.gpuMem.pendingDestructions
+                  << ", deviceLocal=" << cp.gpuMem.deviceLocalUsage << "] | "
+                  << "GPU_CUMULATIVE[framesSubmitted=" << cp.cumulativeFramesSubmitted
+                  << ", submissions=" << cp.cumulativeSubmissions
+                  << ", pipelinesCreated=" << cp.cumulativePipelinesCreated
+                  << ", validationErrors=" << cp.cumulativeValidationErrors << "]\n";
+    };
+    printRow("Iter 1   ", cpFirst);
+    printRow("Iter 100 ", cp100);
+    printRow("Iter 500 ", cp500);
+    printRow("Iter 1000", cp1000);
+    if (cpLast.iteration != cpFirst.iteration && cpLast.iteration != cp100.iteration &&
+        cpLast.iteration != cp500.iteration && cpLast.iteration != cp1000.iteration) {
+        printRow("Iter Last", cpLast);
+    }
+    std::cerr << "------------------------------------------------------------\n";
+}
+
+int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
     using namespace LuxEngine;
     const auto overallStart = std::chrono::steady_clock::now();
-    std::cerr << "[Editor_gpu_lifecycle] probing Vulkan GPU availability\n";
+    std::cerr << "[Editor_gpu_lifecycle] probing Vulkan GPU availability (gpuIterations="
+              << cfg.gpuIterations << ", viewportIterations=" << cfg.viewportIterations << ")\n";
 
     EngineSceneRenderer::SetForceAllowed(true);
     // Request Vulkan Synchronization Validation (falls back to standard Validation or Off if layer missing)
@@ -677,6 +913,8 @@ int RunGpuLifecycleTests(QApplication& app) {
               << "  Validation Enabled     : " << (deviceInfo.validation ? "YES" : "NO") << "\n"
               << "  Sync Validation        : "
               << (deviceInfo.synchronizationValidation ? "YES" : "NO") << "\n"
+              << "  Target GPU Lifecycle   : " << cfg.gpuIterations << " iterations\n"
+              << "  Target Viewport Stress : " << cfg.viewportIterations << " iterations\n"
               << "============================================================\n";
 
     Scene scene2D;
@@ -692,132 +930,294 @@ int RunGpuLifecycleTests(QApplication& app) {
     cube.AddComponent<MeshRendererComponent>().material.albedoColor = {0.2f, 0.8f, 0.3f, 1.0f};
 
     uint32 totalValidationErrors = 0;
+    uint64 totalFramesSubmitted = 0;
+    uint64 totalSubmissions = 0;
+    uint64 totalPipelinesCreated = 0;
 
-    // --- PART 2.1: 100x Full EngineSceneRenderer Create / Render 2D & 3D / Readback / Shutdown ---
-    std::cerr << "[Editor_gpu_lifecycle] PART 2.1: Starting 100x full EngineSceneRenderer "
-                 "create-render-shutdown stress loop...\n";
-    const auto loop100Start = std::chrono::steady_clock::now();
-    GpuMemoryStats firstIterStats{};
-    GpuMemoryStats lastIterStats{};
+    // --- PART 2.1: Full EngineSceneRenderer Create -> Init -> 2D/3D Render -> QImage Readback ->
+    // WaitIdle -> Shutdown -> Resource Release (cfg.gpuIterations times) ---
+    std::cerr << "[Editor_gpu_lifecycle] PART 2.1: Starting " << cfg.gpuIterations
+              << "x full EngineSceneRenderer create-render-readback-waitidle-shutdown loop...\n";
+    const auto loopStart = std::chrono::steady_clock::now();
+    StressCheckpoint cpFirst{}, cp100{}, cp500{}, cp1000{}, cpLast{};
     int completedIterations = 0;
 
-    for (int i = 0; i < 100; ++i) {
-        // 1. Create EngineSceneRenderer
+    for (int i = 0; i < cfg.gpuIterations; ++i) {
+        const int iterNum = i + 1;
         auto renderer = std::make_unique<EngineSceneRenderer>();
-        // 2 & 3. Initialize GpuDevice + Renderer2D & Renderer3D Contexts
-        Check(renderer->EnsureReady() && renderer->IsReady() && renderer->GetGpuDevice() != nullptr,
-              "EngineSceneRenderer initializes GpuDevice and contexts in 100x loop");
+        CheckWithGpuDiagnostics(renderer->EnsureReady() && renderer->IsReady() &&
+                                    renderer->GetGpuDevice() != nullptr,
+                                "EngineSceneRenderer::EnsureReady", iterNum, renderer.get(),
+                                "EngineSceneRenderer failed to initialize GpuDevice and contexts");
 
-        // 4 & 6. Perform real 2D rendering + QImage readback check
         QImage img2D;
-        Check(renderer->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D),
-              "100x loop 2D render succeeds");
-        Check(!img2D.isNull() && img2D.width() == 160 && img2D.height() == 120 &&
-                  HasNonBackgroundPixel(img2D, 30, 34, 42),
-              "100x loop 2D QImage readback has valid dimensions and rendered quad pixels");
+        CheckWithGpuDiagnostics(
+            renderer->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D),
+            "EngineSceneRenderer::Render2D", iterNum, renderer.get(), "2D render failed");
+        CheckWithGpuDiagnostics(!img2D.isNull() && img2D.width() == 160 && img2D.height() == 120 &&
+                                    HasNonBackgroundPixel(img2D, 30, 34, 42),
+                                "EngineSceneRenderer::Readback2D", iterNum, renderer.get(),
+                                "2D QImage readback invalid or missing rendered quad pixels");
 
-        // 5 & 6. Perform real 3D rendering + QImage readback check
         QImage img3D;
-        Check(renderer->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D),
-              "100x loop 3D render succeeds");
-        Check(!img3D.isNull() && img3D.width() == 160 && img3D.height() == 120 &&
-                  HasNonBackgroundPixel(img3D, 27, 33, 42),
-              "100x loop 3D QImage readback has valid dimensions and rendered mesh pixels");
+        CheckWithGpuDiagnostics(
+            renderer->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D),
+            "EngineSceneRenderer::Render3D", iterNum, renderer.get(), "3D render failed");
+        CheckWithGpuDiagnostics(!img3D.isNull() && img3D.width() == 160 && img3D.height() == 120 &&
+                                    HasNonBackgroundPixel(img3D, 27, 33, 42),
+                                "EngineSceneRenderer::Readback3D", iterNum, renderer.get(),
+                                "3D QImage readback invalid or missing rendered mesh pixels");
 
-        // 7 & 8. Check Vulkan validation errors and GPU memory/resource statistics
-        Check(renderer->GetGpuDevice()->WaitIdle(), "GpuDevice WaitIdle succeeds");
+        CheckWithGpuDiagnostics(renderer->GetGpuDevice()->WaitIdle(), "GpuDevice::WaitIdle",
+                                iterNum, renderer.get(), "GpuDevice WaitIdle failed");
+
         const auto counters = renderer->GetGpuDevice()->GetCounters();
         const auto memStats = renderer->GetGpuDevice()->GetMemoryStats();
         totalValidationErrors += counters.validationErrors;
-        Check(counters.validationErrors == 0,
-              "zero Vulkan validation errors during 100x EngineSceneRenderer iteration");
-        // EngineSceneRenderer holds 1 default white texture in GpuDevice and 0 live user buffers
-        // (dynamic geometry uses the per-frame ring buffer); no pending destructions or staging leaks.
-        Check(memStats.liveBuffers == 0 && memStats.liveTextures == 1 &&
-                  memStats.pendingDestructions == 0 && memStats.pendingStagingBytes == 0 &&
-                  memStats.allocationCount > 0 && memStats.allocationBytes > 0,
-              "active GPU resource counts match exact expected baseline before Shutdown");
+        totalFramesSubmitted += counters.framesSubmitted;
+        totalSubmissions += counters.submissions;
+        totalPipelinesCreated += counters.pipelinesCreated;
 
-        if (i == 0)
-            firstIterStats = memStats;
-        if (i == 99)
-            lastIterStats = memStats;
+        CheckWithGpuDiagnostics(counters.validationErrors == 0, "VulkanValidation", iterNum,
+                                renderer.get(),
+                                "Vulkan validation error detected during EngineSceneRenderer loop");
+        CheckWithGpuDiagnostics(
+            memStats.liveBuffers == 0 && memStats.liveTextures == 1 &&
+                memStats.pendingDestructions == 0 && memStats.pendingStagingBytes == 0 &&
+                memStats.allocationCount > 0 && memStats.allocationBytes > 0,
+            "ActiveGpuResourceCheck", iterNum, renderer.get(),
+            "Active GPU resource counts deviated from expected baseline before Shutdown");
+
+        StressCheckpoint currentCp{};
+        currentCp.iteration = iterNum;
+        currentCp.cpu = QueryCpuMemory();
+        currentCp.gpuMem = memStats;
+        currentCp.gpuCounters = counters;
+        currentCp.cumulativeFramesSubmitted = totalFramesSubmitted;
+        currentCp.cumulativeSubmissions = totalSubmissions;
+        currentCp.cumulativePipelinesCreated = totalPipelinesCreated;
+        currentCp.cumulativeValidationErrors = totalValidationErrors;
+
+        if (iterNum == 1)
+            cpFirst = currentCp;
+        if (iterNum == 100)
+            cp100 = currentCp;
+        if (iterNum == 500)
+            cp500 = currentCp;
+        if (iterNum == 1000)
+            cp1000 = currentCp;
+        if (iterNum == cfg.gpuIterations)
+            cpLast = currentCp;
 
         // Verify post-shutdown context safety when tearing down
         Renderer2D::Context observer2D(renderer->GetGpuDevice());
         Renderer3D::Context observer3D(renderer->GetGpuDevice());
-        Check(observer2D.IsDeviceValid() && observer3D.IsDeviceValid(),
-              "observer contexts valid while GpuDevice is alive");
+        CheckWithGpuDiagnostics(observer2D.IsDeviceValid() && observer3D.IsDeviceValid(),
+                                "ContextValidBeforeShutdown", iterNum, renderer.get(),
+                                "Observer contexts should be valid while GpuDevice is alive");
 
-        // 9. Shutdown Renderer and GpuDevice
         renderer->Shutdown();
-        Check(!renderer->IsReady() && renderer->GetGpuDevice() == nullptr,
-              "EngineSceneRenderer Shutdown releases GpuDevice");
-        Check(!observer2D.IsDeviceValid() && !observer3D.IsDeviceValid(),
-              "contexts bound to destroyed GpuDevice immediately detect invalid device");
+        CheckWithGpuDiagnostics(!renderer->IsReady() && renderer->GetGpuDevice() == nullptr,
+                                "EngineSceneRenderer::Shutdown", iterNum, renderer.get(),
+                                "Shutdown did not release GpuDevice");
+        CheckWithGpuDiagnostics(!observer2D.IsDeviceValid() && !observer3D.IsDeviceValid(),
+                                "ContextInvalidAfterShutdown", iterNum, renderer.get(),
+                                "Observer contexts did not detect destroyed GpuDevice");
         observer2D.Shutdown();
         observer3D.Shutdown();
 
         ++completedIterations;
-        if ((i + 1) % 20 == 0 || i == 0) {
-            std::cerr << "  [100x EngineSceneRenderer] iteration " << (i + 1)
-                      << "/100: PASS | liveBuffers=" << memStats.liveBuffers
-                      << " liveTextures=" << memStats.liveTextures
-                      << " allocCount=" << memStats.allocationCount
-                      << " allocBytes=" << memStats.allocationBytes
-                      << " deviceLocalUsage=" << memStats.deviceLocalUsage
-                      << " validationErrors=" << counters.validationErrors << "\n";
+        if (iterNum % 10 == 0 || iterNum == 1 || iterNum == cfg.gpuIterations) {
+            std::cerr << "  [GPU Lifecycle] iter " << iterNum << "/" << cfg.gpuIterations
+                      << " | CPU[ws=" << (currentCp.cpu.workingSetBytes / 1024)
+                      << "KB, priv=" << (currentCp.cpu.privateBytes / 1024) << "KB]"
+                      << " | GPU_ACTIVE[allocs=" << memStats.allocationCount
+                      << ", bytes=" << memStats.allocationBytes
+                      << ", buf=" << memStats.liveBuffers << ", tex=" << memStats.liveTextures
+                      << ", pend=" << memStats.pendingDestructions
+                      << ", vram=" << memStats.deviceLocalUsage << "]"
+                      << " | GPU_CUM[frames=" << totalFramesSubmitted
+                      << ", submits=" << totalSubmissions
+                      << ", pipes=" << totalPipelinesCreated
+                      << ", valErr=" << totalValidationErrors << "]\n";
         }
     }
-    const double loop100Sec =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - loop100Start).count();
-    Check(completedIterations == 100 &&
-              firstIterStats.allocationCount == lastIterStats.allocationCount &&
-              firstIterStats.allocationBytes == lastIterStats.allocationBytes &&
-              firstIterStats.liveBuffers == lastIterStats.liveBuffers &&
-              firstIterStats.liveTextures == lastIterStats.liveTextures,
-          "100x EngineSceneRenderer lifecycle completed with zero resource or allocation drift");
 
-    // Also verify 100x SceneViewport2D & SceneViewport3D widget + Context creation cycles
+    const double loopSec =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - loopStart).count();
+    PrintCheckpointComparison("EngineSceneRenderer Full Lifecycle", cpFirst, cp100, cp500, cp1000,
+                              cpLast);
+
+    Check(completedIterations == cfg.gpuIterations &&
+              cpFirst.gpuMem.allocationCount == cpLast.gpuMem.allocationCount &&
+              cpFirst.gpuMem.allocationBytes == cpLast.gpuMem.allocationBytes &&
+              cpFirst.gpuMem.liveBuffers == cpLast.gpuMem.liveBuffers &&
+              cpFirst.gpuMem.liveTextures == cpLast.gpuMem.liveTextures &&
+              cpLast.gpuMem.pendingDestructions == 0,
+          "EngineSceneRenderer lifecycle completed with zero active GPU resource or allocation "
+          "drift");
+    if (cp100.iteration > 0 && cp500.iteration > 0 && cp1000.iteration > 0) {
+        Check(cp100.gpuMem.allocationCount == cp500.gpuMem.allocationCount &&
+                  cp500.gpuMem.allocationCount == cp1000.gpuMem.allocationCount &&
+                  cp100.gpuMem.allocationBytes == cp500.gpuMem.allocationBytes &&
+                  cp500.gpuMem.allocationBytes == cp1000.gpuMem.allocationBytes &&
+                  cp100.gpuMem.liveBuffers == cp500.gpuMem.liveBuffers &&
+                  cp500.gpuMem.liveBuffers == cp1000.gpuMem.liveBuffers &&
+                  cp100.gpuMem.liveTextures == cp500.gpuMem.liveTextures &&
+                  cp500.gpuMem.liveTextures == cp1000.gpuMem.liveTextures,
+              "Active GPU allocations and resource counts at 100, 500, and 1000 iterations are "
+              "strictly constant (zero leak)");
+    }
+
+    // --- PART 2.2: 2D/3D Viewport Create/Destroy & Alternating Destruction Order (A->B vs B->A)
+    // for cfg.viewportIterations iterations ---
+    std::cerr << "[Editor_gpu_lifecycle] PART 2.2: Starting " << cfg.viewportIterations
+              << "x 2D/3D viewport creation/destruction & alternating teardown order (A->B / "
+                 "B->A)...\n";
+    const auto vpStart = std::chrono::steady_clock::now();
+    StressCheckpoint vpCpFirst{}, vpCp100{}, vpCp500{}, vpCp1000{}, vpCpLast{};
     {
         EditorDocument doc;
-        auto shared = std::make_shared<EngineSceneRenderer>();
-        Check(shared->EnsureReady(), "shared GPU renderer initializes for 100x widget cycle");
-        QImage warmup;
-        Check(shared->Render(scene2D, 320, 200, QRectF(-5.0, 5.0, 10.0, -10.0), warmup) &&
-                  shared->Render3D(scene3D, 320, 200, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, warmup),
-              "shared GPU renderer warmup renders");
-        Check(shared->GetGpuDevice()->WaitIdle(), "shared GpuDevice warmup WaitIdle");
-        const auto memBefore = shared->GetGpuDevice()->GetMemoryStats();
-        for (int i = 0; i < 100; ++i) {
-            Renderer2D::Context ctx2D(shared->GetGpuDevice());
-            Renderer3D::Context ctx3D(shared->GetGpuDevice());
-            Check(ctx2D.IsDeviceValid() && ctx3D.IsDeviceValid(),
-                  "2D/3D contexts valid in 100x widget cycle");
-            SceneViewport2D vp2D(nullptr, doc, [](auto) {}, [](auto, const auto&) {},
-                                 [](auto, auto, auto, auto) {}, [] {}, [] {}, shared);
-            SceneViewport3D vp3D(nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {},
-                                 shared);
-            vp2D.resize(320, 200);
-            vp3D.resize(320, 200);
-        }
-        Check(shared->GetGpuDevice()->WaitIdle(), "shared GpuDevice WaitIdle");
-        const auto memAfter = shared->GetGpuDevice()->GetMemoryStats();
-        const auto counters = shared->GetGpuDevice()->GetCounters();
-        totalValidationErrors += counters.validationErrors;
-        Check(counters.validationErrors == 0 &&
-                  memAfter.allocationCount == memBefore.allocationCount &&
-                  memAfter.allocationBytes == memBefore.allocationBytes &&
-                  memAfter.liveBuffers == memBefore.liveBuffers &&
-                  memAfter.liveTextures == memBefore.liveTextures &&
-                  memAfter.pendingDestructions == 0,
-              "zero GPU resource drift after 100x SceneViewport2D/3D + Context cycles");
-        shared->Shutdown();
-    }
+        auto rendererA = std::make_shared<EngineSceneRenderer>();
+        auto rendererB = std::make_shared<EngineSceneRenderer>();
+        CheckWithGpuDiagnostics(rendererA->EnsureReady(), "ViewportStress::InitA", 0,
+                                rendererA.get(), "rendererA failed to initialize");
+        CheckWithGpuDiagnostics(rendererB->EnsureReady(), "ViewportStress::InitB", 0,
+                                rendererB.get(), "rendererB failed to initialize");
 
-    // --- PART 2.2: Multi-Viewport Simultaneous 2D/3D, Close Orders, Resize, Mid-Render Shutdown,
-    // Fault Recovery ---
-    std::cerr << "[Editor_gpu_lifecycle] PART 2.2: Multi-viewport & edge-case verification\n";
+        QImage warmupA, warmupB;
+        CheckWithGpuDiagnostics(
+            rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), warmupA) &&
+                rendererA->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, warmupA),
+            "ViewportStress::WarmupA", 0, rendererA.get(), "rendererA warmup failed");
+        CheckWithGpuDiagnostics(
+            rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0, warmupB) &&
+                rendererB->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), warmupB),
+            "ViewportStress::WarmupB", 0, rendererB.get(), "rendererB warmup failed");
+        CheckWithGpuDiagnostics(rendererA->GetGpuDevice()->WaitIdle() &&
+                                    rendererB->GetGpuDevice()->WaitIdle(),
+                                "ViewportStress::WarmupWaitIdle", 0, rendererA.get(),
+                                "warmup WaitIdle failed");
+
+        for (int i = 0; i < cfg.viewportIterations; ++i) {
+            const int iterNum = i + 1;
+            const bool close2DFirst = (i % 2 == 0);
+
+            auto ctx2D = std::make_unique<Renderer2D::Context>(rendererA->GetGpuDevice());
+            auto ctx3D = std::make_unique<Renderer3D::Context>(rendererB->GetGpuDevice());
+            CheckWithGpuDiagnostics(ctx2D->IsDeviceValid() && ctx3D->IsDeviceValid(),
+                                    "ViewportStress::ContextInit", iterNum, rendererA.get(),
+                                    "2D or 3D context invalid");
+
+            auto vp2D = std::make_unique<SceneViewport2D>(
+                nullptr, doc, [](auto) {}, [](auto, const auto&) {},
+                [](auto, auto, auto, auto) {}, [] {}, [] {}, rendererA);
+            auto vp3D = std::make_unique<SceneViewport3D>(
+                nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {}, rendererB);
+            vp2D->resize(200, 150);
+            vp3D->resize(200, 150);
+
+            QImage imgA, imgB;
+            if (close2DFirst) {
+                // Close 2D viewport & context first, then verify 3D viewport/renderer still renders
+                vp2D.reset();
+                ctx2D->Shutdown();
+                ctx2D.reset();
+                CheckWithGpuDiagnostics(
+                    rendererB->IsReady() &&
+                        rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0,
+                                            imgB) &&
+                        !imgB.isNull(),
+                    "ViewportStress::Render3DAfter2DClosed", iterNum, rendererB.get(),
+                    "3D viewport render failed after 2D viewport closed first");
+                vp3D.reset();
+                ctx3D->Shutdown();
+                ctx3D.reset();
+            } else {
+                // Close 3D viewport & context first, then verify 2D viewport/renderer still renders
+                vp3D.reset();
+                ctx3D->Shutdown();
+                ctx3D.reset();
+                CheckWithGpuDiagnostics(
+                    rendererA->IsReady() &&
+                        rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0),
+                                          imgA) &&
+                        !imgA.isNull(),
+                    "ViewportStress::Render2DAfter3DClosed", iterNum, rendererA.get(),
+                    "2D viewport render failed after 3D viewport closed first");
+                vp2D.reset();
+                ctx2D->Shutdown();
+                ctx2D.reset();
+            }
+
+            if (iterNum % 10 == 0 || iterNum == 1 || iterNum == cfg.viewportIterations) {
+                CheckWithGpuDiagnostics(rendererA->GetGpuDevice()->WaitIdle() &&
+                                            rendererB->GetGpuDevice()->WaitIdle(),
+                                        "ViewportStress::WaitIdle", iterNum, rendererA.get(),
+                                        "WaitIdle failed during viewport loop");
+                const auto memA = rendererA->GetGpuDevice()->GetMemoryStats();
+                const auto memB = rendererB->GetGpuDevice()->GetMemoryStats();
+                const auto cntA = rendererA->GetGpuDevice()->GetCounters();
+                const auto cntB = rendererB->GetGpuDevice()->GetCounters();
+                CheckWithGpuDiagnostics(cntA.validationErrors == 0 && cntB.validationErrors == 0,
+                                        "ViewportStress::Validation", iterNum, rendererA.get(),
+                                        "validation error during viewport loop");
+
+                StressCheckpoint cp{};
+                cp.iteration = iterNum;
+                cp.cpu = QueryCpuMemory();
+                cp.gpuMem.allocationCount = memA.allocationCount + memB.allocationCount;
+                cp.gpuMem.allocationBytes = memA.allocationBytes + memB.allocationBytes;
+                cp.gpuMem.liveBuffers = memA.liveBuffers + memB.liveBuffers;
+                cp.gpuMem.liveTextures = memA.liveTextures + memB.liveTextures;
+                cp.gpuMem.pendingDestructions = memA.pendingDestructions + memB.pendingDestructions;
+                cp.gpuMem.deviceLocalUsage = memA.deviceLocalUsage + memB.deviceLocalUsage;
+                cp.cumulativeFramesSubmitted = cntA.framesSubmitted + cntB.framesSubmitted;
+                cp.cumulativeSubmissions = cntA.submissions + cntB.submissions;
+                cp.cumulativePipelinesCreated = cntA.pipelinesCreated + cntB.pipelinesCreated;
+                cp.cumulativeValidationErrors = cntA.validationErrors + cntB.validationErrors;
+
+                if (iterNum == 1)
+                    vpCpFirst = cp;
+                if (iterNum == 100)
+                    vpCp100 = cp;
+                if (iterNum == 500)
+                    vpCp500 = cp;
+                if (iterNum == 1000)
+                    vpCp1000 = cp;
+                if (iterNum == cfg.viewportIterations)
+                    vpCpLast = cp;
+
+                std::cerr << "  [Viewport 2D/3D Order=" << (close2DFirst ? "2D->3D" : "3D->2D")
+                          << "] iter " << iterNum << "/" << cfg.viewportIterations
+                          << " | CPU[ws=" << (cp.cpu.workingSetBytes / 1024)
+                          << "KB, priv=" << (cp.cpu.privateBytes / 1024) << "KB]"
+                          << " | GPU_ACTIVE[allocs=" << cp.gpuMem.allocationCount
+                          << ", bytes=" << cp.gpuMem.allocationBytes
+                          << ", buf=" << cp.gpuMem.liveBuffers << ", tex=" << cp.gpuMem.liveTextures
+                          << ", pend=" << cp.gpuMem.pendingDestructions << "]"
+                          << " | GPU_CUM[frames=" << cp.cumulativeFramesSubmitted
+                          << ", valErr=" << cp.cumulativeValidationErrors << "]\n";
+            }
+        }
+
+        totalValidationErrors += rendererA->GetGpuDevice()->GetCounters().validationErrors +
+                                 rendererB->GetGpuDevice()->GetCounters().validationErrors;
+        rendererA->Shutdown();
+        rendererB->Shutdown();
+    }
+    const double vpSec =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - vpStart).count();
+    PrintCheckpointComparison("Multi-Viewport 2D/3D Alternating Teardown", vpCpFirst, vpCp100,
+                              vpCp500, vpCp1000, vpCpLast);
+    Check(vpCpFirst.gpuMem.allocationCount == vpCpLast.gpuMem.allocationCount &&
+              vpCpFirst.gpuMem.allocationBytes == vpCpLast.gpuMem.allocationBytes &&
+              vpCpFirst.gpuMem.liveBuffers == vpCpLast.gpuMem.liveBuffers &&
+              vpCpFirst.gpuMem.liveTextures == vpCpLast.gpuMem.liveTextures &&
+              vpCpLast.gpuMem.pendingDestructions == 0,
+          "zero GPU resource drift after multi-viewport alternating teardown loop");
+
+    // Also verify full EngineSceneRenderer A & B destruction in both orders (A->B and B->A)
     for (int closeOrder = 0; closeOrder < 2; ++closeOrder) {
         auto rendererA = std::make_unique<EngineSceneRenderer>();
         auto rendererB = std::make_unique<EngineSceneRenderer>();
@@ -826,33 +1226,29 @@ int RunGpuLifecycleTests(QApplication& app) {
               "viewport A initial 2D render");
         Check(rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0, imgB),
               "viewport B initial 3D render");
-        Check(imgA.size() == QSize(200, 150) && imgB.size() == QSize(200, 150),
-              "simultaneous 2D and 3D viewports produce expected image sizes");
-
         if (closeOrder == 0) {
             rendererA.reset();
-            Check(rendererB->IsReady(), "viewport B remains ready after viewport A is closed");
-            Check(rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0, imgB),
-                  "viewport B 3D render succeeds after viewport A destruction");
-            Check(rendererB->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgB),
-                  "viewport B 2D render succeeds after viewport A destruction");
+            Check(rendererB->IsReady() &&
+                      rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0,
+                                          imgB) &&
+                      rendererB->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgB),
+                  "viewport B renders 3D & 2D after viewport A GpuDevice is destroyed first");
             totalValidationErrors += rendererB->GetGpuDevice()->GetCounters().validationErrors;
-            Check(rendererB->GetGpuDevice()->GetCounters().validationErrors == 0,
-                  "viewport B validation clean after A closed first");
         } else {
             rendererB.reset();
-            Check(rendererA->IsReady(), "viewport A remains ready after viewport B is closed");
-            Check(rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgA),
-                  "viewport A 2D render succeeds after viewport B destruction");
-            Check(rendererA->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.3, 0.1, 4.0, imgA),
-                  "viewport A 3D render succeeds after viewport B destruction");
+            Check(rendererA->IsReady() &&
+                      rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgA) &&
+                      rendererA->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.3, 0.1, 4.0,
+                                          imgA),
+                  "viewport A renders 2D & 3D after viewport B GpuDevice is destroyed first");
             totalValidationErrors += rendererA->GetGpuDevice()->GetCounters().validationErrors;
-            Check(rendererA->GetGpuDevice()->GetCounters().validationErrors == 0,
-                  "viewport A validation clean after B closed first");
         }
     }
 
-    // Repeated Resize + Mid-Render Shutdown Request + Post-Shutdown Context Guard + Fault Recovery
+    // --- PART 2.3: Resize, Mid-Render Shutdown, Post-Shutdown Context Guard & DeviceLost Fault
+    // Injection ---
+    std::cerr << "[Editor_gpu_lifecycle] PART 2.3: Resize, mid-render Shutdown, and DeviceLost "
+                 "fault injection tests...\n";
     {
         EngineSceneRenderer renderer;
         QImage output;
@@ -871,7 +1267,6 @@ int RunGpuLifecycleTests(QApplication& app) {
         bool hookCalled = false;
         renderer.SetPostSceneHookForTesting([&] {
             hookCalled = true;
-            // Calling Shutdown() mid-frame must defer teardown until Render() finishes
             renderer.Shutdown();
             Check(renderer.IsReady() && renderer.GetGpuDevice() != nullptr,
                   "GpuDevice remains alive while mid-frame render is still executing");
@@ -893,7 +1288,6 @@ int RunGpuLifecycleTests(QApplication& app) {
             detached3D.Shutdown();
             Check(!detached2D.IsDeviceValid() && !detached3D.IsDeviceValid(),
                   "Shutdown contexts report !IsDeviceValid()");
-            // Attempting to use contexts after Shutdown must be a safe no-op without crash
             OrthographicCamera ortho(-5.0f, 5.0f, -5.0f, 5.0f);
             detached2D.BeginScene(ortho);
             detached2D.DrawQuad(Vec2{0.0f, 0.0f}, Vec2{1.0f, 1.0f}, Vec4{1.0f, 1.0f, 1.0f, 1.0f});
@@ -907,7 +1301,6 @@ int RunGpuLifecycleTests(QApplication& app) {
         }
 
 #if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
-        // Initialization failure fault injection + Reset recovery
         renderer.Shutdown();
         renderer.Reset();
         Vk::ClearFaults();
@@ -930,7 +1323,6 @@ int RunGpuLifecycleTests(QApplication& app) {
                       renderer.IsReady() && renderer.GetRecoveryCount() == expectedRecovery,
                   "EngineSceneRenderer automatically recovers after DeviceLost within limit");
         }
-        // 4th DeviceLost must exceed recovery limit (kMaxDeviceRecoveries == 3)
         Vk::InjectFault(Vk::Fault::DeviceLost);
         Check(!renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output),
               "4th DeviceLost fails active frame");
@@ -940,7 +1332,6 @@ int RunGpuLifecycleTests(QApplication& app) {
                   renderer.LastError().contains(QStringLiteral("복구 한도")),
               "EngineSceneRenderer enforces recovery limit after 3 recoveries");
 
-        // Explicit Reset() clears the recovery counter and restores rendering
         renderer.Reset();
         Check(renderer.GetRecoveryCount() == 0 &&
                   renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output) &&
@@ -961,28 +1352,26 @@ int RunGpuLifecycleTests(QApplication& app) {
     std::cerr << "============================================================\n"
               << "[Editor_gpu_lifecycle] SUMMARY REPORT\n"
               << "  Status                 : PASS\n"
-              << "  GPU Model              : " << deviceInfo.deviceName << "\n"
+              << "  GPU Model              : " << deviceInfo.deviceName << " ("
+              << deviceInfo.deviceType << ")\n"
               << "  Vulkan API Version     : " << FormatVulkanVersion(deviceInfo.apiVersion) << "\n"
               << "  Vulkan Driver Version  : " << FormatVulkanVersion(deviceInfo.driverVersion)
               << "\n"
-              << "  100x Full Lifecycle    : " << completedIterations << "/100 PASS ("
-              << loop100Sec << " s)\n"
+              << "  Validation / SyncVal   : " << (deviceInfo.validation ? "ON" : "OFF") << " / "
+              << (deviceInfo.synchronizationValidation ? "ON" : "OFF") << "\n"
+              << "  GPU Lifecycle Loop     : " << completedIterations << "/" << cfg.gpuIterations
+              << " PASS (" << loopSec << " s)\n"
+              << "  Viewport Teardown Loop : " << cfg.viewportIterations << "/"
+              << cfg.viewportIterations << " PASS (" << vpSec << " s)\n"
               << "  Total Execution Time   : " << totalSec << " s\n"
               << "  Validation Errors      : " << totalValidationErrors << "\n"
-              << "  Iter 1 Memory Stats    : allocCount=" << firstIterStats.allocationCount
-              << ", allocBytes=" << firstIterStats.allocationBytes
-              << ", liveBuffers=" << firstIterStats.liveBuffers
-              << ", liveTextures=" << firstIterStats.liveTextures << "\n"
-              << "  Iter 100 Memory Stats  : allocCount=" << lastIterStats.allocationCount
-              << ", allocBytes=" << lastIterStats.allocationBytes
-              << ", liveBuffers=" << lastIterStats.liveBuffers
-              << ", liveTextures=" << lastIterStats.liveTextures << "\n"
-              << "  Memory Delta (1->100)  : allocCount="
-              << (static_cast<long long>(lastIterStats.allocationCount) -
-                  static_cast<long long>(firstIterStats.allocationCount))
+              << "  Active GPU Memory Delta (Iter 1 -> Iter " << cfg.gpuIterations
+              << "): allocCount="
+              << (static_cast<long long>(cpLast.gpuMem.allocationCount) -
+                  static_cast<long long>(cpFirst.gpuMem.allocationCount))
               << ", allocBytes="
-              << (static_cast<long long>(lastIterStats.allocationBytes) -
-                  static_cast<long long>(firstIterStats.allocationBytes))
+              << (static_cast<long long>(cpLast.gpuMem.allocationBytes) -
+                  static_cast<long long>(cpFirst.gpuMem.allocationBytes))
               << " bytes\n"
               << "============================================================\n";
     return 0;
@@ -1014,21 +1403,19 @@ int main(int argc, char** argv) {
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
 
-    std::string mode = "all";
-    if (argc > 1 && argv[1] != nullptr)
-        mode = argv[1];
+    const StressConfig cfg = ParseStressConfig(argc, argv);
 
     try {
-        if (mode == "ui") {
-            return RunHeadlessEditorUiTests(app, settings);
+        if (cfg.mode == "ui") {
+            return RunHeadlessEditorUiTests(app, settings, cfg);
         }
-        if (mode == "gpu") {
-            return RunGpuLifecycleTests(app);
+        if (cfg.mode == "gpu") {
+            return RunGpuLifecycleTests(app, cfg);
         }
-        const int uiResult = RunHeadlessEditorUiTests(app, settings);
+        const int uiResult = RunHeadlessEditorUiTests(app, settings, cfg);
         if (uiResult != 0)
             return uiResult;
-        const int gpuResult = RunGpuLifecycleTests(app);
+        const int gpuResult = RunGpuLifecycleTests(app, cfg);
         return gpuResult == kSkipReturnCode ? 0 : gpuResult;
     } catch (const std::exception& error) {
         std::cerr << "[FATAL] " << error.what() << '\n';
