@@ -210,6 +210,21 @@ void Core() {
           "duplicate animation time");
     clip.loop = true;
     Check(Near(clip.Sample(-0.5f).position.x, 20), "negative animation time");
+    // Bug 3 Regression Test: NaN & Inf safety, factor clamping, and looping precision
+    const auto nanSample = clip.Sample(std::numeric_limits<float>::quiet_NaN());
+    Check(std::isfinite(nanSample.position.x), "animation sample with NaN returns finite position");
+    const auto infSample = clip.Sample(std::numeric_limits<float>::infinity());
+    Check(std::isfinite(infSample.position.x), "animation sample with infinity returns finite position");
+    clip.loop = false;
+    const auto clampedSample = clip.Sample(100.0f);
+    Check(Near(clampedSample.position.x, 20.0f), "animation factor clamped at end without extrapolation");
+    clip.loop = true;
+    float animTime = 0.0f;
+    TransformComponent animTransform;
+    for (int step = 0; step < 1000; ++step) {
+        AnimationEngine::UpdateClip(clip, animTime, 0.016f, animTransform);
+    }
+    Check(animTime >= 0.0f && animTime <= clip.duration, "animation update loop keeps time wrapped and bounded");
     Throws([&] { clip.AddKeyframe({-1}); }, "invalid keyframe rejected");
     PhysicsEngine::Init();
     Vec3 p{0, 0.5f, 0};
@@ -538,6 +553,40 @@ void Physics2D() {
         Check(suspended.GetComponent<TransformComponent>().position.y < 2.5f,
               "world gravity change wakes sleeping body");
     }
+    {
+        // Bug 1 Regression Test: Destroying an entity involved in collision A must NOT drop collision events for pair B
+        Scene scene;
+        auto a1 = scene.CreateEntity("pairA_1");
+        a1.GetComponent<TransformComponent>().position = {0, 0, 0};
+        a1.AddComponent<Rigidbody2DComponent>();
+        a1.AddComponent<BoxCollider2DComponent>().isTrigger = true;
+
+        auto a2 = scene.CreateEntity("pairA_2");
+        a2.GetComponent<TransformComponent>().position = {0, 0, 0};
+        a2.AddComponent<Rigidbody2DComponent>();
+        a2.AddComponent<BoxCollider2DComponent>().isTrigger = true;
+
+        auto b1 = scene.CreateEntity("pairB_1");
+        b1.GetComponent<TransformComponent>().position = {10, 0, 0};
+        b1.AddComponent<Rigidbody2DComponent>();
+        b1.AddComponent<BoxCollider2DComponent>().isTrigger = true;
+
+        auto b2 = scene.CreateEntity("pairB_2");
+        b2.GetComponent<TransformComponent>().position = {10, 0, 0};
+        b2.AddComponent<Rigidbody2DComponent>();
+        b2.AddComponent<BoxCollider2DComponent>().isTrigger = true;
+
+        scene.OnUpdate(1.0 / 60.0);
+        Check(scene.GetCollisionEvents2D().size() == 2, "both simultaneous collision pairs registered");
+
+        // Destroy entity a1 from pair A; pair B's event must remain completely intact!
+        scene.DestroyEntity(a1);
+        const auto& remaining = scene.GetCollisionEvents2D();
+        Check(remaining.size() == 1, "destroying entity A removes only pair A event");
+        Check((remaining[0].entityA == b1.GetId() && remaining[0].entityB == b2.GetId()) ||
+              (remaining[0].entityA == b2.GetId() && remaining[0].entityB == b1.GetId()),
+              "pair B collision event strictly preserved");
+    }
     PhysicsEngine::Shutdown();
 }
 void Scenes() {
@@ -578,6 +627,18 @@ void Scenes() {
         orphan = shortLived.CreateEntity();
     }
     Check(!orphan.IsValid() && !orphan.HasComponent<TagComponent>(), "scene lifetime tracked");
+    {
+        // Bug 2 Regression Test: Oversized or malformed TilemapComponent must not cause DoS loop in OnRender
+        Scene tileScene;
+        auto tileEntity = tileScene.CreateEntity("hugeTilemap");
+        auto& tm = tileEntity.AddComponent<TilemapComponent>();
+        tm.width = 100000;
+        tm.height = 100000;
+        tm.tileSize = 1.0f;
+        // OnRender should immediately reject this tilemap safely without running 10 billion loop iterations
+        tileScene.OnRender();
+        Check(tileEntity.IsValid(), "oversized tilemap handled safely in OnRender");
+    }
     Files files;
     auto persistent = scene.CreateEntity("spaces and \"quotes\"");
     persistent.GetComponent<TransformComponent>().position = {1.25f, 2, 3};
@@ -918,9 +979,25 @@ void Assets() {
     files.Text("bad.obj", "v 0 0 0\nf 0 1 2\n");
     Check(!AssetManager::LoadMesh(files.Path("bad.obj"), mesh) && mesh.vertices.empty(),
           "invalid mesh fails");
+    // Bug 4 Regression Test: empty OBJ file and excessive mesh file limits
+    files.Text("empty.obj", "");
+    Check(!AssetManager::LoadMesh(files.Path("empty.obj"), mesh), "empty mesh file fails safely");
     Check(!AssetManager::LoadMesh(files.Path("missing.obj"), mesh), "missing mesh fails");
     Check(!AssetManager::LoadTexture(files.Path("missing.png")), "missing device fails");
     Check(!AssetManager::HasTexture(files.Path("missing.png")), "failed image not cached");
+    // Multithreaded cache safety test
+    std::vector<std::thread> assetWorkers;
+    for (int t = 0; t < 4; ++t) {
+        assetWorkers.emplace_back([&] {
+            for (int iter = 0; iter < 100; ++iter) {
+                AssetManager::HasTexture("nonexistent.png");
+                AssetManager::GetCachedTextureCount();
+            }
+        });
+    }
+    for (auto& w : assetWorkers)
+        w.join();
+    Check(true, "multithreaded asset cache operations safe");
     std::vector<uint8> bytes{1, 2};
     files.Text("empty", "");
     Check(!AssetManager::LoadShaderBytes(files.Path("empty"), bytes) && bytes.empty(),

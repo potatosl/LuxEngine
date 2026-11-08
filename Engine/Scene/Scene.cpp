@@ -96,7 +96,9 @@ void Scene::OnUpdate(double dt) {
 void Scene::RemovePhysicsBody2D(uint32 id) {
     if (physics2D_)
         physics2D_->Remove(id);
-    collisionEvents2D_.clear();
+    std::erase_if(collisionEvents2D_, [id](const auto& event) {
+        return event.entityA == id || event.entityB == id;
+    });
 }
 namespace {
 Vec4 TileColor(uint8_t tile) {
@@ -138,7 +140,9 @@ void Scene::OnRender() {
             continue;
         if (entity.HasComponent<TilemapComponent>()) {
             const auto& map = entity.GetComponent<TilemapComponent>();
-            if (!Finite(map.tileSize) || map.tileSize <= 0.0f)
+            if (map.width == 0 || map.width > 256 || map.height == 0 || map.height > 256 ||
+                !std::isfinite(map.tileSize) || map.tileSize <= 0.0f || map.tileSize > 64.0f ||
+                map.tiles.size() != static_cast<size_t>(map.width) * map.height)
                 continue;
             for (uint32 y = 0; y < map.height; ++y)
                 for (uint32 x = 0; x < map.width; ++x) {

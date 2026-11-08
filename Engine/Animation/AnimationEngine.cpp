@@ -1,6 +1,7 @@
 #include "Engine/Animation/AnimationEngine.hpp"
 #include "Engine/Core/Log.hpp"
 #include <algorithm>
+#include <cmath>
 
 namespace LuxEngine {
 
@@ -14,6 +15,9 @@ TransformComponent AnimationClip::Sample(float time) const {
         result.scale = keyframes[0].scale;
         return result;
     }
+
+    if (!std::isfinite(time))
+        time = 0.0f;
 
     float clampedTime = time;
     if (duration > 0.0f) {
@@ -47,8 +51,9 @@ TransformComponent AnimationClip::Sample(float time) const {
     const auto& kf1 = *it;
 
     const float segmentDuration = kf1.time - kf0.time;
-    const float factor =
+    const float rawFactor =
         (segmentDuration > 0.0001f) ? (clampedTime - kf0.time) / segmentDuration : 0.0f;
+    const float factor = std::clamp(rawFactor, 0.0f, 1.0f);
 
     result.position = kf0.position + (kf1.position - kf0.position) * factor;
     result.rotation = kf0.rotation + (kf1.rotation - kf0.rotation) * factor;
@@ -66,7 +71,15 @@ void AnimationEngine::Shutdown() {
 
 void AnimationEngine::UpdateClip(const AnimationClip& clip, float& currentTime, float dt,
                                  TransformComponent& outTransform) {
-    currentTime += dt;
+    if (!std::isfinite(currentTime))
+        currentTime = 0.0f;
+    if (std::isfinite(dt) && dt > 0.0f)
+        currentTime += dt;
+    if (clip.loop && clip.duration > 0.0f && std::isfinite(currentTime)) {
+        currentTime = std::fmod(currentTime, clip.duration);
+        if (currentTime < 0.0f)
+            currentTime += clip.duration;
+    }
     outTransform = clip.Sample(currentTime);
 }
 

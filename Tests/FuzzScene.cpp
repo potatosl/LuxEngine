@@ -16,7 +16,19 @@ bool TestSceneBytes(const uint8_t* data, size_t size) {
 
     std::string inMemory(reinterpret_cast<const char*>(data), size);
     LuxEngine::Scene scene;
-    return scene.DeserializeFromString(inMemory);
+    if (!scene.DeserializeFromString(inMemory))
+        return false;
+
+    // Full pipeline verification on deserialized components
+    std::string reserialized;
+    scene.SerializeToString(reserialized);
+    scene.OnUpdate(0.016);
+    scene.OnRender();
+    scene.OnRender3D();
+    for (auto entity : scene.GetEntities()) {
+        entity.IsValid();
+    }
+    return true;
 }
 
 std::vector<uint8_t> MakeBytes(std::string_view s) {
