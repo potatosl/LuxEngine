@@ -1,5 +1,6 @@
 #include "App/EditorWindow.hpp"
 #include "Engine/ECS/ECS.hpp"
+#include "Engine/Platform/Window.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
@@ -8,6 +9,8 @@
 #include "Viewport/EngineSceneRenderer.hpp"
 #include "Viewport/SceneViewport2D.hpp"
 #include "Viewport/SceneViewport3D.hpp"
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -48,6 +51,7 @@
 #endif
 #include <windows.h>
 #include <psapi.h>
+#include <malloc.h>
 #ifdef small
 #undef small
 #endif
@@ -60,6 +64,28 @@ constexpr int kDefaultIterations = 100;
 struct CpuMemorySample {
     LuxEngine::uint64 workingSetBytes = 0;
     LuxEngine::uint64 privateBytes = 0;
+};
+
+struct DetailedCpuMemorySample {
+    LuxEngine::uint64 workingSetBytes = 0;
+    LuxEngine::uint64 privateBytes = 0;
+    LuxEngine::uint64 defaultHeapBusyBytes = 0;
+    LuxEngine::uint64 defaultHeapBusyBlocks = 0;
+    LuxEngine::uint64 secondaryHeapsBusyBytes = 0;
+    LuxEngine::uint64 secondaryHeapsBusyBlocks = 0;
+    LuxEngine::uint32 heapCount = 0;
+    LuxEngine::uint64 vmPrivateCommitBytes = 0;
+    LuxEngine::uint64 vmMappedCommitBytes = 0;
+    LuxEngine::uint64 vmImageCommitBytes = 0;
+};
+
+struct FourStageCpuSample {
+    int iteration = 0;
+    CpuMemorySample preInit{};
+    CpuMemorySample postRender{};
+    CpuMemorySample postShutdown{};
+    CpuMemorySample postDestroy{};
+    DetailedCpuMemorySample detailedPostDestroy{};
 };
 
 CpuMemorySample QueryCpuMemory() {
@@ -76,9 +102,86 @@ CpuMemorySample QueryCpuMemory() {
     return sample;
 }
 
+void CompactProcessHeaps() {
+#if defined(_WIN32)
+    _heapmin();
+    const DWORD count = GetProcessHeaps(0, nullptr);
+    if (count > 0 && count <= 512) {
+        std::vector<HANDLE> heaps(count);
+        const DWORD fetched = GetProcessHeaps(count, heaps.data());
+        for (DWORD i = 0; i < fetched; ++i) {
+            if (heaps[i])
+                HeapCompact(heaps[i], 0);
+        }
+    }
+#endif
+}
+
+DetailedCpuMemorySample QueryDetailedCpuMemory(bool compactFirst = false) {
+    DetailedCpuMemorySample out{};
+#if defined(_WIN32)
+    if (compactFirst)
+        CompactProcessHeaps();
+
+    const auto basic = QueryCpuMemory();
+    out.workingSetBytes = basic.workingSetBytes;
+    out.privateBytes = basic.privateBytes;
+
+    const HANDLE defaultHeap = GetProcessHeap();
+    const DWORD count = GetProcessHeaps(0, nullptr);
+    if (count > 0 && count <= 512) {
+        std::vector<HANDLE> heaps(count);
+        const DWORD fetched = GetProcessHeaps(count, heaps.data());
+        out.heapCount = fetched;
+        for (DWORD i = 0; i < fetched; ++i) {
+            HANDLE h = heaps[i];
+            if (!h)
+                continue;
+            if (!HeapLock(h))
+                continue;
+            PROCESS_HEAP_ENTRY entry{};
+            while (HeapWalk(h, &entry)) {
+                if ((entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) != 0) {
+                    if (h == defaultHeap) {
+                        out.defaultHeapBusyBytes += entry.cbData;
+                        ++out.defaultHeapBusyBlocks;
+                    } else {
+                        out.secondaryHeapsBusyBytes += entry.cbData;
+                        ++out.secondaryHeapsBusyBlocks;
+                    }
+                }
+            }
+            HeapUnlock(h);
+        }
+    }
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    const unsigned char* addr = nullptr;
+    while (VirtualQuery(addr, &mbi, sizeof(mbi)) == sizeof(mbi)) {
+        if (mbi.State == MEM_COMMIT) {
+            if (mbi.Type == MEM_PRIVATE)
+                out.vmPrivateCommitBytes += mbi.RegionSize;
+            else if (mbi.Type == MEM_MAPPED)
+                out.vmMappedCommitBytes += mbi.RegionSize;
+            else if (mbi.Type == MEM_IMAGE)
+                out.vmImageCommitBytes += mbi.RegionSize;
+        }
+        const unsigned char* next =
+            static_cast<const unsigned char*>(mbi.BaseAddress) + mbi.RegionSize;
+        if (next <= addr)
+            break;
+        addr = next;
+    }
+#else
+    (void)compactFirst;
+#endif
+    return out;
+}
+
 struct StressCheckpoint {
     int iteration = 0;
     CpuMemorySample cpu{};
+    FourStageCpuSample fourStage{};
     LuxEngine::GpuMemoryStats gpuMem{};
     LuxEngine::GpuDeviceCounters gpuCounters{};
     LuxEngine::uint64 cumulativeFramesSubmitted = 0;
@@ -867,6 +970,34 @@ void PrintCheckpointComparison(const char* title, const StressCheckpoint& cpFirs
                   << ", submissions=" << cp.cumulativeSubmissions
                   << ", pipelinesCreated=" << cp.cumulativePipelinesCreated
                   << ", validationErrors=" << cp.cumulativeValidationErrors << "]\n";
+        if (cp.fourStage.iteration != 0) {
+            const auto& fs = cp.fourStage;
+            const auto& det = fs.detailedPostDestroy;
+            std::cerr << "      -> 4-Stage CPU PrivateKB: [preInit="
+                      << (fs.preInit.privateBytes / 1024)
+                      << "KB -> postRender=" << (fs.postRender.privateBytes / 1024)
+                      << "KB -> postShutdown=" << (fs.postShutdown.privateBytes / 1024)
+                      << "KB -> postDestroy=" << (fs.postDestroy.privateBytes / 1024) << "KB"
+                      << " (reclaimedOnShutdown="
+                      << (static_cast<long long>(fs.postRender.privateBytes) -
+                          static_cast<long long>(fs.postShutdown.privateBytes)) /
+                             1024
+                      << "KB, netIterDelta="
+                      << (static_cast<long long>(fs.postDestroy.privateBytes) -
+                          static_cast<long long>(fs.preInit.privateBytes)) /
+                             1024
+                      << "KB)]\n";
+            if (det.privateBytes != 0) {
+                std::cerr << "      -> Post-Destroy Compacted Breakdown: [defaultHeapBusy="
+                          << (det.defaultHeapBusyBytes / 1024) << "KB ("
+                          << det.defaultHeapBusyBlocks << " blks), secondaryHeapsBusy="
+                          << (det.secondaryHeapsBusyBytes / 1024) << "KB ("
+                          << det.secondaryHeapsBusyBlocks << " blks, heaps=" << det.heapCount
+                          << "), vmPrivateCommit=" << (det.vmPrivateCommitBytes / 1024)
+                          << "KB, vmMappedCommit=" << (det.vmMappedCommitBytes / 1024)
+                          << "KB, vmImageCommit=" << (det.vmImageCommitBytes / 1024) << "KB]\n";
+            }
+        }
     };
     printRow("Iter 1   ", cpFirst);
     printRow("Iter 100 ", cp100);
@@ -877,6 +1008,45 @@ void PrintCheckpointComparison(const char* title, const StressCheckpoint& cpFirs
         printRow("Iter Last", cpLast);
     }
     std::cerr << "------------------------------------------------------------\n";
+}
+
+void PrintIsolationDelta(const char* name, int iters, const DetailedCpuMemorySample& before,
+                         const DetailedCpuMemorySample& after) {
+    const long long privDeltaKB =
+        (static_cast<long long>(after.privateBytes) - static_cast<long long>(before.privateBytes)) /
+        1024;
+    const long long wsDeltaKB = (static_cast<long long>(after.workingSetBytes) -
+                                 static_cast<long long>(before.workingSetBytes)) /
+                                1024;
+    const long long defHeapDeltaBytes = static_cast<long long>(after.defaultHeapBusyBytes) -
+                                        static_cast<long long>(before.defaultHeapBusyBytes);
+    const long long defHeapDeltaBlks = static_cast<long long>(after.defaultHeapBusyBlocks) -
+                                       static_cast<long long>(before.defaultHeapBusyBlocks);
+    const long long secHeapDeltaBytes = static_cast<long long>(after.secondaryHeapsBusyBytes) -
+                                        static_cast<long long>(before.secondaryHeapsBusyBytes);
+    const long long vmPrivDeltaKB = (static_cast<long long>(after.vmPrivateCommitBytes) -
+                                     static_cast<long long>(before.vmPrivateCommitBytes)) /
+                                    1024;
+    const long long vmMapDeltaKB = (static_cast<long long>(after.vmMappedCommitBytes) -
+                                    static_cast<long long>(before.vmMappedCommitBytes)) /
+                                   1024;
+    const long long vmImgDeltaKB = (static_cast<long long>(after.vmImageCommitBytes) -
+                                    static_cast<long long>(before.vmImageCommitBytes)) /
+                                   1024;
+    std::cerr << "  [Isolation: " << name << " (" << iters << "x)]\n"
+              << "    PrivateUsage : " << (before.privateBytes / 1024) << "KB -> "
+              << (after.privateBytes / 1024) << "KB (delta=" << privDeltaKB << "KB, "
+              << (iters > 0 ? static_cast<double>(privDeltaKB) / iters : 0.0) << " KB/iter)\n"
+              << "    WorkingSet   : " << (before.workingSetBytes / 1024) << "KB -> "
+              << (after.workingSetBytes / 1024) << "KB (delta=" << wsDeltaKB << "KB)\n"
+              << "    DefaultHeap  : " << (before.defaultHeapBusyBytes / 1024) << "KB -> "
+              << (after.defaultHeapBusyBytes / 1024) << "KB (delta=" << defHeapDeltaBytes
+              << " bytes, " << defHeapDeltaBlks << " blocks)\n"
+              << "    SecondHeaps  : " << (before.secondaryHeapsBusyBytes / 1024) << "KB -> "
+              << (after.secondaryHeapsBusyBytes / 1024) << "KB (delta=" << secHeapDeltaBytes
+              << " bytes, heaps=" << before.heapCount << "->" << after.heapCount << ")\n"
+              << "    VM Commit    : PrivateDelta=" << vmPrivDeltaKB
+              << "KB, MappedDelta=" << vmMapDeltaKB << "KB, ImageDelta=" << vmImgDeltaKB << "KB\n";
 }
 
 int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
@@ -934,6 +1104,131 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
     uint64 totalSubmissions = 0;
     uint64 totalPipelinesCreated = 0;
 
+    // --- PART 2.0: Controlled CPU Memory Isolation Tests (Separating SDL Window, Device Init/Shutdown
+    // ONLY vs. Full Render/Readback, and Validation OFF vs. ON vs. Synchronization) ---
+    constexpr int kIsolationIterations = 50;
+    std::cerr << "[Editor_gpu_lifecycle] PART 2.0: Running " << kIsolationIterations
+              << "x controlled CPU memory isolation sub-tests...\n";
+    {
+        // Sub-test 2.0A: SDL_InitSubSystem + Window Create/Destroy + SDL_QuitSubSystem ONLY
+        const auto beforeSdl = QueryDetailedCpuMemory(true);
+        for (int i = 0; i < kIsolationIterations; ++i) {
+            Check(SDL_InitSubSystem(SDL_INIT_VIDEO), "Isolation SDL_InitSubSystem");
+            Window win;
+            WindowProps props;
+            props.title = "LuxIsolationWindow";
+            props.width = 640;
+            props.height = 360;
+            props.resizable = true;
+            props.vulkan = true;
+            props.hidden = true;
+            props.vsync = false;
+            Check(win.Initialize(props), "Isolation Window::Initialize");
+            win.Shutdown();
+            SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        }
+        const auto afterSdl = QueryDetailedCpuMemory(true);
+        PrintIsolationDelta("2.0A: SDL Window Create+Destroy ONLY (No Vulkan Device)",
+                            kIsolationIterations, beforeSdl, afterSdl);
+
+        // Sub-test 2.0B: GPU Device Init + Shutdown ONLY (No Render, No Readback), Validation = OFF
+        EngineSceneRenderer::SetDefaultValidation(static_cast<int>(GpuValidation::Off));
+        {
+            EngineSceneRenderer warmup;
+            Check(warmup.EnsureReady(), "Warmup Off");
+            warmup.Shutdown();
+        }
+        const auto beforeInitOff = QueryDetailedCpuMemory(true);
+        for (int i = 0; i < kIsolationIterations; ++i) {
+            auto r = std::make_unique<EngineSceneRenderer>();
+            Check(r->EnsureReady() && r->GetGpuDevice() != nullptr, "Isolation InitOnly Val=Off");
+            Check(r->GetGpuDevice()->WaitIdle(), "Isolation WaitIdle Val=Off");
+            r->Shutdown();
+            r.reset();
+        }
+        const auto afterInitOff = QueryDetailedCpuMemory(true);
+        PrintIsolationDelta(
+            "2.0B: GpuDevice Init+Shutdown ONLY (No Render/Readback, Validation=OFF)",
+            kIsolationIterations, beforeInitOff, afterInitOff);
+
+        // Sub-test 2.0C: Full Init + 2D/3D Render + QImage Readback + Shutdown, Validation = OFF
+        const auto beforeFullOff = QueryDetailedCpuMemory(true);
+        for (int i = 0; i < kIsolationIterations; ++i) {
+            auto r = std::make_unique<EngineSceneRenderer>();
+            Check(r->EnsureReady() && r->GetGpuDevice() != nullptr, "Isolation Full Val=Off");
+            QImage img2D, img3D;
+            Check(r->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D) &&
+                      !img2D.isNull(),
+                  "Isolation Full 2D Val=Off");
+            Check(r->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D) &&
+                      !img3D.isNull(),
+                  "Isolation Full 3D Val=Off");
+            Check(r->GetGpuDevice()->WaitIdle(), "Isolation Full WaitIdle Val=Off");
+            r->Shutdown();
+            r.reset();
+        }
+        const auto afterFullOff = QueryDetailedCpuMemory(true);
+        PrintIsolationDelta(
+            "2.0C: Full Init+Render2D/3D+Readback+Shutdown (Validation=OFF)",
+            kIsolationIterations, beforeFullOff, afterFullOff);
+
+        // Sub-test 2.0D: GPU Device Init + Shutdown ONLY (No Render, No Readback), Validation = ON
+        EngineSceneRenderer::SetDefaultValidation(static_cast<int>(GpuValidation::On));
+        const auto beforeInitOn = QueryDetailedCpuMemory(true);
+        for (int i = 0; i < kIsolationIterations; ++i) {
+            auto r = std::make_unique<EngineSceneRenderer>();
+            Check(r->EnsureReady() && r->GetGpuDevice() != nullptr, "Isolation InitOnly Val=On");
+            Check(r->GetGpuDevice()->WaitIdle(), "Isolation WaitIdle Val=On");
+            totalValidationErrors += r->GetGpuDevice()->GetCounters().validationErrors;
+            r->Shutdown();
+            r.reset();
+        }
+        const auto afterInitOn = QueryDetailedCpuMemory(true);
+        PrintIsolationDelta(
+            "2.0D: GpuDevice Init+Shutdown ONLY (No Render/Readback, Validation=ON)",
+            kIsolationIterations, beforeInitOn, afterInitOn);
+
+        // Sub-test 2.0E: GPU Device Init + Shutdown ONLY (No Render, No Readback), Validation = Synchronization
+        EngineSceneRenderer::SetDefaultValidation(static_cast<int>(GpuValidation::Synchronization));
+        const auto beforeInitSync = QueryDetailedCpuMemory(true);
+        for (int i = 0; i < kIsolationIterations; ++i) {
+            auto r = std::make_unique<EngineSceneRenderer>();
+            Check(r->EnsureReady() && r->GetGpuDevice() != nullptr, "Isolation InitOnly Val=Sync");
+            Check(r->GetGpuDevice()->WaitIdle(), "Isolation WaitIdle Val=Sync");
+            totalValidationErrors += r->GetGpuDevice()->GetCounters().validationErrors;
+            r->Shutdown();
+            r.reset();
+        }
+        const auto afterInitSync = QueryDetailedCpuMemory(true);
+        PrintIsolationDelta(
+            "2.0E: GpuDevice Init+Shutdown ONLY (No Render/Readback, Validation=Synchronization)",
+            kIsolationIterations, beforeInitSync, afterInitSync);
+
+        // Sub-test 2.0F: Full Init + 2D/3D Render + QImage Readback + Shutdown, Validation = Synchronization
+        const auto beforeFullSync = QueryDetailedCpuMemory(true);
+        for (int i = 0; i < kIsolationIterations; ++i) {
+            auto r = std::make_unique<EngineSceneRenderer>();
+            Check(r->EnsureReady() && r->GetGpuDevice() != nullptr, "Isolation Full Val=Sync");
+            QImage img2D, img3D;
+            Check(r->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D) &&
+                      !img2D.isNull(),
+                  "Isolation Full 2D Val=Sync");
+            Check(r->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D) &&
+                      !img3D.isNull(),
+                  "Isolation Full 3D Val=Sync");
+            Check(r->GetGpuDevice()->WaitIdle(), "Isolation Full WaitIdle Val=Sync");
+            totalValidationErrors += r->GetGpuDevice()->GetCounters().validationErrors;
+            r->Shutdown();
+            r.reset();
+        }
+        const auto afterFullSync = QueryDetailedCpuMemory(true);
+        PrintIsolationDelta(
+            "2.0F: Full Init+Render2D/3D+Readback+Shutdown (Validation=Synchronization)",
+            kIsolationIterations, beforeFullSync, afterFullSync);
+    }
+    EngineSceneRenderer::SetDefaultValidation(static_cast<int>(GpuValidation::Synchronization));
+
     // --- PART 2.1: Full EngineSceneRenderer Create -> Init -> 2D/3D Render -> QImage Readback ->
     // WaitIdle -> Shutdown -> Resource Release (cfg.gpuIterations times) ---
     std::cerr << "[Editor_gpu_lifecycle] PART 2.1: Starting " << cfg.gpuIterations
@@ -944,32 +1239,42 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
 
     for (int i = 0; i < cfg.gpuIterations; ++i) {
         const int iterNum = i + 1;
+        FourStageCpuSample stageSample{};
+        stageSample.iteration = iterNum;
+        stageSample.preInit = QueryCpuMemory();
+
         auto renderer = std::make_unique<EngineSceneRenderer>();
         CheckWithGpuDiagnostics(renderer->EnsureReady() && renderer->IsReady() &&
                                     renderer->GetGpuDevice() != nullptr,
                                 "EngineSceneRenderer::EnsureReady", iterNum, renderer.get(),
                                 "EngineSceneRenderer failed to initialize GpuDevice and contexts");
 
-        QImage img2D;
-        CheckWithGpuDiagnostics(
-            renderer->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D),
-            "EngineSceneRenderer::Render2D", iterNum, renderer.get(), "2D render failed");
-        CheckWithGpuDiagnostics(!img2D.isNull() && img2D.width() == 160 && img2D.height() == 120 &&
-                                    HasNonBackgroundPixel(img2D, 30, 34, 42),
-                                "EngineSceneRenderer::Readback2D", iterNum, renderer.get(),
-                                "2D QImage readback invalid or missing rendered quad pixels");
+        {
+            QImage img2D;
+            CheckWithGpuDiagnostics(
+                renderer->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D),
+                "EngineSceneRenderer::Render2D", iterNum, renderer.get(), "2D render failed");
+            CheckWithGpuDiagnostics(!img2D.isNull() && img2D.width() == 160 &&
+                                        img2D.height() == 120 &&
+                                        HasNonBackgroundPixel(img2D, 30, 34, 42),
+                                    "EngineSceneRenderer::Readback2D", iterNum, renderer.get(),
+                                    "2D QImage readback invalid or missing rendered quad pixels");
 
-        QImage img3D;
-        CheckWithGpuDiagnostics(
-            renderer->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D),
-            "EngineSceneRenderer::Render3D", iterNum, renderer.get(), "3D render failed");
-        CheckWithGpuDiagnostics(!img3D.isNull() && img3D.width() == 160 && img3D.height() == 120 &&
-                                    HasNonBackgroundPixel(img3D, 27, 33, 42),
-                                "EngineSceneRenderer::Readback3D", iterNum, renderer.get(),
-                                "3D QImage readback invalid or missing rendered mesh pixels");
+            QImage img3D;
+            CheckWithGpuDiagnostics(
+                renderer->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D),
+                "EngineSceneRenderer::Render3D", iterNum, renderer.get(), "3D render failed");
+            CheckWithGpuDiagnostics(!img3D.isNull() && img3D.width() == 160 &&
+                                        img3D.height() == 120 &&
+                                        HasNonBackgroundPixel(img3D, 27, 33, 42),
+                                    "EngineSceneRenderer::Readback3D", iterNum, renderer.get(),
+                                    "3D QImage readback invalid or missing rendered mesh pixels");
 
-        CheckWithGpuDiagnostics(renderer->GetGpuDevice()->WaitIdle(), "GpuDevice::WaitIdle",
-                                iterNum, renderer.get(), "GpuDevice WaitIdle failed");
+            CheckWithGpuDiagnostics(renderer->GetGpuDevice()->WaitIdle(), "GpuDevice::WaitIdle",
+                                    iterNum, renderer.get(), "GpuDevice WaitIdle failed");
+
+            stageSample.postRender = QueryCpuMemory();
+        }
 
         const auto counters = renderer->GetGpuDevice()->GetCounters();
         const auto memStats = renderer->GetGpuDevice()->GetMemoryStats();
@@ -988,9 +1293,42 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             "ActiveGpuResourceCheck", iterNum, renderer.get(),
             "Active GPU resource counts deviated from expected baseline before Shutdown");
 
+        // Verify post-shutdown context safety when tearing down
+        Renderer2D::Context observer2D(renderer->GetGpuDevice());
+        Renderer3D::Context observer3D(renderer->GetGpuDevice());
+        CheckWithGpuDiagnostics(observer2D.IsDeviceValid() && observer3D.IsDeviceValid(),
+                                "ContextValidBeforeShutdown", iterNum, renderer.get(),
+                                "Observer contexts should be valid while GpuDevice is alive");
+
+        renderer->Shutdown();
+        stageSample.postShutdown = QueryCpuMemory();
+
+        CheckWithGpuDiagnostics(!renderer->IsReady() && renderer->GetGpuDevice() == nullptr,
+                                "EngineSceneRenderer::Shutdown", iterNum, renderer.get(),
+                                "Shutdown did not release GpuDevice");
+        CheckWithGpuDiagnostics(!observer2D.IsDeviceValid() && !observer3D.IsDeviceValid(),
+                                "ContextInvalidAfterShutdown", iterNum, renderer.get(),
+                                "Observer contexts did not detect destroyed GpuDevice");
+        observer2D.Shutdown();
+        observer3D.Shutdown();
+
+        renderer.reset();
+
+        const bool isMilestone = (iterNum == 1 || iterNum == 100 || iterNum == 500 ||
+                                  iterNum == 1000 || iterNum == cfg.gpuIterations);
+        if (isMilestone) {
+            stageSample.detailedPostDestroy = QueryDetailedCpuMemory(true);
+            stageSample.postDestroy.workingSetBytes =
+                stageSample.detailedPostDestroy.workingSetBytes;
+            stageSample.postDestroy.privateBytes = stageSample.detailedPostDestroy.privateBytes;
+        } else {
+            stageSample.postDestroy = QueryCpuMemory();
+        }
+
         StressCheckpoint currentCp{};
         currentCp.iteration = iterNum;
-        currentCp.cpu = QueryCpuMemory();
+        currentCp.cpu = stageSample.postRender;
+        currentCp.fourStage = stageSample;
         currentCp.gpuMem = memStats;
         currentCp.gpuCounters = counters;
         currentCp.cumulativeFramesSubmitted = totalFramesSubmitted;
@@ -1009,28 +1347,13 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         if (iterNum == cfg.gpuIterations)
             cpLast = currentCp;
 
-        // Verify post-shutdown context safety when tearing down
-        Renderer2D::Context observer2D(renderer->GetGpuDevice());
-        Renderer3D::Context observer3D(renderer->GetGpuDevice());
-        CheckWithGpuDiagnostics(observer2D.IsDeviceValid() && observer3D.IsDeviceValid(),
-                                "ContextValidBeforeShutdown", iterNum, renderer.get(),
-                                "Observer contexts should be valid while GpuDevice is alive");
-
-        renderer->Shutdown();
-        CheckWithGpuDiagnostics(!renderer->IsReady() && renderer->GetGpuDevice() == nullptr,
-                                "EngineSceneRenderer::Shutdown", iterNum, renderer.get(),
-                                "Shutdown did not release GpuDevice");
-        CheckWithGpuDiagnostics(!observer2D.IsDeviceValid() && !observer3D.IsDeviceValid(),
-                                "ContextInvalidAfterShutdown", iterNum, renderer.get(),
-                                "Observer contexts did not detect destroyed GpuDevice");
-        observer2D.Shutdown();
-        observer3D.Shutdown();
-
         ++completedIterations;
         if (iterNum % 10 == 0 || iterNum == 1 || iterNum == cfg.gpuIterations) {
             std::cerr << "  [GPU Lifecycle] iter " << iterNum << "/" << cfg.gpuIterations
-                      << " | CPU[ws=" << (currentCp.cpu.workingSetBytes / 1024)
-                      << "KB, priv=" << (currentCp.cpu.privateBytes / 1024) << "KB]"
+                      << " | CPU_PRIV_4STAGE[pre=" << (stageSample.preInit.privateBytes / 1024)
+                      << "KB, render=" << (stageSample.postRender.privateBytes / 1024)
+                      << "KB, shut=" << (stageSample.postShutdown.privateBytes / 1024)
+                      << "KB, destroy=" << (stageSample.postDestroy.privateBytes / 1024) << "KB]"
                       << " | GPU_ACTIVE[allocs=" << memStats.allocationCount
                       << ", bytes=" << memStats.allocationBytes
                       << ", buf=" << memStats.liveBuffers << ", tex=" << memStats.liveTextures
@@ -1346,6 +1669,7 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
 
     EngineSceneRenderer::SetForceAllowed(false);
     app.processEvents();
+    const auto finalSuiteCpu = QueryDetailedCpuMemory(true);
 
     const double totalSec =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - overallStart).count();
@@ -1373,6 +1697,22 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
               << (static_cast<long long>(cpLast.gpuMem.allocationBytes) -
                   static_cast<long long>(cpFirst.gpuMem.allocationBytes))
               << " bytes\n"
+              << "  CPU Post-Destroy PrivateUsage (Iter 1 -> Iter " << cfg.gpuIterations << "): "
+              << (cpFirst.fourStage.postDestroy.privateBytes / 1024) << "KB -> "
+              << (cpLast.fourStage.postDestroy.privateBytes / 1024) << "KB (delta="
+              << (static_cast<long long>(cpLast.fourStage.postDestroy.privateBytes) -
+                  static_cast<long long>(cpFirst.fourStage.postDestroy.privateBytes)) /
+                     1024
+              << "KB)\n"
+              << "  CPU DefaultHeap Busy (Iter 1 -> Iter " << cfg.gpuIterations << "): "
+              << (cpFirst.fourStage.detailedPostDestroy.defaultHeapBusyBytes / 1024) << "KB ("
+              << cpFirst.fourStage.detailedPostDestroy.defaultHeapBusyBlocks << " blks) -> "
+              << (cpLast.fourStage.detailedPostDestroy.defaultHeapBusyBytes / 1024) << "KB ("
+              << cpLast.fourStage.detailedPostDestroy.defaultHeapBusyBlocks << " blks)\n"
+              << "  Final Suite Teardown CPU: PrivateUsage=" << (finalSuiteCpu.privateBytes / 1024)
+              << "KB, WorkingSet=" << (finalSuiteCpu.workingSetBytes / 1024)
+              << "KB, DefaultHeapBusy=" << (finalSuiteCpu.defaultHeapBusyBytes / 1024) << "KB ("
+              << finalSuiteCpu.defaultHeapBusyBlocks << " blks)\n"
               << "============================================================\n";
     return 0;
 }

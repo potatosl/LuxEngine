@@ -52,7 +52,7 @@ public:
     }
 
 private:
-    bool InitializeState();
+    bool InitializeState(uint32 initialWidth = 640, uint32 initialHeight = 360);
     bool BeginViewportFrame(uint32 width, uint32 height);
     bool ReadbackToImage(QImage& output);
 

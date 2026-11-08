@@ -8,11 +8,22 @@
 #include "Engine/Scene/Scene.hpp"
 #include <QGuiApplication>
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <mutex>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace LuxEngine {
 namespace {
@@ -20,6 +31,62 @@ constexpr uint32 kMaxDeviceRecoveries = 3;
 constexpr int kMaxSwapchainAcquireRetries = 3;
 std::atomic<bool> s_ForceAllowed{false};
 std::atomic<int> s_DefaultValidation{static_cast<int>(GpuValidation::Auto)};
+
+// Keeps SDL video subsystem, vulkan-1.dll loader, and (when validation is active) the Khronos
+// validation layer module resident across repeated viewport teardown/re-initialization cycles so
+// that vkDestroyInstance / SDL_DestroyWindow do not repeatedly unload and reload the Vulkan loader
+// and validation layer DLLs into new VirtualAlloc arenas.
+struct ProcessVulkanSubsystemRetention {
+    std::mutex mutex;
+    bool sdlVideoRetained = false;
+    bool vulkanLoaderRetained = false;
+#ifdef _WIN32
+    HMODULE validationLayerModule = nullptr;
+#endif
+
+    void RetainLoaderAndVideo() {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!sdlVideoRetained) {
+            if (SDL_InitSubSystem(SDL_INIT_VIDEO))
+                sdlVideoRetained = true;
+        }
+        if (sdlVideoRetained && !vulkanLoaderRetained) {
+            if (SDL_Vulkan_LoadLibrary(nullptr))
+                vulkanLoaderRetained = true;
+        }
+    }
+
+    void RetainValidationLayerIfLoaded() {
+#ifdef _WIN32
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!validationLayerModule) {
+            GetModuleHandleExW(0, L"VkLayer_khronos_validation.dll", &validationLayerModule);
+        }
+#endif
+    }
+
+    ~ProcessVulkanSubsystemRetention() {
+#ifdef _WIN32
+        if (validationLayerModule) {
+            FreeLibrary(validationLayerModule);
+            validationLayerModule = nullptr;
+        }
+#endif
+        if (vulkanLoaderRetained) {
+            SDL_Vulkan_UnloadLibrary();
+            vulkanLoaderRetained = false;
+        }
+        if (sdlVideoRetained) {
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            sdlVideoRetained = false;
+        }
+    }
+};
+
+ProcessVulkanSubsystemRetention& GetProcessRetention() {
+    static ProcessVulkanSubsystemRetention s_Retention;
+    return s_Retention;
+}
 } // namespace
 
 struct EngineSceneRenderer::State {
@@ -37,8 +104,10 @@ struct EngineSceneRenderer::State {
         context3D.Shutdown();
         gpu.Shutdown();
         window.Shutdown();
-        if (sdlVideo)
+        if (sdlVideo) {
+            SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        }
     }
 };
 
@@ -97,7 +166,8 @@ void EngineSceneRenderer::Reset() {
     error_.clear();
 }
 
-bool EngineSceneRenderer::InitializeState() {
+bool EngineSceneRenderer::InitializeState(uint32 initialWidth, uint32 initialHeight) {
+    GetProcessRetention().RetainLoaderAndVideo();
     auto state = std::make_unique<State>();
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         error_ = QStringLiteral("SDL 비디오 초기화 실패: %1").arg(QString::fromUtf8(SDL_GetError()));
@@ -106,8 +176,8 @@ bool EngineSceneRenderer::InitializeState() {
     state->sdlVideo = true;
     WindowProps props;
     props.title = "LuxEditor viewport";
-    props.width = 640;
-    props.height = 360;
+    props.width = initialWidth > 0 ? initialWidth : 640;
+    props.height = initialHeight > 0 ? initialHeight : 360;
     props.resizable = true;
     props.vulkan = true;
     props.hidden = true;
@@ -117,6 +187,7 @@ bool EngineSceneRenderer::InitializeState() {
             QStringLiteral("엔진 창을 만들지 못했습니다: %1").arg(QString::fromUtf8(SDL_GetError()));
         return false;
     }
+    SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     GpuDeviceConfig config;
     config.vsync = false;
     config.framesInFlight = 1;
@@ -125,6 +196,9 @@ bool EngineSceneRenderer::InitializeState() {
         error_ = QStringLiteral("Vulkan 장치 초기화 실패: %1")
                      .arg(QString::fromStdString(state->gpu.GetLastError()));
         return false;
+    }
+    if (state->gpu.GetInfo().validation) {
+        GetProcessRetention().RetainValidationLayerIfLoaded();
     }
     state->context2D.Init(&state->gpu);
     state->context3D.Init(&state->gpu);
@@ -149,18 +223,25 @@ bool EngineSceneRenderer::EnsureReady() {
                          .arg(QString::fromStdString(state_->gpu.GetLastError()));
             return false;
         }
+        const uint32 prevW = state_->width > 0 ? state_->width : 640;
+        const uint32 prevH = state_->height > 0 ? state_->height : 360;
         ++recoveries_;
         state_.reset();
-        return InitializeState();
+        return InitializeState(prevW, prevH);
     }
     if (attempted_)
         return false;
     attempted_ = true;
-    return InitializeState();
+    return InitializeState(640, 360);
 }
 
 bool EngineSceneRenderer::BeginViewportFrame(uint32 width, uint32 height) {
     for (int recoveryAttempt = 0; recoveryAttempt < 2; ++recoveryAttempt) {
+        if (!IsReady() && Allowed() && !attempted_ && !state_) {
+            attempted_ = true;
+            if (!InitializeState(width, height))
+                return false;
+        }
         if (!EnsureReady() || !state_)
             return false;
         auto& s = *state_;
@@ -169,6 +250,7 @@ bool EngineSceneRenderer::BeginViewportFrame(uint32 width, uint32 height) {
                 error_ = QStringLiteral("엔진 창 크기를 바꾸지 못했습니다.");
                 return false;
             }
+            SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
             s.gpu.NotifyResize();
             s.width = width;
             s.height = height;
