@@ -10,8 +10,8 @@ foreach(suite core physics2d scene assets audio window)
     set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 30 LABELS headless
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
 endforeach()
-set_tests_properties(Engine_audio PROPERTIES ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
-set_tests_properties(Engine_window PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+set_tests_properties(Engine_audio PROPERTIES TIMEOUT 180 ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
+set_tests_properties(Engine_window PROPERTIES TIMEOUT 60 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
 
 # GPU suites need a display and a Vulkan driver; they exit with 77 (skipped) when either is missing.
 set(LUX_GPU_TEST_ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")

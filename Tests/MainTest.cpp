@@ -956,11 +956,11 @@ void Wav(const std::string& file, uint32 dataBytes = 16000) {
         for (size_t i = 0; i < dataBytes / 2; ++i)
             u16(static_cast<uint16>(static_cast<int16>(std::sin(i * 0.2) * 1000)));
     } else {
-        std::vector<char> chunk(65536, 0);
+        static const std::vector<char> s_ZeroChunk(1024 * 1024, 0);
         uint32 remaining = dataBytes;
         while (remaining > 0) {
-            uint32 toWrite = std::min<uint32>(remaining, static_cast<uint32>(chunk.size()));
-            out.write(chunk.data(), toWrite);
+            uint32 toWrite = std::min<uint32>(remaining, static_cast<uint32>(s_ZeroChunk.size()));
+            out.write(s_ZeroChunk.data(), toWrite);
             remaining -= toWrite;
         }
     }
