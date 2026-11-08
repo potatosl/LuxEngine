@@ -32,6 +32,18 @@ public:
     const std::vector<Collision2DEvent>& GetCollisionEvents2D() const {
         return collisionEvents2D_;
     }
+    enum class SaveFault {
+        None,
+        TempWriteFailure,
+        DiskFull,
+        ReplaceAccessDenied,
+        ReplaceFailedAfterBackup,
+        BackupRestoreFailure
+    };
+    static void InjectSaveFault(SaveFault fault, uint32 count = 1);
+    static void ClearSaveFaults();
+    static std::string GetLastSaveError();
+
     bool Serialize(const std::string& filepath);
     bool Deserialize(const std::string& filepath);
     bool SerializeToString(std::string& out);

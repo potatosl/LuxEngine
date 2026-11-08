@@ -8,6 +8,7 @@
 #include "Engine/Scene/Scene.hpp"
 #include <QGuiApplication>
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -15,25 +16,24 @@
 
 namespace LuxEngine {
 namespace {
-std::atomic<int> s_ActiveRendererInstances{0};
+constexpr uint32 kMaxDeviceRecoveries = 3;
+constexpr int kMaxSwapchainAcquireRetries = 3;
+std::atomic<bool> s_ForceAllowed{false};
 } // namespace
 
 struct EngineSceneRenderer::State {
     bool sdlVideo = false;
     Window window;
     GpuDevice gpu;
-    bool renderer = false;
+    Renderer2D::Context context2D;
+    Renderer3D::Context context3D;
     uint32 width = 0;
     uint32 height = 0;
     GpuFrameCapture capture;
 
     ~State() {
-        if (renderer) {
-            if (s_ActiveRendererInstances.fetch_sub(1) == 1) {
-                Renderer2D::Shutdown();
-                Renderer3D::Shutdown();
-            }
-        }
+        context2D.Shutdown();
+        context3D.Shutdown();
         gpu.Shutdown();
         window.Shutdown();
         if (sdlVideo)
@@ -42,11 +42,19 @@ struct EngineSceneRenderer::State {
 };
 
 EngineSceneRenderer::EngineSceneRenderer() = default;
-EngineSceneRenderer::~EngineSceneRenderer() = default;
+EngineSceneRenderer::~EngineSceneRenderer() {
+    Shutdown();
+}
+
+void EngineSceneRenderer::SetForceAllowed(bool force) {
+    s_ForceAllowed.store(force);
+}
 
 bool EngineSceneRenderer::Allowed() {
     if (qEnvironmentVariableIsSet("LUX_EDITOR_SOFTWARE_VIEWPORT"))
         return false;
+    if (s_ForceAllowed.load() || qEnvironmentVariableIsSet("LUX_EDITOR_FORCE_GPU_VIEWPORT"))
+        return true;
     const QString platform = QGuiApplication::platformName();
     return platform != QStringLiteral("offscreen") && platform != QStringLiteral("minimal");
 }
@@ -55,16 +63,36 @@ bool EngineSceneRenderer::IsReady() const {
     return state_ && state_->gpu.IsReady();
 }
 
-bool EngineSceneRenderer::EnsureReady() {
-    if (IsReady())
-        return true;
-    if (attempted_)
-        return false;
-    attempted_ = true;
-    if (!Allowed()) {
-        error_ = QStringLiteral("GPU 뷰포트가 꺼져 있습니다.");
-        return false;
+GpuDevice* EngineSceneRenderer::GetGpuDevice() noexcept {
+    return state_ ? &state_->gpu : nullptr;
+}
+
+const GpuDevice* EngineSceneRenderer::GetGpuDevice() const noexcept {
+    return state_ ? &state_->gpu : nullptr;
+}
+
+void EngineSceneRenderer::Shutdown() {
+    if (rendering_) {
+        pendingShutdown_ = true;
+        return;
     }
+    pendingShutdown_ = false;
+    state_.reset();
+}
+
+void EngineSceneRenderer::Reset() {
+    if (rendering_) {
+        pendingShutdown_ = true;
+        return;
+    }
+    pendingShutdown_ = false;
+    state_.reset();
+    attempted_ = false;
+    recoveries_ = 0;
+    error_.clear();
+}
+
+bool EngineSceneRenderer::InitializeState() {
     auto state = std::make_unique<State>();
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         error_ = QStringLiteral("SDL 비디오 초기화 실패: %1").arg(QString::fromUtf8(SDL_GetError()));
@@ -80,7 +108,8 @@ bool EngineSceneRenderer::EnsureReady() {
     props.hidden = true;
     props.vsync = false;
     if (!state->window.Initialize(props)) {
-        error_ = QStringLiteral("엔진 창을 만들지 못했습니다: %1").arg(QString::fromUtf8(SDL_GetError()));
+        error_ =
+            QStringLiteral("엔진 창을 만들지 못했습니다: %1").arg(QString::fromUtf8(SDL_GetError()));
         return false;
     }
     GpuDeviceConfig config;
@@ -91,10 +120,8 @@ bool EngineSceneRenderer::EnsureReady() {
                      .arg(QString::fromStdString(state->gpu.GetLastError()));
         return false;
     }
-    Renderer2D::Init(&state->gpu);
-    Renderer3D::Init(&state->gpu);
-    ++s_ActiveRendererInstances;
-    state->renderer = true;
+    state->context2D.Init(&state->gpu);
+    state->context3D.Init(&state->gpu);
     state->width = props.width;
     state->height = props.height;
     state_ = std::move(state);
@@ -102,56 +129,70 @@ bool EngineSceneRenderer::EnsureReady() {
     return true;
 }
 
-bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
-                                 const QRectF& worldBounds, QImage& output) {
-    if (!EnsureReady() || pixelWidth <= 0 || pixelHeight <= 0)
+bool EngineSceneRenderer::EnsureReady() {
+    if (IsReady())
+        return true;
+    if (!Allowed()) {
+        error_ = QStringLiteral("GPU 뷰포트가 꺼져 있습니다.");
         return false;
-    auto& s = *state_;
-    const auto width = static_cast<uint32>(pixelWidth);
-    const auto height = static_cast<uint32>(pixelHeight);
-    if (width != s.width || height != s.height) {
-        if (!s.window.SetSize(width, height)) {
-            error_ = QStringLiteral("엔진 창 크기를 바꾸지 못했습니다.");
+    }
+    // If a previously initialized device entered DeviceLost or Error state, attempt bounded recovery.
+    if (state_ && !state_->gpu.IsReady()) {
+        if (recoveries_ >= kMaxDeviceRecoveries) {
+            error_ = QStringLiteral("GPU 장치 복구 한도를 초과했습니다: %1")
+                         .arg(QString::fromStdString(state_->gpu.GetLastError()));
             return false;
         }
-        s.gpu.NotifyResize();
-        s.width = width;
-        s.height = height;
+        ++recoveries_;
+        state_.reset();
+        return InitializeState();
     }
-    if (!s.gpu.RequestFrameCapture()) {
-        error_ = QString::fromStdString(s.gpu.GetLastError());
+    if (attempted_)
         return false;
-    }
-    if (s.gpu.BeginFrame() != GpuDevice::FrameStart::Ready) {
+    attempted_ = true;
+    return InitializeState();
+}
+
+bool EngineSceneRenderer::BeginViewportFrame(uint32 width, uint32 height) {
+    for (int recoveryAttempt = 0; recoveryAttempt < 2; ++recoveryAttempt) {
+        if (!EnsureReady() || !state_)
+            return false;
+        auto& s = *state_;
+        if (width != s.width || height != s.height) {
+            if (!s.window.SetSize(width, height)) {
+                error_ = QStringLiteral("엔진 창 크기를 바꾸지 못했습니다.");
+                return false;
+            }
+            s.gpu.NotifyResize();
+            s.width = width;
+            s.height = height;
+        }
+        if (!s.gpu.RequestFrameCapture()) {
+            error_ = QString::fromStdString(s.gpu.GetLastError());
+            return false;
+        }
+        GpuDevice::FrameStart start = GpuDevice::FrameStart::Skipped;
+        for (int retry = 0; retry < kMaxSwapchainAcquireRetries; ++retry) {
+            start = s.gpu.BeginFrame();
+            if (start == GpuDevice::FrameStart::Ready || start == GpuDevice::FrameStart::Error ||
+                !s.gpu.IsReady())
+                break;
+        }
+        if (start == GpuDevice::FrameStart::Ready)
+            return true;
         error_ = QStringLiteral("엔진 프레임을 시작하지 못했습니다: %1")
                      .arg(QString::fromStdString(s.gpu.GetLastError()));
-        return false;
+        if (s.gpu.IsReady())
+            return false;
+        // Device became unusable (e.g. DeviceLost); loop once more to trigger EnsureReady() recovery.
     }
-    s.gpu.Clear(30.0f / 255.0f, 34.0f / 255.0f, 42.0f / 255.0f, 1.0f);
-    const OrthographicCamera camera(static_cast<float>(worldBounds.left()),
-                                    static_cast<float>(worldBounds.right()),
-                                    static_cast<float>(worldBounds.bottom()),
-                                    static_cast<float>(worldBounds.top()));
-    // Renderer2D is a process-wide singleton and the editor has several 2D viewports, each with
-    // its own device, so bind this viewport's device for every frame.
-    Renderer2D::Init(&s.gpu);
-    try {
-        Renderer2D::BeginScene(camera);
-        scene.OnRender();
-        Renderer2D::EndScene();
-    } catch (const std::exception& exception) {
-        // An exception escaping paintEvent would take the whole editor down with unsaved work.
-        // Close the frame, report it, and let the viewport fall back to software drawing.
-        Renderer2D::Shutdown();
-        Renderer2D::Init(&s.gpu);
-        s.gpu.EndFrame();
-        error_ = QStringLiteral("엔진 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+    return false;
+}
+
+bool EngineSceneRenderer::ReadbackToImage(QImage& output) {
+    if (!state_)
         return false;
-    }
-    if (!s.gpu.EndFrame()) {
-        error_ = QString::fromStdString(s.gpu.GetLastError());
-        return false;
-    }
+    auto& s = *state_;
     if (!s.gpu.ReadFrameCapture(s.capture) || s.capture.width == 0 || s.capture.height == 0 ||
         s.capture.rgba.size() != static_cast<size_t>(s.capture.width) * s.capture.height * 4) {
         error_ = QStringLiteral("엔진 프레임을 읽지 못했습니다.");
@@ -162,6 +203,10 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
     if (output.size() != QSize(captureWidth, captureHeight) ||
         output.format() != QImage::Format_RGBA8888) {
         output = QImage(captureWidth, captureHeight, QImage::Format_RGBA8888);
+    }
+    if (output.isNull()) {
+        error_ = QStringLiteral("뷰포트 이미지 버퍼를 할당하지 못했습니다.");
+        return false;
     }
     const auto rowBytes = static_cast<size_t>(s.capture.width) * 4;
     if (static_cast<size_t>(output.bytesPerLine()) == rowBytes) {
@@ -174,50 +219,100 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
     return true;
 }
 
-bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight,
-                                   const Vec3& focus, double yaw, double pitch, double distance,
-                                   QImage& output) {
-    if (!EnsureReady() || pixelWidth <= 0 || pixelHeight <= 0)
+bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
+                                 const QRectF& worldBounds, QImage& output) {
+    if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
+        pixelHeight > 16384)
         return false;
-    auto& s = *state_;
+    struct RenderScope {
+        EngineSceneRenderer& self;
+        ~RenderScope() {
+            self.rendering_ = false;
+            if (self.pendingShutdown_)
+                self.Shutdown();
+        }
+    } renderScope{*this};
+    rendering_ = true;
+
     const auto width = static_cast<uint32>(pixelWidth);
     const auto height = static_cast<uint32>(pixelHeight);
-    if (width != s.width || height != s.height) {
-        if (!s.window.SetSize(width, height)) {
-            error_ = QStringLiteral("엔진 창 크기를 바꾸지 못했습니다.");
-            return false;
-        }
-        s.gpu.NotifyResize();
-        s.width = width;
-        s.height = height;
+    if (!BeginViewportFrame(width, height))
+        return false;
+
+    auto& s = *state_;
+    s.gpu.Clear(30.0f / 255.0f, 34.0f / 255.0f, 42.0f / 255.0f, 1.0f);
+    const OrthographicCamera camera(static_cast<float>(worldBounds.left()),
+                                    static_cast<float>(worldBounds.right()),
+                                    static_cast<float>(worldBounds.bottom()),
+                                    static_cast<float>(worldBounds.top()));
+    s.context2D.Init(&s.gpu);
+    Renderer2D::ScopedContext scope2D(s.context2D);
+    try {
+        Renderer2D::BeginScene(camera);
+        scene.OnRender();
+        Renderer2D::EndScene();
+    } catch (const std::exception& exception) {
+        s.context2D.AbortScene();
+        s.gpu.EndFrame();
+        error_ = QStringLiteral("엔진 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+        return false;
+    } catch (...) {
+        s.context2D.AbortScene();
+        s.gpu.EndFrame();
+        error_ = QStringLiteral("엔진 렌더링 중 알 수 없는 예외가 발생했습니다.");
+        return false;
     }
-    if (!s.gpu.RequestFrameCapture()) {
+    if (!s.gpu.EndFrame()) {
         error_ = QString::fromStdString(s.gpu.GetLastError());
         return false;
     }
-    if (s.gpu.BeginFrame() != GpuDevice::FrameStart::Ready) {
-        error_ = QStringLiteral("엔진 프레임을 시작하지 못했습니다: %1")
-                     .arg(QString::fromStdString(s.gpu.GetLastError()));
+    return ReadbackToImage(output);
+}
+
+bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight,
+                                   const Vec3& focus, double yaw, double pitch, double distance,
+                                   QImage& output) {
+    if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
+        pixelHeight > 16384)
         return false;
-    }
-    // Background clear for 3D viewport
+    struct RenderScope {
+        EngineSceneRenderer& self;
+        ~RenderScope() {
+            self.rendering_ = false;
+            if (self.pendingShutdown_)
+                self.Shutdown();
+        }
+    } renderScope{*this};
+    rendering_ = true;
+
+    const auto width = static_cast<uint32>(pixelWidth);
+    const auto height = static_cast<uint32>(pixelHeight);
+    if (!BeginViewportFrame(width, height))
+        return false;
+
+    auto& s = *state_;
     s.gpu.Clear(27.0f / 255.0f, 33.0f / 255.0f, 42.0f / 255.0f, 1.0f);
 
-    const double cy = std::cos(yaw);
-    const double sy = std::sin(yaw);
-    const double cp = std::cos(pitch);
-    const double sp = std::sin(pitch);
+    const double safeYaw = std::isfinite(yaw) ? yaw : 0.0;
+    const double safePitch = std::isfinite(pitch) ? pitch : 0.0;
+    const double cy = std::cos(safeYaw);
+    const double sy = std::sin(safeYaw);
+    const double cp = std::cos(safePitch);
+    const double sp = std::sin(safePitch);
     const double safeDistance = std::max(0.1, std::isfinite(distance) ? distance : 5.0);
-    const Vec3 eye{static_cast<float>(focus.x + safeDistance * sy * cp),
-                   static_cast<float>(focus.y - safeDistance * sp),
-                   static_cast<float>(focus.z + safeDistance * cy * cp)};
+    const Vec3 safeFocus = (std::isfinite(focus.x) && std::isfinite(focus.y) && std::isfinite(focus.z))
+                               ? focus
+                               : Vec3{0.0f, 0.0f, 0.0f};
+    const Vec3 eye{static_cast<float>(safeFocus.x + safeDistance * sy * cp),
+                   static_cast<float>(safeFocus.y - safeDistance * sp),
+                   static_cast<float>(safeFocus.z + safeDistance * cy * cp)};
     const float rawAspect =
         height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
     const float aspect = (std::isfinite(rawAspect) && rawAspect > 0.001f) ? rawAspect : 1.0f;
     constexpr float fovRadians = 60.0f * 3.14159265358979323846f / 180.0f;
     PerspectiveCamera camera(fovRadians, aspect, 0.1f, 1000.0f);
     camera.SetPosition(eye);
-    camera.SetTarget(focus);
+    camera.SetTarget(safeFocus);
     camera.SetUp({0.0f, 1.0f, 0.0f});
 
     DirectionalLight sun;
@@ -225,7 +320,8 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
     sun.color = {1.0f, 0.98f, 0.95f};
     sun.intensity = 1.0f;
 
-    Renderer3D::Init(&s.gpu);
+    s.context3D.Init(&s.gpu);
+    Renderer3D::ScopedContext scope3D(s.context3D);
     try {
         Renderer3D::BeginScene(camera, sun);
         for (Entity entity : scene.GetEntities()) {
@@ -233,8 +329,10 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
                 continue;
             const auto& transform = entity.GetComponent<TransformComponent>();
             if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
-                !std::isfinite(transform.position.z) || !std::isfinite(transform.scale.x) ||
-                !std::isfinite(transform.scale.y) || !std::isfinite(transform.scale.z))
+                !std::isfinite(transform.position.z) || !std::isfinite(transform.rotation.x) ||
+                !std::isfinite(transform.rotation.y) || !std::isfinite(transform.rotation.z) ||
+                !std::isfinite(transform.scale.x) || !std::isfinite(transform.scale.y) ||
+                !std::isfinite(transform.scale.z))
                 continue;
 
             if (entity.HasComponent<MeshRendererComponent>()) {
@@ -252,35 +350,21 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
         }
         Renderer3D::EndScene();
     } catch (const std::exception& exception) {
-        Renderer3D::Shutdown();
-        Renderer3D::Init(&s.gpu);
+        s.context3D.AbortScene();
         s.gpu.EndFrame();
-        error_ = QStringLiteral("엔진 3D 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+        error_ =
+            QStringLiteral("엔진 3D 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+        return false;
+    } catch (...) {
+        s.context3D.AbortScene();
+        s.gpu.EndFrame();
+        error_ = QStringLiteral("엔진 3D 렌더링 중 알 수 없는 예외가 발생했습니다.");
         return false;
     }
     if (!s.gpu.EndFrame()) {
         error_ = QString::fromStdString(s.gpu.GetLastError());
         return false;
     }
-    if (!s.gpu.ReadFrameCapture(s.capture) || s.capture.width == 0 || s.capture.height == 0 ||
-        s.capture.rgba.size() != static_cast<size_t>(s.capture.width) * s.capture.height * 4) {
-        error_ = QStringLiteral("엔진 프레임을 읽지 못했습니다.");
-        return false;
-    }
-    const auto captureWidth = static_cast<int>(s.capture.width);
-    const auto captureHeight = static_cast<int>(s.capture.height);
-    if (output.size() != QSize(captureWidth, captureHeight) ||
-        output.format() != QImage::Format_RGBA8888) {
-        output = QImage(captureWidth, captureHeight, QImage::Format_RGBA8888);
-    }
-    const auto rowBytes = static_cast<size_t>(s.capture.width) * 4;
-    if (static_cast<size_t>(output.bytesPerLine()) == rowBytes) {
-        std::memcpy(output.bits(), s.capture.rgba.data(), s.capture.rgba.size());
-    } else {
-        for (uint32 y = 0; y < s.capture.height; ++y)
-            std::memcpy(output.scanLine(static_cast<int>(y)), s.capture.rgba.data() + y * rowBytes,
-                        rowBytes);
-    }
-    return true;
+    return ReadbackToImage(output);
 }
 } // namespace LuxEngine

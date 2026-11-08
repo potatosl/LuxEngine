@@ -1,6 +1,8 @@
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Platform/Window.hpp"
+#include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
+#include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include <algorithm>
 #include <chrono>
@@ -137,6 +139,8 @@ bool GpuDevice::Initialize(Window& window, const GpuDeviceConfig& config) {
 }
 
 void GpuDevice::Shutdown() {
+    Renderer2D::DetachDevice(this);
+    Renderer3D::DetachDevice(this);
     if (!state_)
         return;
     if (state_->frameActive && state_->Usable())

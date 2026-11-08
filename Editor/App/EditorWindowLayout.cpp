@@ -333,6 +333,7 @@ void EditorWindow::BuildLayout() {
     auto* spriteGroup = new QGroupBox(QStringLiteral("SPRITE RENDERER"), inspectorBody_);
     auto* spriteLayout = new QVBoxLayout(spriteGroup);
     spriteEnabled_ = new QCheckBox(QStringLiteral("스프라이트 사용"), spriteGroup);
+    spriteEnabled_->setObjectName(QStringLiteral("editorSprite"));
     spriteLayout->addWidget(spriteEnabled_);
     auto* colors = new QGridLayout;
     for (int channel = 0; channel < 4; ++channel) {
@@ -350,6 +351,7 @@ void EditorWindow::BuildLayout() {
     auto* meshGroup = new QGroupBox(QStringLiteral("MESH RENDERER"), inspectorBody_);
     auto* meshLayout = new QFormLayout(meshGroup);
     meshEnabled_ = new QCheckBox(QStringLiteral("메시 사용"), meshGroup);
+    meshEnabled_->setObjectName(QStringLiteral("editorMesh"));
     meshLayout->addRow(meshEnabled_);
     metallic_ = Number(meshGroup, 0, 1, 0, .05);
     roughness_ = Number(meshGroup, 0, 1, 1, .05);
@@ -364,6 +366,7 @@ void EditorWindow::BuildLayout() {
     auto* tileGroup = new QGroupBox(QStringLiteral("TILEMAP"), inspectorBody_);
     auto* tileLayout = new QFormLayout(tileGroup);
     tilemapEnabled_ = new QCheckBox(QStringLiteral("타일맵 사용"), tileGroup);
+    tilemapEnabled_->setObjectName(QStringLiteral("editorTilemap"));
     tileLayout->addRow(tilemapEnabled_);
     tilemapWidth_ = new QSpinBox(tileGroup);
     tilemapWidth_->setRange(1, 256);

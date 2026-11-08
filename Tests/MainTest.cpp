@@ -48,6 +48,85 @@ template <class F> void Throws(F fn, const char* message) {
 bool Near(float a, float b) {
     return std::abs(a - b) < 0.0001f;
 }
+
+std::string Sha256Hex(const std::string& input) {
+    static constexpr uint32_t k[64] = {
+        0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u,
+        0x923f82a4u, 0xab1c5ed5u, 0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
+        0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u, 0xe49b69c1u, 0xefbe4786u,
+        0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+        0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u,
+        0x06ca6351u, 0x14292967u, 0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u,
+        0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u, 0xa2bfe8a1u, 0xa81a664bu,
+        0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+        0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au,
+        0x5b9cca4fu, 0x682e6ff3u, 0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+        0x90befffa4u & 0xffffffffu, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u};
+    // Fix k[60] exact constant 0x90befffa
+    uint32_t kFixed[64];
+    std::memcpy(kFixed, k, sizeof(k));
+    kFixed[60] = 0x90befffau;
+
+    uint32_t h[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+                     0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+
+    std::vector<uint8_t> msg(input.begin(), input.end());
+    const uint64_t bitLen = static_cast<uint64_t>(msg.size()) * 8ull;
+    msg.push_back(0x80u);
+    while ((msg.size() % 64) != 56)
+        msg.push_back(0x00u);
+    for (int i = 7; i >= 0; --i)
+        msg.push_back(static_cast<uint8_t>((bitLen >> (i * 8)) & 0xffu));
+
+    auto rotr = [](uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); };
+    for (size_t offset = 0; offset < msg.size(); offset += 64) {
+        uint32_t w[64]{};
+        for (int i = 0; i < 16; ++i) {
+            w[i] = (static_cast<uint32_t>(msg[offset + i * 4]) << 24) |
+                   (static_cast<uint32_t>(msg[offset + i * 4 + 1]) << 16) |
+                   (static_cast<uint32_t>(msg[offset + i * 4 + 2]) << 8) |
+                   static_cast<uint32_t>(msg[offset + i * 4 + 3]);
+        }
+        for (int i = 16; i < 64; ++i) {
+            const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+        for (int i = 0; i < 64; ++i) {
+            const uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const uint32_t ch = (e & f) ^ ((~e) & g);
+            const uint32_t temp1 = hh + S1 + ch + kFixed[i] + w[i];
+            const uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            const uint32_t temp2 = S0 + maj;
+            hh = g;
+            g = f;
+            f = e;
+            e = d + temp1;
+            d = c;
+            c = b;
+            b = a;
+            a = temp1 + temp2;
+        }
+        h[0] += a;
+        h[1] += b;
+        h[2] += c;
+        h[3] += d;
+        h[4] += e;
+        h[5] += f;
+        h[6] += g;
+        h[7] += hh;
+    }
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(64);
+    for (int i = 0; i < 8; ++i) {
+        for (int shift = 28; shift >= 0; shift -= 4)
+            out.push_back(hex[(h[i] >> shift) & 0xfu]);
+    }
+    return out;
+}
 struct Files {
     std::filesystem::path root = std::filesystem::temp_directory_path() /
                                  ("luxengine-tests-" + std::to_string(SDL_GetTicksNS()));
@@ -564,43 +643,176 @@ void Scenes() {
         }
 
 #ifdef _WIN32
-        // 5. Target file locked exclusively (Windows Win32 file lock / sharing violation)
+        // 5. Target file locked exclusively (Windows Win32 file lock / sharing violation 32)
         {
             const std::string lockedPath = files.Path("locked_scene.lux");
             Check(scene.Serialize(lockedPath), "initial save before lock");
-            const std::string beforeLockContent = bytes(lockedPath);
+            const std::string beforeLockSha = Sha256Hex(bytes(lockedPath));
 
             HANDLE hFile = CreateFileA(lockedPath.c_str(), GENERIC_READ | GENERIC_WRITE,
                                        0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (hFile != INVALID_HANDLE_VALUE) {
-                Check(!scene.Serialize(lockedPath), "save to exclusively locked file fails safely");
-                CloseHandle(hFile);
+            Check(hFile != INVALID_HANDLE_VALUE, "lock handle opened");
+            auto lockMod = scene.CreateEntity("modified_while_locked");
+            Check(!scene.Serialize(lockedPath), "save to exclusively locked file fails safely");
+            Check(Scene::GetLastSaveError().find("Win32 error 32") != std::string::npos,
+                  "locked file reports Win32 error 32 (ERROR_SHARING_VIOLATION)");
+            CloseHandle(hFile);
+            scene.DestroyEntity(lockMod);
 
-                const std::string afterLockContent = bytes(lockedPath);
-                Check(beforeLockContent == afterLockContent,
-                      "original scene file preserved when target is locked");
-            }
+            Check(Sha256Hex(bytes(lockedPath)) == beforeLockSha,
+                  "original scene SHA256 preserved when target is locked");
         }
 #endif
 
-        // 6. Rapid consecutive saves (verifies collision-free temp paths)
-        const std::string rapidPath = files.Path("rapid_save.lux");
-        for (int i = 0; i < 20; ++i) {
-            Check(scene.Serialize(rapidPath), "rapid consecutive save");
-        }
-
-        // 7. Verify no temporary .saving- files are leaked in directory
-        size_t leftoverTempFiles = 0;
-        for (const auto& entry : std::filesystem::directory_iterator(files.root)) {
-            const auto name = entry.path().string();
-            if (name.find(".saving-") != std::string::npos ||
-                name.find(".lux-bak-") != std::string::npos) {
-                ++leftoverTempFiles;
+        // 6. Normal save 100 iterations with SHA-256 verification
+        {
+            const std::string rapidPath = files.Path("rapid_save_100.lux");
+            std::string expectedMem;
+            Check(scene.SerializeToString(expectedMem), "expected serialized string");
+            const std::string expectedSha = Sha256Hex(expectedMem);
+            for (int i = 0; i < 100; ++i) {
+                Check(scene.Serialize(rapidPath), "100x consecutive atomic save");
             }
+            Check(Sha256Hex(bytes(rapidPath)) == expectedSha,
+                  "100x consecutive save SHA256 matches exactly");
         }
-        Check(leftoverTempFiles == 0, "zero temporary or backup files leaked after operations");
 
-        // 8. In-memory SerializeToString / DeserializeFromString roundtrip & NaN/Inf validation
+        // 7. Concurrent multi-threaded saves to the same target and separate targets
+        {
+            const std::string concurrentPath = files.Path("concurrent_save.lux");
+            Check(scene.Serialize(concurrentPath), "initial concurrent target");
+            std::vector<std::thread> workers;
+            std::atomic<int> successes{0};
+            for (int t = 0; t < 8; ++t) {
+                workers.emplace_back([&, t] {
+                    Scene localScene;
+                    auto ent = localScene.CreateEntity("worker_" + std::to_string(t));
+                    ent.GetComponent<TransformComponent>().position = {static_cast<float>(t), 1.0f, 2.0f};
+                    for (int iter = 0; iter < 10; ++iter) {
+                        if (localScene.Serialize(concurrentPath))
+                            ++successes;
+                    }
+                });
+            }
+            for (auto& w : workers)
+                w.join();
+            Check(successes.load() > 0, "concurrent saves completed");
+            Scene verifyConcurrent;
+            Check(verifyConcurrent.Deserialize(concurrentPath) &&
+                      verifyConcurrent.GetEntityCount() == 1,
+                  "concurrently saved file is never torn or corrupted");
+        }
+
+        // 8. Fault Injection: TempWriteFailure, DiskFull, ReplaceAccessDenied, ReplaceFailedAfterBackup
+        {
+            const std::string faultPath = files.Path("fault_atomic.lux");
+            Check(scene.Serialize(faultPath), "baseline save before fault injection");
+            const std::string baselineSha = Sha256Hex(bytes(faultPath));
+
+            auto dirtyEnt = scene.CreateEntity("uncommitted_dirty_entity");
+            dirtyEnt.GetComponent<TransformComponent>().position = {99.0f, 88.0f, 77.0f};
+
+            Scene::InjectSaveFault(Scene::SaveFault::TempWriteFailure);
+            Check(!scene.Serialize(faultPath), "TempWriteFailure fault rejected");
+            Check(Scene::GetLastSaveError().find("Win32 error 5") != std::string::npos,
+                  "TempWriteFailure reports error code");
+            Check(Sha256Hex(bytes(faultPath)) == baselineSha,
+                  "original SHA256 preserved on TempWriteFailure");
+
+            Scene::InjectSaveFault(Scene::SaveFault::DiskFull);
+            Check(!scene.Serialize(faultPath), "DiskFull fault rejected");
+            Check(Scene::GetLastSaveError().find("112") != std::string::npos,
+                  "DiskFull reports ERROR_DISK_FULL (112)");
+            Check(Sha256Hex(bytes(faultPath)) == baselineSha,
+                  "original SHA256 preserved on DiskFull");
+
+            Scene::InjectSaveFault(Scene::SaveFault::ReplaceAccessDenied);
+            Check(!scene.Serialize(faultPath), "ReplaceAccessDenied fault rejected");
+            Check(Scene::GetLastSaveError().find("Win32 error 5") != std::string::npos,
+                  "ReplaceAccessDenied reports ERROR_ACCESS_DENIED (5)");
+            Check(Sha256Hex(bytes(faultPath)) == baselineSha,
+                  "original SHA256 preserved on ReplaceAccessDenied");
+
+            Scene::InjectSaveFault(Scene::SaveFault::ReplaceFailedAfterBackup);
+            Check(!scene.Serialize(faultPath), "ReplaceFailedAfterBackup fault rejected");
+            Check(Scene::GetLastSaveError().find("1177") != std::string::npos &&
+                      Scene::GetLastSaveError().find("restored from backup") != std::string::npos,
+                  "ReplaceFailedAfterBackup reports 1177 and restores backup");
+            Check(Sha256Hex(bytes(faultPath)) == baselineSha,
+                  "original SHA256 restored and verified after ReplaceFailedAfterBackup");
+
+            scene.DestroyEntity(dirtyEnt);
+            Scene::ClearSaveFaults();
+        }
+
+        // 9. Verify zero leftover .saving- or .lux-bak- files after all recoverable operations
+        {
+            size_t leftoverTempFiles = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(files.root)) {
+                const auto name = entry.path().string();
+                if (name.find(".saving-") != std::string::npos ||
+                    name.find(".lux-bak-") != std::string::npos) {
+                    ++leftoverTempFiles;
+                }
+            }
+            Check(leftoverTempFiles == 0,
+                  "zero temporary or backup files leaked after recoverable operations");
+        }
+
+        // 10. Fault Injection: BackupRestoreFailure MUST NOT delete backup file and MUST log its path
+        {
+            const std::string unrecoverablePath = files.Path("backup_preserved.lux");
+            Check(scene.Serialize(unrecoverablePath), "initial save for BackupRestoreFailure test");
+            const std::string originalSha = Sha256Hex(bytes(unrecoverablePath));
+
+            auto dirtyEnt = scene.CreateEntity("dirty_uncommitted");
+            Scene::InjectSaveFault(Scene::SaveFault::BackupRestoreFailure);
+            Check(!scene.Serialize(unrecoverablePath), "BackupRestoreFailure returns false");
+            const std::string errLog = Scene::GetLastSaveError();
+            Check(errLog.find("1177") != std::string::npos &&
+                      errLog.find("Original scene preserved at backup path:") != std::string::npos,
+                  "BackupRestoreFailure logs preserved backup path and error code");
+
+            std::filesystem::path foundBackup;
+            size_t leftoverSaving = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(files.root)) {
+                const auto name = entry.path().filename().string();
+                if (name.find("backup_preserved.lux.lux-bak-") == 0)
+                    foundBackup = entry.path();
+                if (name.find(".saving-") != std::string::npos)
+                    ++leftoverSaving;
+            }
+            Check(!foundBackup.empty() && std::filesystem::exists(foundBackup),
+                  "backup file is preserved on disk when backup restoration fails");
+            Check(leftoverSaving == 0, "temporary .saving- file cleaned up even when restore fails");
+            Check(Sha256Hex(bytes(foundBackup.string())) == originalSha,
+                  "preserved backup file SHA256 matches original scene 100%");
+
+            std::error_code removeEc;
+            std::filesystem::remove(foundBackup, removeEc);
+            scene.DestroyEntity(dirtyEnt);
+            Scene::ClearSaveFaults();
+        }
+
+        // 11. Korean and whitespace directory/file paths
+        {
+            const std::filesystem::path koreanDir =
+                files.root / std::filesystem::path(u8"한글 공백 디렉터리 테스트");
+            std::filesystem::create_directories(koreanDir);
+            const std::filesystem::path koreanFile =
+                koreanDir / std::filesystem::path(u8"장면 저장 테스트 01.lux");
+            const auto u8Str = koreanFile.u8string();
+            const std::string koreanPathUtf8(reinterpret_cast<const char*>(u8Str.data()),
+                                             u8Str.size());
+            Check(scene.Serialize(koreanPathUtf8), "save to Korean + whitespace path succeeds");
+            Check(scene.Serialize(koreanPathUtf8), "overwrite Korean + whitespace path succeeds");
+            Scene koreanLoaded;
+            Check(koreanLoaded.Deserialize(koreanPathUtf8) &&
+                      koreanLoaded.GetEntityCount() == scene.GetEntityCount(),
+                  "load from Korean + whitespace path succeeds");
+        }
+
+        // 12. In-memory SerializeToString / DeserializeFromString roundtrip & NaN/Inf validation
         std::string memSnapshot;
         Check(scene.SerializeToString(memSnapshot) && !memSnapshot.empty(),
               "in-memory SerializeToString succeeds");
@@ -1466,8 +1678,84 @@ void VulkanSystems() {
               "textures from another device rejected");
         Check(gpu.EndFrame(), "frame after foreign draw");
         Check(!foreign.BelongsTo(gpu) && foreign.BelongsTo(otherGpu), "texture ownership");
+
+        // Multi-context isolation & different destruction orders
+        Renderer2D::Context ctx2DA(&gpu);
+        Renderer2D::Context ctx2DB(&otherGpu);
+        Renderer3D::Context ctx3DA(&gpu);
+        Renderer3D::Context ctx3DB(&otherGpu);
+        Check(ctx2DA.IsDeviceValid() && ctx2DB.IsDeviceValid() && ctx3DA.IsDeviceValid() &&
+                  ctx3DB.IsDeviceValid(),
+              "per-viewport renderer contexts track valid GpuDevice ownership");
+
+        // Exception safety inside ScopedContext
+        {
+            bool caught = false;
+            try {
+                Renderer2D::ScopedContext scope2D(ctx2DA);
+                Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+                Renderer2D::DrawQuad(Vec2{0, 0}, {1, 1}, {1, 0, 0, 1});
+                throw std::runtime_error("simulated scene exception");
+            } catch (const std::exception&) {
+                caught = true;
+            }
+            Check(caught, "simulated scene exception caught");
+            // Next BeginScene on ctx2DA must succeed because ScopedContext aborted the active scene
+            Renderer2D::ScopedContext scope2D(ctx2DA);
+            Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+            Renderer2D::EndScene();
+        }
+
+        // Bind global Renderer2D/3D and ctx2DB/ctx3DB to otherGpu, then shut down otherGpu FIRST
+        Renderer2D::Init(&otherGpu);
+        Renderer3D::Init(&otherGpu);
         otherGpu.Shutdown();
         Check(!foreign.IsValid(), "foreign texture invalid after its device shuts down");
+        Check(!ctx2DB.IsDeviceValid() && !ctx3DB.IsDeviceValid(),
+              "renderer contexts immediately detect GpuDevice shutdown without UAF");
+        Check(ctx2DA.IsDeviceValid() && ctx3DA.IsDeviceValid(),
+              "surviving viewport contexts remain valid when another GpuDevice shuts down");
+
+        // Calling Renderer2D/3D after bound GpuDevice was shut down must be a safe no-op (zero UAF)
+        Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+        Renderer2D::DrawQuad(Vec2{0, 0}, {1, 1}, {1, 1, 1, 1});
+        Renderer2D::EndScene();
+        Check(Renderer2D::GetStats().drawCalls == 0,
+              "detached global Renderer2D safely skips draw calls after device shutdown");
+
+        Renderer3D::BeginScene(PerspectiveCamera(1.0f, 1.0f, 0.1f, 10.0f), {});
+        Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+        Renderer3D::EndScene();
+        Check(Renderer3D::GetStats().drawCalls == 0,
+              "detached global Renderer3D safely skips draw calls after device shutdown");
+
+        // Surviving device (gpu) still renders cleanly via its own contexts
+        Check(graphics.Begin(), "surviving device begins frame after other device shutdown");
+        {
+            Renderer2D::ScopedContext scope2D(ctx2DA);
+            Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+            Renderer2D::DrawQuad(Vec2{0, 0}, {1, 1}, {0, 1, 0, 1});
+            Renderer2D::EndScene();
+            Check(Renderer2D::GetStats().drawCalls == 1, "surviving 2D context submits draw");
+        }
+        {
+            Renderer3D::ScopedContext scope3D(ctx3DA);
+            Renderer3D::BeginScene(PerspectiveCamera(1.0f, 1.0f, 0.1f, 10.0f), {});
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+            Renderer3D::EndScene();
+            Check(Renderer3D::GetStats().drawCalls == 1, "surviving 3D context submits draw");
+        }
+        Check(gpu.EndFrame(), "surviving device finishes frame");
+
+        // 100x Init/Shutdown cycles on Renderer2D and Renderer3D
+        for (int iter = 0; iter < 100; ++iter) {
+            Renderer2D::Init(&gpu);
+            Renderer3D::Init(&gpu);
+            Renderer2D::Shutdown();
+            Renderer3D::Shutdown();
+        }
+        Renderer2D::Init(&gpu);
+        Renderer3D::Init(&gpu);
     }
 
     const auto recreations = gpu.GetCounters().swapchainRecreations;

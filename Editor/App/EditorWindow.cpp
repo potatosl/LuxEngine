@@ -1259,8 +1259,18 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     }
     const auto before = SnapshotScene();
     const auto previous = SelectedId(document_);
-    edit();
+    try {
+        edit();
+    } catch (...) {
+        if (!before.isEmpty())
+            RestoreScene(before, previous);
+        return;
+    }
     const auto after = SnapshotScene();
+    if (!before.isEmpty() && after.isEmpty()) {
+        RestoreScene(before, previous);
+        return;
+    }
     const auto next = SelectedId(document_);
     if (!before.isEmpty() && !after.isEmpty() && before != after)
         undo_->push(new SceneEditCommand(
@@ -1370,148 +1380,481 @@ void EditorWindow::CopyEntity() {
     QApplication::clipboard()->setMimeData(mime);
     Log(QStringLiteral("엔티티를 복사했습니다."));
 }
+namespace {
+constexpr qsizetype kMaxClipboardJsonBytes = 1024 * 1024;
+constexpr float kMaxClipboardCoord = 100000.0f;
+constexpr float kMaxClipboardMass = 1000000.0f;
+constexpr float kMaxClipboardGravityScale = 10000.0f;
+constexpr float kMaxClipboardDuration = 86400.0f;
+
+bool IsStrictValidUtf8(const QByteArray& bytes) {
+    const auto* s = reinterpret_cast<const unsigned char*>(bytes.constData());
+    const size_t len = static_cast<size_t>(bytes.size());
+    size_t i = 0;
+    while (i < len) {
+        const unsigned char c = s[i];
+        if (c == 0x00)
+            return false;
+        if (c <= 0x7F) {
+            ++i;
+        } else if (c >= 0xC2 && c <= 0xDF) {
+            if (i + 1 >= len || (s[i + 1] & 0xC0) != 0x80)
+                return false;
+            i += 2;
+        } else if (c >= 0xE0 && c <= 0xEF) {
+            if (i + 2 >= len || (s[i + 1] & 0xC0) != 0x80 || (s[i + 2] & 0xC0) != 0x80)
+                return false;
+            if (c == 0xE0 && s[i + 1] < 0xA0)
+                return false; // Overlong
+            if (c == 0xED && s[i + 1] >= 0xA0)
+                return false; // UTF-16 surrogate
+            i += 3;
+        } else if (c >= 0xF0 && c <= 0xF4) {
+            if (i + 3 >= len || (s[i + 1] & 0xC0) != 0x80 || (s[i + 2] & 0xC0) != 0x80 ||
+                (s[i + 3] & 0xC0) != 0x80)
+                return false;
+            if (c == 0xF0 && s[i + 1] < 0x90)
+                return false; // Overlong
+            if (c == 0xF4 && s[i + 1] > 0x8F)
+                return false; // > U+10FFFF
+            i += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ParseFiniteFloat(const QJsonValue& val, float& out, float minVal = -kMaxClipboardCoord,
+                      float maxVal = kMaxClipboardCoord) {
+    if (!val.isDouble())
+        return false;
+    const double d = val.toDouble();
+    if (!std::isfinite(d))
+        return false;
+    const float f = static_cast<float>(d);
+    if (!std::isfinite(f) || f < minVal || f > maxVal)
+        return false;
+    out = f;
+    return true;
+}
+
+bool ParseExactInt(const QJsonValue& val, int& out, int minVal, int maxVal) {
+    if (!val.isDouble())
+        return false;
+    const double d = val.toDouble();
+    if (!std::isfinite(d) || std::floor(d) != d || d < static_cast<double>(minVal) ||
+        d > static_cast<double>(maxVal))
+        return false;
+    out = static_cast<int>(d);
+    return true;
+}
+
+bool ParseVec2(const QJsonValue& val, Vec2& out, float minVal = -kMaxClipboardCoord,
+               float maxVal = kMaxClipboardCoord) {
+    if (!val.isArray())
+        return false;
+    const auto arr = val.toArray();
+    if (arr.size() != 2)
+        return false;
+    return ParseFiniteFloat(arr[0], out.x, minVal, maxVal) &&
+           ParseFiniteFloat(arr[1], out.y, minVal, maxVal);
+}
+
+bool ParseVec3(const QJsonValue& val, Vec3& out, float minVal = -kMaxClipboardCoord,
+               float maxVal = kMaxClipboardCoord) {
+    if (!val.isArray())
+        return false;
+    const auto arr = val.toArray();
+    if (arr.size() != 3)
+        return false;
+    return ParseFiniteFloat(arr[0], out.x, minVal, maxVal) &&
+           ParseFiniteFloat(arr[1], out.y, minVal, maxVal) &&
+           ParseFiniteFloat(arr[2], out.z, minVal, maxVal);
+}
+
+bool ParseVec4(const QJsonValue& val, Vec4& out, float minVal = -kMaxClipboardCoord,
+               float maxVal = kMaxClipboardCoord) {
+    if (!val.isArray())
+        return false;
+    const auto arr = val.toArray();
+    if (arr.size() != 4)
+        return false;
+    return ParseFiniteFloat(arr[0], out.x, minVal, maxVal) &&
+           ParseFiniteFloat(arr[1], out.y, minVal, maxVal) &&
+           ParseFiniteFloat(arr[2], out.z, minVal, maxVal) &&
+           ParseFiniteFloat(arr[3], out.w, minVal, maxVal);
+}
+
+struct ValidatedClipboardEntity {
+    QString name;
+    TransformComponent transform;
+    std::optional<SpriteRendererComponent> sprite;
+    std::optional<MeshRendererComponent> mesh;
+    std::optional<CameraComponent> camera;
+    std::optional<TilemapComponent> tilemap;
+    std::optional<Rigidbody2DComponent> rigidbody2d;
+    std::optional<BoxCollider2DComponent> collider2d;
+    std::optional<Rigidbody3DComponent> rigidbody3d;
+    std::optional<BoxCollider3DComponent> collider3d;
+    std::optional<AnimationComponent> animation;
+};
+
+bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& parsed,
+                           QString& errorMsg) {
+    for (auto it = object.begin(); it != object.end(); ++it) {
+        const QString& key = it.key();
+        if (key != QStringLiteral("name") && key != QStringLiteral("position") &&
+            key != QStringLiteral("rotation") && key != QStringLiteral("scale") &&
+            key != QStringLiteral("sprite") && key != QStringLiteral("mesh") &&
+            key != QStringLiteral("camera") && key != QStringLiteral("tilemap") &&
+            key != QStringLiteral("rigidbody2d") && key != QStringLiteral("collider2d") &&
+            key != QStringLiteral("rigidbody3d") && key != QStringLiteral("collider3d") &&
+            key != QStringLiteral("animation")) {
+            errorMsg = QStringLiteral("알 수 없는 클립보드 필드가 포함되어 있습니다: %1").arg(key);
+            return false;
+        }
+    }
+
+    const QJsonValue nameVal = object.value(QStringLiteral("name"));
+    if (!nameVal.isString()) {
+        errorMsg = QStringLiteral("엔티티 이름(name) 필드가 누락되었거나 문자열이 아닙니다.");
+        return false;
+    }
+    parsed.name = nameVal.toString().trimmed();
+    if (parsed.name.isEmpty() || parsed.name.size() > 256 ||
+        parsed.name.contains(QChar::ReplacementCharacter)) {
+        errorMsg = QStringLiteral("엔티티 이름이 비어 있거나 허용 길이를 초과했습니다.");
+        return false;
+    }
+
+    if (!object.contains(QStringLiteral("position")) ||
+        !object.contains(QStringLiteral("rotation")) ||
+        !object.contains(QStringLiteral("scale"))) {
+        errorMsg = QStringLiteral("필수 Transform 필드(position, rotation, scale)가 누락되었습니다.");
+        return false;
+    }
+    if (!ParseVec3(object.value(QStringLiteral("position")), parsed.transform.position) ||
+        !ParseVec3(object.value(QStringLiteral("rotation")), parsed.transform.rotation) ||
+        !ParseVec3(object.value(QStringLiteral("scale")), parsed.transform.scale)) {
+        errorMsg = QStringLiteral("Transform 수치가 유효하지 않거나 허용 범위를 벗어났습니다.");
+        return false;
+    }
+    if (std::abs(parsed.transform.scale.x) < 1e-5f || std::abs(parsed.transform.scale.y) < 1e-5f ||
+        std::abs(parsed.transform.scale.z) < 1e-5f) {
+        errorMsg = QStringLiteral("Transform 크기는 0이 될 수 없습니다.");
+        return false;
+    }
+
+    if (object.contains(QStringLiteral("sprite"))) {
+        SpriteRendererComponent comp;
+        if (!ParseVec4(object.value(QStringLiteral("sprite")), comp.color, 0.0f, 100.0f)) {
+            errorMsg = QStringLiteral("스프라이트 색상 데이터가 유효하지 않습니다.");
+            return false;
+        }
+        parsed.sprite = comp;
+    }
+
+    if (object.contains(QStringLiteral("mesh"))) {
+        const QJsonValue meshVal = object.value(QStringLiteral("mesh"));
+        if (!meshVal.isArray()) {
+            errorMsg = QStringLiteral("메시 데이터가 배열 형식이 아닙니다.");
+            return false;
+        }
+        const auto meshArr = meshVal.toArray();
+        if (meshArr.size() != 2 && meshArr.size() != 6) {
+            errorMsg = QStringLiteral("메시 배열 길이가 올바르지 않습니다.");
+            return false;
+        }
+        MeshRendererComponent comp;
+        if (!ParseFiniteFloat(meshArr[0], comp.material.metallic, 0.0f, 1.0f) ||
+            !ParseFiniteFloat(meshArr[1], comp.material.roughness, 0.0f, 1.0f)) {
+            errorMsg = QStringLiteral("메시 재질 수치가 허용 범위(0~1)를 벗어났습니다.");
+            return false;
+        }
+        if (meshArr.size() == 6) {
+            if (!ParseFiniteFloat(meshArr[2], comp.material.albedoColor.x, 0.0f, 100.0f) ||
+                !ParseFiniteFloat(meshArr[3], comp.material.albedoColor.y, 0.0f, 100.0f) ||
+                !ParseFiniteFloat(meshArr[4], comp.material.albedoColor.z, 0.0f, 100.0f) ||
+                !ParseFiniteFloat(meshArr[5], comp.material.albedoColor.w, 0.0f, 100.0f)) {
+                errorMsg = QStringLiteral("메시 알베도 색상이 유효하지 않습니다.");
+                return false;
+            }
+        }
+        parsed.mesh = comp;
+    }
+
+    if (object.contains(QStringLiteral("camera"))) {
+        const QJsonValue camVal = object.value(QStringLiteral("camera"));
+        if (!camVal.isObject()) {
+            errorMsg = QStringLiteral("카메라 컴포넌트가 객체 형식이 아닙니다.");
+            return false;
+        }
+        const auto camObj = camVal.toObject();
+        const QJsonValue primVal = camObj.value(QStringLiteral("primary"));
+        const QJsonValue perspVal = camObj.value(QStringLiteral("perspective"));
+        CameraComponent comp;
+        if (!primVal.isBool() || !perspVal.isBool() ||
+            !ParseFiniteFloat(camObj.value(QStringLiteral("fov")), comp.fov, 0.0f, 180.0f) ||
+            comp.fov <= 0.0f || comp.fov >= 180.0f ||
+            !ParseFiniteFloat(camObj.value(QStringLiteral("orthoSize")), comp.orthoSize, 0.0f,
+                              kMaxClipboardCoord) ||
+            comp.orthoSize <= 0.0f) {
+            errorMsg = QStringLiteral("카메라 FOV 또는 직교 크기가 유효 범위를 벗어났습니다.");
+            return false;
+        }
+        comp.isPrimary = primVal.toBool();
+        comp.isPerspective = perspVal.toBool();
+        parsed.camera = comp;
+    }
+
+    if (object.contains(QStringLiteral("tilemap"))) {
+        const QJsonValue mapVal = object.value(QStringLiteral("tilemap"));
+        if (!mapVal.isObject()) {
+            errorMsg = QStringLiteral("타일맵 컴포넌트가 객체 형식이 아닙니다.");
+            return false;
+        }
+        const auto mapObj = mapVal.toObject();
+        int w = 0, h = 0;
+        float tileSize = 0.0f;
+        if (!ParseExactInt(mapObj.value(QStringLiteral("width")), w, 1, 256) ||
+            !ParseExactInt(mapObj.value(QStringLiteral("height")), h, 1, 256) ||
+            !ParseFiniteFloat(mapObj.value(QStringLiteral("tileSize")), tileSize, 0.0f, 64.0f) ||
+            tileSize <= 0.0f) {
+            errorMsg = QStringLiteral("타일맵 크기(최대 256x256) 또는 타일 크기가 유효하지 않습니다.");
+            return false;
+        }
+        const QJsonValue tilesVal = mapObj.value(QStringLiteral("tiles"));
+        if (!tilesVal.isArray()) {
+            errorMsg = QStringLiteral("타일맵 tiles 배열이 누락되었습니다.");
+            return false;
+        }
+        const auto tilesArr = tilesVal.toArray();
+        if (tilesArr.size() != static_cast<qsizetype>(w * h)) {
+            errorMsg = QStringLiteral("타일맵 셀 개수가 가로x세로 크기와 일치하지 않습니다.");
+            return false;
+        }
+        TilemapComponent comp;
+        if (!comp.Resize(static_cast<uint32>(w), static_cast<uint32>(h))) {
+            errorMsg = QStringLiteral("타일맵 할당에 실패했습니다.");
+            return false;
+        }
+        comp.tileSize = tileSize;
+        for (qsizetype i = 0; i < tilesArr.size(); ++i) {
+            int tv = -1;
+            if (!ParseExactInt(tilesArr[i], tv, 0, 5)) {
+                errorMsg = QStringLiteral("타일맵 셀 값이 허용 범위(0~5)를 벗어났습니다.");
+                return false;
+            }
+            comp.tiles[static_cast<size_t>(i)] = static_cast<uint8_t>(tv);
+        }
+        parsed.tilemap = std::move(comp);
+    }
+
+    if (object.contains(QStringLiteral("rigidbody2d"))) {
+        const QJsonValue rbVal = object.value(QStringLiteral("rigidbody2d"));
+        if (!rbVal.isObject()) {
+            errorMsg = QStringLiteral("2D 강체 컴포넌트가 객체 형식이 아닙니다.");
+            return false;
+        }
+        const auto rbObj = rbVal.toObject();
+        int type = -1;
+        Rigidbody2DComponent comp;
+        if (!ParseExactInt(rbObj.value(QStringLiteral("type")), type, 0, 2) ||
+            !ParseVec2(rbObj.value(QStringLiteral("velocity")), comp.velocity) ||
+            !ParseFiniteFloat(rbObj.value(QStringLiteral("mass")), comp.mass, 0.0f,
+                              kMaxClipboardMass) ||
+            comp.mass <= 0.0f ||
+            !ParseFiniteFloat(rbObj.value(QStringLiteral("gravityScale")), comp.gravityScale,
+                              -kMaxClipboardGravityScale, kMaxClipboardGravityScale)) {
+            errorMsg = QStringLiteral("2D 강체 속성(질량, 속도, 중력 배율)이 유효하지 않습니다.");
+            return false;
+        }
+        comp.type = static_cast<BodyType>(type);
+        parsed.rigidbody2d = comp;
+    }
+
+    if (object.contains(QStringLiteral("collider2d"))) {
+        const QJsonValue colVal = object.value(QStringLiteral("collider2d"));
+        if (!colVal.isObject()) {
+            errorMsg = QStringLiteral("2D 콜라이더 컴포넌트가 객체 형식이 아닙니다.");
+            return false;
+        }
+        const auto colObj = colVal.toObject();
+        const QJsonValue trigVal = colObj.value(QStringLiteral("trigger"));
+        BoxCollider2DComponent comp;
+        if (!trigVal.isBool() ||
+            !ParseVec2(colObj.value(QStringLiteral("size")), comp.size, 0.0f, kMaxClipboardCoord) ||
+            comp.size.x <= 0.0f || comp.size.y <= 0.0f ||
+            !ParseVec2(colObj.value(QStringLiteral("offset")), comp.offset)) {
+            errorMsg = QStringLiteral("2D 콜라이더 크기 또는 오프셋이 유효하지 않습니다.");
+            return false;
+        }
+        comp.isTrigger = trigVal.toBool();
+        parsed.collider2d = comp;
+    }
+
+    if (object.contains(QStringLiteral("rigidbody3d"))) {
+        const QJsonValue rbVal = object.value(QStringLiteral("rigidbody3d"));
+        if (!rbVal.isObject()) {
+            errorMsg = QStringLiteral("3D 강체 컴포넌트가 객체 형식이 아닙니다.");
+            return false;
+        }
+        const auto rbObj = rbVal.toObject();
+        int type = -1;
+        Rigidbody3DComponent comp;
+        if (!ParseExactInt(rbObj.value(QStringLiteral("type")), type, 0, 2) ||
+            !ParseVec3(rbObj.value(QStringLiteral("velocity")), comp.velocity) ||
+            !ParseFiniteFloat(rbObj.value(QStringLiteral("mass")), comp.mass, 0.0f,
+                              kMaxClipboardMass) ||
+            comp.mass <= 0.0f ||
+            !ParseFiniteFloat(rbObj.value(QStringLiteral("gravityScale")), comp.gravityScale,
+                              -kMaxClipboardGravityScale, kMaxClipboardGravityScale)) {
+            errorMsg = QStringLiteral("3D 강체 속성(질량, 속도, 중력 배율)이 유효하지 않습니다.");
+            return false;
+        }
+        comp.type = static_cast<BodyType>(type);
+        parsed.rigidbody3d = comp;
+    }
+
+    if (object.contains(QStringLiteral("collider3d"))) {
+        const QJsonValue colVal = object.value(QStringLiteral("collider3d"));
+        if (!colVal.isObject()) {
+            errorMsg = QStringLiteral("3D 콜라이더 컴포넌트가 객체 형식이 아닙니다.");
+            return false;
+        }
+        const auto colObj = colVal.toObject();
+        const QJsonValue trigVal = colObj.value(QStringLiteral("trigger"));
+        BoxCollider3DComponent comp;
+        if (!trigVal.isBool() ||
+            !ParseVec3(colObj.value(QStringLiteral("size")), comp.size, 0.0f, kMaxClipboardCoord) ||
+            comp.size.x <= 0.0f || comp.size.y <= 0.0f || comp.size.z <= 0.0f ||
+            !ParseVec3(colObj.value(QStringLiteral("offset")), comp.offset)) {
+            errorMsg = QStringLiteral("3D 콜라이더 크기 또는 오프셋이 유효하지 않습니다.");
+            return false;
+        }
+        comp.isTrigger = trigVal.toBool();
+        parsed.collider3d = comp;
+    }
+
+    if (object.contains(QStringLiteral("animation"))) {
+        const QJsonValue animVal = object.value(QStringLiteral("animation"));
+        if (!animVal.isObject()) {
+            errorMsg = QStringLiteral("애니메이션 컴포넌트가 객체 형식이 아닙니다.");
+            return false;
+        }
+        const auto animObj = animVal.toObject();
+        const QJsonValue clipNameVal = animObj.value(QStringLiteral("name"));
+        const QJsonValue loopVal = animObj.value(QStringLiteral("loop"));
+        const QJsonValue playingVal = animObj.value(QStringLiteral("playing"));
+        const QJsonValue keysVal = animObj.value(QStringLiteral("keyframes"));
+        AnimationComponent comp;
+        if (!clipNameVal.isString() || !loopVal.isBool() || !playingVal.isBool() ||
+            !keysVal.isArray() ||
+            !ParseFiniteFloat(animObj.value(QStringLiteral("duration")), comp.clip.duration, 0.0f,
+                              kMaxClipboardDuration) ||
+            comp.clip.duration <= 0.0f) {
+            errorMsg = QStringLiteral("애니메이션 클립 속성 또는 재생 시간이 유효하지 않습니다.");
+            return false;
+        }
+        const QString clipName = clipNameVal.toString().trimmed();
+        if (clipName.isEmpty() || clipName.size() > 256 ||
+            clipName.contains(QChar::ReplacementCharacter)) {
+            errorMsg = QStringLiteral("애니메이션 클립 이름이 유효하지 않습니다.");
+            return false;
+        }
+        const auto keysArr = keysVal.toArray();
+        if (keysArr.size() > 4096) {
+            errorMsg = QStringLiteral("애니메이션 키프레임 수가 최대 허용치(4096개)를 초과했습니다.");
+            return false;
+        }
+        comp.clip.name = clipName.toUtf8().toStdString();
+        comp.clip.loop = loopVal.toBool();
+        comp.playing = playingVal.toBool();
+        for (const auto& kv : keysArr) {
+            if (!kv.isObject()) {
+                errorMsg = QStringLiteral("애니메이션 키프레임이 객체 형식이 아닙니다.");
+                return false;
+            }
+            const auto kObj = kv.toObject();
+            Keyframe key;
+            if (!ParseFiniteFloat(kObj.value(QStringLiteral("time")), key.time, 0.0f,
+                                  kMaxClipboardDuration) ||
+                key.time < 0.0f ||
+                !ParseVec3(kObj.value(QStringLiteral("position")), key.position) ||
+                !ParseVec3(kObj.value(QStringLiteral("rotation")), key.rotation) ||
+                !ParseVec3(kObj.value(QStringLiteral("scale")), key.scale) ||
+                std::abs(key.scale.x) < 1e-5f || std::abs(key.scale.y) < 1e-5f ||
+                std::abs(key.scale.z) < 1e-5f) {
+                errorMsg = QStringLiteral("애니메이션 키프레임 수치가 유효하지 않습니다.");
+                return false;
+            }
+            comp.clip.AddKeyframe(key);
+        }
+        parsed.animation = std::move(comp);
+    }
+    return true;
+}
+} // namespace
+
 void EditorWindow::PasteEntity() {
     const auto* mime = QApplication::clipboard()->mimeData();
-    if (!mime->hasFormat(QStringLiteral("application/x-lux-entity")))
+    if (!mime || !mime->hasFormat(QStringLiteral("application/x-lux-entity")))
         return;
+    const QByteArray rawBytes = mime->data(QStringLiteral("application/x-lux-entity"));
+    if (rawBytes.isEmpty() || rawBytes.size() > kMaxClipboardJsonBytes) {
+        Log(QStringLiteral("붙여넣기 실패: 클립보드 데이터가 비어 있거나 허용 크기(1MB)를 초과했습니다."));
+        return;
+    }
+    if (!IsStrictValidUtf8(rawBytes)) {
+        Log(QStringLiteral("붙여넣기 실패: 클립보드 데이터에 잘못된 UTF-8 인코딩이 포함되어 있습니다."));
+        return;
+    }
     QJsonParseError parse;
-    const auto doc =
-        QJsonDocument::fromJson(mime->data(QStringLiteral("application/x-lux-entity")), &parse);
-    if (parse.error != QJsonParseError::NoError || !doc.isObject())
+    const auto doc = QJsonDocument::fromJson(rawBytes, &parse);
+    if (parse.error != QJsonParseError::NoError || !doc.isObject()) {
+        Log(QStringLiteral("붙여넣기 실패: 클립보드 JSON 구문이 손상되었습니다."));
         return;
-    const auto object = doc.object();
-    const QString name = object.value(QStringLiteral("name")).toString();
-    if (name.isEmpty())
+    }
+    ValidatedClipboardEntity validated;
+    QString validationError;
+    if (!ValidateClipboardJson(doc.object(), validated, validationError)) {
+        Log(QStringLiteral("붙여넣기 실패: %1").arg(validationError));
         return;
-    RecordEdit(QStringLiteral("엔티티 붙여넣기"), [this, object, name] {
-        Entity entity = document_.CreateEntity(Utf8(name + QStringLiteral(" 복사본")));
-        auto& t = entity.GetComponent<TransformComponent>();
-        auto assign2 = [](const QJsonArray& values, Vec2& target) {
-            if (values.size() == 2)
-                target = {static_cast<float>(values[0].toDouble()),
-                          static_cast<float>(values[1].toDouble())};
-        };
-        auto assign3 = [](const QJsonArray& values, Vec3& target) {
-            if (values.size() == 3)
-                target = {static_cast<float>(values[0].toDouble()),
-                          static_cast<float>(values[1].toDouble()),
-                          static_cast<float>(values[2].toDouble())};
-        };
-        assign3(object.value(QStringLiteral("position")).toArray(), t.position);
-        assign3(object.value(QStringLiteral("rotation")).toArray(), t.rotation);
-        assign3(object.value(QStringLiteral("scale")).toArray(), t.scale);
-        const auto sprite = object.value(QStringLiteral("sprite")).toArray();
-        if (sprite.size() == 4)
-            entity.AddComponent<SpriteRendererComponent>().color = {
-                static_cast<float>(sprite[0].toDouble()), static_cast<float>(sprite[1].toDouble()),
-                static_cast<float>(sprite[2].toDouble()), static_cast<float>(sprite[3].toDouble())};
-        const auto mesh = object.value(QStringLiteral("mesh")).toArray();
-        if (mesh.size() >= 2) {
-            auto& material = entity.AddComponent<MeshRendererComponent>().material;
-            material.metallic = static_cast<float>(mesh[0].toDouble());
-            material.roughness = static_cast<float>(mesh[1].toDouble());
-            if (mesh.size() == 6) {
-                material.albedoColor = {static_cast<float>(mesh[2].toDouble()),
-                                        static_cast<float>(mesh[3].toDouble()),
-                                        static_cast<float>(mesh[4].toDouble()),
-                                        static_cast<float>(mesh[5].toDouble())};
+    }
+
+    RecordEdit(QStringLiteral("엔티티 붙여넣기"), [this, validated = std::move(validated)] {
+        Entity entity = document_.CreateEntity(Utf8(validated.name + QStringLiteral(" 복사본")));
+        try {
+            entity.GetComponent<TransformComponent>() = validated.transform;
+            if (validated.sprite)
+                entity.AddComponent<SpriteRendererComponent>(*validated.sprite);
+            if (validated.mesh)
+                entity.AddComponent<MeshRendererComponent>(*validated.mesh);
+            if (validated.camera)
+                entity.AddComponent<CameraComponent>(*validated.camera);
+            if (validated.tilemap)
+                entity.AddComponent<TilemapComponent>(*validated.tilemap);
+            if (validated.rigidbody2d)
+                entity.AddComponent<Rigidbody2DComponent>(*validated.rigidbody2d);
+            if (validated.collider2d)
+                entity.AddComponent<BoxCollider2DComponent>(*validated.collider2d);
+            if (validated.rigidbody3d)
+                entity.AddComponent<Rigidbody3DComponent>(*validated.rigidbody3d);
+            if (validated.collider3d)
+                entity.AddComponent<BoxCollider3DComponent>(*validated.collider3d);
+            if (validated.animation)
+                entity.AddComponent<AnimationComponent>(*validated.animation);
+
+            std::string verifySerialized;
+            if (!document_.GetScene().SerializeToString(verifySerialized)) {
+                document_.GetScene().DestroyEntity(entity);
+                throw std::runtime_error("Clipboard entity failed scene serialization invariant");
             }
-        }
-        if (object.contains(QStringLiteral("camera"))) {
-            const auto camObj = object.value(QStringLiteral("camera")).toObject();
-            auto& cam = entity.AddComponent<CameraComponent>();
-            cam.isPrimary = camObj.value(QStringLiteral("primary")).toBool(true);
-            cam.isPerspective = camObj.value(QStringLiteral("perspective")).toBool(false);
-            cam.fov = std::clamp(static_cast<float>(camObj.value(QStringLiteral("fov")).toDouble(45.0)),
-                                 1.0f, 179.0f);
-            cam.orthoSize = std::max(
-                0.01f, static_cast<float>(camObj.value(QStringLiteral("orthoSize")).toDouble(10.0)));
-        }
-        if (object.contains(QStringLiteral("tilemap"))) {
-            const auto mapObj = object.value(QStringLiteral("tilemap")).toObject();
-            const uint32 w = static_cast<uint32>(mapObj.value(QStringLiteral("width")).toInt(8));
-            const uint32 h = static_cast<uint32>(mapObj.value(QStringLiteral("height")).toInt(8));
-            auto& map = entity.AddComponent<TilemapComponent>();
-            if (map.Resize(w, h)) {
-                map.tileSize = std::clamp(
-                    static_cast<float>(mapObj.value(QStringLiteral("tileSize")).toDouble(1.0)),
-                    0.01f, 64.0f);
-                const auto tilesArr = mapObj.value(QStringLiteral("tiles")).toArray();
-                for (qsizetype i = 0; i < tilesArr.size() && static_cast<size_t>(i) < map.tiles.size();
-                     ++i) {
-                    const int tv = tilesArr[i].toInt(0);
-                    if (tv >= 0 && tv <= 5)
-                        map.tiles[static_cast<size_t>(i)] = static_cast<uint8_t>(tv);
-                }
-            }
-        }
-        if (object.contains(QStringLiteral("rigidbody2d"))) {
-            const auto rbObj = object.value(QStringLiteral("rigidbody2d")).toObject();
-            auto& rb = entity.AddComponent<Rigidbody2DComponent>();
-            const int type = std::clamp(rbObj.value(QStringLiteral("type")).toInt(1), 0, 2);
-            rb.type = static_cast<BodyType>(type);
-            assign2(rbObj.value(QStringLiteral("velocity")).toArray(), rb.velocity);
-            rb.mass = std::max(0.001f,
-                               static_cast<float>(rbObj.value(QStringLiteral("mass")).toDouble(1.0)));
-            rb.gravityScale =
-                static_cast<float>(rbObj.value(QStringLiteral("gravityScale")).toDouble(1.0));
-        }
-        if (object.contains(QStringLiteral("collider2d"))) {
-            const auto colObj = object.value(QStringLiteral("collider2d")).toObject();
-            auto& col = entity.AddComponent<BoxCollider2DComponent>();
-            assign2(colObj.value(QStringLiteral("size")).toArray(), col.size);
-            if (col.size.x <= 0.0f)
-                col.size.x = 1.0f;
-            if (col.size.y <= 0.0f)
-                col.size.y = 1.0f;
-            assign2(colObj.value(QStringLiteral("offset")).toArray(), col.offset);
-            col.isTrigger = colObj.value(QStringLiteral("trigger")).toBool(false);
-        }
-        if (object.contains(QStringLiteral("rigidbody3d"))) {
-            const auto rbObj = object.value(QStringLiteral("rigidbody3d")).toObject();
-            auto& rb = entity.AddComponent<Rigidbody3DComponent>();
-            const int type = std::clamp(rbObj.value(QStringLiteral("type")).toInt(1), 0, 2);
-            rb.type = static_cast<BodyType>(type);
-            assign3(rbObj.value(QStringLiteral("velocity")).toArray(), rb.velocity);
-            rb.mass = std::max(0.001f,
-                               static_cast<float>(rbObj.value(QStringLiteral("mass")).toDouble(1.0)));
-            rb.gravityScale =
-                static_cast<float>(rbObj.value(QStringLiteral("gravityScale")).toDouble(1.0));
-        }
-        if (object.contains(QStringLiteral("collider3d"))) {
-            const auto colObj = object.value(QStringLiteral("collider3d")).toObject();
-            auto& col = entity.AddComponent<BoxCollider3DComponent>();
-            assign3(colObj.value(QStringLiteral("size")).toArray(), col.size);
-            if (col.size.x <= 0.0f)
-                col.size.x = 1.0f;
-            if (col.size.y <= 0.0f)
-                col.size.y = 1.0f;
-            if (col.size.z <= 0.0f)
-                col.size.z = 1.0f;
-            assign3(colObj.value(QStringLiteral("offset")).toArray(), col.offset);
-            col.isTrigger = colObj.value(QStringLiteral("trigger")).toBool(false);
-        }
-        if (object.contains(QStringLiteral("animation"))) {
-            const auto animObj = object.value(QStringLiteral("animation")).toObject();
-            auto& anim = entity.AddComponent<AnimationComponent>();
-            anim.clip.name = Utf8(animObj.value(QStringLiteral("name")).toString(QStringLiteral("Transform")));
-            anim.clip.duration = std::max(
-                0.01f, static_cast<float>(animObj.value(QStringLiteral("duration")).toDouble(1.0)));
-            anim.clip.loop = animObj.value(QStringLiteral("loop")).toBool(true);
-            anim.playing = animObj.value(QStringLiteral("playing")).toBool(true);
-            const auto keysArr = animObj.value(QStringLiteral("keyframes")).toArray();
-            for (const auto& kv : keysArr) {
-                if (!kv.isObject())
-                    continue;
-                const auto kObj = kv.toObject();
-                Keyframe key;
-                key.time = std::max(0.0f,
-                                    static_cast<float>(kObj.value(QStringLiteral("time")).toDouble(0.0)));
-                assign3(kObj.value(QStringLiteral("position")).toArray(), key.position);
-                assign3(kObj.value(QStringLiteral("rotation")).toArray(), key.rotation);
-                assign3(kObj.value(QStringLiteral("scale")).toArray(), key.scale);
-                anim.clip.AddKeyframe(key);
-            }
+        } catch (...) {
+            if (entity.IsValid())
+                document_.GetScene().DestroyEntity(entity);
+            throw;
         }
     });
     RefreshAll();

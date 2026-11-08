@@ -3,6 +3,7 @@
 #include "Engine/Core/Core.hpp"
 #include "Engine/Core/Math.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
+#include <memory>
 #include <vector>
 
 namespace LuxEngine {
@@ -102,8 +103,56 @@ public:
         uint32 meshCount = 0;
     };
 
+    class LUX_API Context {
+    public:
+        Context();
+        explicit Context(GpuDevice* device);
+        ~Context();
+        Context(const Context&) = delete;
+        Context& operator=(const Context&) = delete;
+        Context(Context&& other) noexcept;
+        Context& operator=(Context&& other) noexcept;
+
+        void Init(GpuDevice* device = nullptr);
+        void Shutdown();
+        void DetachDevice(const GpuDevice* device);
+        bool IsDeviceValid() const;
+
+        void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light);
+        void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light,
+                        std::span<const PointLight> pointLights);
+        void EndScene();
+        void AbortScene();
+
+        void DrawMesh(const Mat4& transform, const Material3D& material);
+        void DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material);
+        void DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
+                      const Mat4& transform, const Material3D& material);
+        void DrawCube(const Vec3& position, const Vec3& scale, const Material3D& material);
+
+        void ResetStats();
+        Statistics GetStats() const;
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl_;
+    };
+
+    class LUX_API ScopedContext {
+    public:
+        explicit ScopedContext(Context& context);
+        ~ScopedContext();
+        ScopedContext(const ScopedContext&) = delete;
+        ScopedContext& operator=(const ScopedContext&) = delete;
+
+    private:
+        Context* previous_ = nullptr;
+        Context* current_ = nullptr;
+    };
+
     static void Init(GpuDevice* device = nullptr);
     static void Shutdown();
+    static void DetachDevice(const GpuDevice* device);
 
     static void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light);
     static void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light,

@@ -4,6 +4,7 @@
 #include "Engine/Core/Math.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include "Engine/Renderer/RHI/Texture.hpp"
+#include <memory>
 #include <vector>
 
 namespace LuxEngine {
@@ -63,8 +64,55 @@ public:
         uint32 quadCount = 0;
     };
 
+    class LUX_API Context {
+    public:
+        Context();
+        explicit Context(GpuDevice* device);
+        ~Context();
+        Context(const Context&) = delete;
+        Context& operator=(const Context&) = delete;
+        Context(Context&& other) noexcept;
+        Context& operator=(Context&& other) noexcept;
+
+        void Init(GpuDevice* device = nullptr);
+        void Shutdown();
+        void DetachDevice(const GpuDevice* device);
+        bool IsDeviceValid() const;
+
+        void BeginScene(const OrthographicCamera& camera);
+        void EndScene();
+        void AbortScene();
+
+        void DrawQuad(const Vec2& position, const Vec2& size, const Vec4& color);
+        void DrawQuad(const Vec3& position, const Vec2& size, const Vec4& color);
+        void DrawRotatedQuad(const Vec2& position, const Vec2& size, float rotationRadians,
+                             const Vec4& color);
+        void DrawSprite(const Vec2& position, const Vec2& size, GpuTexture* texture,
+                        const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+
+        void ResetStats();
+        Statistics GetStats() const;
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl_;
+    };
+
+    class LUX_API ScopedContext {
+    public:
+        explicit ScopedContext(Context& context);
+        ~ScopedContext();
+        ScopedContext(const ScopedContext&) = delete;
+        ScopedContext& operator=(const ScopedContext&) = delete;
+
+    private:
+        Context* previous_ = nullptr;
+        Context* current_ = nullptr;
+    };
+
     static void Init(GpuDevice* device = nullptr);
     static void Shutdown();
+    static void DetachDevice(const GpuDevice* device);
 
     static void BeginScene(const OrthographicCamera& camera);
     static void EndScene();

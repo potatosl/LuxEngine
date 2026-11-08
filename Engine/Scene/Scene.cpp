@@ -1,16 +1,19 @@
 #include "Engine/Scene/Scene.hpp"
+#include "Engine/Core/Log.hpp"
 #include "Engine/Physics/PhysicsEngine.hpp"
 #include "Engine/Physics/PhysicsWorld2D.h"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -178,48 +181,288 @@ std::filesystem::path Utf8Path(const std::string& text) {
         std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
 }
 
-bool AtomicReplaceFile(const std::filesystem::path& tempPath, const std::filesystem::path& targetPath) {
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    if (!fs::exists(targetPath, ec)) {
-        fs::rename(tempPath, targetPath, ec);
-        if (ec) {
-            fs::remove(tempPath, ec);
-            return false;
-        }
+std::string PathToUtf8(const std::filesystem::path& p) {
+    const auto u8 = p.u8string();
+    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+}
+
+std::mutex s_SaveErrorMutex;
+std::string s_LastSaveError;
+std::mutex s_SaveFaultMutex;
+Scene::SaveFault s_InjectedSaveFault = Scene::SaveFault::None;
+uint32 s_InjectedSaveFaultCount = 0;
+std::atomic<uint64> s_SaveSequence{0};
+std::mutex s_FileReplaceMutex;
+
+void SetSaveError(const std::string& message) {
+    {
+        std::lock_guard<std::mutex> lock(s_SaveErrorMutex);
+        s_LastSaveError = message;
+    }
+    if (!message.empty())
+        Log::Error(message);
+}
+
+void ClearSaveError() {
+    std::lock_guard<std::mutex> lock(s_SaveErrorMutex);
+    s_LastSaveError.clear();
+}
+
+bool ConsumeSaveFault(Scene::SaveFault expected) {
+    std::lock_guard<std::mutex> lock(s_SaveFaultMutex);
+    if (s_InjectedSaveFault == expected && s_InjectedSaveFaultCount > 0) {
+        --s_InjectedSaveFaultCount;
+        if (s_InjectedSaveFaultCount == 0)
+            s_InjectedSaveFault = Scene::SaveFault::None;
         return true;
     }
+    return false;
+}
+
+bool WriteTempFileFlushed(const std::filesystem::path& tempPath, const std::string& data) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (ConsumeSaveFault(Scene::SaveFault::TempWriteFailure)) {
+        SetSaveError("Scene save failed: injected temporary file write failure (Win32 error 5: ERROR_ACCESS_DENIED) for " +
+                     PathToUtf8(tempPath));
+        return false;
+    }
+#ifdef _WIN32
+    const std::wstring tempW = tempPath.wstring();
+    HANDLE handle = CreateFileW(tempW.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const DWORD err = GetLastError();
+        SetSaveError("Scene save failed: could not create temporary file '" + PathToUtf8(tempPath) +
+                     "' (Win32 error " + std::to_string(err) + ")");
+        return false;
+    }
+    if (ConsumeSaveFault(Scene::SaveFault::DiskFull)) {
+        CloseHandle(handle);
+        DeleteFileW(tempW.c_str());
+        SetSaveError("Scene save failed: disk full while writing temporary file '" +
+                     PathToUtf8(tempPath) + "' (Win32 error 112: ERROR_DISK_FULL)");
+        return false;
+    }
+    const char* ptr = data.data();
+    size_t remaining = data.size();
+    while (remaining > 0) {
+        const DWORD chunk = static_cast<DWORD>(
+            std::min<size_t>(remaining, static_cast<size_t>(std::numeric_limits<DWORD>::max())));
+        DWORD written = 0;
+        if (!WriteFile(handle, ptr, chunk, &written, nullptr) || written != chunk) {
+            const DWORD err = GetLastError();
+            CloseHandle(handle);
+            DeleteFileW(tempW.c_str());
+            SetSaveError("Scene save failed: WriteFile failed on temporary file '" +
+                         PathToUtf8(tempPath) + "' (Win32 error " + std::to_string(err) + ")");
+            return false;
+        }
+        ptr += written;
+        remaining -= written;
+    }
+    if (!FlushFileBuffers(handle)) {
+        const DWORD err = GetLastError();
+        CloseHandle(handle);
+        DeleteFileW(tempW.c_str());
+        SetSaveError("Scene save failed: FlushFileBuffers failed on temporary file '" +
+                     PathToUtf8(tempPath) + "' (Win32 error " + std::to_string(err) + ")");
+        return false;
+    }
+    if (!CloseHandle(handle)) {
+        const DWORD err = GetLastError();
+        DeleteFileW(tempW.c_str());
+        SetSaveError("Scene save failed: CloseHandle failed on temporary file '" +
+                     PathToUtf8(tempPath) + "' (Win32 error " + std::to_string(err) + ")");
+        return false;
+    }
+    return true;
+#else
+    if (ConsumeSaveFault(Scene::SaveFault::DiskFull)) {
+        SetSaveError("Scene save failed: disk full while writing temporary file '" +
+                     PathToUtf8(tempPath) + "'");
+        return false;
+    }
+    std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        SetSaveError("Scene save failed: could not open temporary file '" + PathToUtf8(tempPath) + "'");
+        return false;
+    }
+    out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    out.flush();
+    if (!out) {
+        out.close();
+        fs::remove(tempPath, ec);
+        SetSaveError("Scene save failed: write/flush error on temporary file '" + PathToUtf8(tempPath) + "'");
+        return false;
+    }
+    out.close();
+    if (!out) {
+        fs::remove(tempPath, ec);
+        SetSaveError("Scene save failed: close error on temporary file '" + PathToUtf8(tempPath) + "'");
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool AtomicReplaceFile(const std::filesystem::path& tempPath, const std::filesystem::path& targetPath,
+                       uint64 seq) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
 
 #ifdef _WIN32
     const std::wstring targetW = targetPath.wstring();
     const std::wstring tempW = tempPath.wstring();
+    const DWORD initialTargetAttrs = GetFileAttributesW(targetW.c_str());
+    const bool targetExistedInitially = (initialTargetAttrs != INVALID_FILE_ATTRIBUTES);
+
+    if (!targetExistedInitially) {
+        const DWORD attrErr = GetLastError();
+        if (attrErr != ERROR_FILE_NOT_FOUND) {
+            DeleteFileW(tempW.c_str());
+            SetSaveError("Scene save failed: cannot access target path '" + PathToUtf8(targetPath) +
+                         "' (Win32 error " + std::to_string(attrErr) + ")");
+            return false;
+        }
+        if (ConsumeSaveFault(Scene::SaveFault::ReplaceAccessDenied)) {
+            DeleteFileW(tempW.c_str());
+            SetSaveError("Scene save failed: access denied moving temporary file to '" +
+                         PathToUtf8(targetPath) + "' (Win32 error 5: ERROR_ACCESS_DENIED)");
+            return false;
+        }
+        if (MoveFileExW(tempW.c_str(), targetW.c_str(), MOVEFILE_WRITE_THROUGH)) {
+            return true;
+        }
+        const DWORD moveErr = GetLastError();
+        if (moveErr != ERROR_ALREADY_EXISTS && moveErr != ERROR_FILE_EXISTS) {
+            DeleteFileW(tempW.c_str());
+            SetSaveError("Scene save failed: MoveFileExW to new target '" + PathToUtf8(targetPath) +
+                         "' failed (Win32 error " + std::to_string(moveErr) + ")");
+            return false;
+        }
+        // If another writer created targetPath concurrently, fall through to atomic ReplaceFileW with backup.
+    }
+
     const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    const std::wstring backupW = (targetPath.wstring() + L".lux-bak-" + std::to_wstring(timestamp));
+    const auto threadId = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    const std::wstring backupW = targetW + L".lux-bak-" + std::to_wstring(timestamp) + L"-" +
+                                 std::to_wstring(threadId) + L"-" + std::to_wstring(seq);
+    const fs::path backupPath(backupW);
 
-    if (ReplaceFileW(targetW.c_str(), tempW.c_str(), backupW.c_str(),
-                     REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS, nullptr, nullptr)) {
-        std::error_code removeEc;
-        fs::remove(backupW, removeEc);
-        return true;
+    bool replaceSucceeded = false;
+    DWORD replaceErr = ERROR_SUCCESS;
+    bool injectRestoreFailure = false;
+
+    if (ConsumeSaveFault(Scene::SaveFault::ReplaceAccessDenied)) {
+        replaceSucceeded = false;
+        replaceErr = ERROR_ACCESS_DENIED;
+    } else if (ConsumeSaveFault(Scene::SaveFault::ReplaceFailedAfterBackup)) {
+        // Simulate step 1 of ReplaceFileW succeeding (target moved to backup) and step 2 failing.
+        if (MoveFileExW(targetW.c_str(), backupW.c_str(), MOVEFILE_WRITE_THROUGH)) {
+            replaceSucceeded = false;
+            replaceErr = ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
+        } else {
+            replaceSucceeded = false;
+            replaceErr = GetLastError();
+        }
+    } else if (ConsumeSaveFault(Scene::SaveFault::BackupRestoreFailure)) {
+        // Simulate target moved to backup, replacement failing, AND backup restoration failing.
+        if (MoveFileExW(targetW.c_str(), backupW.c_str(), MOVEFILE_WRITE_THROUGH)) {
+            replaceSucceeded = false;
+            replaceErr = ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
+            injectRestoreFailure = true;
+        } else {
+            replaceSucceeded = false;
+            replaceErr = GetLastError();
+        }
+    } else {
+        if (ReplaceFileW(targetW.c_str(), tempW.c_str(), backupW.c_str(),
+                         REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS, nullptr,
+                         nullptr)) {
+            replaceSucceeded = true;
+        } else {
+            replaceErr = GetLastError();
+        }
     }
 
-    std::error_code backupEc;
-    if (fs::exists(backupW, backupEc)) {
-        ReplaceFileW(targetW.c_str(), backupW.c_str(), nullptr,
-                     REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS, nullptr, nullptr);
-        fs::remove(backupW, backupEc);
+    if (replaceSucceeded) {
+        if (GetFileAttributesW(targetW.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            DeleteFileW(backupW.c_str());
+            return true;
+        }
+        replaceErr = ERROR_FILE_NOT_FOUND;
     }
 
-    if (MoveFileExW(tempW.c_str(), targetW.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        return true;
+    // Replacement failed. Absolute priority: preserve the original file and never clobber it with tempW.
+    const bool backupExists = (GetFileAttributesW(backupW.c_str()) != INVALID_FILE_ATTRIBUTES);
+    if (!backupExists) {
+        // Original target file was never renamed to backup and remains intact.
+        DeleteFileW(tempW.c_str());
+        SetSaveError("Scene save failed: ReplaceFileW failed before backup replacement for '" +
+                     PathToUtf8(targetPath) + "' (Win32 error " + std::to_string(replaceErr) +
+                     "). Original file preserved.");
+        return false;
     }
 
-    fs::remove(tempPath, ec);
+    // Backup exists: the original file was moved to backupW. Attempt safe restoration of backupW -> targetW.
+    bool restored = false;
+    DWORD restoreErr = ERROR_SUCCESS;
+    if (injectRestoreFailure) {
+        restored = false;
+        restoreErr = ERROR_ACCESS_DENIED;
+    } else {
+        const bool targetCurrentlyExists =
+            (GetFileAttributesW(targetW.c_str()) != INVALID_FILE_ATTRIBUTES);
+        if (!targetCurrentlyExists) {
+            if (MoveFileExW(backupW.c_str(), targetW.c_str(), MOVEFILE_WRITE_THROUGH)) {
+                restored = true;
+            } else {
+                restoreErr = GetLastError();
+            }
+        } else {
+            if (ReplaceFileW(targetW.c_str(), backupW.c_str(), nullptr,
+                             REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS,
+                             nullptr, nullptr)) {
+                restored = true;
+            } else {
+                restoreErr = GetLastError();
+            }
+        }
+    }
+
+    // Clean up temporary file so no partial/uncommitted replacement file lingers.
+    DeleteFileW(tempW.c_str());
+
+    if (restored && GetFileAttributesW(targetW.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        // Confirm targetW has non-zero size before removing any lingering backupW.
+        const auto targetSize = fs::file_size(targetPath, ec);
+        if (!ec && targetSize > 0) {
+            if (GetFileAttributesW(backupW.c_str()) != INVALID_FILE_ATTRIBUTES)
+                DeleteFileW(backupW.c_str());
+        }
+        SetSaveError("Scene save failed for '" + PathToUtf8(targetPath) + "' (Win32 error " +
+                     std::to_string(replaceErr) +
+                     "); original file was safely restored from backup.");
+        return false;
+    }
+
+    // Backup restoration failed! NEVER delete backupW — it holds the user's original scene data.
+    SetSaveError("CRITICAL: Scene save failed for '" + PathToUtf8(targetPath) + "' (Win32 error " +
+                 std::to_string(replaceErr) + ") and backup restoration failed (Win32 error " +
+                 std::to_string(restoreErr) +
+                 "). Original scene preserved at backup path: " + PathToUtf8(backupPath));
     return false;
 #else
+    if (ConsumeSaveFault(Scene::SaveFault::ReplaceAccessDenied)) {
+        fs::remove(tempPath, ec);
+        SetSaveError("Scene save failed: access denied replacing '" + PathToUtf8(targetPath) + "'");
+        return false;
+    }
     fs::rename(tempPath, targetPath, ec);
     if (ec) {
         fs::remove(tempPath, ec);
+        SetSaveError("Scene save failed: rename failed for '" + PathToUtf8(targetPath) + "'");
         return false;
     }
     return true;
@@ -375,41 +618,58 @@ bool Scene::SerializeToString(std::string& output) {
     return true;
 }
 
+void Scene::InjectSaveFault(SaveFault fault, uint32 count) {
+    std::lock_guard<std::mutex> lock(s_SaveFaultMutex);
+    s_InjectedSaveFault = fault;
+    s_InjectedSaveFaultCount = count;
+}
+
+void Scene::ClearSaveFaults() {
+    std::lock_guard<std::mutex> lock(s_SaveFaultMutex);
+    s_InjectedSaveFault = SaveFault::None;
+    s_InjectedSaveFaultCount = 0;
+}
+
+std::string Scene::GetLastSaveError() {
+    std::lock_guard<std::mutex> lock(s_SaveErrorMutex);
+    return s_LastSaveError;
+}
+
 bool Scene::Serialize(const std::string& filepath) {
-    if (filepath.empty())
+    if (filepath.empty()) {
+        SetSaveError("Scene save failed: empty filepath");
         return false;
+    }
     std::string serialized;
-    if (!SerializeToString(serialized))
+    if (!SerializeToString(serialized)) {
+        SetSaveError("Scene save failed: scene validation/serialization failed");
         return false;
+    }
     namespace fs = std::filesystem;
     const fs::path targetPath = Utf8Path(filepath);
     std::error_code ec;
     const fs::path parentDir = targetPath.parent_path();
-    if (!parentDir.empty() && !fs::is_directory(parentDir, ec))
+    if (!parentDir.empty() && !fs::is_directory(parentDir, ec)) {
+        SetSaveError("Scene save failed: parent directory does not exist for '" + filepath + "'");
         return false;
+    }
 
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto threadId = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    const uint64 seq = ++s_SaveSequence;
     fs::path tempPath = targetPath;
-    tempPath += ".saving-" + std::to_string(now) + "-" + std::to_string(threadId);
-    {
-        std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
-        if (!out)
-            return false;
-        out.write(serialized.data(), static_cast<std::streamsize>(serialized.size()));
-        out.flush();
-        if (!out) {
-            out.close();
-            fs::remove(tempPath, ec);
-            return false;
-        }
-        out.close();
-        if (!out) {
-            fs::remove(tempPath, ec);
-            return false;
-        }
-    }
-    return AtomicReplaceFile(tempPath, targetPath);
+    tempPath +=
+        ".saving-" + std::to_string(now) + "-" + std::to_string(threadId) + "-" + std::to_string(seq);
+
+    if (!WriteTempFileFlushed(tempPath, serialized))
+        return false;
+
+    std::lock_guard<std::mutex> replaceLock(s_FileReplaceMutex);
+    if (!AtomicReplaceFile(tempPath, targetPath, seq))
+        return false;
+
+    ClearSaveError();
+    return true;
 }
 
 bool Scene::DeserializeStream(std::istream& in) {
