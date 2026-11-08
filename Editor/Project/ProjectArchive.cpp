@@ -93,12 +93,18 @@ bool SafeArchivePath(const std::filesystem::path& relative) {
     if (name.find_first_of("<>\"|?*") != std::string::npos)
         return false;
 
-    if (*relative.begin() == ".git" || *relative.begin() == ".lux")
+    // Case-insensitive check for VCS and engine private directories (.git, .lux, .GIT, .Lux, etc.)
+    const auto firstPartLower = ToLowerAscii(GenericPathUtf8(*relative.begin()));
+    if (firstPartLower == ".git" || firstPartLower == ".lux")
         return false;
 
     for (const auto& part : relative) {
         const auto p = GenericPathUtf8(part);
         if (p == ".." || p == "." || p.empty())
+            return false;
+
+        const auto partLower = ToLowerAscii(p);
+        if (partLower == ".git" || partLower == ".lux")
             return false;
 
         // Windows trailing dot or trailing space vulnerability:
@@ -219,7 +225,7 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
                 error = "압축 파일 내 디렉터리와 파일 경로 충돌이 발견되었습니다: " + name;
                 break;
             }
-            // Check all parent directories of this file
+            // Check all parent directory prefixes of this file against existing files
             std::string parentCheck = cleanFolded;
             while (true) {
                 const auto slash = parentCheck.rfind('/');
@@ -230,6 +236,7 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
                     error = "압축 파일 내 상위 파일과 하위 디렉터리 경로 충돌이 발견되었습니다: " + name;
                     break;
                 }
+                caseFoldedDirs.insert(parentCheck);
             }
             if (!error.empty())
                 break;

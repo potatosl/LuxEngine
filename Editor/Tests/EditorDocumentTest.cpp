@@ -559,6 +559,43 @@ void TestArchiveSecurityAndFuzzing() {
     Check(zip_close(z) == 0, "no proj fixture zip finalized");
     Check(!ImportProject(noProjZip, files.path / "no_manifest_imported", error),
           "Archive missing project.luxproj safely rejected");
+
+    // 10. Zip with case-insensitive .git / .lux attempt (.GIT/config, .Lux/cache)
+    const auto gitZip = files.path / "git_blocked.luxpack";
+    z = zip_open(PathUtf8(gitZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "git zip created");
+    zip_source_t* srcGit = zip_source_buffer(z, "[core]\n", 7, 0);
+    Check(zip_file_add(z, ".GIT/config", srcGit, ZIP_FL_ENC_UTF_8) >= 0, ".GIT/config entry added");
+    zip_source_t* srcProjGit = zip_source_buffer(z, "LUXPROJECT 2\nname \"Git\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjGit, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "git fixture zip finalized");
+    Check(!ImportProject(gitZip, files.path / "git_imported", error),
+          "Case-insensitive .GIT directory in zip safely rejected");
+
+    const auto luxDirZip = files.path / "lux_blocked.luxpack";
+    z = zip_open(PathUtf8(luxDirZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "lux dir zip created");
+    zip_source_t* srcLux = zip_source_buffer(z, "cache data", 10, 0);
+    Check(zip_file_add(z, ".Lux/internal", srcLux, ZIP_FL_ENC_UTF_8) >= 0, ".Lux/internal entry added");
+    zip_source_t* srcProjLux = zip_source_buffer(z, "LUXPROJECT 2\nname \"Lux\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjLux, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "lux fixture zip finalized");
+    Check(!ImportProject(luxDirZip, files.path / "lux_imported", error),
+          "Case-insensitive .Lux directory in zip safely rejected");
+
+    // 11. Order-reversed file-directory collision ("folder/child.txt" FIRST, "folder" SECOND as file)
+    const auto revCollZip = files.path / "rev_file_dir_collision.luxpack";
+    z = zip_open(PathUtf8(revCollZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "rev collision zip created");
+    zip_source_t* srcRevChild = zip_source_buffer(z, "child content", 13, 0);
+    Check(zip_file_add(z, "rev_dir/nested.txt", srcRevChild, ZIP_FL_ENC_UTF_8) >= 0, "rev_dir/nested.txt entry added first");
+    zip_source_t* srcRevFile = zip_source_buffer(z, "file content", 12, 0);
+    Check(zip_file_add(z, "rev_dir", srcRevFile, ZIP_FL_ENC_UTF_8) >= 0, "rev_dir file entry added second");
+    zip_source_t* srcProjRev = zip_source_buffer(z, "LUXPROJECT 2\nname \"RevColl\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 72, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjRev, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "rev collision fixture zip finalized");
+    Check(!ImportProject(revCollZip, files.path / "rev_coll_imported", error),
+          "Order-reversed file-directory collision in zip safely rejected");
 }
 
 } // namespace

@@ -14,12 +14,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Configure Network & Download Retries
+        shell: pwsh
+        run: |
+          "retry = 5`nretry-connrefused`nretry-delay = 2" | Out-File -FilePath "$HOME/.curlrc" -Encoding ascii
+
       - name: Setup Vulkan SDK
         uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
           vulkan-query-version: 1.3.296.0
           vulkan-components: Vulkan-Headers, Vulkan-Loader, SPIRV-Tools
-          vulkan-use-cache: false
+          vulkan-use-cache: true
 
       - name: Setup Portable DXC Shader Compiler
         shell: pwsh
@@ -29,7 +34,7 @@ jobs:
       - name: Install Dependencies via vcpkg
         shell: pwsh
         run: |
-          vcpkg install --triplet x64-windows sdl3 stb vulkan-memory-allocator libzip
+          vcpkg install --triplet x64-windows --clean-after-build sdl3 stb vulkan-memory-allocator libzip
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -106,10 +111,11 @@ jobs:
           path: build/Testing/Temporary/*
           if-no-files-found: warn
 
-      - name: Run Fuzz Seed Corpus
+      - name: Run Fuzz Seed Corpus & Mutational Fuzzer
         shell: pwsh
         run: |
           & "./build/bin/Debug/LuxFuzzScene.exe"
+          & "./build/bin/Debug/LuxFuzzScene.exe" --runs 10000
 
       - name: Install SDK (Debug)
         shell: pwsh

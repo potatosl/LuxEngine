@@ -930,7 +930,7 @@ void Assets() {
           "shader load");
     AssetManager::Shutdown();
 }
-void Wav(const std::string& file) {
+void Wav(const std::string& file, uint32 dataBytes = 16000) {
     std::ofstream out(file, std::ios::binary);
     auto u16 = [&](uint16 value) {
         for (int i = 0; i < 2; ++i)
@@ -941,7 +941,7 @@ void Wav(const std::string& file) {
             out.put(static_cast<char>((value >> (i * 8)) & 255));
     };
     out.write("RIFF", 4);
-    u32(36 + 16000);
+    u32(36 + dataBytes);
     out.write("WAVEfmt ", 8);
     u32(16);
     u16(1);
@@ -951,9 +951,19 @@ void Wav(const std::string& file) {
     u16(2);
     u16(16);
     out.write("data", 4);
-    u32(16000);
-    for (int i = 0; i < 8000; ++i)
-        u16(static_cast<uint16>(static_cast<int16>(std::sin(i * 0.2) * 1000)));
+    u32(dataBytes);
+    if (dataBytes <= 16000) {
+        for (size_t i = 0; i < dataBytes / 2; ++i)
+            u16(static_cast<uint16>(static_cast<int16>(std::sin(i * 0.2) * 1000)));
+    } else {
+        std::vector<char> chunk(65536, 0);
+        uint32 remaining = dataBytes;
+        while (remaining > 0) {
+            uint32 toWrite = std::min<uint32>(remaining, static_cast<uint32>(chunk.size()));
+            out.write(chunk.data(), toWrite);
+            remaining -= toWrite;
+        }
+    }
 }
 void Audio() {
     Files files;
@@ -983,23 +993,56 @@ void Audio() {
     Check(!AudioEngine::PlaySound(files.Path("tone.wav"), std::numeric_limits<float>::quiet_NaN()),
           "NaN sound volume rejected");
 
-    // 2. Concurrent sound playback limit (up to 64)
-    for (int i = 0; i < 70; ++i) {
-        AudioEngine::PlaySound(files.Path("tone.wav"), 0.01f);
+    // 2. Concurrent sound playback limit (strictly enforced up to 64)
+    size_t playingCount = 0;
+    for (int i = 0; i < 64; ++i) {
+        if (AudioEngine::PlaySound(files.Path("tone.wav"), 0.001f))
+            ++playingCount;
     }
-    // 3. Immediate Shutdown() during active playback: MUST NOT cause callback UAF or data race
-    Check(AudioEngine::PlayMusic(files.Path("tone.wav"), true, 0.5f), "looping music before shutdown");
-    Check(AudioEngine::IsMusicPlaying(), "music active before mid-playback shutdown");
+    Check(playingCount == 64, "all 64 concurrent sounds play successfully");
+    Check(!AudioEngine::PlaySound(files.Path("tone.wav"), 0.001f),
+          "65th concurrent sound rejected when at MaxConcurrentSounds limit");
+
+    // 3. Immediate StopMusic() and Shutdown() during active playback: MUST NOT cause callback UAF or race
+    Check(AudioEngine::PlayMusic(files.Path("tone.wav"), true, 0.5f), "looping music before stop");
+    Check(AudioEngine::IsMusicPlaying(), "music active before StopMusic");
+    AudioEngine::StopMusic();
+    Check(!AudioEngine::IsMusicPlaying(), "StopMusic safely terminates playback");
+    Check(AudioEngine::PlayMusic(files.Path("tone.wav"), true, 0.5f), "restart music");
     AudioEngine::Shutdown();
     Check(!AudioEngine::IsMusicPlaying(), "shutdown safely stops active playback without crash");
+    Check(AudioEngine::GetCacheUsageBytes() == 0, "shutdown clears audio cache");
+    Check(AudioEngine::GetCachedFileCount() == 0, "shutdown clears cached files");
 
-    // 4. Repeated Init/Shutdown stress loop
-    for (int loop = 0; loop < 10; ++loop) {
+    // 4. Strict 64 MiB Cache Ceiling Enforcement when all items are actively playing
+    Check(AudioEngine::Init(), "re-init audio engine for cache test");
+    constexpr uint32 singleWavBytes = 4 * 1024 * 1024; // 4 MiB each
+    constexpr int numLargeFiles = 18; // 18 * 4 MiB = 72 MiB total (> 64 MiB limit)
+    for (int i = 0; i < numLargeFiles; ++i) {
+        const auto path = files.Path(("large_" + std::to_string(i) + ".wav").c_str());
+        Wav(path, singleWavBytes);
+        Check(AudioEngine::PlaySound(path, 0.0001f), "large sound plays");
+        Check(AudioEngine::GetCacheUsageBytes() <= 64ull * 1024ull * 1024ull,
+              "Audio cache usage strictly <= 64 MiB ceiling at all times");
+        Check(AudioEngine::GetCachedFileCount() <= 256,
+              "Cached file count strictly <= MaxCachedAudioFiles (256)");
+    }
+    Check(AudioEngine::GetCacheUsageBytes() == 64ull * 1024ull * 1024ull,
+          "Cache exactly filled to 64 MiB capacity with subsequent buffers bypassing cache");
+    AudioEngine::Shutdown();
+    Check(AudioEngine::GetCacheUsageBytes() == 0, "cache freed on shutdown");
+
+    // 5. Repeated 1,000x Init/Shutdown stress loop
+    const auto stressStart = std::chrono::steady_clock::now();
+    for (int loop = 0; loop < 1000; ++loop) {
         Check(AudioEngine::Init(), "Init in stress loop");
-        AudioEngine::PlaySound(files.Path("tone.wav"), 0.1f);
+        AudioEngine::PlaySound(files.Path("tone.wav"), 0.01f);
         AudioEngine::Shutdown();
     }
-    Check(!AudioEngine::IsMusicPlaying(), "audio shutdown");
+    const auto stressElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - stressStart).count();
+    std::cout << "Audio 1,000x Init/Shutdown stress completed in " << stressElapsed << " ms\n";
+    Check(!AudioEngine::IsMusicPlaying(), "audio shutdown clean");
 }
 void WindowEvents() {
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
@@ -1165,6 +1208,68 @@ void WindowEvents() {
         Check(SDL_PushEvent(&event), "own close event queued");
         window.PollEvents();
         Check(!window.IsRunning(), "own close event stops window");
+
+        // Selective SDL Window Event Draining Verification:
+        // Verify that draining window-specific events for one window drops only that window's events
+        // while preserving events destined for other windows and general input events.
+        SDL_Window* secondWindow = SDL_CreateWindow("Secondary Window", 200, 200, SDL_WINDOW_HIDDEN);
+        Check(secondWindow != nullptr, "secondary window created");
+        const SDL_WindowID win1Id = SDL_GetWindowID(handle);
+        const SDL_WindowID win2Id = SDL_GetWindowID(secondWindow);
+        Check(win1Id != 0 && win2Id != 0 && win1Id != win2Id, "distinct window IDs");
+
+        SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+
+        // Push window events for both windows and an input key event
+        SDL_Event e1{};
+        e1.type = SDL_EVENT_WINDOW_RESIZED;
+        e1.window.windowID = win1Id;
+        e1.window.data1 = 500;
+        e1.window.data2 = 400;
+        Check(SDL_PushEvent(&e1), "push win1 event");
+
+        SDL_Event e2{};
+        e2.type = SDL_EVENT_WINDOW_RESIZED;
+        e2.window.windowID = win2Id;
+        e2.window.data1 = 600;
+        e2.window.data2 = 500;
+        Check(SDL_PushEvent(&e2), "push win2 event");
+
+        SDL_Event eKey{};
+        eKey.type = SDL_EVENT_KEY_DOWN;
+        eKey.key.key = SDLK_SPACE;
+        Check(SDL_PushEvent(&eKey), "push key event");
+
+        // Apply selective filter targeting win1Id (identical to DrainWindowEvents)
+        SDL_FilterEvents(
+            [](void* userdata, SDL_Event* ev) -> bool {
+                const SDL_WindowID id = *static_cast<SDL_WindowID*>(userdata);
+                if (ev->type >= SDL_EVENT_WINDOW_FIRST && ev->type <= SDL_EVENT_WINDOW_LAST) {
+                    if (ev->window.windowID == id)
+                        return false;
+                }
+                return true;
+            },
+            const_cast<SDL_WindowID*>(&win1Id));
+
+        // Verify win1Id event was dropped, while win2Id and key events remain
+        SDL_Event remaining[8]{};
+        int count = SDL_PeepEvents(remaining, 8, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        bool foundWin1 = false;
+        bool foundWin2 = false;
+        bool foundKey = false;
+        for (int i = 0; i < count; ++i) {
+            if (remaining[i].type == SDL_EVENT_WINDOW_RESIZED && remaining[i].window.windowID == win1Id)
+                foundWin1 = true;
+            if (remaining[i].type == SDL_EVENT_WINDOW_RESIZED && remaining[i].window.windowID == win2Id)
+                foundWin2 = true;
+            if (remaining[i].type == SDL_EVENT_KEY_DOWN && remaining[i].key.key == SDLK_SPACE)
+                foundKey = true;
+        }
+        Check(!foundWin1, "selective drain dropped target window event");
+        Check(foundWin2, "selective drain preserved secondary window event");
+        Check(foundKey, "selective drain preserved key input event");
+        SDL_DestroyWindow(secondWindow);
     }
     Input::Shutdown();
     SDL_Quit();

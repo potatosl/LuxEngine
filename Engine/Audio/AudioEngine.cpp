@@ -159,12 +159,17 @@ std::shared_ptr<CachedAudio> LoadBuffer(const std::string& file) {
     // Evict older unreferenced items to respect memory budget
     EvictAudioCacheIfNeeded(cached->length);
 
-    s_LruList.push_front(file);
-    CacheEntry entry;
-    entry.audio = cached;
-    entry.lruIt = s_LruList.begin();
-    audioCache.emplace(file, std::move(entry));
-    s_CurrentCacheBytes += cached->length;
+    // If adding this buffer would still exceed budget because active voices hold existing cache entries,
+    // bypass the cache entirely to enforce the strict 64 MiB ceiling without blocking playback.
+    if (s_CurrentCacheBytes + cached->length <= MaxAudioCacheBytes &&
+        audioCache.size() < MaxCachedAudioFiles) {
+        s_LruList.push_front(file);
+        CacheEntry entry;
+        entry.audio = cached;
+        entry.lruIt = s_LruList.begin();
+        audioCache.emplace(file, std::move(entry));
+        s_CurrentCacheBytes += cached->length;
+    }
 
     return cached;
 }
@@ -296,5 +301,15 @@ void AudioEngine::StopMusic() {
 bool AudioEngine::IsMusicPlaying() {
     std::lock_guard<std::mutex> lock(s_AudioMutex);
     return music && Playing(*music);
+}
+
+uint64 AudioEngine::GetCacheUsageBytes() {
+    std::lock_guard<std::mutex> lock(s_AudioMutex);
+    return s_CurrentCacheBytes;
+}
+
+size_t AudioEngine::GetCachedFileCount() {
+    std::lock_guard<std::mutex> lock(s_AudioMutex);
+    return audioCache.size();
 }
 } // namespace LuxEngine
