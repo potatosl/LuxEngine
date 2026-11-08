@@ -8,11 +8,16 @@
 #include "Engine/Scene/Scene.hpp"
 #include <QGuiApplication>
 #include <SDL3/SDL.h>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <exception>
 
 namespace LuxEngine {
+namespace {
+std::atomic<int> s_ActiveRendererInstances{0};
+} // namespace
+
 struct EngineSceneRenderer::State {
     bool sdlVideo = false;
     Window window;
@@ -24,8 +29,10 @@ struct EngineSceneRenderer::State {
 
     ~State() {
         if (renderer) {
-            Renderer2D::Shutdown();
-            Renderer3D::Shutdown();
+            if (s_ActiveRendererInstances.fetch_sub(1) == 1) {
+                Renderer2D::Shutdown();
+                Renderer3D::Shutdown();
+            }
         }
         gpu.Shutdown();
         window.Shutdown();
@@ -86,6 +93,7 @@ bool EngineSceneRenderer::EnsureReady() {
     }
     Renderer2D::Init(&state->gpu);
     Renderer3D::Init(&state->gpu);
+    ++s_ActiveRendererInstances;
     state->renderer = true;
     state->width = props.width;
     state->height = props.height;
@@ -134,6 +142,7 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
     } catch (const std::exception& exception) {
         // An exception escaping paintEvent would take the whole editor down with unsaved work.
         // Close the frame, report it, and let the viewport fall back to software drawing.
+        Renderer2D::Shutdown();
         Renderer2D::Init(&s.gpu);
         s.gpu.EndFrame();
         error_ = QStringLiteral("엔진 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
@@ -243,6 +252,7 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
         }
         Renderer3D::EndScene();
     } catch (const std::exception& exception) {
+        Renderer3D::Shutdown();
         Renderer3D::Init(&s.gpu);
         s.gpu.EndFrame();
         error_ = QStringLiteral("엔진 3D 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));

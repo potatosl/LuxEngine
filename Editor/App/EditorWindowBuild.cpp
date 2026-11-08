@@ -47,7 +47,8 @@ void EditorWindow::ChooseEnginePackage() {
         return;
     BuildTools tools = DetectBuildTools(
         FromQ(QCoreApplication::applicationDirPath()), [&](const char* name) {
-            return std::string(name) == "LUX_ENGINE_DIR" ? directory.toStdString() : std::string{};
+            return std::string(name) == "LUX_ENGINE_DIR" ? directory.toUtf8().toStdString()
+                                                         : std::string{};
         });
     if (tools.enginePackage.empty()) {
         ShowError(QStringLiteral("엔진 SDK"),
@@ -77,8 +78,8 @@ void EditorWindow::StartBuild(BuildConfiguration configuration, bool clean,
     BuildTools tools = DetectBuildTools(
         FromQ(QCoreApplication::applicationDirPath()), [&](const char* name) {
             if (std::string(name) == "LUX_ENGINE_DIR" && !savedSdk.isEmpty())
-                return savedSdk.toStdString();
-            return qEnvironmentVariable(name).toStdString();
+                return savedSdk.toUtf8().toStdString();
+            return qEnvironmentVariable(name).toUtf8().toStdString();
         });
     std::string error;
     auto plan = PlanBuild(project_->GetFile().parent_path(), configuration, tools,
@@ -163,11 +164,16 @@ void EditorWindow::HandleBuildOutput(const QByteArray& chunk) {
                 break;
             end = buildLineBuffer_.size();
         }
-        const QString line = QString::fromLocal8Bit(buildLineBuffer_.left(end)).trimmed();
+        const QByteArray rawLine = buildLineBuffer_.left(end);
         buildLineBuffer_.remove(0, end + 1);
+        const QString utf8Line = QString::fromUtf8(rawLine);
+        const QString line =
+            (utf8Line.contains(QChar::ReplacementCharacter) ? QString::fromLocal8Bit(rawLine)
+                                                            : utf8Line)
+                .trimmed();
         if (line.isEmpty())
             continue;
-        const std::string text = line.toStdString();
+        const std::string text = line.toUtf8().toStdString();
         if (const auto percent = ParseBuildProgress(text)) {
             buildProgress_->setRange(0, 100);
             buildProgress_->setValue(*percent);
@@ -248,9 +254,9 @@ void EditorWindow::PackageBuild() {
     std::string error;
     std::optional<PackageResult> result;
     RunWithProgress(QStringLiteral("배포 패키지를 만드는 중..."), [&] {
-        result = CreateDistributionArchive(*executable, FromQ(file),
-                                           QStringLiteral("%1-%2").arg(name, version).toStdString(),
-                                           error);
+        result = CreateDistributionArchive(
+            *executable, FromQ(file),
+            QStringLiteral("%1-%2").arg(name, version).toUtf8().toStdString(), error);
     });
     if (!result) {
         ShowError(QStringLiteral("배포"), QString::fromUtf8(error));

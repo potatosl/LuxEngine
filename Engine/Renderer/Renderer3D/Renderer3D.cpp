@@ -89,6 +89,12 @@ bool Mesh3D::IsValid() const {
 }
 
 void Renderer3D::Init(GpuDevice* gpu) {
+    if (device == gpu && !active) {
+        vertices.clear();
+        pointLights.clear();
+        stats = {};
+        return;
+    }
     Shutdown();
     device = gpu;
     vertices.reserve(3600);

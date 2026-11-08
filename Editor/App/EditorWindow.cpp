@@ -1236,26 +1236,17 @@ void EditorWindow::EndViewportEdit() {
     viewportEditSelected_.reset();
 }
 QByteArray EditorWindow::SnapshotScene() {
-    QTemporaryDir temp;
-    if (!temp.isValid())
+    std::string serialized;
+    if (!document_.GetScene().SerializeToString(serialized))
         return {};
-    const auto path = PathFromUtf8(Utf8(temp.path() + QStringLiteral("/snapshot.lux")));
-    if (!document_.GetScene().Serialize(PathUtf8(path)))
-        return {};
-    QFile file(Q(path));
-    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
+    return QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
 }
 void EditorWindow::RestoreScene(const QByteArray& bytes, std::optional<uint32> selected) {
-    QTemporaryDir temp;
-    if (!temp.isValid())
+    if (bytes.isEmpty())
         return;
-    const auto path = PathFromUtf8(Utf8(temp.path() + QStringLiteral("/snapshot.lux")));
-    QFile file(Q(path));
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(bytes) != bytes.size())
-        return;
-    file.close();
+    const std::string serialized(bytes.constData(), static_cast<size_t>(bytes.size()));
     restoringHistory_ = true;
-    if (document_.ReplaceScene(PathUtf8(path), selected))
+    if (document_.ReplaceSceneFromData(serialized, selected))
         RefreshAll();
     restoringHistory_ = false;
 }
@@ -1292,7 +1283,86 @@ void EditorWindow::CopyEntity() {
     }
     if (selected.HasComponent<MeshRendererComponent>()) {
         const auto& m = selected.GetComponent<MeshRendererComponent>().material;
-        object.insert(QStringLiteral("mesh"), QJsonArray{m.metallic, m.roughness});
+        const auto& c = m.albedoColor;
+        object.insert(QStringLiteral("mesh"),
+                      QJsonArray{m.metallic, m.roughness, c.x, c.y, c.z, c.w});
+    }
+    if (selected.HasComponent<CameraComponent>()) {
+        const auto& cam = selected.GetComponent<CameraComponent>();
+        QJsonObject camObj;
+        camObj.insert(QStringLiteral("primary"), cam.isPrimary);
+        camObj.insert(QStringLiteral("perspective"), cam.isPerspective);
+        camObj.insert(QStringLiteral("fov"), cam.fov);
+        camObj.insert(QStringLiteral("orthoSize"), cam.orthoSize);
+        object.insert(QStringLiteral("camera"), camObj);
+    }
+    if (selected.HasComponent<TilemapComponent>()) {
+        const auto& map = selected.GetComponent<TilemapComponent>();
+        QJsonObject mapObj;
+        mapObj.insert(QStringLiteral("width"), static_cast<int>(map.width));
+        mapObj.insert(QStringLiteral("height"), static_cast<int>(map.height));
+        mapObj.insert(QStringLiteral("tileSize"), map.tileSize);
+        QJsonArray tilesArr;
+        for (uint8_t tile : map.tiles)
+            tilesArr.append(static_cast<int>(tile));
+        mapObj.insert(QStringLiteral("tiles"), tilesArr);
+        object.insert(QStringLiteral("tilemap"), mapObj);
+    }
+    if (selected.HasComponent<Rigidbody2DComponent>()) {
+        const auto& rb = selected.GetComponent<Rigidbody2DComponent>();
+        QJsonObject rbObj;
+        rbObj.insert(QStringLiteral("type"), static_cast<int>(rb.type));
+        rbObj.insert(QStringLiteral("velocity"), QJsonArray{rb.velocity.x, rb.velocity.y});
+        rbObj.insert(QStringLiteral("mass"), rb.mass);
+        rbObj.insert(QStringLiteral("gravityScale"), rb.gravityScale);
+        object.insert(QStringLiteral("rigidbody2d"), rbObj);
+    }
+    if (selected.HasComponent<BoxCollider2DComponent>()) {
+        const auto& col = selected.GetComponent<BoxCollider2DComponent>();
+        QJsonObject colObj;
+        colObj.insert(QStringLiteral("size"), QJsonArray{col.size.x, col.size.y});
+        colObj.insert(QStringLiteral("offset"), QJsonArray{col.offset.x, col.offset.y});
+        colObj.insert(QStringLiteral("trigger"), col.isTrigger);
+        object.insert(QStringLiteral("collider2d"), colObj);
+    }
+    if (selected.HasComponent<Rigidbody3DComponent>()) {
+        const auto& rb = selected.GetComponent<Rigidbody3DComponent>();
+        QJsonObject rbObj;
+        rbObj.insert(QStringLiteral("type"), static_cast<int>(rb.type));
+        rbObj.insert(QStringLiteral("velocity"),
+                     QJsonArray{rb.velocity.x, rb.velocity.y, rb.velocity.z});
+        rbObj.insert(QStringLiteral("mass"), rb.mass);
+        rbObj.insert(QStringLiteral("gravityScale"), rb.gravityScale);
+        object.insert(QStringLiteral("rigidbody3d"), rbObj);
+    }
+    if (selected.HasComponent<BoxCollider3DComponent>()) {
+        const auto& col = selected.GetComponent<BoxCollider3DComponent>();
+        QJsonObject colObj;
+        colObj.insert(QStringLiteral("size"), QJsonArray{col.size.x, col.size.y, col.size.z});
+        colObj.insert(QStringLiteral("offset"), QJsonArray{col.offset.x, col.offset.y, col.offset.z});
+        colObj.insert(QStringLiteral("trigger"), col.isTrigger);
+        object.insert(QStringLiteral("collider3d"), colObj);
+    }
+    if (selected.HasComponent<AnimationComponent>()) {
+        const auto& anim = selected.GetComponent<AnimationComponent>();
+        QJsonObject animObj;
+        animObj.insert(QStringLiteral("name"), Q(anim.clip.name));
+        animObj.insert(QStringLiteral("duration"), anim.clip.duration);
+        animObj.insert(QStringLiteral("loop"), anim.clip.loop);
+        animObj.insert(QStringLiteral("playing"), anim.playing);
+        QJsonArray keysArr;
+        for (const auto& k : anim.clip.keyframes) {
+            QJsonObject kObj;
+            kObj.insert(QStringLiteral("time"), k.time);
+            kObj.insert(QStringLiteral("position"),
+                        QJsonArray{k.position.x, k.position.y, k.position.z});
+            kObj.insert(QStringLiteral("rotation"),
+                        QJsonArray{k.rotation.x, k.rotation.y, k.rotation.z});
+            kObj.insert(QStringLiteral("scale"), QJsonArray{k.scale.x, k.scale.y, k.scale.z});
+            keysArr.append(kObj);
+        }
+        animObj.insert(QStringLiteral("keyframes"), keysArr);
+        object.insert(QStringLiteral("animation"), animObj);
     }
     auto* mime = new QMimeData;
     mime->setData(QStringLiteral("application/x-lux-entity"),
@@ -1316,6 +1386,11 @@ void EditorWindow::PasteEntity() {
     RecordEdit(QStringLiteral("엔티티 붙여넣기"), [this, object, name] {
         Entity entity = document_.CreateEntity(Utf8(name + QStringLiteral(" 복사본")));
         auto& t = entity.GetComponent<TransformComponent>();
+        auto assign2 = [](const QJsonArray& values, Vec2& target) {
+            if (values.size() == 2)
+                target = {static_cast<float>(values[0].toDouble()),
+                          static_cast<float>(values[1].toDouble())};
+        };
         auto assign3 = [](const QJsonArray& values, Vec3& target) {
             if (values.size() == 3)
                 target = {static_cast<float>(values[0].toDouble()),
@@ -1331,10 +1406,112 @@ void EditorWindow::PasteEntity() {
                 static_cast<float>(sprite[0].toDouble()), static_cast<float>(sprite[1].toDouble()),
                 static_cast<float>(sprite[2].toDouble()), static_cast<float>(sprite[3].toDouble())};
         const auto mesh = object.value(QStringLiteral("mesh")).toArray();
-        if (mesh.size() == 2) {
+        if (mesh.size() >= 2) {
             auto& material = entity.AddComponent<MeshRendererComponent>().material;
             material.metallic = static_cast<float>(mesh[0].toDouble());
             material.roughness = static_cast<float>(mesh[1].toDouble());
+            if (mesh.size() == 6) {
+                material.albedoColor = {static_cast<float>(mesh[2].toDouble()),
+                                        static_cast<float>(mesh[3].toDouble()),
+                                        static_cast<float>(mesh[4].toDouble()),
+                                        static_cast<float>(mesh[5].toDouble())};
+            }
+        }
+        if (object.contains(QStringLiteral("camera"))) {
+            const auto camObj = object.value(QStringLiteral("camera")).toObject();
+            auto& cam = entity.AddComponent<CameraComponent>();
+            cam.isPrimary = camObj.value(QStringLiteral("primary")).toBool(true);
+            cam.isPerspective = camObj.value(QStringLiteral("perspective")).toBool(false);
+            cam.fov = std::clamp(static_cast<float>(camObj.value(QStringLiteral("fov")).toDouble(45.0)),
+                                 1.0f, 179.0f);
+            cam.orthoSize = std::max(
+                0.01f, static_cast<float>(camObj.value(QStringLiteral("orthoSize")).toDouble(10.0)));
+        }
+        if (object.contains(QStringLiteral("tilemap"))) {
+            const auto mapObj = object.value(QStringLiteral("tilemap")).toObject();
+            const uint32 w = static_cast<uint32>(mapObj.value(QStringLiteral("width")).toInt(8));
+            const uint32 h = static_cast<uint32>(mapObj.value(QStringLiteral("height")).toInt(8));
+            auto& map = entity.AddComponent<TilemapComponent>();
+            if (map.Resize(w, h)) {
+                map.tileSize = std::clamp(
+                    static_cast<float>(mapObj.value(QStringLiteral("tileSize")).toDouble(1.0)),
+                    0.01f, 64.0f);
+                const auto tilesArr = mapObj.value(QStringLiteral("tiles")).toArray();
+                for (qsizetype i = 0; i < tilesArr.size() && static_cast<size_t>(i) < map.tiles.size();
+                     ++i) {
+                    const int tv = tilesArr[i].toInt(0);
+                    if (tv >= 0 && tv <= 5)
+                        map.tiles[static_cast<size_t>(i)] = static_cast<uint8_t>(tv);
+                }
+            }
+        }
+        if (object.contains(QStringLiteral("rigidbody2d"))) {
+            const auto rbObj = object.value(QStringLiteral("rigidbody2d")).toObject();
+            auto& rb = entity.AddComponent<Rigidbody2DComponent>();
+            const int type = std::clamp(rbObj.value(QStringLiteral("type")).toInt(1), 0, 2);
+            rb.type = static_cast<BodyType>(type);
+            assign2(rbObj.value(QStringLiteral("velocity")).toArray(), rb.velocity);
+            rb.mass = std::max(0.001f,
+                               static_cast<float>(rbObj.value(QStringLiteral("mass")).toDouble(1.0)));
+            rb.gravityScale =
+                static_cast<float>(rbObj.value(QStringLiteral("gravityScale")).toDouble(1.0));
+        }
+        if (object.contains(QStringLiteral("collider2d"))) {
+            const auto colObj = object.value(QStringLiteral("collider2d")).toObject();
+            auto& col = entity.AddComponent<BoxCollider2DComponent>();
+            assign2(colObj.value(QStringLiteral("size")).toArray(), col.size);
+            if (col.size.x <= 0.0f)
+                col.size.x = 1.0f;
+            if (col.size.y <= 0.0f)
+                col.size.y = 1.0f;
+            assign2(colObj.value(QStringLiteral("offset")).toArray(), col.offset);
+            col.isTrigger = colObj.value(QStringLiteral("trigger")).toBool(false);
+        }
+        if (object.contains(QStringLiteral("rigidbody3d"))) {
+            const auto rbObj = object.value(QStringLiteral("rigidbody3d")).toObject();
+            auto& rb = entity.AddComponent<Rigidbody3DComponent>();
+            const int type = std::clamp(rbObj.value(QStringLiteral("type")).toInt(1), 0, 2);
+            rb.type = static_cast<BodyType>(type);
+            assign3(rbObj.value(QStringLiteral("velocity")).toArray(), rb.velocity);
+            rb.mass = std::max(0.001f,
+                               static_cast<float>(rbObj.value(QStringLiteral("mass")).toDouble(1.0)));
+            rb.gravityScale =
+                static_cast<float>(rbObj.value(QStringLiteral("gravityScale")).toDouble(1.0));
+        }
+        if (object.contains(QStringLiteral("collider3d"))) {
+            const auto colObj = object.value(QStringLiteral("collider3d")).toObject();
+            auto& col = entity.AddComponent<BoxCollider3DComponent>();
+            assign3(colObj.value(QStringLiteral("size")).toArray(), col.size);
+            if (col.size.x <= 0.0f)
+                col.size.x = 1.0f;
+            if (col.size.y <= 0.0f)
+                col.size.y = 1.0f;
+            if (col.size.z <= 0.0f)
+                col.size.z = 1.0f;
+            assign3(colObj.value(QStringLiteral("offset")).toArray(), col.offset);
+            col.isTrigger = colObj.value(QStringLiteral("trigger")).toBool(false);
+        }
+        if (object.contains(QStringLiteral("animation"))) {
+            const auto animObj = object.value(QStringLiteral("animation")).toObject();
+            auto& anim = entity.AddComponent<AnimationComponent>();
+            anim.clip.name = Utf8(animObj.value(QStringLiteral("name")).toString(QStringLiteral("Transform")));
+            anim.clip.duration = std::max(
+                0.01f, static_cast<float>(animObj.value(QStringLiteral("duration")).toDouble(1.0)));
+            anim.clip.loop = animObj.value(QStringLiteral("loop")).toBool(true);
+            anim.playing = animObj.value(QStringLiteral("playing")).toBool(true);
+            const auto keysArr = animObj.value(QStringLiteral("keyframes")).toArray();
+            for (const auto& kv : keysArr) {
+                if (!kv.isObject())
+                    continue;
+                const auto kObj = kv.toObject();
+                Keyframe key;
+                key.time = std::max(0.0f,
+                                    static_cast<float>(kObj.value(QStringLiteral("time")).toDouble(0.0)));
+                assign3(kObj.value(QStringLiteral("position")).toArray(), key.position);
+                assign3(kObj.value(QStringLiteral("rotation")).toArray(), key.rotation);
+                assign3(kObj.value(QStringLiteral("scale")).toArray(), key.scale);
+                anim.clip.AddKeyframe(key);
+            }
         }
     });
     RefreshAll();

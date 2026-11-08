@@ -154,6 +154,15 @@ void Core() {
     const auto before = p;
     PhysicsEngine::Step2D(p, body, collider, -1);
     Check(Near(p.x, before.x), "invalid timestep ignored");
+    body.velocity = {std::numeric_limits<float>::quiet_NaN(), 0};
+    PhysicsEngine::Step2D(p, body, collider, 0.1);
+    Check(Near(p.x, before.x) && Near(p.y, before.y), "NaN velocity in Step2D ignored safely");
+    Vec3 p3{0, 2, 0};
+    Rigidbody3DComponent body3;
+    BoxCollider3DComponent collider3;
+    body3.velocity = {0, std::numeric_limits<float>::infinity(), 0};
+    PhysicsEngine::Step3D(p3, body3, collider3, 0.1);
+    Check(Near(p3.y, 2.0f), "infinite velocity in Step3D ignored safely");
     Check(!Input::IsMouseButtonPressed(0) && !Input::IsMouseButtonPressed(33),
           "invalid mouse buttons");
     Check(!Input::IsGamepadButtonPressed(static_cast<LuxGamepadButton>(-1)),
@@ -590,6 +599,28 @@ void Scenes() {
             }
         }
         Check(leftoverTempFiles == 0, "zero temporary or backup files leaked after operations");
+
+        // 8. In-memory SerializeToString / DeserializeFromString roundtrip & NaN/Inf validation
+        std::string memSnapshot;
+        Check(scene.SerializeToString(memSnapshot) && !memSnapshot.empty(),
+              "in-memory SerializeToString succeeds");
+        Scene memRestored;
+        Check(memRestored.DeserializeFromString(memSnapshot) &&
+                  memRestored.GetEntityCount() == scene.GetEntityCount(),
+              "in-memory DeserializeFromString restores scene");
+
+        auto nanEnt = scene.CreateEntity("nan_entity");
+        nanEnt.GetComponent<TransformComponent>().position.x =
+            std::numeric_limits<float>::quiet_NaN();
+        Check(!scene.Serialize(newScenePath) && !scene.SerializeToString(memSnapshot),
+              "NaN transform rejected before corrupting scene file");
+        nanEnt.GetComponent<TransformComponent>().position.x = 0.0f;
+        nanEnt.AddComponent<CameraComponent>().fov = -10.0f;
+        Check(!scene.SerializeToString(memSnapshot), "invalid negative camera FOV rejected");
+        nanEnt.GetComponent<CameraComponent>().fov = 60.0f;
+        nanEnt.AddComponent<BoxCollider2DComponent>().size = {-1.0f, 1.0f};
+        Check(!scene.SerializeToString(memSnapshot), "negative collider size rejected");
+        scene.DestroyEntity(nanEnt);
     }
 }
 void Assets() {

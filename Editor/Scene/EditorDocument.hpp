@@ -18,6 +18,7 @@ public:
     bool Save();
     bool SaveAs(const std::string& path);
     bool ReplaceScene(const std::string& serializedPath, std::optional<uint32> selectedId);
+    bool ReplaceSceneFromData(const std::string& serializedData, std::optional<uint32> selectedId);
 
     bool IsDirty() const noexcept {
         return dirty_;

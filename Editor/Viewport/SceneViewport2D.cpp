@@ -242,6 +242,22 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
         return;
     setFocus();
     if (tool_ == EditorTool::TileBrush || tool_ == EditorTool::TileErase) {
+        const QPointF world = ScreenToWorld(event->position());
+        Entity mapEntity = document_.GetSelected();
+        if (!mapEntity || !mapEntity.HasComponent<TilemapComponent>()) {
+            for (Entity candidate : document_.GetScene().GetEntities()) {
+                if (!candidate.HasComponent<TilemapComponent>())
+                    continue;
+                const auto& map = candidate.GetComponent<TilemapComponent>();
+                const auto& position = candidate.GetComponent<TransformComponent>().position;
+                if (world.x() >= position.x && world.y() >= position.y &&
+                    world.x() < position.x + map.width * map.tileSize &&
+                    world.y() < position.y + map.height * map.tileSize) {
+                    onSelect_(candidate.GetId());
+                    break;
+                }
+            }
+        }
         tilePainting_ = true;
         onBeginEdit_();
         PaintAt(event->position());

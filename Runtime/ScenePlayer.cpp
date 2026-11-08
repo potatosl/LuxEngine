@@ -146,6 +146,7 @@ bool ScenePlayer::LoadScene() {
 
 void ScenePlayer::OnInit() {
     Renderer2D::Init(&GetGpuDevice());
+    Renderer3D::Init(&GetGpuDevice());
     PhysicsEngine::Init();
     if (!LoadScene()) {
         Close();
@@ -178,6 +179,26 @@ void ScenePlayer::UpdateCamera() {
     const float halfWidth = view_.halfHeight * aspect;
     camera_.SetProjection(view_.centerX - halfWidth, view_.centerX + halfWidth,
                           view_.centerY - view_.halfHeight, view_.centerY + view_.halfHeight);
+
+    float fovDegrees = 60.0f;
+    Vec3 camPos{view_.centerX, view_.centerY + 3.0f, std::max(5.0f, view_.halfHeight * 2.0f)};
+    Vec3 camTarget{view_.centerX, view_.centerY, 0.0f};
+    for (Entity entity : scene_.GetEntities()) {
+        if (entity.HasComponent<CameraComponent>() && entity.HasComponent<TransformComponent>()) {
+            const auto& cam = entity.GetComponent<CameraComponent>();
+            const auto& tr = entity.GetComponent<TransformComponent>();
+            if (cam.isPrimary && cam.isPerspective && std::isfinite(cam.fov) && cam.fov > 0.0f &&
+                cam.fov < 180.0f) {
+                fovDegrees = cam.fov;
+                camPos = tr.position;
+                break;
+            }
+        }
+    }
+    camera3D_.SetPerspective(ToRadians(fovDegrees), aspect, 0.1f, 1000.0f);
+    camera3D_.SetPosition(camPos);
+    camera3D_.SetTarget(camTarget);
+    camera3D_.SetUp({0.0f, 1.0f, 0.0f});
 }
 
 void ScenePlayer::OnUpdate(double dt) {
@@ -213,6 +234,22 @@ void ScenePlayer::OnUpdate(double dt) {
 
 void ScenePlayer::OnRender(float) {
     UpdateCamera();
+    bool has3DMeshes = false;
+    for (Entity entity : scene_.GetEntities()) {
+        if (entity.HasComponent<MeshRendererComponent>()) {
+            has3DMeshes = true;
+            break;
+        }
+    }
+    if (has3DMeshes) {
+        DirectionalLight sun;
+        sun.direction = Vec3(0.5f, -1.0f, 0.5f).Normalized();
+        sun.color = {1.0f, 0.98f, 0.95f};
+        sun.intensity = 1.0f;
+        Renderer3D::BeginScene(camera3D_, sun);
+        scene_.OnRender3D();
+        Renderer3D::EndScene();
+    }
     Renderer2D::BeginScene(camera_);
     scene_.OnRender();
     Renderer2D::EndScene();
@@ -221,6 +258,7 @@ void ScenePlayer::OnRender(float) {
 void ScenePlayer::OnShutdown() {
     Input::ClearBindings();
     PhysicsEngine::Shutdown();
+    Renderer3D::Shutdown();
     Renderer2D::Shutdown();
 }
 

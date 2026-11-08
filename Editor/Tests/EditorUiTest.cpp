@@ -93,6 +93,22 @@ int main(int argc, char** argv) {
             checkbox->setChecked(true);
             Check(checkbox->isChecked(), "component can be added in inspector");
         }
+        auto* copyAction = window.findChild<QAction*>(QStringLiteral("copyEntity"));
+        auto* pasteAction = window.findChild<QAction*>(QStringLiteral("pasteEntity"));
+        if (copyAction && pasteAction) {
+            copyAction->trigger();
+            pasteAction->trigger();
+            Check(hierarchy->count() == 3, "copy and paste entity duplicates all components");
+            for (const QString& id :
+                 {QStringLiteral("editorBody2D"), QStringLiteral("editorCollider2D"),
+                  QStringLiteral("editorAnimation")}) {
+                auto* checkbox = window.findChild<QCheckBox*>(id);
+                Check(checkbox && checkbox->isChecked(),
+                      "pasted entity retains physics, collider and animation components");
+            }
+            undo->undo();
+            Check(hierarchy->count() == 2, "undo removes pasted entity");
+        }
         auto* startPreview = window.findChild<QAction*>(QStringLiteral("previewStart"));
         auto* stepPreview = window.findChild<QAction*>(QStringLiteral("previewStep"));
         auto* stopPreview = window.findChild<QAction*>(QStringLiteral("previewStop"));

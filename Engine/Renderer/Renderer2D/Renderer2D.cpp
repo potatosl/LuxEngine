@@ -60,6 +60,13 @@ void OrthographicCamera::RecalculateMatrix() {
 }
 
 void Renderer2D::Init(GpuDevice* gpu) {
+    if (device == gpu && !active) {
+        for (size_t i = 0; i < usedBatches; ++i)
+            batches[i].owner.reset();
+        usedBatches = 0;
+        stats = {};
+        return;
+    }
     Shutdown();
     device = gpu;
 }
