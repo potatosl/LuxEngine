@@ -596,6 +596,27 @@ void TestArchiveSecurityAndFuzzing() {
     Check(zip_close(z) == 0, "rev collision fixture zip finalized");
     Check(!ImportProject(revCollZip, files.path / "rev_coll_imported", error),
           "Order-reversed file-directory collision in zip safely rejected");
+
+#if defined(_WIN32)
+    // 12. Windows Directory Junction rejection in project export
+    const auto juncProjDir = files.path / "junc_proj";
+    auto juncProj = EditorProject::Create(juncProjDir, "JuncProj", ProjectTemplate::Empty, error);
+    Check(juncProj.has_value(), "junction test project created");
+    const auto externalTarget = files.path / "secret_external";
+    std::filesystem::create_directories(externalTarget);
+    std::ofstream(externalTarget / "secret.txt") << "sensitive system data";
+
+    const auto junctionLink = juncProjDir / "Assets" / "LinkedJunction";
+    std::string cmd = "cmd /c mklink /J \"" + junctionLink.string() + "\" \"" + externalTarget.string() + "\" >nul 2>nul";
+    system(cmd.c_str());
+
+    const auto juncArchive = files.path / "junc_test.luxpack";
+    Check(!ExportProject(*juncProj, juncArchive, error),
+          "Project containing directory junction safely rejected during export");
+
+    std::string rmCmd = "cmd /c rmdir \"" + junctionLink.string() + "\" >nul 2>nul";
+    system(rmCmd.c_str());
+#endif
 }
 
 } // namespace

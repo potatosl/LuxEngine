@@ -8,6 +8,51 @@ $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
 
+function Test-VulkanGpuAvailable {
+    $vulkaninfo = $null
+    if ($env:VULKAN_SDK -and (Test-Path (Join-Path $env:VULKAN_SDK "bin\vulkaninfo.exe"))) {
+        $vulkaninfo = Join-Path $env:VULKAN_SDK "bin\vulkaninfo.exe"
+    } elseif (Test-Path "C:\Windows\System32\vulkaninfo.exe") {
+        $vulkaninfo = "C:\Windows\System32\vulkaninfo.exe"
+    } else {
+        $vCmd = Get-Command vulkaninfo.exe -ErrorAction SilentlyContinue
+        if ($vCmd) { $vulkaninfo = $vCmd.Source }
+    }
+
+    if (-not $vulkaninfo -or -not (Test-Path $vulkaninfo)) {
+        return @{ Available = $false; Reason = "vulkaninfo.exe not found" }
+    }
+
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $vulkaninfo
+        $psi.Arguments = "--summary"
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $stdOutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stdErrTask = $proc.StandardError.ReadToEndAsync()
+        if (-not $proc.WaitForExit(10000)) {
+            $proc.Kill()
+            return @{ Available = $false; Reason = "vulkaninfo --summary timed out" }
+        }
+        $stdout = $stdOutTask.Result
+
+        if ($proc.ExitCode -eq 0 -and ($stdout -match "GPU\d+:" -or $stdout -match "deviceName")) {
+            $gpuMatch = [regex]::Match($stdout, "deviceName\s*=\s*(.+)")
+            $deviceName = if ($gpuMatch.Success) { $gpuMatch.Groups[1].Value.Trim() } else { "Generic Vulkan GPU" }
+            return @{ Available = $true; DeviceName = $deviceName }
+        } else {
+            return @{ Available = $false; Reason = "vulkaninfo exit code $($proc.ExitCode) or no physical GPU listed" }
+        }
+    } catch {
+        return @{ Available = $false; Reason = $_.Exception.Message }
+    }
+}
+
 Write-Host "=== Testing LuxPlayer Standalone Portable Package ==="
 
 $testStaging = $StagingDir
@@ -46,12 +91,8 @@ try {
         }
     }
 
-    # Sanitize PATH: retain Windows System32 and Vulkan runtime location
+    # Sanitize PATH: retain standard Windows System32 and Vulkan SDK bin if present
     $cleanPath = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
-    $vCmd = Get-Command vulkan-1.dll -ErrorAction SilentlyContinue
-    if ($vCmd) {
-        $cleanPath = "$cleanPath;$(Split-Path $vCmd.Source)"
-    }
     if ($env:VULKAN_SDK -and (Test-Path (Join-Path $env:VULKAN_SDK "bin"))) {
         $cleanPath = "$cleanPath;$env:VULKAN_SDK\bin"
     } elseif ($env:VK_SDK_PATH -and (Test-Path (Join-Path $env:VK_SDK_PATH "bin"))) {
@@ -110,6 +151,9 @@ try {
 
     # 3. Test 'LuxPlayer.exe scenes/Demo.lux --frames 5'
     Write-Host "3. Testing 'LuxPlayer.exe scenes/Demo.lux --frames 5'..."
+    $gpuCheck = Test-VulkanGpuAvailable
+    Write-Host "GPU probe result: Available=$($gpuCheck.Available), Details=$($gpuCheck.DeviceName)$($gpuCheck.Reason)"
+
     $psi3 = New-Object System.Diagnostics.ProcessStartInfo
     $psi3.FileName = $playerExe
     $psi3.Arguments = "scenes/Demo.lux --frames 5"
@@ -130,18 +174,25 @@ try {
     $err3 = $stdErrTask3.Result
     Write-Host "Player run output:`n$output3"
     if ($err3) { Write-Host "Player run stderr:`n$err3" }
-    if ($proc3.ExitCode -ne 0) {
-        # Check if failure is due to running on a headless CI VM without physical GPU / display
-        if ($err3 -match "(No Vulkan|Failed to find|Failed to create Vulkan|VK_ERROR|surface|swapchain)" -or
-            $output3 -match "(No Vulkan|Failed to find|Failed to create Vulkan|VK_ERROR|surface|swapchain)" -or
-            $proc3.ExitCode -eq 1 -or $proc3.ExitCode -eq 3) {
-            Write-Host "Note: Vulkan display device unavailable in headless environment (exit code $($proc3.ExitCode)). CLI options and portable runtime integrity successfully verified."
-        } else {
-            throw "LuxPlayer.exe demo run failed with exit code $($proc3.ExitCode): $err3"
-        }
+
+    $gpuRenderPassed = $false
+    if ($proc3.ExitCode -eq 0) {
+        $gpuRenderPassed = $true
+        Write-Host "[GPU_RENDER_PASS] LuxPlayer successfully rendered frames."
+    } elseif ($gpuCheck.Available) {
+        # Physical GPU is present, so failure is a real bug/crash, NOT a headless restriction!
+        throw "[GPU_RENDER_FAIL] Physical GPU ($($gpuCheck.DeviceName)) is present, but LuxPlayer failed with exit code $($proc3.ExitCode): $err3"
+    } else {
+        # Headless VM environment without physical Vulkan GPU
+        Write-Host "[GPU_RENDER_SKIPPED] Headless environment without physical GPU detected ($($gpuCheck.Reason), exit code $($proc3.ExitCode))."
+        Write-Host "[CLI_PASS] CLI options and standalone runtime integrity verified."
     }
 
-    Write-Host "`n=== Standalone LuxPlayer Verification: ALL PASSED ==="
+    if ($gpuRenderPassed) {
+        Write-Host "`n=== Standalone LuxPlayer Verification: ALL PASSED (CLI + GPU Render) ==="
+    } else {
+        Write-Host "`n=== Standalone LuxPlayer Verification: CLI PASSED (GPU Render SKIPPED - Headless) ==="
+    }
 }
 finally {
     if ($cleanup -and (Test-Path $testStaging)) {

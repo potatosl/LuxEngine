@@ -5,7 +5,7 @@ lux_set_target_warnings(LuxEngineTests)
 lux_copy_runtime(LuxEngineTests)
 
 # Headless suites need no display or GPU.
-foreach(suite core physics2d scene assets audio window)
+foreach(suite core physics2d scene assets audio window security)
     add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
     set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 30 LABELS headless
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")

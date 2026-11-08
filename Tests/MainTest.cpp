@@ -143,6 +143,10 @@ struct Files {
     void Text(const char* name, const char* data) const {
         std::ofstream(Path(name)) << data;
     }
+    void Binary(const char* name, const void* data, size_t size) const {
+        std::ofstream out(Path(name), std::ios::binary);
+        out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
+    }
 };
 using namespace LuxEngine;
 void Core() {
@@ -2520,6 +2524,71 @@ void LongRun() {
     rotating.Release();
     graphics.ValidationClean("long run");
 }
+
+void Security() {
+    Files files;
+    RawMeshData mesh;
+
+    // 1. OBJ Mesh float safety (NaN, Inf)
+    files.Text("nan.obj", "v NaN 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    Check(!AssetManager::LoadMesh(files.Path("nan.obj"), mesh), "NaN float in OBJ rejected");
+
+    files.Text("inf.obj", "v 0 Infinity 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    Check(!AssetManager::LoadMesh(files.Path("inf.obj"), mesh), "Inf float in OBJ rejected");
+
+    // 2. OBJ Mesh index safety (out-of-bounds, negative out-of-bounds, LLONG_MIN underflow)
+    files.Text("neg_oob.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf -99999 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("neg_oob.obj"), mesh), "out-of-bounds negative index rejected");
+
+    files.Text("pos_oob.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 99999 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("pos_oob.obj"), mesh), "out-of-bounds positive index rejected");
+
+    files.Text("underflow.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf -9223372036854775808 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("underflow.obj"), mesh), "INT64_MIN index rejected without crash");
+
+    // 3. OBJ Malformed syntax (degenerate faces, empty tokens)
+    files.Text("empty_face.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf\n");
+    Check(!AssetManager::LoadMesh(files.Path("empty_face.obj"), mesh), "empty face rejected");
+
+    files.Text("two_v_face.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("two_v_face.obj"), mesh), "two-vertex face rejected");
+
+    files.Text("corrupt_token.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf // 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("corrupt_token.obj"), mesh), "corrupt token face rejected");
+
+    // 4. Texture decompression bomb prevention
+    // Construct a 54-byte BMP header with width=16384, height=16384 (would require 1 GiB decoded)
+    {
+        std::vector<uint8> bombBmp(54, 0);
+        bombBmp[0] = 'B';
+        bombBmp[1] = 'M';
+        *reinterpret_cast<uint32*>(&bombBmp[2]) = 54;
+        *reinterpret_cast<uint32*>(&bombBmp[10]) = 54;
+        *reinterpret_cast<uint32*>(&bombBmp[14]) = 40;
+        *reinterpret_cast<int32*>(&bombBmp[18]) = 16384;
+        *reinterpret_cast<int32*>(&bombBmp[22]) = 16384;
+        *reinterpret_cast<uint16*>(&bombBmp[26]) = 1;
+        *reinterpret_cast<uint16*>(&bombBmp[28]) = 32;
+        files.Binary("texture_bomb.bmp", bombBmp.data(), bombBmp.size());
+        Check(!AssetManager::LoadTexture(files.Path("texture_bomb.bmp"), nullptr),
+              "texture bomb with oversized dimensions rejected in header");
+        Check(!AssetManager::HasTexture(files.Path("texture_bomb.bmp")),
+              "texture bomb not cached");
+    }
+
+    // 5. Corrupted image file
+    files.Text("corrupt.png", "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00");
+    Check(!AssetManager::LoadTexture(files.Path("corrupt.png"), nullptr), "truncated PNG rejected");
+    Check(!AssetManager::HasTexture(files.Path("corrupt.png")), "corrupt PNG not cached");
+
+    // 6. Shader byte loader limits
+    std::vector<uint8> shaderBytes;
+    files.Text("zero_shader", "");
+    Check(!AssetManager::LoadShaderBytes(files.Path("zero_shader"), shaderBytes), "zero byte shader rejected");
+
+    AssetManager::Shutdown();
+}
+
 int vulkanValidationMessages = 0;
 SDL_LogOutputFunction defaultLogOutput = nullptr;
 void* defaultLogData = nullptr;
@@ -2560,6 +2629,8 @@ int main(int argc, char** argv) {
             Stress();
         else if (suite == "longrun")
             LongRun();
+        else if (suite == "security")
+            Security();
         else
             throw std::runtime_error("Unknown suite");
         if (vulkanValidationMessages != 0)

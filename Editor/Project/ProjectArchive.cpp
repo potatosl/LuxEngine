@@ -1,6 +1,16 @@
 #include "ProjectArchive.hpp"
 #include "PathEncoding.hpp"
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -72,6 +82,18 @@ std::string ToLowerAscii(std::string_view s) {
     for (char c : s)
         out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
     return out;
+}
+
+bool IsReparsePointOrSymlink(const std::filesystem::path& p) {
+    std::error_code ec;
+    if (std::filesystem::is_symlink(p, ec))
+        return true;
+#if defined(_WIN32)
+    const DWORD attrs = GetFileAttributesW(p.wstring().c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT))
+        return true;
+#endif
+    return false;
 }
 
 std::filesystem::path TemporarySibling(const std::filesystem::path& target) {
@@ -277,6 +299,11 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
     // === PASS 2: Safe Extraction Pass ===
     // Extract entries to staging directory and verify strict filesystem boundaries.
     const auto stagingNorm = staging.lexically_normal();
+    if (IsReparsePointOrSymlink(stagingNorm)) {
+        error = "압축 해제 대상 기본 폴더가 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)입니다.";
+        zip_close(zip);
+        return false;
+    }
     uint64_t actualExtractedTotal = 0;
 
     for (const auto& entry : entries) {
@@ -288,12 +315,17 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
             break;
         }
 
-        // Boundary check: ensure no parent path in the staging area is a symlink or junction
+        // Boundary check: ensure target and all parent components in staging are not symlinks or junctions
+        if (IsReparsePointOrSymlink(target)) {
+            error = "압축 해제 대상 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 존재합니다.";
+            break;
+        }
+
         std::error_code ec;
         auto cur = target.parent_path();
         while (cur != stagingNorm && cur.has_relative_path()) {
-            if (std::filesystem::is_symlink(cur, ec)) {
-                error = "압축 해제 경로에 보안상 허용되지 않는 심볼릭 링크가 감지되었습니다.";
+            if (IsReparsePointOrSymlink(cur)) {
+                error = "압축 해제 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 감지되었습니다.";
                 break;
             }
             cur = cur.parent_path();
@@ -306,8 +338,17 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
             error = "압축 파일의 폴더를 만들 수 없습니다: " + ec.message();
             break;
         }
+        if (IsReparsePointOrSymlink(entry.isDirectory ? target : target.parent_path())) {
+            error = "압축 해제 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 감지되었습니다.";
+            break;
+        }
         if (entry.isDirectory)
             continue;
+
+        if (IsReparsePointOrSymlink(target)) {
+            error = "압축 해제 대상 파일 경로에 심볼릭 링크 또는 접점(Junction)이 감지되었습니다.";
+            break;
+        }
 
         zip_file_t* input = zip_fopen_index(zip, entry.index, 0);
         std::ofstream output(target, std::ios::binary | std::ios::trunc);
@@ -411,8 +452,8 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
                 iterator.disable_recursion_pending();
             continue;
         }
-        if (iterator->is_symlink(ec)) {
-            error = "심볼릭 링크가 있는 프로젝트는 내보낼 수 없습니다.";
+        if (IsReparsePointOrSymlink(iterator->path())) {
+            error = "심볼릭 링크 또는 접점(Junction)이 있는 프로젝트는 보안상 내보낼 수 없습니다.";
             break;
         }
         if (!iterator->is_regular_file(ec))

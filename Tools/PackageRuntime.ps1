@@ -47,19 +47,25 @@ if (Test-Path $sdlDll) {
     throw "Packaging failure: SDL3.dll not found in $binSource or $BuildDir/bin"
 }
 
-# Copy Vulkan loader DLL if available in system, Vulkan SDK, or PATH
+# Copy Vulkan loader DLL strictly from verified system or official Vulkan SDK locations
 $vulkanSource = $null
-$vCmd = Get-Command vulkan-1.dll -ErrorAction SilentlyContinue
-if ($vCmd) {
-    $vulkanSource = $vCmd.Source
-} elseif (Test-Path "C:\Windows\System32\vulkan-1.dll") {
+if (Test-Path "C:\Windows\System32\vulkan-1.dll") {
     $vulkanSource = "C:\Windows\System32\vulkan-1.dll"
-} elseif ($env:VULKAN_SDK -and (Test-Path (Join-Path $env:VULKAN_SDK "bin/vulkan-1.dll"))) {
-    $vulkanSource = Join-Path $env:VULKAN_SDK "bin/vulkan-1.dll"
+} elseif ($env:VULKAN_SDK -and (Test-Path (Join-Path $env:VULKAN_SDK "bin\vulkan-1.dll"))) {
+    $vulkanSource = Join-Path $env:VULKAN_SDK "bin\vulkan-1.dll"
+} elseif ($env:VK_SDK_PATH -and (Test-Path (Join-Path $env:VK_SDK_PATH "bin\vulkan-1.dll"))) {
+    $vulkanSource = Join-Path $env:VK_SDK_PATH "bin\vulkan-1.dll"
 }
+
 if ($vulkanSource -and (Test-Path $vulkanSource)) {
+    $vulkanItem = Get-Item $vulkanSource
+    if ($vulkanItem.Length -lt 100KB) {
+        throw "Packaging failure: vulkan-1.dll at $vulkanSource is suspiciously small ($($vulkanItem.Length) bytes)"
+    }
     Copy-Item -Path $vulkanSource -Destination $playerStaging -Force
-    Write-Host "Bundled vulkan-1.dll from $vulkanSource"
+    Write-Host "Bundled vulkan-1.dll from verified source: $vulkanSource ($($vulkanItem.Length) bytes)"
+} else {
+    Write-Warning "vulkan-1.dll not found in System32 or VULKAN_SDK. Standalone package will rely on host system Vulkan loader."
 }
 
 # Copy shaders
