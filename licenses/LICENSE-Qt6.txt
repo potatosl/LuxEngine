@@ -1,0 +1,16 @@
+Qt 6 Libraries (LGPLv3 Notice)
+
+The LuxEditor application uses the Qt GUI toolkit (version 6.x) under the
+terms of the GNU Lesser General Public License version 3 (LGPLv3).
+
+Qt is copyright (C) 2026 The Qt Company Ltd. and other contributors.
+
+Under the LGPLv3:
+1. You may obtain the complete machine-readable copy of the source code for Qt
+   at https://www.qt.io/download or https://code.qt.io/.
+2. The Qt libraries are dynamically linked by LuxEditor. You may modify the Qt
+   libraries and relink or replace the shared libraries (DLLs) with your own
+   compatible version.
+3. No reverse engineering restrictions are imposed on user debugging of modifications
+   to the Qt libraries.
+4. Full text of the LGPLv3 license is available at https://www.gnu.org/licenses/lgpl-3.0.html.

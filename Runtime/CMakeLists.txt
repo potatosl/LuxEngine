@@ -25,6 +25,7 @@ lux_set_target_warnings(LuxRuntime)
 # Standalone scene player used by the editor's "run in window" command.
 add_executable(LuxPlayer Player/Main.cpp)
 target_link_libraries(LuxPlayer PRIVATE LuxEngine::Runtime)
+target_compile_definitions(LuxPlayer PRIVATE LUX_RUNTIME_ENGINE_VERSION="${LuxEngine_VERSION}")
 lux_set_target_warnings(LuxPlayer)
 if(MSVC)
     target_compile_options(LuxPlayer PRIVATE /utf-8)

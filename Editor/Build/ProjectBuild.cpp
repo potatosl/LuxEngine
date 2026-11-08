@@ -156,16 +156,40 @@ BuildTools DetectBuildTools(const fs::path& applicationDirectory,
     if (const std::string sdk = env("LUX_ENGINE_DIR"); !sdk.empty()) {
         const fs::path root = PathFromUtf8(sdk);
         for (const fs::path& candidate :
-             {root, root / "lib/cmake/LuxEngine"})
+             {root, root / "lib/cmake/LuxEngine", root / "cmake/LuxEngine"})
             if (HasEnginePackage(candidate)) {
                 tools.enginePackage = candidate;
                 break;
             }
     }
+    if (tools.enginePackage.empty()) {
+        if (const std::string prefix = env("CMAKE_PREFIX_PATH"); !prefix.empty()) {
+            size_t start = 0;
+            while (start <= prefix.size()) {
+                size_t end = prefix.find(PathSeparator, start);
+                if (end == std::string::npos)
+                    end = prefix.size();
+                if (end > start) {
+                    const fs::path candRoot = PathFromUtf8(prefix.substr(start, end - start));
+                    for (const fs::path& c :
+                         {candRoot, candRoot / "lib/cmake/LuxEngine", candRoot / "cmake/LuxEngine"}) {
+                        if (HasEnginePackage(c)) {
+                            tools.enginePackage = c;
+                            break;
+                        }
+                    }
+                    if (!tools.enginePackage.empty())
+                        break;
+                }
+                start = end + 1;
+            }
+        }
+    }
     if (tools.enginePackage.empty())
         for (const fs::path& relative :
              {fs::path("lib/cmake/LuxEngine"), fs::path("../lib/cmake/LuxEngine"),
-              fs::path("../../lib/cmake/LuxEngine")}) {
+              fs::path("../../lib/cmake/LuxEngine"), fs::path("cmake/LuxEngine"),
+              fs::path("../cmake/LuxEngine"), fs::path("../../cmake/LuxEngine")}) {
             const fs::path candidate = (applicationDirectory / relative).lexically_normal();
             if (HasEnginePackage(candidate)) {
                 tools.enginePackage = candidate;
@@ -187,7 +211,7 @@ std::string DescribeMissingTools(const BuildTools& tools) {
         message += "CMake를 찾을 수 없습니다. CMake를 설치하거나 환경 변수 LUX_CMAKE에 cmake 경로를 지정하세요.\n";
     if (tools.enginePackage.empty())
         message += "설치된 LuxEngine 패키지를 찾을 수 없습니다. 엔진을 `cmake --install`로 설치하고 환경 변수 "
-                   "LUX_ENGINE_DIR에 설치 폴더를 지정하세요.\n";
+                   "LUX_ENGINE_DIR 또는 CMAKE_PREFIX_PATH에 설치 폴더를 지정하세요.\n";
     return message;
 }
 

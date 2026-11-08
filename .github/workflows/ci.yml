@@ -75,7 +75,7 @@ jobs:
             exit 1
           }
 
-      - name: Build Engine & Editor (Debug)
+      - name: Build Engine, Editor & Tests (Debug)
         shell: pwsh
         run: |
           cmake --build build --config Debug -- /m /v:minimal
@@ -88,15 +88,33 @@ jobs:
             }
           }
 
+      - name: Build Engine, Editor & Tests (Release)
+        shell: pwsh
+        run: |
+          cmake --build build --config Release -- /m /v:minimal
+          if ($env:Qt6_DIR) {
+            $qtBin = Join-Path (Split-Path (Split-Path (Split-Path $env:Qt6_DIR))) "bin"
+            $windeployqt = Join-Path $qtBin "windeployqt.exe"
+            if (Test-Path $windeployqt) {
+              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Release/LuxEditorUiTests.exe
+              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Release/LuxEditorDocumentTests.exe
+            }
+          }
+
       - name: List Registered CTest Tests
         shell: pwsh
         run: |
           ctest --test-dir build -C Debug -N
 
-      - name: Run Headless Engine & Editor UI Tests
+      - name: Run Headless Engine & Editor UI Tests (Debug)
         shell: pwsh
         run: |
           ctest --test-dir build -C Debug --output-on-failure -L headless -LE "long|slow" --timeout 180
+
+      - name: Run Headless Engine & Editor UI Tests (Release)
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release --output-on-failure -L headless -LE "long|slow" --timeout 180
 
       - name: Run Editor UI Undo/Redo & Clipboard Regression Verbose
         shell: pwsh
@@ -117,50 +135,35 @@ jobs:
           & "./build/bin/Debug/LuxFuzzScene.exe"
           & "./build/bin/Debug/LuxFuzzScene.exe" --runs 10000
 
-      - name: Install SDK (Debug)
+      - name: Package LuxEngine SDK
         shell: pwsh
         run: |
-          cmake --install build --config Debug --prefix ./installed_sdk
+          & pwsh Tools/PackageSdk.ps1 -BuildDir build -OutputDir dist
 
-      - name: Build & Run SDK Consumer Project
+      - name: Verify Relocated SDK & MinimalGame Consumer
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path consumer -Force | Out-Null
-          @'
-          cmake_minimum_required(VERSION 3.24)
-          project(ConsumerTest LANGUAGES CXX)
-          set(CMAKE_CXX_STANDARD 20)
-          set(CMAKE_CXX_STANDARD_REQUIRED ON)
-          find_package(LuxEngine CONFIG REQUIRED)
-          add_executable(ConsumerApp main.cpp)
-          target_link_libraries(ConsumerApp PRIVATE LuxEngine::Engine LuxEngine::Runtime)
-          lux_copy_shaders(ConsumerApp)
-          '@ | Out-File consumer/CMakeLists.txt -Encoding utf8
-          @'
-          #include "Engine/Core/Math.hpp"
-          #include "Engine/Scene/Scene.hpp"
-          #include "Engine/Scene/Entity.hpp"
-          #include <iostream>
-          int main() {
-              LuxEngine::Scene scene;
-              auto e = scene.CreateEntity("TestEntity");
-              std::cout << "ConsumerApp entity count: " << scene.GetEntityCount() << std::endl;
-              return (scene.GetEntityCount() == 1) ? 0 : 1;
-          }
-          '@ | Out-File consumer/main.cpp -Encoding utf8
-          $sdkCmakeDir = (Resolve-Path "./installed_sdk/lib/cmake/LuxEngine").Path
-          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif (Test-Path "C:/vcpkg") { "C:/vcpkg" } else { (Split-Path (Split-Path (Get-Command vcpkg).Source)) }
-          $consumerArgs = @(
-            "-S", "consumer",
-            "-B", "consumer/build",
-            "-A", "x64",
-            "-DLuxEngine_DIR=$sdkCmakeDir",
-            "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
-            "-DVCPKG_TARGET_TRIPLET=x64-windows",
-            "-DCMAKE_PREFIX_PATH=C:/LuxDeps"
-          )
-          & cmake @consumerArgs
-          cmake --build consumer/build --config Debug
-          $consumerExe = (Get-ChildItem -Path consumer/build -Filter "ConsumerApp.exe" -Recurse | Select-Object -First 1).FullName
-          Write-Host "Running ConsumerApp: $consumerExe"
-          & $consumerExe
+          & pwsh Tools/VerifySdkRelocation.ps1 -BuildDir build
+
+      - name: Package LuxEditor Standalone Portable
+        shell: pwsh
+        run: |
+          & pwsh Tools/PackageEditor.ps1 -BuildDir build -OutputDir dist
+
+      - name: Verify Standalone Editor in Isolated Environment
+        shell: pwsh
+        run: |
+          & pwsh Tools/VerifyEditorStandalone.ps1
+
+      - name: Package LuxPlayer Standalone Portable
+        shell: pwsh
+        run: |
+          & pwsh Tools/PackageRuntime.ps1 -BuildDir build -OutputDir dist
+
+      - name: Upload Distribution Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuxEngine-Distributions
+          path: |
+            dist/*.zip
+          if-no-files-found: error

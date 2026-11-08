@@ -92,12 +92,25 @@ install(TARGETS LuxEngine LuxRuntime EXPORT LuxEngineTargets
     RUNTIME DESTINATION bin
     INCLUDES DESTINATION include
 )
+if(WIN32 AND TARGET SDL3::SDL3-shared)
+    install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
+endif()
 install(DIRECTORY Engine/ DESTINATION include/Engine FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY Runtime/ DESTINATION include/Runtime FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders/" DESTINATION share/LuxEngine/shaders)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION share/LuxEngine/licenses)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION licenses)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/examples/MinimalGame/" DESTINATION share/LuxEngine/examples/MinimalGame)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/examples/MinimalGame/" DESTINATION examples/MinimalGame)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md" DESTINATION .)
 install(EXPORT LuxEngineTargets NAMESPACE LuxEngine:: DESTINATION lib/cmake/LuxEngine)
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfigVersion.cmake"
     DESTINATION lib/cmake/LuxEngine
+)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfigVersion.cmake"
+    DESTINATION cmake/LuxEngine
 )
