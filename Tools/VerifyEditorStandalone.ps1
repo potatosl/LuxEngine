@@ -61,8 +61,9 @@ try {
     $output = $stdOutTask1.Result
     $err = $stdErrTask1.Result
     Write-Host "Version output: $output"
+    if ($err) { Write-Host "Version stderr: $err" }
     if ($proc.ExitCode -ne 0) {
-        throw "LuxEditor.exe --version failed with exit code $($proc.ExitCode): $err"
+        throw "LuxEditor.exe --version failed with exit code $($proc.ExitCode): $err (output: $output)"
     }
 
     Write-Host "2. Testing 'LuxEditor.exe --smoke-test' in clean environment..."
@@ -71,7 +72,9 @@ try {
     $psi2.Arguments = "--smoke-test"
     $psi2.WorkingDirectory = $testStaging
     $psi2.EnvironmentVariables["PATH"] = $cleanPath
-    $psi2.EnvironmentVariables["QT_QPA_PLATFORM"] = "offscreen"
+    if (Test-Path (Join-Path $testStaging "platforms/qoffscreen.dll")) {
+        $psi2.EnvironmentVariables["QT_QPA_PLATFORM"] = "offscreen"
+    }
     $psi2.UseShellExecute = $false
     $psi2.RedirectStandardOutput = $true
     $psi2.RedirectStandardError = $true
@@ -86,8 +89,9 @@ try {
     $output2 = $stdOutTask.Result
     $err2 = $stdErrTask.Result
     Write-Host "Smoke test output: $output2"
+    if ($err2) { Write-Host "Smoke test stderr: $err2" }
     if ($proc2.ExitCode -ne 0 -or -not ($output2 -like "*Smoke test passed*")) {
-        throw "LuxEditor.exe --smoke-test failed with exit code $($proc2.ExitCode): $err2"
+        throw "LuxEditor.exe --smoke-test failed with exit code $($proc2.ExitCode): $err2 (output: $output2)"
     }
 
     Write-Host "`n=== Standalone LuxEditor Verification: ALL PASSED ==="

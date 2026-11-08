@@ -41,6 +41,15 @@ Get-ChildItem -Path $binSource -Filter "*.dll" | ForEach-Object {
     Copy-Item -Path $_.FullName -Destination $editorStaging -Force
 }
 
+# Search locations for Qt runtime and tools (vcpkg, standalone Qt, CI environment)
+$qtRoots = @()
+if ($env:Qt6_DIR) {
+    $qtRoots += (Split-Path (Split-Path (Split-Path $env:Qt6_DIR)))
+}
+$qtRoots += "C:\vcpkg\installed\x64-windows"
+$qtRoots += "C:\vcpkg\installed\x64-windows\Qt6"
+$qtRoots += "C:\Qt"
+
 # Copy Qt platform plugin
 $platformsDir = Join-Path $editorStaging "platforms"
 New-Item -ItemType Directory -Path $platformsDir -Force | Out-Null
@@ -50,9 +59,14 @@ if (Test-Path (Join-Path $binSource "platforms")) {
     }
 }
 if (-not (Test-Path (Join-Path $platformsDir "qoffscreen.dll"))) {
-    $vcpkgOffscreen = "C:/vcpkg/installed/x64-windows/Qt6/plugins/platforms/qoffscreen.dll"
-    if (Test-Path $vcpkgOffscreen) {
-        Copy-Item -Path $vcpkgOffscreen -Destination $platformsDir -Force
+    foreach ($rootCand in $qtRoots) {
+        if (Test-Path $rootCand) {
+            $candOffscreen = Get-ChildItem -Path $rootCand -Filter "qoffscreen.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($candOffscreen) {
+                Copy-Item -Path $candOffscreen.FullName -Destination $platformsDir -Force
+                break
+            }
+        }
     }
 }
 
@@ -102,10 +116,23 @@ See the `licenses/` directory for full license texts and dependency details.
 "@
 $editorReadme | Out-File -FilePath (Join-Path $editorStaging "README.md") -Encoding utf8
 
-# Check for windeployqt if any required Qt plugin is missing
-$windeployqt = (Get-ChildItem -Path "C:\vcpkg" -Filter "windeployqt.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+# Check for windeployqt to deploy all required Qt runtime dependencies
+$windeployqt = $null
+foreach ($rootCand in $qtRoots) {
+    if (Test-Path $rootCand) {
+        $candWindeployqt = Get-ChildItem -Path $rootCand -Filter "windeployqt.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($candWindeployqt) {
+            $windeployqt = $candWindeployqt.FullName
+            break
+        }
+    }
+}
+if (-not $windeployqt) {
+    $cmd = Get-Command windeployqt -ErrorAction SilentlyContinue
+    if ($cmd) { $windeployqt = $cmd.Source }
+}
 if ($windeployqt -and (Test-Path $windeployqt)) {
-    Write-Host "Running windeployqt to ensure all required Qt dependencies are bundled..."
+    Write-Host "Running windeployqt ($windeployqt) to ensure all required Qt dependencies are bundled..."
     & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw (Join-Path $editorStaging "LuxEditor.exe")
 }
 
