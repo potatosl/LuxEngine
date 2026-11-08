@@ -19,6 +19,7 @@ namespace {
 constexpr uint32 kMaxDeviceRecoveries = 3;
 constexpr int kMaxSwapchainAcquireRetries = 3;
 std::atomic<bool> s_ForceAllowed{false};
+std::atomic<int> s_DefaultValidation{static_cast<int>(GpuValidation::Auto)};
 } // namespace
 
 struct EngineSceneRenderer::State {
@@ -48,6 +49,10 @@ EngineSceneRenderer::~EngineSceneRenderer() {
 
 void EngineSceneRenderer::SetForceAllowed(bool force) {
     s_ForceAllowed.store(force);
+}
+
+void EngineSceneRenderer::SetDefaultValidation(int validationMode) {
+    s_DefaultValidation.store(validationMode);
 }
 
 bool EngineSceneRenderer::Allowed() {
@@ -115,6 +120,7 @@ bool EngineSceneRenderer::InitializeState() {
     GpuDeviceConfig config;
     config.vsync = false;
     config.framesInFlight = 1;
+    config.validation = static_cast<GpuValidation>(s_DefaultValidation.load());
     if (!state->gpu.Initialize(state->window, config)) {
         error_ = QStringLiteral("Vulkan 장치 초기화 실패: %1")
                      .arg(QString::fromStdString(state->gpu.GetLastError()));
@@ -250,6 +256,8 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
     try {
         Renderer2D::BeginScene(camera);
         scene.OnRender();
+        if (postSceneHook_)
+            postSceneHook_();
         Renderer2D::EndScene();
     } catch (const std::exception& exception) {
         s.context2D.AbortScene();

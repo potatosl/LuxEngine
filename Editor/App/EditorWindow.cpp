@@ -502,6 +502,7 @@ void EditorWindow::ImportEditorSettings() {
     Log(QStringLiteral("에디터 설정을 가져왔습니다."));
 }
 void EditorWindow::Log(const QString& message, bool error) {
+    lastLogMessage_ = message;
     consoleOutput_->appendPlainText(message);
     debugPanel_->AddLog(message, error);
     if (error) {
@@ -1246,9 +1247,12 @@ void EditorWindow::RestoreScene(const QByteArray& bytes, std::optional<uint32> s
         return;
     const std::string serialized(bytes.constData(), static_cast<size_t>(bytes.size()));
     restoringHistory_ = true;
-    if (document_.ReplaceSceneFromData(serialized, selected))
+    const bool restored = document_.ReplaceSceneFromData(serialized, selected);
+    if (restored)
         RefreshAll();
     restoringHistory_ = false;
+    if (!restored)
+        Log(QStringLiteral("장면 상태 복원에 실패했습니다."), true);
 }
 void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& edit) {
     if (previewActive_)
@@ -1258,21 +1262,37 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
         return;
     }
     const auto before = SnapshotScene();
+    if (before.isEmpty()) {
+        Log(QStringLiteral("편집 기록 실패 (%1): 편집 전 장면 스냅샷을 생성하지 못했습니다.").arg(name),
+            true);
+        return;
+    }
     const auto previous = SelectedId(document_);
     try {
         edit();
+    } catch (const std::exception& error) {
+        RestoreScene(before, previous);
+        Log(QStringLiteral("편집 실패 (%1): %2 — 이전 장면 상태로 복원했습니다.")
+                .arg(name, QString::fromUtf8(error.what())),
+            true);
+        return;
     } catch (...) {
-        if (!before.isEmpty())
-            RestoreScene(before, previous);
+        RestoreScene(before, previous);
+        Log(QStringLiteral("편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
+                .arg(name),
+            true);
         return;
     }
     const auto after = SnapshotScene();
-    if (!before.isEmpty() && after.isEmpty()) {
+    if (after.isEmpty()) {
         RestoreScene(before, previous);
+        Log(QStringLiteral("편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
+                .arg(name),
+            true);
         return;
     }
     const auto next = SelectedId(document_);
-    if (!before.isEmpty() && !after.isEmpty() && before != after)
+    if (before != after)
         undo_->push(new SceneEditCommand(
             name, [this, before, previous] { RestoreScene(before, previous); },
             [this, after, next] { RestoreScene(after, next); }));

@@ -43,6 +43,19 @@ public:
     explicit EditorWindow(QWidget* parent = nullptr);
     ~EditorWindow() override;
 
+    EditorDocument& GetDocument() noexcept {
+        return document_;
+    }
+    const EditorDocument& GetDocument() const noexcept {
+        return document_;
+    }
+    const QString& LastLogMessage() const noexcept {
+        return lastLogMessage_;
+    }
+    void ExecuteRecordedEdit(const QString& name, const std::function<void()>& edit) {
+        RecordEdit(name, edit);
+    }
+
 private:
     void BuildMenus();
     void BuildLayout();
@@ -228,5 +241,6 @@ private:
     std::vector<BuildDiagnostic> buildDiagnostics_;
     QByteArray buildLineBuffer_;
     QString playerScenePath_;
+    QString lastLogMessage_;
 };
 } // namespace LuxEngine

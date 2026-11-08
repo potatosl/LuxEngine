@@ -6,10 +6,17 @@ if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Forc
 $log = Join-Path $logDir "verify-log.txt"
 "=== START $(Get-Date -Format s) ===" | Out-File $log -Encoding utf8
 function L($m) { $m | Out-File $log -Append -Encoding utf8; Write-Host $m }
+$script:failedSteps = @()
 function Run($name, [scriptblock]$cmd) {
   L "`n=== STEP: $name ==="
   & $cmd 2>&1 | ForEach-Object { "$_" } | Out-File $log -Append -Encoding utf8
-  $code = $LASTEXITCODE; L "=== EXIT [$name]: $code ==="; return $code
+  $code = $LASTEXITCODE
+  if ($null -eq $code) { $code = 0 }
+  L "=== EXIT [$name]: $code ==="
+  if ($code -ne 0) {
+    $script:failedSteps += "$name (exit $code)"
+  }
+  return $code
 }
 Set-Location $root
 L "git: $(git rev-parse --abbrev-ref HEAD) $(git rev-parse --short HEAD)"
@@ -39,7 +46,7 @@ $c1 = Run "configure engine" { & $cmake -S $root -B $b @genArgs -DLUX_BUILD_TEST
 if ($c1 -eq 0) {
   $c2 = Run "build engine" { & $cmake --build $b --config Debug -- /m /v:minimal }
   if ($c2 -eq 0) {
-    Run "ctest" { & $ctest --test-dir $b -C Debug --output-on-failure --timeout 180 } | Out-Null
+    $ct1 = Run "ctest" { & $ctest --test-dir $b -C Debug --output-on-failure --timeout 180 }
   }
 }
 # Games built from the editor find the engine through this installed SDK (LUX_ENGINE_DIR).
@@ -63,18 +70,18 @@ if ($s1 -eq 0) {
 $c3 = Run "configure editor" { & $cmake -S $root -B $b -DLUX_BUILD_EDITOR=ON @tc }
 if ($c3 -eq 0) {
   $c4 = Run "build editor" { & $cmake --build $b --config Debug -- /m /v:minimal }
-  if ($c4 -eq 0) { Run "ctest editor" { & $ctest --test-dir $b -C Debug --output-on-failure -R Editor --timeout 1800 } | Out-Null }
+  if ($c4 -eq 0) { $ct2 = Run "ctest editor" { & $ctest --test-dir $b -C Debug --output-on-failure -R Editor --timeout 1800 } }
 }
 # Release build and tests of everything (engine, runtime, editor).
 $r1 = Run "build all Release" { & $cmake --build $b --config Release -- /m /v:minimal }
-if ($r1 -eq 0) { Run "ctest Release" { & $ctest --test-dir $b -C Release --output-on-failure --timeout 1800 } | Out-Null }
+if ($r1 -eq 0) { $ct3 = Run "ctest Release" { & $ctest --test-dir $b -C Release --output-on-failure --timeout 1800 } }
 # The editor on its own, built against the installed SDK (how it is built outside this repo).
 $eb = "$root/build/editor-standalone"
 $e1 = Run "configure standalone editor" { & $cmake -S "$root/Editor" -B $eb @genArgs -DLUX_BUILD_TESTS=ON "-DLuxEngine_DIR=C:/LuxSDK/lib/cmake/LuxEngine" @tc }
 if ($e1 -eq 0) {
   $e2 = Run "build standalone editor" { & $cmake --build $eb --config Debug -- /m /v:minimal }
   if ($e2 -eq 0) {
-    Run "ctest standalone editor" { & $ctest --test-dir $eb -C Debug --output-on-failure --timeout 1800 } | Out-Null
+    $ct4 = Run "ctest standalone editor" { & $ctest --test-dir $eb -C Debug --output-on-failure --timeout 1800 }
     L "standalone bin: $((Get-ChildItem "$eb/bin/Debug" -Recurse -Include *.exe,qwindows*.dll,*.spv | Select-Object -Expand Name) -join ', ')"
   }
 }
@@ -82,6 +89,12 @@ if ($e1 -eq 0) {
 $fresh = "$root/build/fresh-src"
 if (Test-Path $fresh) { Remove-Item $fresh -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory $fresh | Out-Null
-Run "export HEAD" { cmd /c "git -C `"$root`" archive --format=tar HEAD | tar -x -C `"$fresh`"" } | Out-Null
-Run "configure fresh export" { & $cmake -S $fresh -B "$fresh/_b" @genArgs -DLUX_BUILD_TESTS=ON -DLUX_BUILD_EDITOR=ON @tc } | Out-Null
-L "`n=== DONE $(Get-Date -Format s) ==="
+$f1 = Run "export HEAD" { cmd /c "git -C `"$root`" archive --format=tar HEAD | tar -x -C `"$fresh`"" }
+$f2 = Run "configure fresh export" { & $cmake -S $fresh -B "$fresh/_b" @genArgs -DLUX_BUILD_TESTS=ON -DLUX_BUILD_EDITOR=ON @tc }
+if ($script:failedSteps.Count -gt 0) {
+  L "`n=== FAILED STEPS ($($script:failedSteps.Count)): $($script:failedSteps -join ', ') ==="
+  L "=== DONE (FAILED) $(Get-Date -Format s) ==="
+  exit 1
+}
+L "`n=== DONE (ALL PASSED) $(Get-Date -Format s) ==="
+exit 0

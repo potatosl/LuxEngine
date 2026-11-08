@@ -4,6 +4,7 @@
 #include <QImage>
 #include <QRectF>
 #include <QString>
+#include <functional>
 #include <memory>
 
 namespace LuxEngine {
@@ -45,6 +46,10 @@ public:
     // LUX_EDITOR_FORCE_GPU_VIEWPORT is set, and disabled when LUX_EDITOR_SOFTWARE_VIEWPORT is set.
     static bool Allowed();
     static void SetForceAllowed(bool force);
+    static void SetDefaultValidation(int validationMode);
+    void SetPostSceneHookForTesting(std::function<void()> hook) {
+        postSceneHook_ = std::move(hook);
+    }
 
 private:
     bool InitializeState();
@@ -58,5 +63,6 @@ private:
     bool pendingShutdown_ = false;
     uint32 recoveries_ = 0;
     QString error_;
+    std::function<void()> postSceneHook_;
 };
 } // namespace LuxEngine
