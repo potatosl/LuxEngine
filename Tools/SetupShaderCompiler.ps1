@@ -12,7 +12,12 @@ if (-not $ArchivePath -or -not (Test-Path $ArchivePath)) {
     $ArchivePath = Join-Path $env:TEMP "dxc_2026_09_29.zip"
     Write-Host "Downloading DXC from $dxcUrl..."
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $dxcUrl -OutFile $ArchivePath
+    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        & curl.exe -sSL --fail --retry 5 --retry-connrefused --retry-delay 2 $dxcUrl -o $ArchivePath
+        if ($LASTEXITCODE -ne 0) { throw "curl failed to download DXC archive" }
+    } else {
+        Invoke-WebRequest -Uri $dxcUrl -OutFile $ArchivePath
+    }
     $tempZip = $true
 }
 
