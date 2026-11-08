@@ -672,12 +672,64 @@ bool Scene::Serialize(const std::string& filepath) {
     return true;
 }
 
+namespace {
+constexpr uint64 MaxSceneSizeBytes = 64ull * 1024ull * 1024ull; // 64 MiB
+constexpr uint64 MaxSceneEntities = 100000;                      // 100,000 entities
+constexpr size_t MaxTagStringLength = 256;                        // 256 bytes per tag
+constexpr size_t MaxClipNameLength = 256;                         // 256 bytes per animation clip name
+
+bool IsValidUtf8(std::string_view str) {
+    size_t i = 0;
+    while (i < str.size()) {
+        const auto c = static_cast<unsigned char>(str[i]);
+        if (c < 0x80) {
+            ++i;
+        } else if ((c & 0xE0) == 0xC0) {
+            if (i + 1 >= str.size())
+                return false;
+            const auto c1 = static_cast<unsigned char>(str[i + 1]);
+            if ((c1 & 0xC0) != 0x80 || c < 0xC2)
+                return false;
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 >= str.size())
+                return false;
+            const auto c1 = static_cast<unsigned char>(str[i + 1]);
+            const auto c2 = static_cast<unsigned char>(str[i + 2]);
+            if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80)
+                return false;
+            if (c == 0xE0 && c1 < 0xA0)
+                return false;
+            if (c == 0xED && c1 >= 0xA0)
+                return false;
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            if (i + 3 >= str.size())
+                return false;
+            const auto c1 = static_cast<unsigned char>(str[i + 1]);
+            const auto c2 = static_cast<unsigned char>(str[i + 2]);
+            const auto c3 = static_cast<unsigned char>(str[i + 3]);
+            if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
+                return false;
+            if (c == 0xF0 && c1 < 0x90)
+                return false;
+            if (c == 0xF4 && c1 > 0x8F)
+                return false;
+            i += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
 bool Scene::DeserializeStream(std::istream& in) {
     std::string header;
     unsigned version = 0;
     uint64 count = 0;
     if (!(in >> header >> version >> count) || header != "LuxEngineScene" ||
-        (version != 1 && version != 2) || count > 1000000)
+        (version != 1 && version != 2) || count > MaxSceneEntities)
         return false;
     Scene parsed;
     parsed.nextEntityId_ = 1;
@@ -707,7 +759,11 @@ bool Scene::DeserializeStream(std::istream& in) {
                     entity.AddComponent<T>(std::move(c));
                 }
             };
-            load.operator()<TagComponent>([&](auto& c) { in >> std::quoted(c.tag); });
+            load.operator()<TagComponent>([&](auto& c) {
+                in >> std::quoted(c.tag);
+                if (c.tag.size() > MaxTagStringLength || !IsValidUtf8(c.tag))
+                    in.setstate(std::ios::failbit);
+            });
             load.operator()<TransformComponent>([&](auto& c) {
                 in >> c.position >> c.rotation >> c.scale;
                 if (!Finite(c.position) || !Finite(c.rotation) || !Finite(c.scale))
@@ -760,12 +816,17 @@ bool Scene::DeserializeStream(std::istream& in) {
                     in >> c.width >> c.height >> c.tileSize >> std::quoted(cells);
                     if (c.width == 0 || c.width > 256 || c.height == 0 || c.height > 256 ||
                         !std::isfinite(c.tileSize) || c.tileSize <= 0.0f || c.tileSize > 64.0f ||
-                        cells.size() != c.width * c.height)
+                        cells.size() != static_cast<size_t>(c.width) * c.height) {
                         in.setstate(std::ios::failbit);
+                        return;
+                    }
                     c.tiles.clear();
+                    c.tiles.reserve(cells.size());
                     for (char tile : cells) {
-                        if (tile < '0' || tile > '5')
+                        if (tile < '0' || tile > '5') {
                             in.setstate(std::ios::failbit);
+                            return;
+                        }
                         c.tiles.push_back(static_cast<uint8_t>(tile - '0'));
                     }
                 });
@@ -773,15 +834,20 @@ bool Scene::DeserializeStream(std::istream& in) {
                     size_t keyCount = 0;
                     in >> std::quoted(c.clip.name) >> c.clip.duration >> c.clip.loop >> c.playing >>
                         keyCount;
-                    if (keyCount > 4096 || !std::isfinite(c.clip.duration) ||
-                        c.clip.duration <= 0.0f)
+                    if (c.clip.name.size() > MaxClipNameLength || !IsValidUtf8(c.clip.name) ||
+                        keyCount > 4096 || !std::isfinite(c.clip.duration) ||
+                        c.clip.duration <= 0.0f) {
                         in.setstate(std::ios::failbit);
+                        return;
+                    }
                     for (size_t keyIndex = 0; keyIndex < keyCount && in; ++keyIndex) {
                         Keyframe key;
                         in >> key.time >> key.position >> key.rotation >> key.scale;
                         if (!std::isfinite(key.time) || key.time < 0.0f || !Finite(key.position) ||
-                            !Finite(key.rotation) || !Finite(key.scale))
+                            !Finite(key.rotation) || !Finite(key.scale)) {
                             in.setstate(std::ios::failbit);
+                            return;
+                        }
                         if (in)
                             c.clip.AddKeyframe(key);
                     }
@@ -804,7 +870,7 @@ bool Scene::DeserializeStream(std::istream& in) {
 }
 
 bool Scene::DeserializeFromString(const std::string& data) {
-    if (data.empty())
+    if (data.empty() || data.size() > MaxSceneSizeBytes)
         return false;
     std::istringstream in(data);
     return DeserializeStream(in);
@@ -812,6 +878,10 @@ bool Scene::DeserializeFromString(const std::string& data) {
 
 bool Scene::Deserialize(const std::string& filepath) {
     if (filepath.empty())
+        return false;
+    std::error_code ec;
+    const auto fileSize = std::filesystem::file_size(Utf8Path(filepath), ec);
+    if (ec || fileSize == 0 || fileSize > MaxSceneSizeBytes)
         return false;
     std::ifstream in(Utf8Path(filepath));
     if (!in)

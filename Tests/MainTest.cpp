@@ -833,6 +833,42 @@ void Scenes() {
         nanEnt.AddComponent<BoxCollider2DComponent>().size = {-1.0f, 1.0f};
         Check(!scene.SerializeToString(memSnapshot), "negative collider size rejected");
         scene.DestroyEntity(nanEnt);
+
+        // 13. Phase 2 Scene Parser Security & Boundary Enforcement
+        {
+            Scene safeScene;
+            safeScene.CreateEntity("BaselineEntity");
+            const uint32 baselineCount = safeScene.GetEntityCount();
+
+            // 13a. 0-byte / empty string rejected without modifying scene
+            Check(!safeScene.DeserializeFromString(""), "0-byte string rejected");
+            Check(safeScene.GetEntityCount() == baselineCount, "0-byte preserves scene");
+
+            // 13b. Corrupted headers / versions
+            Check(!safeScene.DeserializeFromString("BadHeader 2 0\n"), "bad header rejected");
+            Check(!safeScene.DeserializeFromString("LuxEngineScene 99 0\n"), "unsupported version rejected");
+            Check(!safeScene.DeserializeFromString("LuxEngineScene 2 100001\n"), "entity count > 100,000 rejected");
+
+            // 13c. Invalid UTF-8 tag string rejected
+            const std::string badUtf8Tag = "LuxEngineScene 2 1\n1\n1 \"\xFF\xFE\xFD\"\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n";
+            Check(!safeScene.DeserializeFromString(badUtf8Tag), "invalid UTF-8 in tag rejected");
+
+            // 13d. Tag string exceeding 256 bytes rejected
+            const std::string longTag(300, 'A');
+            const std::string oversizedTag = "LuxEngineScene 2 1\n1\n1 \"" + longTag + "\"\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n";
+            Check(!safeScene.DeserializeFromString(oversizedTag), "tag > 256 bytes rejected");
+
+            // 13e. Oversized tilemap (> 256x256) rejected
+            const std::string hugeTilemap = "LuxEngineScene 2 1\n1\n0\n0\n0\n0\n0\n0\n0\n0\n0\n1 300 300 1 \"\"\n0\n";
+            Check(!safeScene.DeserializeFromString(hugeTilemap), "tilemap > 256x256 rejected");
+
+            // 13f. Animation clip name > 256 bytes or invalid UTF-8 rejected
+            const std::string oversizedClip = "LuxEngineScene 2 1\n1\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n1 \"" + longTag + "\" 1.0 1 0 0\n";
+            Check(!safeScene.DeserializeFromString(oversizedClip), "animation clip > 256 bytes rejected");
+
+            Check(safeScene.GetEntityCount() == baselineCount,
+                  "all parser failures strictly preserve original scene state");
+        }
     }
 }
 void Assets() {
@@ -936,8 +972,33 @@ void Audio() {
     Check(AudioEngine::PlayMusic(files.Path("tone.wav"), false), "non-loop playback");
     std::this_thread::sleep_for(std::chrono::milliseconds(1400));
     Check(!AudioEngine::IsMusicPlaying(), "music ends naturally");
+
+    // Phase 2: Audio Safety, Callback Lifecycle & Cache Stress Tests
+    // 1. Abnormal volume rejection (NaN, Inf, negative)
+    AudioEngine::SetMasterVolume(std::numeric_limits<float>::quiet_NaN());
+    Check(Near(AudioEngine::GetMasterVolume(), 1.0f), "NaN volume ignored safely");
+    AudioEngine::SetMasterVolume(-0.5f);
+    Check(Near(AudioEngine::GetMasterVolume(), 0.0f), "negative master volume clamped to 0");
+    AudioEngine::SetMasterVolume(1.0f);
+    Check(!AudioEngine::PlaySound(files.Path("tone.wav"), std::numeric_limits<float>::quiet_NaN()),
+          "NaN sound volume rejected");
+
+    // 2. Concurrent sound playback limit (up to 64)
+    for (int i = 0; i < 70; ++i) {
+        AudioEngine::PlaySound(files.Path("tone.wav"), 0.01f);
+    }
+    // 3. Immediate Shutdown() during active playback: MUST NOT cause callback UAF or data race
+    Check(AudioEngine::PlayMusic(files.Path("tone.wav"), true, 0.5f), "looping music before shutdown");
+    Check(AudioEngine::IsMusicPlaying(), "music active before mid-playback shutdown");
     AudioEngine::Shutdown();
-    AudioEngine::Shutdown();
+    Check(!AudioEngine::IsMusicPlaying(), "shutdown safely stops active playback without crash");
+
+    // 4. Repeated Init/Shutdown stress loop
+    for (int loop = 0; loop < 10; ++loop) {
+        Check(AudioEngine::Init(), "Init in stress loop");
+        AudioEngine::PlaySound(files.Path("tone.wav"), 0.1f);
+        AudioEngine::Shutdown();
+    }
     Check(!AudioEngine::IsMusicPlaying(), "audio shutdown");
 }
 void WindowEvents() {

@@ -59,3 +59,19 @@ target_link_libraries(LuxFuzzScene PRIVATE LuxEngine::Engine)
 lux_set_target_warnings(LuxFuzzScene)
 lux_copy_runtime(LuxFuzzScene)
 
+add_test(NAME Engine_fuzz_seeds COMMAND LuxFuzzScene)
+set_tests_properties(Engine_fuzz_seeds PROPERTIES TIMEOUT 30 LABELS headless
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxFuzzScene>")
+
+option(LUX_BUILD_FUZZERS "Build coverage-guided fuzzers using libFuzzer and sanitizers" OFF)
+if(LUX_BUILD_FUZZERS)
+    add_executable(LuxFuzzSceneEngine FuzzScene.cpp)
+    target_link_libraries(LuxFuzzSceneEngine PRIVATE LuxEngine::Engine)
+    target_compile_definitions(LuxFuzzSceneEngine PRIVATE LUX_FUZZING_ENGINE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(LuxFuzzSceneEngine PRIVATE -fsanitize=fuzzer,address,undefined)
+        target_link_options(LuxFuzzSceneEngine PRIVATE -fsanitize=fuzzer,address,undefined)
+    endif()
+    lux_copy_runtime(LuxFuzzSceneEngine)
+endif()
+

@@ -87,6 +87,27 @@ ProcessVulkanSubsystemRetention& GetProcessRetention() {
     static ProcessVulkanSubsystemRetention s_Retention;
     return s_Retention;
 }
+
+// Selectively drains window-specific events for the viewport SDL window without purging global events
+// or affecting other SDL windows / consumers (e.g. keyboard, mouse, or runtime player windows).
+void DrainWindowEvents(SDL_Window* window) {
+    if (!window)
+        return;
+    const SDL_WindowID targetId = SDL_GetWindowID(window);
+    if (targetId == 0)
+        return;
+    SDL_PumpEvents();
+    SDL_FilterEvents(
+        [](void* userdata, SDL_Event* event) -> bool {
+            const SDL_WindowID id = *static_cast<SDL_WindowID*>(userdata);
+            if (event->type >= SDL_EVENT_WINDOW_FIRST && event->type <= SDL_EVENT_WINDOW_LAST) {
+                if (event->window.windowID == id)
+                    return false; // Drop only events targeted to this specific viewport window
+            }
+            return true; // Keep all other events intact for other windows and subsystems
+        },
+        const_cast<SDL_WindowID*>(&targetId));
+}
 } // namespace
 
 struct EngineSceneRenderer::State {
@@ -103,11 +124,10 @@ struct EngineSceneRenderer::State {
         context2D.Shutdown();
         context3D.Shutdown();
         gpu.Shutdown();
+        DrainWindowEvents(window.GetNativeHandle());
         window.Shutdown();
-        if (sdlVideo) {
-            SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        if (sdlVideo)
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        }
     }
 };
 
@@ -187,7 +207,7 @@ bool EngineSceneRenderer::InitializeState(uint32 initialWidth, uint32 initialHei
             QStringLiteral("엔진 창을 만들지 못했습니다: %1").arg(QString::fromUtf8(SDL_GetError()));
         return false;
     }
-    SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+    DrainWindowEvents(state->window.GetNativeHandle());
     GpuDeviceConfig config;
     config.vsync = false;
     config.framesInFlight = 1;
@@ -250,7 +270,7 @@ bool EngineSceneRenderer::BeginViewportFrame(uint32 width, uint32 height) {
                 error_ = QStringLiteral("엔진 창 크기를 바꾸지 못했습니다.");
                 return false;
             }
-            SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+            DrainWindowEvents(s.window.GetNativeHandle());
             s.gpu.NotifyResize();
             s.width = width;
             s.height = height;

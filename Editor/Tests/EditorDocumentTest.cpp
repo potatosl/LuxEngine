@@ -485,7 +485,7 @@ void TestArchiveSecurityAndFuzzing() {
     Check(!ImportProject(escapeZip, files.path / "escape_imported", error),
           "root escape / Zip Slip attempt safely rejected");
 
-    // 4. Zip with Windows reserved name (e.g. CON.txt or AUX.json)
+    // 4. Zip with Windows reserved name (e.g. CON.txt, NUL, COM1, AUX, CONIN$)
     const auto conZip = files.path / "reserved.luxpack";
     z = zip_open(PathUtf8(conZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
     Check(z != nullptr, "reserved zip created");
@@ -497,6 +497,68 @@ void TestArchiveSecurityAndFuzzing() {
 
     Check(!ImportProject(conZip, files.path / "reserved_imported", error),
           "Windows reserved device name (CON) in zip safely rejected");
+
+    // 5. Zip with Alternate Data Stream (:)
+    const auto adsZip = files.path / "ads.luxpack";
+    z = zip_open(PathUtf8(adsZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "ads zip created");
+    zip_source_t* srcAds = zip_source_buffer(z, "stream data", 11, 0);
+    Check(zip_file_add(z, "file.txt:hidden", srcAds, ZIP_FL_ENC_UTF_8) >= 0, "ADS entry added");
+    zip_source_t* srcProjAds = zip_source_buffer(z, "LUXPROJECT 2\nname \"ADS\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjAds, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "ads fixture zip finalized");
+    Check(!ImportProject(adsZip, files.path / "ads_imported", error),
+          "Alternate Data Stream (:) in zip safely rejected");
+
+    // 6. Zip with Trailing Dot and Trailing Space
+    const auto trailingZip = files.path / "trailing.luxpack";
+    z = zip_open(PathUtf8(trailingZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "trailing zip created");
+    zip_source_t* srcDot = zip_source_buffer(z, "dot data", 8, 0);
+    Check(zip_file_add(z, "bad_name.", srcDot, ZIP_FL_ENC_UTF_8) >= 0, "trailing dot entry added");
+    zip_source_t* srcProjTrailing = zip_source_buffer(z, "LUXPROJECT 2\nname \"Trailing\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 73, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjTrailing, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "trailing fixture zip finalized");
+    Check(!ImportProject(trailingZip, files.path / "trailing_imported", error),
+          "Trailing dot/space in zip path safely rejected");
+
+    // 7. Zip with case-insensitive collision on Windows (e.g. Asset.txt vs asset.txt)
+    const auto caseZip = files.path / "case_collision.luxpack";
+    z = zip_open(PathUtf8(caseZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "case collision zip created");
+    zip_source_t* srcCase1 = zip_source_buffer(z, "case1", 5, 0);
+    Check(zip_file_add(z, "Asset.txt", srcCase1, ZIP_FL_ENC_UTF_8) >= 0, "Asset.txt entry added");
+    zip_source_t* srcCase2 = zip_source_buffer(z, "case2", 5, 0);
+    Check(zip_file_add(z, "asset.txt", srcCase2, ZIP_FL_ENC_UTF_8) >= 0, "asset.txt entry added");
+    zip_source_t* srcProjCase = zip_source_buffer(z, "LUXPROJECT 2\nname \"Case\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 69, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjCase, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "case fixture zip finalized");
+    Check(!ImportProject(caseZip, files.path / "case_imported", error),
+          "Case-collision entries in zip safely rejected");
+
+    // 8. Zip with file-directory collision (e.g. "dir" is a file, and "dir/child.txt" is inside it)
+    const auto collZip = files.path / "file_dir_collision.luxpack";
+    z = zip_open(PathUtf8(collZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "collision zip created");
+    zip_source_t* srcFile = zip_source_buffer(z, "file content", 12, 0);
+    Check(zip_file_add(z, "conflict", srcFile, ZIP_FL_ENC_UTF_8) >= 0, "conflict file entry added");
+    zip_source_t* srcChild = zip_source_buffer(z, "child content", 13, 0);
+    Check(zip_file_add(z, "conflict/child.txt", srcChild, ZIP_FL_ENC_UTF_8) >= 0, "conflict/child.txt entry added");
+    zip_source_t* srcProjColl = zip_source_buffer(z, "LUXPROJECT 2\nname \"Coll\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 69, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjColl, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_close(z) == 0, "collision fixture zip finalized");
+    Check(!ImportProject(collZip, files.path / "coll_imported", error),
+          "File-directory collision in zip safely rejected");
+
+    // 9. Zip missing project.luxproj manifest file
+    const auto noProjZip = files.path / "no_manifest.luxpack";
+    z = zip_open(PathUtf8(noProjZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
+    Check(z != nullptr, "no proj zip created");
+    zip_source_t* srcOrphan = zip_source_buffer(z, "orphan data", 11, 0);
+    Check(zip_file_add(z, "orphan.txt", srcOrphan, ZIP_FL_ENC_UTF_8) >= 0, "orphan entry added");
+    Check(zip_close(z) == 0, "no proj fixture zip finalized");
+    Check(!ImportProject(noProjZip, files.path / "no_manifest_imported", error),
+          "Archive missing project.luxproj safely rejected");
 }
 
 } // namespace
