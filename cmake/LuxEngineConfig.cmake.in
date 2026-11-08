@@ -5,23 +5,19 @@ set(LuxEngine_LICENSES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/licenses")
 set(LuxEngine_EXAMPLES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/examples")
 
 include(CMakeFindDependencyMacro)
-# The hints prioritize the SDK prefix directory so relocated packages find their bundled dependencies,
-# followed by the paths the engine was built with as fallback.
-if(NOT TARGET SDL3::SDL3-shared)
-    find_dependency(SDL3 3.2 CONFIG HINTS
-        "${PACKAGE_PREFIX_DIR}"
-        "${PACKAGE_PREFIX_DIR}/lib/cmake/SDL3"
-        "${PACKAGE_PREFIX_DIR}/share/sdl3"
-        "@SDL3_DIR@"
-    )
-endif()
-if(NOT TARGET box2d::box2d)
-    find_dependency(box2d 2.4...<3 CONFIG HINTS
-        "${PACKAGE_PREFIX_DIR}"
-        "${PACKAGE_PREFIX_DIR}/lib/cmake/box2d"
-        "@box2d_DIR@"
-    )
-endif()
+# The hints point at the packages the engine was built with, as well as the SDK prefix directory,
+# so games find them even when relocated or without the same CMAKE_PREFIX_PATH or vcpkg toolchain.
+find_dependency(SDL3 3.2 CONFIG HINTS
+    "@SDL3_DIR@"
+    "${PACKAGE_PREFIX_DIR}"
+    "${PACKAGE_PREFIX_DIR}/lib/cmake/SDL3"
+    "${PACKAGE_PREFIX_DIR}/share/sdl3"
+)
+find_dependency(box2d 2.4...<3 CONFIG HINTS
+    "@box2d_DIR@"
+    "${PACKAGE_PREFIX_DIR}"
+    "${PACKAGE_PREFIX_DIR}/lib/cmake/box2d"
+)
 if(TARGET box2d::box2d)
     set_target_properties(box2d::box2d PROPERTIES
         MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"

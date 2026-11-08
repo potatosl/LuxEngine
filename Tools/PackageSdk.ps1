@@ -80,12 +80,6 @@ if ($sdlLib -and (Test-Path $sdlLib)) {
     Copy-Item -Path $sdlLib -Destination "$sdkStaging/lib/SDL3.lib" -Force
     Write-Host "Bundled SDL3 import lib"
 }
-$sdlCmakeDir = if ($vcpkgBase) { "$vcpkgBase/installed/x64-windows/share/sdl3" } else { "" }
-if ($sdlCmakeDir -and (Test-Path $sdlCmakeDir)) {
-    New-Item -ItemType Directory -Path "$sdkStaging/share/sdl3" -Force | Out-Null
-    Copy-Item -Path "$sdlCmakeDir/*" -Destination "$sdkStaging/share/sdl3" -Recurse -Force
-    Write-Host "Bundled SDL3 CMake package"
-}
 
 # Verify essential files strictly (throw on missing file)
 $requiredFiles = @(

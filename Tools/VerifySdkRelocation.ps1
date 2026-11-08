@@ -54,43 +54,6 @@ try {
         Copy-Item -Path $sdlDll -Destination "$SdkPrefix/bin/SDL3.dll" -Force
     }
 
-    # Bundle Box2D headers, libraries and CMake files into relocated SDK
-    $box2dInclude = "C:/LuxDeps/include/box2d"
-    if (Test-Path $box2dInclude) {
-        New-Item -ItemType Directory -Path "$SdkPrefix/include/box2d" -Force | Out-Null
-        Copy-Item -Path "$box2dInclude/*" -Destination "$SdkPrefix/include/box2d" -Recurse -Force
-    }
-    $box2dLibRelease = "C:/LuxDeps/lib/box2d.lib"
-    if (Test-Path $box2dLibRelease) {
-        Copy-Item -Path $box2dLibRelease -Destination "$SdkPrefix/lib/box2d.lib" -Force
-    }
-    $box2dLibDebug = "C:/LuxDeps/lib/box2dd.lib"
-    if (Test-Path $box2dLibDebug) {
-        Copy-Item -Path $box2dLibDebug -Destination "$SdkPrefix/lib/box2dd.lib" -Force
-    }
-    $box2dCmakeDir = "C:/LuxDeps/lib/cmake/box2d"
-    if (Test-Path $box2dCmakeDir) {
-        New-Item -ItemType Directory -Path "$SdkPrefix/lib/cmake/box2d" -Force | Out-Null
-        Copy-Item -Path "$box2dCmakeDir/*" -Destination "$SdkPrefix/lib/cmake/box2d" -Recurse -Force
-    }
-
-    # Bundle SDL3 headers, import library and CMake files into relocated SDK
-    $vcpkgBase = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif (Test-Path "C:/vcpkg") { "C:/vcpkg" } else { "" }
-    $sdlInclude = if ($vcpkgBase) { "$vcpkgBase/installed/x64-windows/include/SDL3" } else { "" }
-    if ($sdlInclude -and (Test-Path $sdlInclude)) {
-        New-Item -ItemType Directory -Path "$SdkPrefix/include/SDL3" -Force | Out-Null
-        Copy-Item -Path "$sdlInclude/*" -Destination "$SdkPrefix/include/SDL3" -Recurse -Force
-    }
-    $sdlLib = if ($vcpkgBase) { "$vcpkgBase/installed/x64-windows/lib/SDL3.lib" } else { "" }
-    if ($sdlLib -and (Test-Path $sdlLib)) {
-        Copy-Item -Path $sdlLib -Destination "$SdkPrefix/lib/SDL3.lib" -Force
-    }
-    $sdlCmakeDir = if ($vcpkgBase) { "$vcpkgBase/installed/x64-windows/share/sdl3" } else { "" }
-    if ($sdlCmakeDir -and (Test-Path $sdlCmakeDir)) {
-        New-Item -ItemType Directory -Path "$SdkPrefix/share/sdl3" -Force | Out-Null
-        Copy-Item -Path "$sdlCmakeDir/*" -Destination "$SdkPrefix/share/sdl3" -Recurse -Force
-    }
-
     $sdkCmake = Join-Path $SdkPrefix "lib/cmake/LuxEngine"
     if (-not (Test-Path (Join-Path $sdkCmake "LuxEngineConfig.cmake"))) {
         throw "LuxEngineConfig.cmake missing in $sdkCmake"
