@@ -90,13 +90,16 @@ ProcessVulkanSubsystemRetention& GetProcessRetention() {
 
 // Selectively drains window-specific events for the viewport SDL window without purging global events
 // or affecting other SDL windows / consumers (e.g. keyboard, mouse, or runtime player windows).
-void DrainWindowEvents(SDL_Window* window) {
+// If pump is false, only filters already-queued events without pumping Win32 OS messages,
+// preventing re-entrant message dispatch during active Qt paint events.
+void DrainWindowEvents(SDL_Window* window, bool pump = false) {
     if (!window)
         return;
     const SDL_WindowID targetId = SDL_GetWindowID(window);
     if (targetId == 0)
         return;
-    SDL_PumpEvents();
+    if (pump)
+        SDL_PumpEvents();
     SDL_FilterEvents(
         [](void* userdata, SDL_Event* event) -> bool {
             const SDL_WindowID id = *static_cast<SDL_WindowID*>(userdata);
@@ -124,7 +127,7 @@ struct EngineSceneRenderer::State {
         context2D.Shutdown();
         context3D.Shutdown();
         gpu.Shutdown();
-        DrainWindowEvents(window.GetNativeHandle());
+        DrainWindowEvents(window.GetNativeHandle(), true);
         window.Shutdown();
         if (sdlVideo)
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -207,7 +210,7 @@ bool EngineSceneRenderer::InitializeState(uint32 initialWidth, uint32 initialHei
             QStringLiteral("엔진 창을 만들지 못했습니다: %1").arg(QString::fromUtf8(SDL_GetError()));
         return false;
     }
-    DrainWindowEvents(state->window.GetNativeHandle());
+    DrainWindowEvents(state->window.GetNativeHandle(), false);
     GpuDeviceConfig config;
     config.vsync = false;
     config.framesInFlight = 1;
@@ -270,7 +273,7 @@ bool EngineSceneRenderer::BeginViewportFrame(uint32 width, uint32 height) {
                 error_ = QStringLiteral("엔진 창 크기를 바꾸지 못했습니다.");
                 return false;
             }
-            DrainWindowEvents(s.window.GetNativeHandle());
+            DrainWindowEvents(s.window.GetNativeHandle(), false);
             s.gpu.NotifyResize();
             s.width = width;
             s.height = height;

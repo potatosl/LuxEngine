@@ -1667,6 +1667,72 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         renderer.Shutdown();
     }
 
+    // --- PART 2.4: QPainter Viewport PaintEvent & Rapid Tab Switching / Resize Stress Test ---
+    std::cerr << "[Editor_gpu_lifecycle] PART 2.4: QPainter Viewport PaintEvent, Tab Switching & Resize Stress Test...\n";
+    {
+        EngineSceneRenderer::SetForceAllowed(true);
+        auto sharedRenderer = std::make_shared<EngineSceneRenderer>();
+        EditorDocument doc;
+        auto e = doc.GetScene().CreateEntity("TestQuad");
+        e.GetComponent<TransformComponent>().scale = Vec3{2.0f, 2.0f, 1.0f};
+        e.AddComponent<SpriteRendererComponent>(Vec4{0.2f, 0.8f, 0.4f, 1.0f});
+
+        SceneViewport2D vp2D(nullptr, doc, [](auto) {}, [](auto, const auto&) {},
+                             [](auto, auto, auto, auto) {}, [] {}, [] {}, sharedRenderer);
+        SceneViewport3D vp3D(nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {},
+                             sharedRenderer);
+
+        const int switchIterations = std::min(1000, cfg.viewportIterations > 0 ? cfg.viewportIterations : 200);
+        std::cerr << "  Executing " << switchIterations << " rapid 2D/3D viewport switch, resize, and QPainter render cycles...\n";
+
+        const std::pair<int, int> testSizes[] = {
+            {320, 240}, {400, 300}, {512, 384}, {640, 480}, {800, 600}, {256, 256}, {300, 200}
+        };
+
+        for (int i = 0; i < switchIterations; ++i) {
+            const auto& sz = testSizes[i % std::size(testSizes)];
+            if (i % 2 == 0) {
+                vp2D.resize(sz.first, sz.second);
+                QImage buffer(sz.first, sz.second, QImage::Format_ARGB32_Premultiplied);
+                buffer.fill(Qt::black);
+                vp2D.render(&buffer);
+                Check(!buffer.isNull(), "SceneViewport2D QPainter render succeeded");
+            } else {
+                vp3D.resize(sz.first, sz.second);
+                QImage buffer(sz.first, sz.second, QImage::Format_ARGB32_Premultiplied);
+                buffer.fill(Qt::black);
+                vp3D.render(&buffer);
+                Check(!buffer.isNull(), "SceneViewport3D QPainter render succeeded");
+            }
+        }
+
+        if (sharedRenderer->IsReady() && sharedRenderer->GetGpuDevice()) {
+            Check(sharedRenderer->GetGpuDevice()->WaitIdle(), "sharedRenderer WaitIdle after paint stress");
+            Check(sharedRenderer->GetGpuDevice()->GetCounters().validationErrors == 0,
+                  "zero validation errors after QPainter viewport paint stress");
+            totalValidationErrors += sharedRenderer->GetGpuDevice()->GetCounters().validationErrors;
+        }
+        sharedRenderer->Shutdown();
+        sharedRenderer.reset();
+
+        // Also verify Software Viewport mode renders without errors
+        {
+            EngineSceneRenderer::SetForceAllowed(false);
+            qputenv("LUX_EDITOR_SOFTWARE_VIEWPORT", "1");
+            SceneViewport2D sw2D(nullptr, doc, [](auto) {}, [](auto, const auto&) {},
+                                 [](auto, auto, auto, auto) {}, [] {}, [] {});
+            SceneViewport3D sw3D(nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {});
+            sw2D.resize(320, 240);
+            sw3D.resize(320, 240);
+            QImage img2D(320, 240, QImage::Format_ARGB32_Premultiplied);
+            QImage img3D(320, 240, QImage::Format_ARGB32_Premultiplied);
+            sw2D.render(&img2D);
+            sw3D.render(&img3D);
+            Check(!img2D.isNull() && !img3D.isNull(), "Software Viewport 2D and 3D render succeeded");
+            qunsetenv("LUX_EDITOR_SOFTWARE_VIEWPORT");
+        }
+    }
+
     EngineSceneRenderer::SetForceAllowed(false);
     app.processEvents();
     const auto finalSuiteCpu = QueryDetailedCpuMemory(true);

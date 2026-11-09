@@ -51,21 +51,33 @@ std::optional<QPointF> SceneViewport3D::Project(const Vec3& point) const {
     return QPointF(sx, syy);
 }
 void SceneViewport3D::paintEvent(QPaintEvent*) {
-    QPainter painter(this);
-    painter.fillRect(rect(), QColor(27, 33, 42));
-    painter.setRenderHint(QPainter::Antialiasing);
+    // Decouple GPU render/readback phase from QPainter lifecycle.
+    // Vulkan offscreen rendering must complete before QPainter opens on this QWidget
+    // to prevent re-entrant Qt event loop message dispatch from invalidating the raster paint engine.
     engineFrame_ = false;
     if (EngineSceneRenderer::Allowed()) {
         if (!engineRenderer_)
             engineRenderer_ = std::make_shared<EngineSceneRenderer>();
         const qreal ratio = devicePixelRatioF();
-        if (engineRenderer_->Render3D(document_.GetScene(),
-                                     static_cast<int>(std::lround(width() * ratio)),
-                                     static_cast<int>(std::lround(height() * ratio)),
-                                     focus_, yaw_, pitch_, distance_, cachedFrame_)) {
-            painter.drawImage(rect(), cachedFrame_);
-            engineFrame_ = true;
+        const int pxW = static_cast<int>(std::lround(width() * ratio));
+        const int pxH = static_cast<int>(std::lround(height() * ratio));
+        if (pxW > 0 && pxH > 0) {
+            if (engineRenderer_->Render3D(document_.GetScene(), pxW, pxH,
+                                         focus_, yaw_, pitch_, distance_, cachedFrame_)) {
+                engineFrame_ = true;
+            }
         }
+    }
+
+    QPainter painter(this);
+    if (!painter.isActive())
+        return;
+
+    painter.fillRect(rect(), QColor(27, 33, 42));
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    if (engineFrame_ && !cachedFrame_.isNull()) {
+        painter.drawImage(rect(), cachedFrame_);
     }
     const int gridAlpha = engineFrame_ ? 75 : 255;
     auto line = [gridAlpha](QColor color) {
