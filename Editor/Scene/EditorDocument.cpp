@@ -79,6 +79,17 @@ bool EditorDocument::ReplaceScene(const std::string& serializedPath,
     return true;
 }
 
+bool EditorDocument::ReplaceSceneFromData(const std::string& serializedData,
+                                          std::optional<uint32> selectedId) {
+    auto replacement = std::make_unique<Scene>();
+    if (!replacement->DeserializeFromString(serializedData))
+        return false;
+    scene_.swap(replacement);
+    selectedId_ = selectedId && scene_->IsAlive(*selectedId) ? selectedId : std::nullopt;
+    dirty_ = true;
+    return true;
+}
+
 void EditorDocument::Select(std::optional<uint32> id) {
     selectedId_ = id && scene_->IsAlive(*id) ? id : std::nullopt;
 }

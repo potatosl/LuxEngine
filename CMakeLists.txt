@@ -39,6 +39,13 @@ if(NOT DEFINED CMAKE_DEBUG_POSTFIX)
     set(CMAKE_DEBUG_POSTFIX d)
 endif()
 
+# Fallback mapping for imported targets (e.g. Box2D) that only provide Debug and/or Release builds,
+# preventing Visual Studio multi-config generators from failing on RelWithDebInfo or MinSizeRel.
+set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release Debug "")
+set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL Release Debug "")
+set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE Release Debug "")
+set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Debug Release "")
+
 # -------------------------------------------------------------
 # Include Custom CMake Modules
 # -------------------------------------------------------------
@@ -85,12 +92,25 @@ install(TARGETS LuxEngine LuxRuntime EXPORT LuxEngineTargets
     RUNTIME DESTINATION bin
     INCLUDES DESTINATION include
 )
+if(WIN32 AND TARGET SDL3::SDL3-shared)
+    install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
+endif()
 install(DIRECTORY Engine/ DESTINATION include/Engine FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY Runtime/ DESTINATION include/Runtime FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders/" DESTINATION share/LuxEngine/shaders)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION share/LuxEngine/licenses)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION licenses)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/examples/MinimalGame/" DESTINATION share/LuxEngine/examples/MinimalGame)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/examples/MinimalGame/" DESTINATION examples/MinimalGame)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md" DESTINATION .)
 install(EXPORT LuxEngineTargets NAMESPACE LuxEngine:: DESTINATION lib/cmake/LuxEngine)
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfigVersion.cmake"
     DESTINATION lib/cmake/LuxEngine
+)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/LuxEngineConfigVersion.cmake"
+    DESTINATION cmake/LuxEngine
 )

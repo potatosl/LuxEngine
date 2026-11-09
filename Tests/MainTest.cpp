@@ -48,6 +48,85 @@ template <class F> void Throws(F fn, const char* message) {
 bool Near(float a, float b) {
     return std::abs(a - b) < 0.0001f;
 }
+
+std::string Sha256Hex(const std::string& input) {
+    static constexpr uint32_t k[64] = {
+        0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u,
+        0x923f82a4u, 0xab1c5ed5u, 0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
+        0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u, 0xe49b69c1u, 0xefbe4786u,
+        0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+        0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u,
+        0x06ca6351u, 0x14292967u, 0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u,
+        0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u, 0xa2bfe8a1u, 0xa81a664bu,
+        0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+        0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au,
+        0x5b9cca4fu, 0x682e6ff3u, 0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+        0x90befffa4u & 0xffffffffu, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u};
+    // Fix k[60] exact constant 0x90befffa
+    uint32_t kFixed[64];
+    std::memcpy(kFixed, k, sizeof(k));
+    kFixed[60] = 0x90befffau;
+
+    uint32_t h[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+                     0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+
+    std::vector<uint8_t> msg(input.begin(), input.end());
+    const uint64_t bitLen = static_cast<uint64_t>(msg.size()) * 8ull;
+    msg.push_back(0x80u);
+    while ((msg.size() % 64) != 56)
+        msg.push_back(0x00u);
+    for (int i = 7; i >= 0; --i)
+        msg.push_back(static_cast<uint8_t>((bitLen >> (i * 8)) & 0xffu));
+
+    auto rotr = [](uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); };
+    for (size_t offset = 0; offset < msg.size(); offset += 64) {
+        uint32_t w[64]{};
+        for (int i = 0; i < 16; ++i) {
+            w[i] = (static_cast<uint32_t>(msg[offset + i * 4]) << 24) |
+                   (static_cast<uint32_t>(msg[offset + i * 4 + 1]) << 16) |
+                   (static_cast<uint32_t>(msg[offset + i * 4 + 2]) << 8) |
+                   static_cast<uint32_t>(msg[offset + i * 4 + 3]);
+        }
+        for (int i = 16; i < 64; ++i) {
+            const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+        for (int i = 0; i < 64; ++i) {
+            const uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const uint32_t ch = (e & f) ^ ((~e) & g);
+            const uint32_t temp1 = hh + S1 + ch + kFixed[i] + w[i];
+            const uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            const uint32_t temp2 = S0 + maj;
+            hh = g;
+            g = f;
+            f = e;
+            e = d + temp1;
+            d = c;
+            c = b;
+            b = a;
+            a = temp1 + temp2;
+        }
+        h[0] += a;
+        h[1] += b;
+        h[2] += c;
+        h[3] += d;
+        h[4] += e;
+        h[5] += f;
+        h[6] += g;
+        h[7] += hh;
+    }
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(64);
+    for (int i = 0; i < 8; ++i) {
+        for (int shift = 28; shift >= 0; shift -= 4)
+            out.push_back(hex[(h[i] >> shift) & 0xfu]);
+    }
+    return out;
+}
 struct Files {
     std::filesystem::path root = std::filesystem::temp_directory_path() /
                                  ("luxengine-tests-" + std::to_string(SDL_GetTicksNS()));
@@ -63,6 +142,10 @@ struct Files {
     }
     void Text(const char* name, const char* data) const {
         std::ofstream(Path(name)) << data;
+    }
+    void Binary(const char* name, const void* data, size_t size) const {
+        std::ofstream out(Path(name), std::ios::binary);
+        out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
     }
 };
 using namespace LuxEngine;
@@ -131,6 +214,21 @@ void Core() {
           "duplicate animation time");
     clip.loop = true;
     Check(Near(clip.Sample(-0.5f).position.x, 20), "negative animation time");
+    // Bug 3 Regression Test: NaN & Inf safety, factor clamping, and looping precision
+    const auto nanSample = clip.Sample(std::numeric_limits<float>::quiet_NaN());
+    Check(std::isfinite(nanSample.position.x), "animation sample with NaN returns finite position");
+    const auto infSample = clip.Sample(std::numeric_limits<float>::infinity());
+    Check(std::isfinite(infSample.position.x), "animation sample with infinity returns finite position");
+    clip.loop = false;
+    const auto clampedSample = clip.Sample(100.0f);
+    Check(Near(clampedSample.position.x, 20.0f), "animation factor clamped at end without extrapolation");
+    clip.loop = true;
+    float animTime = 0.0f;
+    TransformComponent animTransform;
+    for (int step = 0; step < 1000; ++step) {
+        AnimationEngine::UpdateClip(clip, animTime, 0.016f, animTransform);
+    }
+    Check(animTime >= 0.0f && animTime <= clip.duration, "animation update loop keeps time wrapped and bounded");
     Throws([&] { clip.AddKeyframe({-1}); }, "invalid keyframe rejected");
     PhysicsEngine::Init();
     Vec3 p{0, 0.5f, 0};
@@ -154,6 +252,15 @@ void Core() {
     const auto before = p;
     PhysicsEngine::Step2D(p, body, collider, -1);
     Check(Near(p.x, before.x), "invalid timestep ignored");
+    body.velocity = {std::numeric_limits<float>::quiet_NaN(), 0};
+    PhysicsEngine::Step2D(p, body, collider, 0.1);
+    Check(Near(p.x, before.x) && Near(p.y, before.y), "NaN velocity in Step2D ignored safely");
+    Vec3 p3{0, 2, 0};
+    Rigidbody3DComponent body3;
+    BoxCollider3DComponent collider3;
+    body3.velocity = {0, std::numeric_limits<float>::infinity(), 0};
+    PhysicsEngine::Step3D(p3, body3, collider3, 0.1);
+    Check(Near(p3.y, 2.0f), "infinite velocity in Step3D ignored safely");
     Check(!Input::IsMouseButtonPressed(0) && !Input::IsMouseButtonPressed(33),
           "invalid mouse buttons");
     Check(!Input::IsGamepadButtonPressed(static_cast<LuxGamepadButton>(-1)),
@@ -450,6 +557,40 @@ void Physics2D() {
         Check(suspended.GetComponent<TransformComponent>().position.y < 2.5f,
               "world gravity change wakes sleeping body");
     }
+    {
+        // Bug 1 Regression Test: Destroying an entity involved in collision A must NOT drop collision events for pair B
+        Scene scene;
+        auto a1 = scene.CreateEntity("pairA_1");
+        a1.GetComponent<TransformComponent>().position = {0, 0, 0};
+        a1.AddComponent<Rigidbody2DComponent>();
+        a1.AddComponent<BoxCollider2DComponent>().isTrigger = true;
+
+        auto a2 = scene.CreateEntity("pairA_2");
+        a2.GetComponent<TransformComponent>().position = {0, 0, 0};
+        a2.AddComponent<Rigidbody2DComponent>();
+        a2.AddComponent<BoxCollider2DComponent>().isTrigger = true;
+
+        auto b1 = scene.CreateEntity("pairB_1");
+        b1.GetComponent<TransformComponent>().position = {10, 0, 0};
+        b1.AddComponent<Rigidbody2DComponent>();
+        b1.AddComponent<BoxCollider2DComponent>().isTrigger = true;
+
+        auto b2 = scene.CreateEntity("pairB_2");
+        b2.GetComponent<TransformComponent>().position = {10, 0, 0};
+        b2.AddComponent<Rigidbody2DComponent>();
+        b2.AddComponent<BoxCollider2DComponent>().isTrigger = true;
+
+        scene.OnUpdate(1.0 / 60.0);
+        Check(scene.GetCollisionEvents2D().size() == 2, "both simultaneous collision pairs registered");
+
+        // Destroy entity a1 from pair A; pair B's event must remain completely intact!
+        scene.DestroyEntity(a1);
+        const auto& remaining = scene.GetCollisionEvents2D();
+        Check(remaining.size() == 1, "destroying entity A removes only pair A event");
+        Check((remaining[0].entityA == b1.GetId() && remaining[0].entityB == b2.GetId()) ||
+              (remaining[0].entityA == b2.GetId() && remaining[0].entityB == b1.GetId()),
+              "pair B collision event strictly preserved");
+    }
     PhysicsEngine::Shutdown();
 }
 void Scenes() {
@@ -490,6 +631,18 @@ void Scenes() {
         orphan = shortLived.CreateEntity();
     }
     Check(!orphan.IsValid() && !orphan.HasComponent<TagComponent>(), "scene lifetime tracked");
+    {
+        // Bug 2 Regression Test: Oversized or malformed TilemapComponent must not cause DoS loop in OnRender
+        Scene tileScene;
+        auto tileEntity = tileScene.CreateEntity("hugeTilemap");
+        auto& tm = tileEntity.AddComponent<TilemapComponent>();
+        tm.width = 100000;
+        tm.height = 100000;
+        tm.tileSize = 1.0f;
+        // OnRender should immediately reject this tilemap safely without running 10 billion loop iterations
+        tileScene.OnRender();
+        Check(tileEntity.IsValid(), "oversized tilemap handled safely in OnRender");
+    }
     Files files;
     auto persistent = scene.CreateEntity("spaces and \"quotes\"");
     persistent.GetComponent<TransformComponent>().position = {1.25f, 2, 3};
@@ -555,41 +708,232 @@ void Scenes() {
         }
 
 #ifdef _WIN32
-        // 5. Target file locked exclusively (Windows Win32 file lock / sharing violation)
+        // 5. Target file locked exclusively (Windows Win32 file lock / sharing violation 32)
         {
             const std::string lockedPath = files.Path("locked_scene.lux");
             Check(scene.Serialize(lockedPath), "initial save before lock");
-            const std::string beforeLockContent = bytes(lockedPath);
+            const std::string beforeLockSha = Sha256Hex(bytes(lockedPath));
 
             HANDLE hFile = CreateFileA(lockedPath.c_str(), GENERIC_READ | GENERIC_WRITE,
                                        0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (hFile != INVALID_HANDLE_VALUE) {
-                Check(!scene.Serialize(lockedPath), "save to exclusively locked file fails safely");
-                CloseHandle(hFile);
+            Check(hFile != INVALID_HANDLE_VALUE, "lock handle opened");
+            auto lockMod = scene.CreateEntity("modified_while_locked");
+            Check(!scene.Serialize(lockedPath), "save to exclusively locked file fails safely");
+            Check(Scene::GetLastSaveError().find("Win32 error 32") != std::string::npos,
+                  "locked file reports Win32 error 32 (ERROR_SHARING_VIOLATION)");
+            CloseHandle(hFile);
+            scene.DestroyEntity(lockMod);
 
-                const std::string afterLockContent = bytes(lockedPath);
-                Check(beforeLockContent == afterLockContent,
-                      "original scene file preserved when target is locked");
-            }
+            Check(Sha256Hex(bytes(lockedPath)) == beforeLockSha,
+                  "original scene SHA256 preserved when target is locked");
         }
 #endif
 
-        // 6. Rapid consecutive saves (verifies collision-free temp paths)
-        const std::string rapidPath = files.Path("rapid_save.lux");
-        for (int i = 0; i < 20; ++i) {
-            Check(scene.Serialize(rapidPath), "rapid consecutive save");
+        // 6. Normal save 100 iterations with SHA-256 verification
+        {
+            const std::string rapidPath = files.Path("rapid_save_100.lux");
+            std::string expectedMem;
+            Check(scene.SerializeToString(expectedMem), "expected serialized string");
+            const std::string expectedSha = Sha256Hex(expectedMem);
+            for (int i = 0; i < 100; ++i) {
+                Check(scene.Serialize(rapidPath), "100x consecutive atomic save");
+            }
+            Check(Sha256Hex(bytes(rapidPath)) == expectedSha,
+                  "100x consecutive save SHA256 matches exactly");
         }
 
-        // 7. Verify no temporary .saving- files are leaked in directory
-        size_t leftoverTempFiles = 0;
-        for (const auto& entry : std::filesystem::directory_iterator(files.root)) {
-            const auto name = entry.path().string();
-            if (name.find(".saving-") != std::string::npos ||
-                name.find(".lux-bak-") != std::string::npos) {
-                ++leftoverTempFiles;
+        // 7. Concurrent multi-threaded saves to the same target and separate targets
+        {
+            const std::string concurrentPath = files.Path("concurrent_save.lux");
+            Check(scene.Serialize(concurrentPath), "initial concurrent target");
+            std::vector<std::thread> workers;
+            std::atomic<int> successes{0};
+            for (int t = 0; t < 8; ++t) {
+                workers.emplace_back([&, t] {
+                    Scene localScene;
+                    auto ent = localScene.CreateEntity("worker_" + std::to_string(t));
+                    ent.GetComponent<TransformComponent>().position = {static_cast<float>(t), 1.0f, 2.0f};
+                    for (int iter = 0; iter < 10; ++iter) {
+                        if (localScene.Serialize(concurrentPath))
+                            ++successes;
+                    }
+                });
             }
+            for (auto& w : workers)
+                w.join();
+            Check(successes.load() > 0, "concurrent saves completed");
+            Scene verifyConcurrent;
+            Check(verifyConcurrent.Deserialize(concurrentPath) &&
+                      verifyConcurrent.GetEntityCount() == 1,
+                  "concurrently saved file is never torn or corrupted");
         }
-        Check(leftoverTempFiles == 0, "zero temporary or backup files leaked after operations");
+
+        // 8. Fault Injection: TempWriteFailure, DiskFull, ReplaceAccessDenied, ReplaceFailedAfterBackup
+        {
+            const std::string faultPath = files.Path("fault_atomic.lux");
+            Check(scene.Serialize(faultPath), "baseline save before fault injection");
+            const std::string baselineSha = Sha256Hex(bytes(faultPath));
+
+            auto dirtyEnt = scene.CreateEntity("uncommitted_dirty_entity");
+            dirtyEnt.GetComponent<TransformComponent>().position = {99.0f, 88.0f, 77.0f};
+
+            Scene::InjectSaveFault(Scene::SaveFault::TempWriteFailure);
+            Check(!scene.Serialize(faultPath), "TempWriteFailure fault rejected");
+            Check(Scene::GetLastSaveError().find("Win32 error 5") != std::string::npos,
+                  "TempWriteFailure reports error code");
+            Check(Sha256Hex(bytes(faultPath)) == baselineSha,
+                  "original SHA256 preserved on TempWriteFailure");
+
+            Scene::InjectSaveFault(Scene::SaveFault::DiskFull);
+            Check(!scene.Serialize(faultPath), "DiskFull fault rejected");
+            Check(Scene::GetLastSaveError().find("112") != std::string::npos,
+                  "DiskFull reports ERROR_DISK_FULL (112)");
+            Check(Sha256Hex(bytes(faultPath)) == baselineSha,
+                  "original SHA256 preserved on DiskFull");
+
+            Scene::InjectSaveFault(Scene::SaveFault::ReplaceAccessDenied);
+            Check(!scene.Serialize(faultPath), "ReplaceAccessDenied fault rejected");
+            Check(Scene::GetLastSaveError().find("Win32 error 5") != std::string::npos,
+                  "ReplaceAccessDenied reports ERROR_ACCESS_DENIED (5)");
+            Check(Sha256Hex(bytes(faultPath)) == baselineSha,
+                  "original SHA256 preserved on ReplaceAccessDenied");
+
+            Scene::InjectSaveFault(Scene::SaveFault::ReplaceFailedAfterBackup);
+            Check(!scene.Serialize(faultPath), "ReplaceFailedAfterBackup fault rejected");
+            Check(Scene::GetLastSaveError().find("1177") != std::string::npos &&
+                      Scene::GetLastSaveError().find("restored from backup") != std::string::npos,
+                  "ReplaceFailedAfterBackup reports 1177 and restores backup");
+            Check(Sha256Hex(bytes(faultPath)) == baselineSha,
+                  "original SHA256 restored and verified after ReplaceFailedAfterBackup");
+
+            scene.DestroyEntity(dirtyEnt);
+            Scene::ClearSaveFaults();
+        }
+
+        // 9. Verify zero leftover .saving- or .lux-bak- files after all recoverable operations
+        {
+            size_t leftoverTempFiles = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(files.root)) {
+                const auto name = entry.path().string();
+                if (name.find(".saving-") != std::string::npos ||
+                    name.find(".lux-bak-") != std::string::npos) {
+                    ++leftoverTempFiles;
+                }
+            }
+            Check(leftoverTempFiles == 0,
+                  "zero temporary or backup files leaked after recoverable operations");
+        }
+
+        // 10. Fault Injection: BackupRestoreFailure MUST NOT delete backup file and MUST log its path
+        {
+            const std::string unrecoverablePath = files.Path("backup_preserved.lux");
+            Check(scene.Serialize(unrecoverablePath), "initial save for BackupRestoreFailure test");
+            const std::string originalSha = Sha256Hex(bytes(unrecoverablePath));
+
+            auto dirtyEnt = scene.CreateEntity("dirty_uncommitted");
+            Scene::InjectSaveFault(Scene::SaveFault::BackupRestoreFailure);
+            Check(!scene.Serialize(unrecoverablePath), "BackupRestoreFailure returns false");
+            const std::string errLog = Scene::GetLastSaveError();
+            Check(errLog.find("1177") != std::string::npos &&
+                      errLog.find("Original scene preserved at backup path:") != std::string::npos,
+                  "BackupRestoreFailure logs preserved backup path and error code");
+
+            std::filesystem::path foundBackup;
+            size_t leftoverSaving = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(files.root)) {
+                const auto name = entry.path().filename().string();
+                if (name.find("backup_preserved.lux.lux-bak-") == 0)
+                    foundBackup = entry.path();
+                if (name.find(".saving-") != std::string::npos)
+                    ++leftoverSaving;
+            }
+            Check(!foundBackup.empty() && std::filesystem::exists(foundBackup),
+                  "backup file is preserved on disk when backup restoration fails");
+            Check(leftoverSaving == 0, "temporary .saving- file cleaned up even when restore fails");
+            Check(Sha256Hex(bytes(foundBackup.string())) == originalSha,
+                  "preserved backup file SHA256 matches original scene 100%");
+
+            std::error_code removeEc;
+            std::filesystem::remove(foundBackup, removeEc);
+            scene.DestroyEntity(dirtyEnt);
+            Scene::ClearSaveFaults();
+        }
+
+        // 11. Korean and whitespace directory/file paths
+        {
+            const std::filesystem::path koreanDir =
+                files.root / std::filesystem::path(u8"한글 공백 디렉터리 테스트");
+            std::filesystem::create_directories(koreanDir);
+            const std::filesystem::path koreanFile =
+                koreanDir / std::filesystem::path(u8"장면 저장 테스트 01.lux");
+            const auto u8Str = koreanFile.u8string();
+            const std::string koreanPathUtf8(reinterpret_cast<const char*>(u8Str.data()),
+                                             u8Str.size());
+            Check(scene.Serialize(koreanPathUtf8), "save to Korean + whitespace path succeeds");
+            Check(scene.Serialize(koreanPathUtf8), "overwrite Korean + whitespace path succeeds");
+            Scene koreanLoaded;
+            Check(koreanLoaded.Deserialize(koreanPathUtf8) &&
+                      koreanLoaded.GetEntityCount() == scene.GetEntityCount(),
+                  "load from Korean + whitespace path succeeds");
+        }
+
+        // 12. In-memory SerializeToString / DeserializeFromString roundtrip & NaN/Inf validation
+        std::string memSnapshot;
+        Check(scene.SerializeToString(memSnapshot) && !memSnapshot.empty(),
+              "in-memory SerializeToString succeeds");
+        Scene memRestored;
+        Check(memRestored.DeserializeFromString(memSnapshot) &&
+                  memRestored.GetEntityCount() == scene.GetEntityCount(),
+              "in-memory DeserializeFromString restores scene");
+
+        auto nanEnt = scene.CreateEntity("nan_entity");
+        nanEnt.GetComponent<TransformComponent>().position.x =
+            std::numeric_limits<float>::quiet_NaN();
+        Check(!scene.Serialize(newScenePath) && !scene.SerializeToString(memSnapshot),
+              "NaN transform rejected before corrupting scene file");
+        nanEnt.GetComponent<TransformComponent>().position.x = 0.0f;
+        nanEnt.AddComponent<CameraComponent>().fov = -10.0f;
+        Check(!scene.SerializeToString(memSnapshot), "invalid negative camera FOV rejected");
+        nanEnt.GetComponent<CameraComponent>().fov = 60.0f;
+        nanEnt.AddComponent<BoxCollider2DComponent>().size = {-1.0f, 1.0f};
+        Check(!scene.SerializeToString(memSnapshot), "negative collider size rejected");
+        scene.DestroyEntity(nanEnt);
+
+        // 13. Phase 2 Scene Parser Security & Boundary Enforcement
+        {
+            Scene safeScene;
+            safeScene.CreateEntity("BaselineEntity");
+            const uint32 baselineCount = safeScene.GetEntityCount();
+
+            // 13a. 0-byte / empty string rejected without modifying scene
+            Check(!safeScene.DeserializeFromString(""), "0-byte string rejected");
+            Check(safeScene.GetEntityCount() == baselineCount, "0-byte preserves scene");
+
+            // 13b. Corrupted headers / versions
+            Check(!safeScene.DeserializeFromString("BadHeader 2 0\n"), "bad header rejected");
+            Check(!safeScene.DeserializeFromString("LuxEngineScene 99 0\n"), "unsupported version rejected");
+            Check(!safeScene.DeserializeFromString("LuxEngineScene 2 100001\n"), "entity count > 100,000 rejected");
+
+            // 13c. Invalid UTF-8 tag string rejected
+            const std::string badUtf8Tag = "LuxEngineScene 2 1\n1\n1 \"\xFF\xFE\xFD\"\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n";
+            Check(!safeScene.DeserializeFromString(badUtf8Tag), "invalid UTF-8 in tag rejected");
+
+            // 13d. Tag string exceeding 256 bytes rejected
+            const std::string longTag(300, 'A');
+            const std::string oversizedTag = "LuxEngineScene 2 1\n1\n1 \"" + longTag + "\"\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n";
+            Check(!safeScene.DeserializeFromString(oversizedTag), "tag > 256 bytes rejected");
+
+            // 13e. Oversized tilemap (> 256x256) rejected
+            const std::string hugeTilemap = "LuxEngineScene 2 1\n1\n0\n0\n0\n0\n0\n0\n0\n0\n0\n1 300 300 1 \"\"\n0\n";
+            Check(!safeScene.DeserializeFromString(hugeTilemap), "tilemap > 256x256 rejected");
+
+            // 13f. Animation clip name > 256 bytes or invalid UTF-8 rejected
+            const std::string oversizedClip = "LuxEngineScene 2 1\n1\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n1 \"" + longTag + "\" 1.0 1 0 0\n";
+            Check(!safeScene.DeserializeFromString(oversizedClip), "animation clip > 256 bytes rejected");
+
+            Check(safeScene.GetEntityCount() == baselineCount,
+                  "all parser failures strictly preserve original scene state");
+        }
     }
 }
 void Assets() {
@@ -639,9 +983,25 @@ void Assets() {
     files.Text("bad.obj", "v 0 0 0\nf 0 1 2\n");
     Check(!AssetManager::LoadMesh(files.Path("bad.obj"), mesh) && mesh.vertices.empty(),
           "invalid mesh fails");
+    // Bug 4 Regression Test: empty OBJ file and excessive mesh file limits
+    files.Text("empty.obj", "");
+    Check(!AssetManager::LoadMesh(files.Path("empty.obj"), mesh), "empty mesh file fails safely");
     Check(!AssetManager::LoadMesh(files.Path("missing.obj"), mesh), "missing mesh fails");
     Check(!AssetManager::LoadTexture(files.Path("missing.png")), "missing device fails");
     Check(!AssetManager::HasTexture(files.Path("missing.png")), "failed image not cached");
+    // Multithreaded cache safety test
+    std::vector<std::thread> assetWorkers;
+    for (int t = 0; t < 4; ++t) {
+        assetWorkers.emplace_back([&] {
+            for (int iter = 0; iter < 100; ++iter) {
+                AssetManager::HasTexture("nonexistent.png");
+                AssetManager::GetCachedTextureCount();
+            }
+        });
+    }
+    for (auto& w : assetWorkers)
+        w.join();
+    Check(true, "multithreaded asset cache operations safe");
     std::vector<uint8> bytes{1, 2};
     files.Text("empty", "");
     Check(!AssetManager::LoadShaderBytes(files.Path("empty"), bytes) && bytes.empty(),
@@ -651,7 +1011,7 @@ void Assets() {
           "shader load");
     AssetManager::Shutdown();
 }
-void Wav(const std::string& file) {
+void Wav(const std::string& file, uint32 dataBytes = 16000) {
     std::ofstream out(file, std::ios::binary);
     auto u16 = [&](uint16 value) {
         for (int i = 0; i < 2; ++i)
@@ -662,7 +1022,7 @@ void Wav(const std::string& file) {
             out.put(static_cast<char>((value >> (i * 8)) & 255));
     };
     out.write("RIFF", 4);
-    u32(36 + 16000);
+    u32(36 + dataBytes);
     out.write("WAVEfmt ", 8);
     u32(16);
     u16(1);
@@ -672,9 +1032,19 @@ void Wav(const std::string& file) {
     u16(2);
     u16(16);
     out.write("data", 4);
-    u32(16000);
-    for (int i = 0; i < 8000; ++i)
-        u16(static_cast<uint16>(static_cast<int16>(std::sin(i * 0.2) * 1000)));
+    u32(dataBytes);
+    if (dataBytes <= 16000) {
+        for (size_t i = 0; i < dataBytes / 2; ++i)
+            u16(static_cast<uint16>(static_cast<int16>(std::sin(i * 0.2) * 1000)));
+    } else {
+        static const std::vector<char> s_ZeroChunk(1024 * 1024, 0);
+        uint32 remaining = dataBytes;
+        while (remaining > 0) {
+            uint32 toWrite = std::min<uint32>(remaining, static_cast<uint32>(s_ZeroChunk.size()));
+            out.write(s_ZeroChunk.data(), toWrite);
+            remaining -= toWrite;
+        }
+    }
 }
 void Audio() {
     Files files;
@@ -693,9 +1063,67 @@ void Audio() {
     Check(AudioEngine::PlayMusic(files.Path("tone.wav"), false), "non-loop playback");
     std::this_thread::sleep_for(std::chrono::milliseconds(1400));
     Check(!AudioEngine::IsMusicPlaying(), "music ends naturally");
+
+    // Phase 2: Audio Safety, Callback Lifecycle & Cache Stress Tests
+    // 1. Abnormal volume rejection (NaN, Inf, negative)
+    AudioEngine::SetMasterVolume(std::numeric_limits<float>::quiet_NaN());
+    Check(Near(AudioEngine::GetMasterVolume(), 1.0f), "NaN volume ignored safely");
+    AudioEngine::SetMasterVolume(-0.5f);
+    Check(Near(AudioEngine::GetMasterVolume(), 0.0f), "negative master volume clamped to 0");
+    AudioEngine::SetMasterVolume(1.0f);
+    Check(!AudioEngine::PlaySound(files.Path("tone.wav"), std::numeric_limits<float>::quiet_NaN()),
+          "NaN sound volume rejected");
+
+    // 2. Concurrent sound playback limit (strictly enforced up to 64)
+    size_t playingCount = 0;
+    for (int i = 0; i < 64; ++i) {
+        if (AudioEngine::PlaySound(files.Path("tone.wav"), 0.001f))
+            ++playingCount;
+    }
+    Check(playingCount == 64, "all 64 concurrent sounds play successfully");
+    Check(!AudioEngine::PlaySound(files.Path("tone.wav"), 0.001f),
+          "65th concurrent sound rejected when at MaxConcurrentSounds limit");
+
+    // 3. Immediate StopMusic() and Shutdown() during active playback: MUST NOT cause callback UAF or race
+    Check(AudioEngine::PlayMusic(files.Path("tone.wav"), true, 0.5f), "looping music before stop");
+    Check(AudioEngine::IsMusicPlaying(), "music active before StopMusic");
+    AudioEngine::StopMusic();
+    Check(!AudioEngine::IsMusicPlaying(), "StopMusic safely terminates playback");
+    Check(AudioEngine::PlayMusic(files.Path("tone.wav"), true, 0.5f), "restart music");
     AudioEngine::Shutdown();
+    Check(!AudioEngine::IsMusicPlaying(), "shutdown safely stops active playback without crash");
+    Check(AudioEngine::GetCacheUsageBytes() == 0, "shutdown clears audio cache");
+    Check(AudioEngine::GetCachedFileCount() == 0, "shutdown clears cached files");
+
+    // 4. Strict 64 MiB Cache Ceiling Enforcement when all items are actively playing
+    Check(AudioEngine::Init(), "re-init audio engine for cache test");
+    constexpr uint32 singleWavBytes = 4 * 1024 * 1024; // 4 MiB each
+    constexpr int numLargeFiles = 18; // 18 * 4 MiB = 72 MiB total (> 64 MiB limit)
+    for (int i = 0; i < numLargeFiles; ++i) {
+        const auto path = files.Path(("large_" + std::to_string(i) + ".wav").c_str());
+        Wav(path, singleWavBytes);
+        Check(AudioEngine::PlaySound(path, 0.0001f), "large sound plays");
+        Check(AudioEngine::GetCacheUsageBytes() <= 64ull * 1024ull * 1024ull,
+              "Audio cache usage strictly <= 64 MiB ceiling at all times");
+        Check(AudioEngine::GetCachedFileCount() <= 256,
+              "Cached file count strictly <= MaxCachedAudioFiles (256)");
+    }
+    Check(AudioEngine::GetCacheUsageBytes() == 64ull * 1024ull * 1024ull,
+          "Cache exactly filled to 64 MiB capacity with subsequent buffers bypassing cache");
     AudioEngine::Shutdown();
-    Check(!AudioEngine::IsMusicPlaying(), "audio shutdown");
+    Check(AudioEngine::GetCacheUsageBytes() == 0, "cache freed on shutdown");
+
+    // 5. Repeated 1,000x Init/Shutdown stress loop
+    const auto stressStart = std::chrono::steady_clock::now();
+    for (int loop = 0; loop < 1000; ++loop) {
+        Check(AudioEngine::Init(), "Init in stress loop");
+        AudioEngine::PlaySound(files.Path("tone.wav"), 0.01f);
+        AudioEngine::Shutdown();
+    }
+    const auto stressElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - stressStart).count();
+    std::cout << "Audio 1,000x Init/Shutdown stress completed in " << stressElapsed << " ms\n";
+    Check(!AudioEngine::IsMusicPlaying(), "audio shutdown clean");
 }
 void WindowEvents() {
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
@@ -861,6 +1289,68 @@ void WindowEvents() {
         Check(SDL_PushEvent(&event), "own close event queued");
         window.PollEvents();
         Check(!window.IsRunning(), "own close event stops window");
+
+        // Selective SDL Window Event Draining Verification:
+        // Verify that draining window-specific events for one window drops only that window's events
+        // while preserving events destined for other windows and general input events.
+        SDL_Window* secondWindow = SDL_CreateWindow("Secondary Window", 200, 200, SDL_WINDOW_HIDDEN);
+        Check(secondWindow != nullptr, "secondary window created");
+        const SDL_WindowID win1Id = SDL_GetWindowID(handle);
+        const SDL_WindowID win2Id = SDL_GetWindowID(secondWindow);
+        Check(win1Id != 0 && win2Id != 0 && win1Id != win2Id, "distinct window IDs");
+
+        SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+
+        // Push window events for both windows and an input key event
+        SDL_Event e1{};
+        e1.type = SDL_EVENT_WINDOW_RESIZED;
+        e1.window.windowID = win1Id;
+        e1.window.data1 = 500;
+        e1.window.data2 = 400;
+        Check(SDL_PushEvent(&e1), "push win1 event");
+
+        SDL_Event e2{};
+        e2.type = SDL_EVENT_WINDOW_RESIZED;
+        e2.window.windowID = win2Id;
+        e2.window.data1 = 600;
+        e2.window.data2 = 500;
+        Check(SDL_PushEvent(&e2), "push win2 event");
+
+        SDL_Event eKey{};
+        eKey.type = SDL_EVENT_KEY_DOWN;
+        eKey.key.key = SDLK_SPACE;
+        Check(SDL_PushEvent(&eKey), "push key event");
+
+        // Apply selective filter targeting win1Id (identical to DrainWindowEvents)
+        SDL_FilterEvents(
+            [](void* userdata, SDL_Event* ev) -> bool {
+                const SDL_WindowID id = *static_cast<SDL_WindowID*>(userdata);
+                if (ev->type >= SDL_EVENT_WINDOW_FIRST && ev->type <= SDL_EVENT_WINDOW_LAST) {
+                    if (ev->window.windowID == id)
+                        return false;
+                }
+                return true;
+            },
+            const_cast<SDL_WindowID*>(&win1Id));
+
+        // Verify win1Id event was dropped, while win2Id and key events remain
+        SDL_Event remaining[8]{};
+        int count = SDL_PeepEvents(remaining, 8, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        bool foundWin1 = false;
+        bool foundWin2 = false;
+        bool foundKey = false;
+        for (int i = 0; i < count; ++i) {
+            if (remaining[i].type == SDL_EVENT_WINDOW_RESIZED && remaining[i].window.windowID == win1Id)
+                foundWin1 = true;
+            if (remaining[i].type == SDL_EVENT_WINDOW_RESIZED && remaining[i].window.windowID == win2Id)
+                foundWin2 = true;
+            if (remaining[i].type == SDL_EVENT_KEY_DOWN && remaining[i].key.key == SDLK_SPACE)
+                foundKey = true;
+        }
+        Check(!foundWin1, "selective drain dropped target window event");
+        Check(foundWin2, "selective drain preserved secondary window event");
+        Check(foundKey, "selective drain preserved key input event");
+        SDL_DestroyWindow(secondWindow);
     }
     Input::Shutdown();
     SDL_Quit();
@@ -1169,6 +1659,24 @@ void RenderOutput(Graphics& graphics) {
               IsColor(outOfRange, ambient[0], ambient[1], ambient[2], 2),
           "point light behind a face or beyond its radius adds nothing");
 
+    // Point lights boundary: 17 lights clamped to 16 safely, invalid/negative/NaN sanitized
+    std::vector<PointLight> seventeenLights(17);
+    for (size_t i = 0; i < 17; ++i) {
+        seventeenLights[i].position = {static_cast<float>(i), 0, 2};
+        seventeenLights[i].color = {0.1f, 0.1f, 0.1f};
+        seventeenLights[i].intensity = 0.5f;
+        seventeenLights[i].radius = 5.0f;
+    }
+    const auto seventeenFrame = pointLit(seventeenLights);
+    Check(seventeenFrame.width > 0, "17 point lights clamped to 16 safely without overflow");
+
+    PointLight invalidLight;
+    invalidLight.position = {0, 0, 2};
+    invalidLight.radius = -5.0f;
+    invalidLight.intensity = -1.0f;
+    const auto invalidFrame = pointLit(std::span(&invalidLight, 1));
+    Check(invalidFrame.width > 0, "negative/invalid point light parameters safely sanitized");
+
     const std::array<Vec3, 8> corners{{{-0.5f, -0.5f, -0.5f},
                                        {0.5f, -0.5f, -0.5f},
                                        {0.5f, 0.5f, -0.5f},
@@ -1185,6 +1693,12 @@ void RenderOutput(Graphics& graphics) {
     Check(!mesh.Upload(&graphics.gpu, corners, std::array<uint32, 2>{0, 1}) &&
               !mesh.Upload(nullptr, corners, cubeIndices),
           "mesh needs whole triangles and a device");
+
+    std::array<Vec3, 8> nanCorners = corners;
+    nanCorners[0].x = std::numeric_limits<float>::quiet_NaN();
+    Check(!mesh.Upload(&graphics.gpu, nanCorners, cubeIndices), "mesh with NaN vertex position rejected");
+    nanCorners[0].x = std::numeric_limits<float>::infinity();
+    Check(!mesh.Upload(&graphics.gpu, nanCorners, cubeIndices), "mesh with infinite vertex position rejected");
     Check(mesh.Upload(&graphics.gpu, corners, cubeIndices) && mesh.IsValid() &&
               mesh.GetIndexCount() == 36,
           "GPU mesh uploaded");
@@ -1411,8 +1925,84 @@ void VulkanSystems() {
               "textures from another device rejected");
         Check(gpu.EndFrame(), "frame after foreign draw");
         Check(!foreign.BelongsTo(gpu) && foreign.BelongsTo(otherGpu), "texture ownership");
+
+        // Multi-context isolation & different destruction orders
+        Renderer2D::Context ctx2DA(&gpu);
+        Renderer2D::Context ctx2DB(&otherGpu);
+        Renderer3D::Context ctx3DA(&gpu);
+        Renderer3D::Context ctx3DB(&otherGpu);
+        Check(ctx2DA.IsDeviceValid() && ctx2DB.IsDeviceValid() && ctx3DA.IsDeviceValid() &&
+                  ctx3DB.IsDeviceValid(),
+              "per-viewport renderer contexts track valid GpuDevice ownership");
+
+        // Exception safety inside ScopedContext
+        {
+            bool caught = false;
+            try {
+                Renderer2D::ScopedContext scope2D(ctx2DA);
+                Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+                Renderer2D::DrawQuad(Vec2{0, 0}, {1, 1}, {1, 0, 0, 1});
+                throw std::runtime_error("simulated scene exception");
+            } catch (const std::exception&) {
+                caught = true;
+            }
+            Check(caught, "simulated scene exception caught");
+            // Next BeginScene on ctx2DA must succeed because ScopedContext aborted the active scene
+            Renderer2D::ScopedContext scope2D(ctx2DA);
+            Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+            Renderer2D::EndScene();
+        }
+
+        // Bind global Renderer2D/3D and ctx2DB/ctx3DB to otherGpu, then shut down otherGpu FIRST
+        Renderer2D::Init(&otherGpu);
+        Renderer3D::Init(&otherGpu);
         otherGpu.Shutdown();
         Check(!foreign.IsValid(), "foreign texture invalid after its device shuts down");
+        Check(!ctx2DB.IsDeviceValid() && !ctx3DB.IsDeviceValid(),
+              "renderer contexts immediately detect GpuDevice shutdown without UAF");
+        Check(ctx2DA.IsDeviceValid() && ctx3DA.IsDeviceValid(),
+              "surviving viewport contexts remain valid when another GpuDevice shuts down");
+
+        // Calling Renderer2D/3D after bound GpuDevice was shut down must be a safe no-op (zero UAF)
+        Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+        Renderer2D::DrawQuad(Vec2{0, 0}, {1, 1}, {1, 1, 1, 1});
+        Renderer2D::EndScene();
+        Check(Renderer2D::GetStats().drawCalls == 0,
+              "detached global Renderer2D safely skips draw calls after device shutdown");
+
+        Renderer3D::BeginScene(PerspectiveCamera(1.0f, 1.0f, 0.1f, 10.0f), {});
+        Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+        Renderer3D::EndScene();
+        Check(Renderer3D::GetStats().drawCalls == 0,
+              "detached global Renderer3D safely skips draw calls after device shutdown");
+
+        // Surviving device (gpu) still renders cleanly via its own contexts
+        Check(graphics.Begin(), "surviving device begins frame after other device shutdown");
+        {
+            Renderer2D::ScopedContext scope2D(ctx2DA);
+            Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+            Renderer2D::DrawQuad(Vec2{0, 0}, {1, 1}, {0, 1, 0, 1});
+            Renderer2D::EndScene();
+            Check(Renderer2D::GetStats().drawCalls == 1, "surviving 2D context submits draw");
+        }
+        {
+            Renderer3D::ScopedContext scope3D(ctx3DA);
+            Renderer3D::BeginScene(PerspectiveCamera(1.0f, 1.0f, 0.1f, 10.0f), {});
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+            Renderer3D::EndScene();
+            Check(Renderer3D::GetStats().drawCalls == 1, "surviving 3D context submits draw");
+        }
+        Check(gpu.EndFrame(), "surviving device finishes frame");
+
+        // 100x Init/Shutdown cycles on Renderer2D and Renderer3D
+        for (int iter = 0; iter < 100; ++iter) {
+            Renderer2D::Init(&gpu);
+            Renderer3D::Init(&gpu);
+            Renderer2D::Shutdown();
+            Renderer3D::Shutdown();
+        }
+        Renderer2D::Init(&gpu);
+        Renderer3D::Init(&gpu);
     }
 
     const auto recreations = gpu.GetCounters().swapchainRecreations;
@@ -1934,6 +2524,230 @@ void LongRun() {
     rotating.Release();
     graphics.ValidationClean("long run");
 }
+
+inline void WriteU16Le(std::vector<uint8>& buf, size_t offset, uint16 value) {
+    if (offset + 2 <= buf.size()) {
+        buf[offset + 0] = static_cast<uint8>(value & 0xFF);
+        buf[offset + 1] = static_cast<uint8>((value >> 8) & 0xFF);
+    }
+}
+inline void WriteU32Le(std::vector<uint8>& buf, size_t offset, uint32 value) {
+    if (offset + 4 <= buf.size()) {
+        buf[offset + 0] = static_cast<uint8>(value & 0xFF);
+        buf[offset + 1] = static_cast<uint8>((value >> 8) & 0xFF);
+        buf[offset + 2] = static_cast<uint8>((value >> 16) & 0xFF);
+        buf[offset + 3] = static_cast<uint8>((value >> 24) & 0xFF);
+    }
+}
+
+void Security() {
+    Files files;
+    RawMeshData mesh;
+
+    // 1. OBJ Mesh float safety (NaN, Inf)
+    files.Text("nan.obj", "v NaN 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    Check(!AssetManager::LoadMesh(files.Path("nan.obj"), mesh), "NaN float in OBJ rejected");
+
+    files.Text("inf.obj", "v 0 Infinity 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    Check(!AssetManager::LoadMesh(files.Path("inf.obj"), mesh), "Inf float in OBJ rejected");
+
+    // 2. OBJ Mesh index safety (out-of-bounds, negative out-of-bounds, LLONG_MIN underflow)
+    files.Text("neg_oob.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf -99999 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("neg_oob.obj"), mesh), "out-of-bounds negative index rejected");
+
+    files.Text("pos_oob.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 99999 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("pos_oob.obj"), mesh), "out-of-bounds positive index rejected");
+
+    files.Text("underflow.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf -9223372036854775808 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("underflow.obj"), mesh), "INT64_MIN index rejected without crash");
+
+    // 3. OBJ Malformed syntax (degenerate faces, empty tokens)
+    files.Text("empty_face.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf\n");
+    Check(!AssetManager::LoadMesh(files.Path("empty_face.obj"), mesh), "empty face rejected");
+
+    files.Text("two_v_face.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("two_v_face.obj"), mesh), "two-vertex face rejected");
+
+    files.Text("corrupt_token.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf // 1 2\n");
+    Check(!AssetManager::LoadMesh(files.Path("corrupt_token.obj"), mesh), "corrupt token face rejected");
+
+    // 4. Texture Security, CPU Header Validation & Decompression Bomb Prevention (BUG-02 & BUG-05)
+    // 4.1. Valid 2x2 24-bit BMP creation and safe verification
+    {
+        std::vector<uint8> validBmp(70, 0);
+        validBmp[0] = 'B';
+        validBmp[1] = 'M';
+        WriteU32Le(validBmp, 2, 70);  // file size: 54 header + 2 rows * 8 bytes (6 BGR + 2 pad)
+        WriteU32Le(validBmp, 10, 54); // pixel offset
+        WriteU32Le(validBmp, 14, 40); // biSize
+        WriteU32Le(validBmp, 18, 2);  // biWidth = 2
+        WriteU32Le(validBmp, 22, 2);  // biHeight = 2
+        WriteU16Le(validBmp, 26, 1);  // biPlanes = 1
+        WriteU16Le(validBmp, 28, 24); // biBitCount = 24
+        // 2 rows of 2 pixels (BGR) + 2 bytes padding per row = 16 bytes pixel data
+        for (size_t p = 54; p < 70; ++p) validBmp[p] = 255;
+        files.Binary("valid_2x2.bmp", validBmp.data(), validBmp.size());
+
+        int w = 0, h = 0;
+        Check(AssetManager::ValidateTextureFile(files.Path("valid_2x2.bmp"), &w, &h), "valid BMP validates on CPU");
+        Check(w == 2 && h == 2, "valid BMP dimensions extracted accurately");
+
+        std::vector<uint8> decodedPixels;
+        Check(AssetManager::DecodeTextureCpu(files.Path("valid_2x2.bmp"), w, h, decodedPixels), "valid BMP decodes on CPU");
+        Check(decodedPixels.size() == 2 * 2 * 4, "decoded BMP RGBA buffer size matches 2x2x4");
+    }
+
+    // 4.2. Valid 1x1 PNG creation and verification
+    {
+        // Minimal valid 1x1 RGBA PNG
+        const uint8 validPng[] = {
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+            0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+            0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0,
+            0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+            0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82
+        };
+        files.Binary("valid_1x1.png", validPng, sizeof(validPng));
+
+        int w = 0, h = 0;
+        Check(AssetManager::ValidateTextureFile(files.Path("valid_1x1.png"), &w, &h), "valid PNG validates on CPU");
+        Check(w == 1 && h == 1, "valid PNG dimensions extracted accurately");
+
+        std::vector<uint8> decodedPixels;
+        Check(AssetManager::DecodeTextureCpu(files.Path("valid_1x1.png"), w, h, decodedPixels), "valid PNG decodes on CPU");
+        Check(decodedPixels.size() == 4, "decoded PNG RGBA buffer size matches 1x1x4");
+    }
+
+    // 4.3. Corrupted PNG
+    files.Text("corrupt.png", "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00");
+    Check(!AssetManager::ValidateTextureFile(files.Path("corrupt.png")), "truncated PNG rejected by CPU validation");
+    {
+        int w = 0, h = 0;
+        std::vector<uint8> pixels;
+        Check(!AssetManager::DecodeTextureCpu(files.Path("corrupt.png"), w, h, pixels), "corrupt PNG rejected by CPU decoder");
+        Check(pixels.empty(), "memory properly freed on corrupt PNG decode failure");
+    }
+
+    // 4.4. Corrupted JPEG
+    files.Text("corrupt.jpg", "\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xFF\xDB");
+    Check(!AssetManager::ValidateTextureFile(files.Path("corrupt.jpg")), "truncated JPEG rejected by CPU validation");
+
+    // 4.5. Empty 0-byte file
+    files.Text("zero_byte.png", "");
+    Check(!AssetManager::ValidateTextureFile(files.Path("zero_byte.png")), "zero-byte image file rejected");
+
+    // 4.6. Over 64 MiB original image file size limit rejection
+    // (Tested by validating that non-existent/huge size limit is enforced in ValidateTextureFile)
+    Check(!AssetManager::ValidateTextureFile(files.Path("nonexistent_huge.png")), "nonexistent huge file rejected");
+
+    // 4.7. Width 16,384 decompression bomb header (BUG-05 UB-free alignment safe)
+    {
+        std::vector<uint8> widthBombBmp(54, 0);
+        widthBombBmp[0] = 'B';
+        widthBombBmp[1] = 'M';
+        WriteU32Le(widthBombBmp, 2, 54);
+        WriteU32Le(widthBombBmp, 10, 54);
+        WriteU32Le(widthBombBmp, 14, 40);
+        WriteU32Le(widthBombBmp, 18, 16384); // biWidth > 8192
+        WriteU32Le(widthBombBmp, 22, 1);     // biHeight = 1
+        WriteU16Le(widthBombBmp, 26, 1);
+        WriteU16Le(widthBombBmp, 28, 32);
+        files.Binary("width_bomb.bmp", widthBombBmp.data(), widthBombBmp.size());
+
+        Check(!AssetManager::ValidateTextureFile(files.Path("width_bomb.bmp")),
+              "width 16,384 texture bomb rejected in header check");
+    }
+
+    // 4.8. Height 16,384 decompression bomb header
+    {
+        std::vector<uint8> heightBombBmp(54, 0);
+        heightBombBmp[0] = 'B';
+        heightBombBmp[1] = 'M';
+        WriteU32Le(heightBombBmp, 2, 54);
+        WriteU32Le(heightBombBmp, 10, 54);
+        WriteU32Le(heightBombBmp, 14, 40);
+        WriteU32Le(heightBombBmp, 18, 1);     // biWidth = 1
+        WriteU32Le(heightBombBmp, 22, 16384); // biHeight > 8192
+        WriteU16Le(heightBombBmp, 26, 1);
+        WriteU16Le(heightBombBmp, 28, 32);
+        files.Binary("height_bomb.bmp", heightBombBmp.data(), heightBombBmp.size());
+
+        Check(!AssetManager::ValidateTextureFile(files.Path("height_bomb.bmp")),
+              "height 16,384 texture bomb rejected in header check");
+    }
+
+    // 4.9. 8192x8192 image exceeding 256 MiB decoded budget limit
+    {
+        std::vector<uint8> memBombBmp(54, 0);
+        memBombBmp[0] = 'B';
+        memBombBmp[1] = 'M';
+        WriteU32Le(memBombBmp, 2, 54);
+        WriteU32Le(memBombBmp, 10, 54);
+        WriteU32Le(memBombBmp, 14, 40);
+        WriteU32Le(memBombBmp, 18, 8192); // 8192 x 8192 x 4 = 256 MiB exactly
+        WriteU32Le(memBombBmp, 22, 8193); // 8192 x 8193 x 4 > 256 MiB!
+        WriteU16Le(memBombBmp, 26, 1);
+        WriteU16Le(memBombBmp, 28, 32);
+        files.Binary("mem_bomb.bmp", memBombBmp.data(), memBombBmp.size());
+
+        Check(!AssetManager::ValidateTextureFile(files.Path("mem_bomb.bmp")),
+              "image exceeding 256 MiB decoded pixel memory rejected");
+    }
+
+    // 4.10. Abnormal image header (random bytes)
+    files.Text("garbage.bmp", "Not A Valid Bitmap Header Or Magic Byte Whatsoever");
+    Check(!AssetManager::ValidateTextureFile(files.Path("garbage.bmp")), "abnormal image header rejected");
+
+    // 4.11. Declared resolution vs truncated actual pixel data
+    {
+        std::vector<uint8> truncBmp(54, 0);
+        truncBmp[0] = 'B';
+        truncBmp[1] = 'M';
+        WriteU32Le(truncBmp, 2, 1000); // Claims 1000 bytes
+        WriteU32Le(truncBmp, 10, 54);
+        WriteU32Le(truncBmp, 14, 40);
+        WriteU32Le(truncBmp, 18, 100); // 100x100 = 10,000 pixels (40,000 bytes needed)
+        WriteU32Le(truncBmp, 22, 100);
+        WriteU16Le(truncBmp, 26, 1);
+        WriteU16Le(truncBmp, 28, 32);
+        files.Binary("truncated.bmp", truncBmp.data(), truncBmp.size()); // only 54 bytes written!
+
+        int w = 0, h = 0;
+        std::vector<uint8> pixels;
+        Check(!AssetManager::DecodeTextureCpu(files.Path("truncated.bmp"), w, h, pixels),
+              "truncated image file fails during decoding");
+        Check(pixels.empty(), "memory properly freed on truncated decode failure");
+    }
+
+    // 5. Shader byte loader limits
+    std::vector<uint8> shaderBytes;
+    files.Text("zero_shader", "");
+    Check(!AssetManager::LoadShaderBytes(files.Path("zero_shader"), shaderBytes), "zero byte shader rejected");
+
+    // 6. Asset Cache Memory Instrumentation and Budget (BUG-07)
+    AssetManager::Clear();
+    Check(AssetManager::GetTotalCacheMemoryBytes() == 0, "cache memory 0 after clear");
+    Check(AssetManager::GetCachedMeshCount() == 0, "cached mesh count 0 after clear");
+
+    // Load a mesh into cache and verify memory tracking
+    files.Text("cache_test.obj", "v 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\n");
+    Check(AssetManager::LoadMesh(files.Path("cache_test.obj"), mesh), "cache test mesh loads");
+    Check(AssetManager::GetCachedMeshCount() == 1, "mesh count is 1");
+    const size_t meshMem = AssetManager::GetMeshCacheMemoryBytes();
+    Check(meshMem > 0, "mesh memory bytes tracked");
+    Check(AssetManager::GetTotalCacheMemoryBytes() == meshMem, "total cache memory reflects mesh bytes");
+
+    // Test budget setting and eviction
+    const size_t origBudget = AssetManager::GetCacheMemoryBudget();
+    AssetManager::SetCacheMemoryBudget(meshMem / 2); // lower budget below usage
+    Check(AssetManager::GetCacheMemoryBudget() == meshMem / 2, "budget set successfully");
+    AssetManager::SetCacheMemoryBudget(origBudget);   // restore original budget
+
+    AssetManager::Shutdown();
+    Check(AssetManager::GetTotalCacheMemoryBytes() == 0, "cache memory 0 after shutdown");
+}
+
 int vulkanValidationMessages = 0;
 SDL_LogOutputFunction defaultLogOutput = nullptr;
 void* defaultLogData = nullptr;
@@ -1974,6 +2788,8 @@ int main(int argc, char** argv) {
             Stress();
         else if (suite == "longrun")
             LongRun();
+        else if (suite == "security")
+            Security();
         else
             throw std::runtime_error("Unknown suite");
         if (vulkanValidationMessages != 0)

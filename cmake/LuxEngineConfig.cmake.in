@@ -1,20 +1,109 @@
 @PACKAGE_INIT@
 set(LuxEngine_SHADER_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/shaders")
+set(LuxEngine_TEMPLATES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/templates")
+set(LuxEngine_LICENSES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/licenses")
+set(LuxEngine_EXAMPLES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/examples")
 
 include(CMakeFindDependencyMacro)
-# The hints point at the packages the engine was built with, so games find them even without the
-# same CMAKE_PREFIX_PATH or vcpkg toolchain.
-find_dependency(SDL3 3.2 CONFIG HINTS "@SDL3_DIR@")
-find_dependency(box2d 2.4...<3 CONFIG HINTS "@box2d_DIR@")
+# The hints point at the packages the engine was built with, as well as the SDK prefix directory,
+# so games find them even when relocated or without the same CMAKE_PREFIX_PATH or vcpkg toolchain.
+find_dependency(SDL3 3.2 CONFIG HINTS
+    "@SDL3_DIR@"
+    "${PACKAGE_PREFIX_DIR}"
+    "${PACKAGE_PREFIX_DIR}/lib/cmake/SDL3"
+    "${PACKAGE_PREFIX_DIR}/share/sdl3"
+)
+find_dependency(box2d 2.4...<3 CONFIG HINTS
+    "@box2d_DIR@"
+    "${PACKAGE_PREFIX_DIR}"
+    "${PACKAGE_PREFIX_DIR}/lib/cmake/box2d"
+)
+if(TARGET box2d::box2d)
+    set_target_properties(box2d::box2d PROPERTIES
+        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
+        MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
+        MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
+        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
+    )
+endif()
 find_dependency(Vulkan 1.1)
 include("${CMAKE_CURRENT_LIST_DIR}/LuxEngineTargets.cmake")
 
-function(lux_copy_shaders target)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${LuxEngine_SHADER_DIR}"
-            "$<TARGET_FILE_DIR:${target}>/shaders"
+# Map configurations for multi-config generators (Visual Studio, Xcode)
+# when only Debug (or only Release) libraries were installed.
+foreach(_lux_target LuxEngine::Engine LuxEngine::Runtime)
+    if(TARGET ${_lux_target})
+        set_target_properties(${_lux_target} PROPERTIES
+            MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
+            MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
+            MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
+            MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
+        )
+    endif()
+endforeach()
+if(TARGET box2d::box2d)
+    set_target_properties(box2d::box2d PROPERTIES
+        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
+        MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
+        MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
+        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
     )
+endif()
+
+function(lux_copy_shaders target)
+    if(EXISTS "${LuxEngine_SHADER_DIR}")
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${LuxEngine_SHADER_DIR}"
+                "$<TARGET_FILE_DIR:${target}>/shaders"
+        )
+    endif()
+endfunction()
+
+function(lux_copy_runtime target)
+    lux_copy_shaders(${target})
+    if(WIN32)
+        if(TARGET SDL3::SDL3-shared)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:SDL3::SDL3-shared>
+                    "$<TARGET_FILE_DIR:${target}>"
+            )
+        elseif(EXISTS "${PACKAGE_PREFIX_DIR}/bin/SDL3.dll")
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${PACKAGE_PREFIX_DIR}/bin/SDL3.dll"
+                    "$<TARGET_FILE_DIR:${target}>"
+            )
+        endif()
+        if(TARGET box2d::box2d)
+            get_target_property(_box2d_type box2d::box2d TYPE)
+            if(_box2d_type STREQUAL "SHARED_LIBRARY")
+                add_custom_command(TARGET ${target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        $<TARGET_FILE:box2d::box2d>
+                        "$<TARGET_FILE_DIR:${target}>"
+                )
+            endif()
+        endif()
+        if(TARGET LuxEngine::Engine)
+            get_target_property(_lux_type LuxEngine::Engine TYPE)
+            if(_lux_type STREQUAL "SHARED_LIBRARY")
+                add_custom_command(TARGET ${target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        $<TARGET_FILE:LuxEngine::Engine>
+                        "$<TARGET_FILE_DIR:${target}>"
+                )
+            endif()
+        endif()
+        if(EXISTS "${LuxEngine_LICENSES_DIR}")
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${LuxEngine_LICENSES_DIR}"
+                    "$<TARGET_FILE_DIR:${target}>/licenses"
+            )
+        endif()
+    endif()
 endfunction()
 
 check_required_components(LuxEngine)

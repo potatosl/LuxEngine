@@ -81,7 +81,9 @@ target_link_libraries(LuxEngine PUBLIC
     box2d::box2d
     PRIVATE
     Vulkan::Vulkan
-    $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>
+)
+target_include_directories(LuxEngine PRIVATE
+    $<TARGET_PROPERTY:GPUOpen::VulkanMemoryAllocator,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
 target_compile_features(LuxEngine PUBLIC cxx_std_20)

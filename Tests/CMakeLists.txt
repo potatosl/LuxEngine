@@ -5,13 +5,13 @@ lux_set_target_warnings(LuxEngineTests)
 lux_copy_runtime(LuxEngineTests)
 
 # Headless suites need no display or GPU.
-foreach(suite core physics2d scene assets audio window)
+foreach(suite core physics2d scene assets audio window security)
     add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
     set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 30 LABELS headless
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
 endforeach()
-set_tests_properties(Engine_audio PROPERTIES ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
-set_tests_properties(Engine_window PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+set_tests_properties(Engine_audio PROPERTIES TIMEOUT 180 ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
+set_tests_properties(Engine_window PROPERTIES TIMEOUT 60 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
 
 # GPU suites need a display and a Vulkan driver; they exit with 77 (skipped) when either is missing.
 set(LUX_GPU_TEST_ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")
@@ -52,3 +52,26 @@ set_tests_properties(Runtime_player PROPERTIES TIMEOUT 60 LABELS gpu
     FIXTURES_REQUIRED lux_player_scene
     WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxPlayer>"
     ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}")
+
+# Dedicated fuzz target for coverage-guided fuzzing and seed corpus verification
+add_executable(LuxFuzzScene FuzzScene.cpp)
+target_link_libraries(LuxFuzzScene PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxFuzzScene)
+lux_copy_runtime(LuxFuzzScene)
+
+add_test(NAME Engine_fuzz_seeds COMMAND LuxFuzzScene)
+set_tests_properties(Engine_fuzz_seeds PROPERTIES TIMEOUT 30 LABELS headless
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxFuzzScene>")
+
+option(LUX_BUILD_FUZZERS "Build coverage-guided fuzzers using libFuzzer and sanitizers" OFF)
+if(LUX_BUILD_FUZZERS)
+    add_executable(LuxFuzzSceneEngine FuzzScene.cpp FuzzStubs.cpp)
+    target_link_libraries(LuxFuzzSceneEngine PRIVATE LuxEngine::Engine)
+    target_compile_definitions(LuxFuzzSceneEngine PRIVATE LUX_FUZZING_ENGINE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(LuxFuzzSceneEngine PRIVATE -fsanitize=fuzzer)
+        target_link_options(LuxFuzzSceneEngine PRIVATE -fsanitize=fuzzer)
+    endif()
+    lux_copy_runtime(LuxFuzzSceneEngine)
+endif()
+

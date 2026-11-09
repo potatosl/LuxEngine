@@ -3,6 +3,7 @@
 #include "Engine/Core/Core.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Engine/Physics/PhysicsEngine.hpp"
+#include <iosfwd>
 #include <stdexcept>
 #include <type_traits>
 #include <typeindex>
@@ -26,12 +27,27 @@ public:
     void DestroyEntity(Entity entity);
     void OnUpdate(double dt);
     void OnRender();
+    void OnRender3D();
     // BeginContact events from the most recent 2D physics step, including sensors.
     const std::vector<Collision2DEvent>& GetCollisionEvents2D() const {
         return collisionEvents2D_;
     }
+    enum class SaveFault {
+        None,
+        TempWriteFailure,
+        DiskFull,
+        ReplaceAccessDenied,
+        ReplaceFailedAfterBackup,
+        BackupRestoreFailure
+    };
+    static void InjectSaveFault(SaveFault fault, uint32 count = 1);
+    static void ClearSaveFaults();
+    static std::string GetLastSaveError();
+
     bool Serialize(const std::string& filepath);
     bool Deserialize(const std::string& filepath);
+    bool SerializeToString(std::string& out);
+    bool DeserializeFromString(const std::string& data);
     uint32 GetEntityCount() const {
         return static_cast<uint32>(entities_.size());
     }
@@ -116,6 +132,7 @@ private:
         if (!IsAlive(id))
             throw std::out_of_range("Entity is not alive");
     }
+    bool DeserializeStream(std::istream& in);
     void RemovePhysicsBody2D(uint32 id);
     uint32 nextEntityId_ = 1;
     std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);

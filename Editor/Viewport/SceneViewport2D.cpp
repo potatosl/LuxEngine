@@ -104,22 +104,35 @@ void SceneViewport2D::DrawGrid(QPainter& painter, int alpha) const {
     }
 }
 void SceneViewport2D::paintEvent(QPaintEvent*) {
-    QPainter painter(this);
-    painter.fillRect(rect(), Background);
-    painter.setRenderHint(QPainter::Antialiasing);
+    // Decouple GPU render/readback phase from QPainter lifecycle.
+    // Vulkan offscreen rendering must complete before QPainter opens on this QWidget
+    // to prevent re-entrant Qt event loop message dispatch from invalidating the raster paint engine.
     engineFrame_ = false;
     if (EngineSceneRenderer::Allowed()) {
         if (!engineRenderer_)
             engineRenderer_ = std::make_shared<EngineSceneRenderer>();
         const qreal ratio = devicePixelRatioF();
-        const QPointF topLeft = ScreenToWorld(QPointF(0, 0));
-        const QPointF bottomRight = ScreenToWorld(QPointF(width(), height()));
-        if (engineRenderer_->Render(document_.GetScene(), static_cast<int>(std::lround(width() * ratio)),
-                                    static_cast<int>(std::lround(height() * ratio)),
-                                    QRectF(topLeft, bottomRight), cachedFrame_)) {
-            painter.drawImage(rect(), cachedFrame_);
-            engineFrame_ = true;
+        const int pxW = static_cast<int>(std::lround(width() * ratio));
+        const int pxH = static_cast<int>(std::lround(height() * ratio));
+        if (pxW > 0 && pxH > 0) {
+            const QPointF topLeft = ScreenToWorld(QPointF(0, 0));
+            const QPointF bottomRight = ScreenToWorld(QPointF(width(), height()));
+            if (engineRenderer_->Render(document_.GetScene(), pxW, pxH,
+                                        QRectF(topLeft, bottomRight), cachedFrame_)) {
+                engineFrame_ = true;
+            }
         }
+    }
+
+    QPainter painter(this);
+    if (!painter.isActive())
+        return;
+
+    painter.fillRect(rect(), Background);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    if (engineFrame_ && !cachedFrame_.isNull()) {
+        painter.drawImage(rect(), cachedFrame_);
     }
     DrawGrid(painter, engineFrame_ ? 70 : 255);
     auto entities = document_.GetScene().GetEntities();
@@ -242,6 +255,22 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
         return;
     setFocus();
     if (tool_ == EditorTool::TileBrush || tool_ == EditorTool::TileErase) {
+        const QPointF world = ScreenToWorld(event->position());
+        Entity mapEntity = document_.GetSelected();
+        if (!mapEntity || !mapEntity.HasComponent<TilemapComponent>()) {
+            for (Entity candidate : document_.GetScene().GetEntities()) {
+                if (!candidate.HasComponent<TilemapComponent>())
+                    continue;
+                const auto& map = candidate.GetComponent<TilemapComponent>();
+                const auto& position = candidate.GetComponent<TransformComponent>().position;
+                if (world.x() >= position.x && world.y() >= position.y &&
+                    world.x() < position.x + map.width * map.tileSize &&
+                    world.y() < position.y + map.height * map.tileSize) {
+                    onSelect_(candidate.GetId());
+                    break;
+                }
+            }
+        }
         tilePainting_ = true;
         onBeginEdit_();
         PaintAt(event->position());

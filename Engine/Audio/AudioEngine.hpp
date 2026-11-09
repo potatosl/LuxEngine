@@ -17,6 +17,9 @@ public:
     static bool PlayMusic(const std::string& musicName, bool loop = true, float volume = 1.0f);
     static void StopMusic();
     static bool IsMusicPlaying();
+
+    static uint64 GetCacheUsageBytes();
+    static size_t GetCachedFileCount();
 };
 
 } // namespace LuxEngine

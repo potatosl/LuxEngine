@@ -1,0 +1,184 @@
+name: LuxEngine CI
+
+on:
+  push:
+    branches: [ main, refactor/*, feat/*, fix/*, audit/* ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Windows Build, Test & SDK Consumer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure Network & Download Retries
+        shell: pwsh
+        run: |
+          "retry = 5`nretry-connrefused`nretry-delay = 2" | Out-File -FilePath "$HOME/.curlrc" -Encoding ascii
+
+      - name: Setup Vulkan SDK
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: 1.3.296.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, SPIRV-Tools
+          vulkan-use-cache: true
+
+      - name: Setup Portable DXC Shader Compiler
+        shell: pwsh
+        run: |
+          & powershell -ExecutionPolicy Bypass -File Tools/SetupShaderCompiler.ps1
+
+      - name: Install Dependencies via vcpkg
+        shell: pwsh
+        run: |
+          vcpkg install --triplet x64-windows --clean-after-build sdl3 stb vulkan-memory-allocator libzip
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+
+      - name: Build and Install Box2D 2.4.1
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path C:/LuxDeps/src -Force | Out-Null
+          git clone --depth 1 -b v2.4.1 https://github.com/erincatto/box2d C:/LuxDeps/src/box2d
+          cmake -S C:/LuxDeps/src/box2d -B C:/LuxDeps/build/box2d -A x64 -DBOX2D_BUILD_UNIT_TESTS=OFF -DBOX2D_BUILD_TESTBED=OFF -DBOX2D_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX=C:/LuxDeps -DCMAKE_DEBUG_POSTFIX=d
+          cmake --build C:/LuxDeps/build/box2d --config Debug -- /m /v:minimal
+          cmake --install C:/LuxDeps/build/box2d --config Debug
+          cmake --build C:/LuxDeps/build/box2d --config Release -- /m /v:minimal
+          cmake --install C:/LuxDeps/build/box2d --config Release
+
+      - name: Configure Engine, Editor & Tests
+        shell: pwsh
+        run: |
+          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif (Test-Path "C:/vcpkg") { "C:/vcpkg" } else { (Split-Path (Split-Path (Get-Command vcpkg).Source)) }
+          $prefixPath = if ($env:Qt6_DIR) { "C:/LuxDeps;$env:Qt6_DIR" } else { "C:/LuxDeps" }
+          Write-Host "Configuring Engine & Editor with vcpkg root: $vcpkgRoot, prefixPath: $prefixPath"
+          $cmakeArgs = @(
+            "-S", ".",
+            "-B", "build",
+            "-A", "x64",
+            "-DLUX_BUILD_TESTS=ON",
+            "-DLUX_BUILD_EDITOR=ON",
+            "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
+            "-DVCPKG_TARGET_TRIPLET=x64-windows",
+            "-DCMAKE_PREFIX_PATH=$prefixPath"
+          )
+          & cmake @cmakeArgs
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path build/CMakeFiles/CMakeError.log) { Get-Content build/CMakeFiles/CMakeError.log -Tail 100 }
+            exit 1
+          }
+
+      - name: Build Engine, Editor & Tests (Debug)
+        shell: pwsh
+        run: |
+          cmake --build build --config Debug -- /m /v:minimal
+          if ($env:Qt6_DIR) {
+            $qtBin = Join-Path (Split-Path (Split-Path (Split-Path $env:Qt6_DIR))) "bin"
+            $windeployqt = Join-Path $qtBin "windeployqt.exe"
+            if (Test-Path $windeployqt) {
+              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Debug/LuxEditor.exe
+              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Debug/LuxEditorUiTests.exe
+              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Debug/LuxEditorDocumentTests.exe
+            }
+          }
+
+      - name: Build Engine, Editor & Tests (Release)
+        shell: pwsh
+        run: |
+          cmake --build build --config Release -- /m /v:minimal
+          if ($env:Qt6_DIR) {
+            $qtBin = Join-Path (Split-Path (Split-Path (Split-Path $env:Qt6_DIR))) "bin"
+            $windeployqt = Join-Path $qtBin "windeployqt.exe"
+            if (Test-Path $windeployqt) {
+              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Release/LuxEditor.exe
+              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Release/LuxEditorUiTests.exe
+              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Release/LuxEditorDocumentTests.exe
+            }
+          }
+
+      - name: List Registered CTest Tests
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Debug -N
+
+      - name: Run Headless Engine & Editor UI Tests (Debug)
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Debug --output-on-failure -L headless -LE "long|slow" --timeout 180
+
+      - name: Run Headless Engine & Editor UI Tests (Release)
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release --output-on-failure -L headless -LE "long|slow" --timeout 180
+
+      - name: Run Editor UI Undo/Redo & Clipboard Regression Verbose
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Debug -R "^Editor_ui$" --output-on-failure -V
+
+      - name: Upload CTest Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs
+          path: build/Testing/Temporary/*
+          if-no-files-found: warn
+
+      - name: Run Fuzz Seed Corpus & Mutational Fuzzer
+        shell: pwsh
+        run: |
+          & "./build/bin/Debug/LuxFuzzScene.exe"
+          & "./build/bin/Debug/LuxFuzzScene.exe" --runs 10000
+
+      - name: Package LuxEngine SDK
+        shell: pwsh
+        run: |
+          & pwsh Tools/PackageSdk.ps1 -BuildDir build -OutputDir dist
+
+      - name: Verify Relocated SDK & MinimalGame Consumer
+        shell: pwsh
+        run: |
+          & pwsh Tools/VerifySdkRelocation.ps1 -BuildDir build
+
+      - name: Verify SDK Relocation Safety & Data Preservation
+        shell: pwsh
+        run: |
+          & pwsh Tests/TestSdkRelocationSafety.ps1
+
+      - name: Package LuxEditor Standalone Portable
+        shell: pwsh
+        run: |
+          & pwsh Tools/PackageEditor.ps1 -BuildDir build -OutputDir dist
+
+      - name: Verify Standalone Editor in Isolated Environment
+        shell: pwsh
+        run: |
+          & pwsh Tools/VerifyEditorStandalone.ps1
+
+      - name: Package LuxPlayer Standalone Portable
+        shell: pwsh
+        run: |
+          & pwsh Tools/PackageRuntime.ps1 -BuildDir build -OutputDir dist
+
+      - name: Verify Standalone LuxPlayer in Isolated Environment
+        shell: pwsh
+        run: |
+          & pwsh Tools/VerifyRuntimeStandalone.ps1
+
+      - name: Upload Distribution Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuxEngine-Distributions
+          path: |
+            dist/*.zip
+          if-no-files-found: error

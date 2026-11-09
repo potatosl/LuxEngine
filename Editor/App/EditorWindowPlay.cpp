@@ -30,7 +30,7 @@ void EditorWindow::RunSceneInWindow() {
     playerScenePath_ = QDir(QDir::tempPath())
                            .filePath(QStringLiteral("LuxEditor-play-%1.lux")
                                          .arg(QCoreApplication::applicationPid()));
-    if (!document_.GetScene().Serialize(playerScenePath_.toStdString())) {
+    if (!document_.GetScene().Serialize(playerScenePath_.toUtf8().toStdString())) {
         ShowError(QStringLiteral("게임 실행"),
                   QStringLiteral("실행용 장면 파일을 저장하지 못했습니다."));
         return;

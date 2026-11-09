@@ -2,6 +2,7 @@
 
 #include "Engine/Application.hpp"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
+#include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/Scene.hpp"
 #include <optional>
@@ -33,7 +34,7 @@ struct ScenePlayerOptions {
 std::optional<ScenePlayerOptions> ParseScenePlayerArguments(const std::vector<std::string>& args,
                                                             std::string& error);
 
-// Runs a saved scene in its own window: physics, animation and Renderer2D drawing.
+// Runs a saved scene in its own window: physics, animation, Renderer3D and Renderer2D drawing.
 // An entity tagged "플레이어", "주인공" or "Player" is driven by WASD/arrows (Space jumps for
 // bodies with Rigidbody2D). Escape closes the window; R reloads the scene file.
 class ScenePlayer final : public Application {
@@ -58,6 +59,7 @@ private:
     Scene scene_;
     Entity player_;
     OrthographicCamera camera_;
+    PerspectiveCamera camera3D_;
     ScenePlayerView view_;
     bool loaded_ = false;
     uint32 frames_ = 0;

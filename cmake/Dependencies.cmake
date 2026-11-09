@@ -1,6 +1,14 @@
 # Build dependencies are installed by the developer, never downloaded by CMake.
 find_package(SDL3 3.2 CONFIG REQUIRED)
 find_package(box2d 2.4...<3 CONFIG REQUIRED)
+if(TARGET box2d::box2d)
+    set_target_properties(box2d::box2d PROPERTIES
+        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
+        MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
+        MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
+        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
+    )
+endif()
 find_package(Vulkan 1.1 REQUIRED)
 
 find_package(VulkanMemoryAllocator CONFIG QUIET)
