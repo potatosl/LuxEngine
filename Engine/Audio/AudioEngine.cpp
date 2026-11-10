@@ -15,7 +15,7 @@
 
 namespace LuxEngine {
 namespace {
-constexpr uint64 MaxAudioCacheBytes = 64ull * 1024ull * 1024ull; // 64 MiB total audio cache budget
+constexpr uint64 MaxAudioCacheBytes = 64ull * 1024ull * 1024ull;  // 64 MiB total audio cache budget
 constexpr uint64 MaxSingleAudioBytes = 16ull * 1024ull * 1024ull; // 16 MiB max per WAV file
 constexpr size_t MaxCachedAudioFiles = 256;
 constexpr size_t MaxConcurrentSounds = 64;
@@ -89,7 +89,7 @@ void SDLCALL Fill(void* userdata, SDL_AudioStream* stream, int additional, int) 
         const auto count =
             std::min(static_cast<Uint32>(additional), voice.buffer->length - voice.cursor);
         if (count == 0 || !SDL_PutAudioStreamData(stream, voice.buffer->bytes + voice.cursor,
-                                                 static_cast<int>(count))) {
+                                                  static_cast<int>(count))) {
             voice.exhausted = true;
             return;
         }
@@ -107,9 +107,8 @@ bool Playing(const Voice& voice) {
 
 // Evicts LRU cached audio entries that are not actively held by any playing voice (use_count == 1)
 void EvictAudioCacheIfNeeded(uint64 incomingBytes) {
-    while (!s_LruList.empty() &&
-           (s_CurrentCacheBytes + incomingBytes > MaxAudioCacheBytes ||
-            audioCache.size() >= MaxCachedAudioFiles)) {
+    while (!s_LruList.empty() && (s_CurrentCacheBytes + incomingBytes > MaxAudioCacheBytes ||
+                                  audioCache.size() >= MaxCachedAudioFiles)) {
         // Find the oldest entry from the back of LRU list
         bool evicted = false;
         for (auto it = s_LruList.rbegin(); it != s_LruList.rend(); ++it) {
@@ -150,8 +149,7 @@ std::shared_ptr<CachedAudio> LoadBuffer(const std::string& file) {
     auto cached = std::make_shared<CachedAudio>();
     cached->filepath = file;
     if (!SDL_LoadWAV(file.c_str(), &cached->spec, &cached->bytes, &cached->length) ||
-        !cached->bytes || cached->length == 0 ||
-        cached->length > MaxSingleAudioBytes ||
+        !cached->bytes || cached->length == 0 || cached->length > MaxSingleAudioBytes ||
         cached->length > static_cast<Uint32>(std::numeric_limits<int>::max())) {
         return nullptr;
     }
@@ -159,8 +157,9 @@ std::shared_ptr<CachedAudio> LoadBuffer(const std::string& file) {
     // Evict older unreferenced items to respect memory budget
     EvictAudioCacheIfNeeded(cached->length);
 
-    // If adding this buffer would still exceed budget because active voices hold existing cache entries,
-    // bypass the cache entirely to enforce the strict 64 MiB ceiling without blocking playback.
+    // If adding this buffer would still exceed budget because active voices hold existing cache
+    // entries, bypass the cache entirely to enforce the strict 64 MiB ceiling without blocking
+    // playback.
     if (s_CurrentCacheBytes + cached->length <= MaxAudioCacheBytes &&
         audioCache.size() < MaxCachedAudioFiles) {
         s_LruList.push_front(file);

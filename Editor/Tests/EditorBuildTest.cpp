@@ -40,9 +40,11 @@ void Write(const fs::path& file, const std::string& text = "x") {
 }
 
 void TestDiagnostics() {
-    auto d = ParseBuildLine(R"(C:\proj\Source\Main.cpp(42,17): error C2065: 'x': undeclared identifier [C:\p.vcxproj])");
-    Check(d && d->severity == DiagnosticSeverity::Error && d->file == R"(C:\proj\Source\Main.cpp)" &&
-              d->line == 42 && d->column == 17 && d->code == "C2065",
+    auto d = ParseBuildLine(
+        R"(C:\proj\Source\Main.cpp(42,17): error C2065: 'x': undeclared identifier [C:\p.vcxproj])");
+    Check(d && d->severity == DiagnosticSeverity::Error &&
+              d->file == R"(C:\proj\Source\Main.cpp)" && d->line == 42 && d->column == 17 &&
+              d->code == "C2065",
           "msvc error");
     Check(d && d->message == "'x': undeclared identifier", "msbuild project suffix stripped");
     d = ParseBuildLine("C:\\프로젝트\\Main.cpp(5,3): 오류 C2065: 'x': 선언되지 않은 식별자입니다.");
@@ -110,7 +112,8 @@ void TestDetection() {
         return it == env.end() ? std::string{} : it->second;
     };
     BuildTools tools = DetectBuildTools(files.path / "app", lookup);
-    Check(tools.cmake.empty() || fs::exists(tools.cmake), "no environment: cmake only if installed");
+    Check(tools.cmake.empty() || fs::exists(tools.cmake),
+          "no environment: cmake only if installed");
     Check(tools.enginePackage.empty(), "no environment: no engine package");
     Check(!DescribeMissingTools(BuildTools{}).empty(), "missing tools are described");
 
@@ -171,7 +174,8 @@ void TestPlan() {
     Check(plan && plan->steps.size() == 2, "plan has configure and build steps");
     Check(plan->buildDirectory == project / ".lux" / "build", "build folder is inside .lux");
     const auto& configure = plan->steps[0].arguments;
-    Check(std::find(configure.begin(), configure.end(), "-DCMAKE_BUILD_TYPE=Release") != configure.end(),
+    Check(std::find(configure.begin(), configure.end(), "-DCMAKE_BUILD_TYPE=Release") !=
+              configure.end(),
           "configure has build type");
     bool hasEngineDir = false;
     for (const auto& argument : configure)

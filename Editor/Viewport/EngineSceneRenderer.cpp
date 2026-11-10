@@ -1,4 +1,3 @@
-#include "ViewportCamera3D.hpp"
 #include "EngineSceneRenderer.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Engine/Platform/Window.hpp"
@@ -7,6 +6,7 @@
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/Scene.hpp"
+#include "ViewportCamera3D.hpp"
 #include <QGuiApplication>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -89,9 +89,9 @@ ProcessVulkanSubsystemRetention& GetProcessRetention() {
     return s_Retention;
 }
 
-// Selectively drains window-specific events for the viewport SDL window without purging global events
-// or affecting other SDL windows / consumers (e.g. keyboard, mouse, or runtime player windows).
-// If pump is false, only filters already-queued events without pumping Win32 OS messages,
+// Selectively drains window-specific events for the viewport SDL window without purging global
+// events or affecting other SDL windows / consumers (e.g. keyboard, mouse, or runtime player
+// windows). If pump is false, only filters already-queued events without pumping Win32 OS messages,
 // preventing re-entrant message dispatch during active Qt paint events.
 void DrainWindowEvents(SDL_Window* window, bool pump = false) {
     if (!window)
@@ -194,7 +194,8 @@ bool EngineSceneRenderer::InitializeState(uint32 initialWidth, uint32 initialHei
     GetProcessRetention().RetainLoaderAndVideo();
     auto state = std::make_unique<State>();
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
-        error_ = QStringLiteral("SDL 비디오 초기화 실패: %1").arg(QString::fromUtf8(SDL_GetError()));
+        error_ =
+            QStringLiteral("SDL 비디오 초기화 실패: %1").arg(QString::fromUtf8(SDL_GetError()));
         return false;
     }
     state->sdlVideo = true;
@@ -207,8 +208,8 @@ bool EngineSceneRenderer::InitializeState(uint32 initialWidth, uint32 initialHei
     props.hidden = true;
     props.vsync = false;
     if (!state->window.Initialize(props)) {
-        error_ =
-            QStringLiteral("엔진 창을 만들지 못했습니다: %1").arg(QString::fromUtf8(SDL_GetError()));
+        error_ = QStringLiteral("엔진 창을 만들지 못했습니다: %1")
+                     .arg(QString::fromUtf8(SDL_GetError()));
         return false;
     }
     DrainWindowEvents(state->window.GetNativeHandle(), false);
@@ -240,7 +241,8 @@ bool EngineSceneRenderer::EnsureReady() {
         error_ = QStringLiteral("GPU 뷰포트가 꺼져 있습니다.");
         return false;
     }
-    // If a previously initialized device entered DeviceLost or Error state, attempt bounded recovery.
+    // If a previously initialized device entered DeviceLost or Error state, attempt bounded
+    // recovery.
     if (state_ && !state_->gpu.IsReady()) {
         if (recoveries_ >= kMaxDeviceRecoveries) {
             error_ = QStringLiteral("GPU 장치 복구 한도를 초과했습니다: %1")
@@ -296,7 +298,8 @@ bool EngineSceneRenderer::BeginViewportFrame(uint32 width, uint32 height) {
                      .arg(QString::fromStdString(s.gpu.GetLastError()));
         if (s.gpu.IsReady())
             return false;
-        // Device became unusable (e.g. DeviceLost); loop once more to trigger EnsureReady() recovery.
+        // Device became unusable (e.g. DeviceLost); loop once more to trigger EnsureReady()
+        // recovery.
     }
     return false;
 }
@@ -353,10 +356,9 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
 
     auto& s = *state_;
     s.gpu.Clear(30.0f / 255.0f, 34.0f / 255.0f, 42.0f / 255.0f, 1.0f);
-    const OrthographicCamera camera(static_cast<float>(worldBounds.left()),
-                                    static_cast<float>(worldBounds.right()),
-                                    static_cast<float>(worldBounds.bottom()),
-                                    static_cast<float>(worldBounds.top()));
+    const OrthographicCamera camera(
+        static_cast<float>(worldBounds.left()), static_cast<float>(worldBounds.right()),
+        static_cast<float>(worldBounds.bottom()), static_cast<float>(worldBounds.top()));
     s.context2D.Init(&s.gpu);
     Renderer2D::ScopedContext scope2D(s.context2D);
     try {
@@ -383,9 +385,8 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
     return ReadbackToImage(output);
 }
 
-bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight,
-                                   const Vec3& focus, double yaw, double pitch, double distance,
-                                   QImage& output) {
+bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight, const Vec3& focus,
+                                   double yaw, double pitch, double distance, QImage& output) {
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
         return false;
@@ -446,8 +447,7 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
     } catch (const std::exception& exception) {
         s.context3D.AbortScene();
         s.gpu.EndFrame();
-        error_ =
-            QStringLiteral("엔진 3D 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+        error_ = QStringLiteral("엔진 3D 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
         return false;
     } catch (...) {
         s.context3D.AbortScene();

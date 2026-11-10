@@ -27,9 +27,10 @@ void EditorWindow::RunSceneInWindow() {
     }
     StopSceneWindow();
     // Run what is on screen, including unsaved edits, without touching the user's scene file.
-    playerScenePath_ = QDir(QDir::tempPath())
-                           .filePath(QStringLiteral("LuxEditor-play-%1.lux")
-                                         .arg(QCoreApplication::applicationPid()));
+    playerScenePath_ =
+        QDir(QDir::tempPath())
+            .filePath(
+                QStringLiteral("LuxEditor-play-%1.lux").arg(QCoreApplication::applicationPid()));
     if (!document_.GetScene().Serialize(playerScenePath_.toUtf8().toStdString())) {
         ShowError(QStringLiteral("게임 실행"),
                   QStringLiteral("실행용 장면 파일을 저장하지 못했습니다."));

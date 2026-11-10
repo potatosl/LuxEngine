@@ -52,10 +52,10 @@ struct Renderer2D::Context::Impl {
               const std::weak_ptr<Vk::DeviceState>& owner, uint64 texture, const Vec4& color) {
         if (!active)
             return;
-        if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) ||
-            !std::isfinite(size.x) || !std::isfinite(size.y) || !std::isfinite(angle) ||
-            !std::isfinite(color.x) || !std::isfinite(color.y) || !std::isfinite(color.z) ||
-            !std::isfinite(color.w))
+        if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
+            !std::isfinite(position.z) || !std::isfinite(size.x) || !std::isfinite(size.y) ||
+            !std::isfinite(angle) || !std::isfinite(color.x) || !std::isfinite(color.y) ||
+            !std::isfinite(color.z) || !std::isfinite(color.w))
             return;
         if (!usedBatches || batches[usedBatches - 1].texture != texture ||
             !SameOwner(batches[usedBatches - 1].owner, owner) ||

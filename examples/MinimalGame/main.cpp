@@ -1,6 +1,6 @@
-#include <Engine/Scene/Scene.hpp>
-#include <Engine/Scene/Entity.hpp>
 #include <Engine/Core/Math.hpp>
+#include <Engine/Scene/Entity.hpp>
+#include <Engine/Scene/Scene.hpp>
 #include <iostream>
 
 int main() {

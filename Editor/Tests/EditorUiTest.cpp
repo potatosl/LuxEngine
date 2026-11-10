@@ -9,8 +9,6 @@
 #include "Viewport/EngineSceneRenderer.hpp"
 #include "Viewport/SceneViewport2D.hpp"
 #include "Viewport/SceneViewport3D.hpp"
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -31,6 +29,8 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QUndoStack>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -49,9 +49,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
-#include <psapi.h>
 #include <malloc.h>
+#include <psapi.h>
+#include <windows.h>
 #ifdef small
 #undef small
 #endif
@@ -206,8 +206,8 @@ void CheckWithGpuDiagnostics(bool condition, const char* phase, int iteration,
         << " cpuPrivateBytes=" << cpu.privateBytes;
     if (renderer) {
         oss << " rendererReady=" << (renderer->IsReady() ? "true" : "false")
-            << " recoveryCount=" << renderer->GetRecoveryCount()
-            << " rendererError=\"" << renderer->LastError().toStdString() << "\"";
+            << " recoveryCount=" << renderer->GetRecoveryCount() << " rendererError=\""
+            << renderer->LastError().toStdString() << "\"";
         if (const auto* gpu = renderer->GetGpuDevice()) {
             const auto mem = gpu->GetMemoryStats();
             const auto cnt = gpu->GetCounters();
@@ -413,8 +413,8 @@ void VerifyFullClipboardEntityComponents(LuxEngine::Entity entity) {
 
     Check(entity.HasComponent<TransformComponent>(), "pasted entity has TransformComponent");
     const auto& tr = entity.GetComponent<TransformComponent>();
-    Check(Vec3Near(tr.position, {1.5f, -2.5f, 3.0f}) &&
-              Vec3Near(tr.rotation, {0.1f, 0.2f, 0.3f}) && Vec3Near(tr.scale, {2.0f, 3.0f, 4.0f}),
+    Check(Vec3Near(tr.position, {1.5f, -2.5f, 3.0f}) && Vec3Near(tr.rotation, {0.1f, 0.2f, 0.3f}) &&
+              Vec3Near(tr.scale, {2.0f, 3.0f, 4.0f}),
           "pasted entity TransformComponent values match");
 
     Check(entity.HasComponent<SpriteRendererComponent>(),
@@ -588,9 +588,10 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     pasteAction->trigger();
     Check(hierarchy->count() == 3 && window.GetDocument().GetScene().GetEntityCount() == 3,
           "valid full-component clipboard JSON pasted");
-    for (const QString& id : {QStringLiteral("editorSprite"), QStringLiteral("editorMesh"),
-                              QStringLiteral("editorTilemap"), QStringLiteral("editorBody2D"),
-                              QStringLiteral("editorCollider2D"), QStringLiteral("editorAnimation")}) {
+    for (const QString& id :
+         {QStringLiteral("editorSprite"), QStringLiteral("editorMesh"),
+          QStringLiteral("editorTilemap"), QStringLiteral("editorBody2D"),
+          QStringLiteral("editorCollider2D"), QStringLiteral("editorAnimation")}) {
         auto* checkbox = window.findChild<QCheckBox*>(id);
         Check(checkbox && checkbox->isChecked(),
               "inspector checkboxes reflect pasted entity components");
@@ -613,8 +614,8 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
             FindEntityByTag(window.GetDocument().GetScene(), "검증엔티티 복사본").IsValid()) {
             const auto cpu = QueryCpuMemory();
             std::ostringstream oss;
-            oss << "[Undo/Redo FAILURE] iteration=" << iter << " phase=undo hierarchyCount="
-                << hierarchy->count()
+            oss << "[Undo/Redo FAILURE] iteration=" << iter
+                << " phase=undo hierarchyCount=" << hierarchy->count()
                 << " sceneEntities=" << window.GetDocument().GetScene().GetEntityCount()
                 << " cpuWorkingSetBytes=" << cpu.workingSetBytes
                 << " cpuPrivateBytes=" << cpu.privateBytes;
@@ -624,8 +625,8 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
         if (hierarchy->count() != 3 || window.GetDocument().GetScene().GetEntityCount() != 3) {
             const auto cpu = QueryCpuMemory();
             std::ostringstream oss;
-            oss << "[Undo/Redo FAILURE] iteration=" << iter << " phase=redo hierarchyCount="
-                << hierarchy->count()
+            oss << "[Undo/Redo FAILURE] iteration=" << iter
+                << " phase=redo hierarchyCount=" << hierarchy->count()
                 << " sceneEntities=" << window.GetDocument().GetScene().GetEntityCount()
                 << " cpuWorkingSetBytes=" << cpu.workingSetBytes
                 << " cpuPrivateBytes=" << cpu.privateBytes;
@@ -652,7 +653,8 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
         std::chrono::duration<double>(std::chrono::steady_clock::now() - undoStart).count();
     const CpuMemorySample undoCpuEnd = QueryCpuMemory();
 
-    Entity afterStressPasted = FindEntityByTag(window.GetDocument().GetScene(), "검증엔티티 복사본");
+    Entity afterStressPasted =
+        FindEntityByTag(window.GetDocument().GetScene(), "검증엔티티 복사본");
     VerifyFullClipboardEntityComponents(afterStressPasted);
     std::string afterStressSerialized;
     Check(window.GetDocument().GetScene().SerializeToString(afterStressSerialized) &&
@@ -673,11 +675,12 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
         std::cerr << " | @1000=" << (undoCpu1000.privateBytes / 1024) << "KB";
     std::cerr << ")\n";
 
-    // Copy the pasted entity back to clipboard and verify all 9 optional components roundtrip intact
+    // Copy the pasted entity back to clipboard and verify all 9 optional components roundtrip
+    // intact
     copyAction->trigger();
     {
-        const auto copiedDoc = QJsonDocument::fromJson(
-            QApplication::clipboard()->mimeData()->data(QStringLiteral("application/x-lux-entity")));
+        const auto copiedDoc = QJsonDocument::fromJson(QApplication::clipboard()->mimeData()->data(
+            QStringLiteral("application/x-lux-entity")));
         Check(copiedDoc.isObject(), "copied back entity JSON is valid object");
         const auto copiedObj = copiedDoc.object();
         Check(copiedObj.contains(QStringLiteral("sprite")) &&
@@ -822,8 +825,8 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     }
 
     // 10. Invalid UTF-8
-    SetClipboardJsonBytes(QByteArray(
-        "{\"name\":\"\xFF\xFE\xC0\xAF\",\"position\":[0,0,0],\"rotation\":[0,0,0],\"scale\":[1,1,1]}"));
+    SetClipboardJsonBytes(QByteArray("{\"name\":\"\xFF\xFE\xC0\xAF\",\"position\":[0,0,0],"
+                                     "\"rotation\":[0,0,0],\"scale\":[1,1,1]}"));
     assertRejected("10. invalid UTF-8 sequence rejected");
 
     // 11. Corrupted JSON
@@ -855,7 +858,8 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
                  "mutating scene, undo stack, or selection\n";
 
     // --- PART 3.4: RecordEdit Exception Rollback & Error Logging ---
-    std::cerr << "[Editor_ui] PART 3.4: Verifying RecordEdit exception rollback and error logging\n";
+    std::cerr
+        << "[Editor_ui] PART 3.4: Verifying RecordEdit exception rollback and error logging\n";
     window.ExecuteRecordedEdit(QStringLiteral("강제 오류 편집"), [&] {
         Entity temp = window.GetDocument().CreateEntity("예외임시엔티티");
         temp.AddComponent<SpriteRendererComponent>();
@@ -887,7 +891,9 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
               "pre-save serialized scene matches baseline");
 
         const std::string savedScenePath =
-            settings.filePath(QStringLiteral("actual_pasted_editor_scene.lux")).toUtf8().toStdString();
+            settings.filePath(QStringLiteral("actual_pasted_editor_scene.lux"))
+                .toUtf8()
+                .toStdString();
         Check(window.GetDocument().SaveAs(savedScenePath),
               "actual EditorWindow document with pasted entity saves to .lux file");
 
@@ -958,8 +964,8 @@ void PrintCheckpointComparison(const char* title, const StressCheckpoint& cpFirs
         if (cp.iteration == 0)
             return;
         std::cerr << "    " << label << " (iter=" << cp.iteration << "): "
-                  << "CPU[workingSet=" << (cp.cpu.workingSetBytes / 1024) << "KB, private="
-                  << (cp.cpu.privateBytes / 1024) << "KB] | "
+                  << "CPU[workingSet=" << (cp.cpu.workingSetBytes / 1024)
+                  << "KB, private=" << (cp.cpu.privateBytes / 1024) << "KB] | "
                   << "GPU_ACTIVE[allocCount=" << cp.gpuMem.allocationCount
                   << ", allocBytes=" << cp.gpuMem.allocationBytes
                   << ", liveBuffers=" << cp.gpuMem.liveBuffers
@@ -990,9 +996,10 @@ void PrintCheckpointComparison(const char* title, const StressCheckpoint& cpFirs
             if (det.privateBytes != 0) {
                 std::cerr << "      -> Post-Destroy Compacted Breakdown: [defaultHeapBusy="
                           << (det.defaultHeapBusyBytes / 1024) << "KB ("
-                          << det.defaultHeapBusyBlocks << " blks), secondaryHeapsBusy="
-                          << (det.secondaryHeapsBusyBytes / 1024) << "KB ("
-                          << det.secondaryHeapsBusyBlocks << " blks, heaps=" << det.heapCount
+                          << det.defaultHeapBusyBlocks
+                          << " blks), secondaryHeapsBusy=" << (det.secondaryHeapsBusyBytes / 1024)
+                          << "KB (" << det.secondaryHeapsBusyBlocks
+                          << " blks, heaps=" << det.heapCount
                           << "), vmPrivateCommit=" << (det.vmPrivateCommitBytes / 1024)
                           << "KB, vmMappedCommit=" << (det.vmMappedCommitBytes / 1024)
                           << "KB, vmImageCommit=" << (det.vmImageCommitBytes / 1024) << "KB]\n";
@@ -1056,7 +1063,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
               << cfg.gpuIterations << ", viewportIterations=" << cfg.viewportIterations << ")\n";
 
     EngineSceneRenderer::SetForceAllowed(true);
-    // Request Vulkan Synchronization Validation (falls back to standard Validation or Off if layer missing)
+    // Request Vulkan Synchronization Validation (falls back to standard Validation or Off if layer
+    // missing)
     EngineSceneRenderer::SetDefaultValidation(static_cast<int>(GpuValidation::Synchronization));
 
     GpuDeviceInfo deviceInfo{};
@@ -1104,8 +1112,9 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
     uint64 totalSubmissions = 0;
     uint64 totalPipelinesCreated = 0;
 
-    // --- PART 2.0: Controlled CPU Memory Isolation Tests (Separating SDL Window, Device Init/Shutdown
-    // ONLY vs. Full Render/Readback, and Validation OFF vs. ON vs. Synchronization) ---
+    // --- PART 2.0: Controlled CPU Memory Isolation Tests (Separating SDL Window, Device
+    // Init/Shutdown ONLY vs. Full Render/Readback, and Validation OFF vs. ON vs. Synchronization)
+    // ---
     constexpr int kIsolationIterations = 50;
     std::cerr << "[Editor_gpu_lifecycle] PART 2.0: Running " << kIsolationIterations
               << "x controlled CPU memory isolation sub-tests...\n";
@@ -1169,9 +1178,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             r.reset();
         }
         const auto afterFullOff = QueryDetailedCpuMemory(true);
-        PrintIsolationDelta(
-            "2.0C: Full Init+Render2D/3D+Readback+Shutdown (Validation=OFF)",
-            kIsolationIterations, beforeFullOff, afterFullOff);
+        PrintIsolationDelta("2.0C: Full Init+Render2D/3D+Readback+Shutdown (Validation=OFF)",
+                            kIsolationIterations, beforeFullOff, afterFullOff);
 
         // Sub-test 2.0D: GPU Device Init + Shutdown ONLY (No Render, No Readback), Validation = ON
         EngineSceneRenderer::SetDefaultValidation(static_cast<int>(GpuValidation::On));
@@ -1189,7 +1197,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             "2.0D: GpuDevice Init+Shutdown ONLY (No Render/Readback, Validation=ON)",
             kIsolationIterations, beforeInitOn, afterInitOn);
 
-        // Sub-test 2.0E: GPU Device Init + Shutdown ONLY (No Render, No Readback), Validation = Synchronization
+        // Sub-test 2.0E: GPU Device Init + Shutdown ONLY (No Render, No Readback), Validation =
+        // Synchronization
         EngineSceneRenderer::SetDefaultValidation(static_cast<int>(GpuValidation::Synchronization));
         const auto beforeInitSync = QueryDetailedCpuMemory(true);
         for (int i = 0; i < kIsolationIterations; ++i) {
@@ -1205,7 +1214,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             "2.0E: GpuDevice Init+Shutdown ONLY (No Render/Readback, Validation=Synchronization)",
             kIsolationIterations, beforeInitSync, afterInitSync);
 
-        // Sub-test 2.0F: Full Init + 2D/3D Render + QImage Readback + Shutdown, Validation = Synchronization
+        // Sub-test 2.0F: Full Init + 2D/3D Render + QImage Readback + Shutdown, Validation =
+        // Synchronization
         const auto beforeFullSync = QueryDetailedCpuMemory(true);
         for (int i = 0; i < kIsolationIterations; ++i) {
             auto r = std::make_unique<EngineSceneRenderer>();
@@ -1355,13 +1365,12 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
                       << "KB, shut=" << (stageSample.postShutdown.privateBytes / 1024)
                       << "KB, destroy=" << (stageSample.postDestroy.privateBytes / 1024) << "KB]"
                       << " | GPU_ACTIVE[allocs=" << memStats.allocationCount
-                      << ", bytes=" << memStats.allocationBytes
-                      << ", buf=" << memStats.liveBuffers << ", tex=" << memStats.liveTextures
+                      << ", bytes=" << memStats.allocationBytes << ", buf=" << memStats.liveBuffers
+                      << ", tex=" << memStats.liveTextures
                       << ", pend=" << memStats.pendingDestructions
                       << ", vram=" << memStats.deviceLocalUsage << "]"
                       << " | GPU_CUM[frames=" << totalFramesSubmitted
-                      << ", submits=" << totalSubmissions
-                      << ", pipes=" << totalPipelinesCreated
+                      << ", submits=" << totalSubmissions << ", pipes=" << totalPipelinesCreated
                       << ", valErr=" << totalValidationErrors << "]\n";
         }
     }
@@ -1417,10 +1426,9 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0, warmupB) &&
                 rendererB->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), warmupB),
             "ViewportStress::WarmupB", 0, rendererB.get(), "rendererB warmup failed");
-        CheckWithGpuDiagnostics(rendererA->GetGpuDevice()->WaitIdle() &&
-                                    rendererB->GetGpuDevice()->WaitIdle(),
-                                "ViewportStress::WarmupWaitIdle", 0, rendererA.get(),
-                                "warmup WaitIdle failed");
+        CheckWithGpuDiagnostics(
+            rendererA->GetGpuDevice()->WaitIdle() && rendererB->GetGpuDevice()->WaitIdle(),
+            "ViewportStress::WarmupWaitIdle", 0, rendererA.get(), "warmup WaitIdle failed");
 
         for (int i = 0; i < cfg.viewportIterations; ++i) {
             const int iterNum = i + 1;
@@ -1433,8 +1441,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
                                     "2D or 3D context invalid");
 
             auto vp2D = std::make_unique<SceneViewport2D>(
-                nullptr, doc, [](auto) {}, [](auto, const auto&) {},
-                [](auto, auto, auto, auto) {}, [] {}, [] {}, rendererA);
+                nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [](auto, auto, auto, auto) {},
+                [] {}, [] {}, rendererA);
             auto vp3D = std::make_unique<SceneViewport3D>(
                 nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {}, rendererB);
             vp2D->resize(200, 150);
@@ -1559,11 +1567,11 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             totalValidationErrors += rendererB->GetGpuDevice()->GetCounters().validationErrors;
         } else {
             rendererB.reset();
-            Check(rendererA->IsReady() &&
-                      rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgA) &&
-                      rendererA->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.3, 0.1, 4.0,
-                                          imgA),
-                  "viewport A renders 2D & 3D after viewport B GpuDevice is destroyed first");
+            Check(
+                rendererA->IsReady() &&
+                    rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgA) &&
+                    rendererA->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.3, 0.1, 4.0, imgA),
+                "viewport A renders 2D & 3D after viewport B GpuDevice is destroyed first");
             totalValidationErrors += rendererA->GetGpuDevice()->GetCounters().validationErrors;
         }
     }
@@ -1575,8 +1583,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
     {
         EngineSceneRenderer renderer;
         QImage output;
-        const std::pair<int, int> sizes[] = {
-            {160, 120}, {320, 240}, {256, 256}, {400, 220}, {128, 96}, {360, 180}};
+        const std::pair<int, int> sizes[] = {{160, 120}, {320, 240}, {256, 256},
+                                             {400, 220}, {128, 96},  {360, 180}};
         for (const auto& [w, h] : sizes) {
             Check(renderer.Render(scene2D, w, h, QRectF(-5.0, 5.0, 10.0, -10.0), output) &&
                       output.width() == w && output.height() == h,
@@ -1636,7 +1644,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
                   renderer.Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.0, 0.0, 5.0, output),
               "EngineSceneRenderer recovers after Reset following init failure");
 
-        // DeviceLost recovery (up to kMaxDeviceRecoveries = 3) and recovery limit enforcement on 4th
+        // DeviceLost recovery (up to kMaxDeviceRecoveries = 3) and recovery limit enforcement on
+        // 4th
         for (uint32 expectedRecovery = 1; expectedRecovery <= 3; ++expectedRecovery) {
             Vk::InjectFault(Vk::Fault::DeviceLost);
             Check(!renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output),
@@ -1651,8 +1660,7 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
               "4th DeviceLost fails active frame");
         Vk::ClearFaults();
         Check(!renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output) &&
-                  !renderer.IsReady() &&
-                  renderer.LastError().contains(QStringLiteral("복구 한도")),
+                  !renderer.IsReady() && renderer.LastError().contains(QStringLiteral("복구 한도")),
               "EngineSceneRenderer enforces recovery limit after 3 recoveries");
 
         renderer.Reset();
@@ -1668,7 +1676,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
     }
 
     // --- PART 2.4: QPainter Viewport PaintEvent & Rapid Tab Switching / Resize Stress Test ---
-    std::cerr << "[Editor_gpu_lifecycle] PART 2.4: QPainter Viewport PaintEvent, Tab Switching & Resize Stress Test...\n";
+    std::cerr << "[Editor_gpu_lifecycle] PART 2.4: QPainter Viewport PaintEvent, Tab Switching & "
+                 "Resize Stress Test...\n";
     {
         EngineSceneRenderer::SetForceAllowed(true);
         auto sharedRenderer = std::make_shared<EngineSceneRenderer>();
@@ -1677,17 +1686,19 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         e.GetComponent<TransformComponent>().scale = Vec3{2.0f, 2.0f, 1.0f};
         e.AddComponent<SpriteRendererComponent>(Vec4{0.2f, 0.8f, 0.4f, 1.0f});
 
-        SceneViewport2D vp2D(nullptr, doc, [](auto) {}, [](auto, const auto&) {},
-                             [](auto, auto, auto, auto) {}, [] {}, [] {}, sharedRenderer);
-        SceneViewport3D vp3D(nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {},
-                             sharedRenderer);
+        SceneViewport2D vp2D(
+            nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [](auto, auto, auto, auto) {},
+            [] {}, [] {}, sharedRenderer);
+        SceneViewport3D vp3D(
+            nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {}, sharedRenderer);
 
-        const int switchIterations = std::min(1000, cfg.viewportIterations > 0 ? cfg.viewportIterations : 200);
-        std::cerr << "  Executing " << switchIterations << " rapid 2D/3D viewport switch, resize, and QPainter render cycles...\n";
+        const int switchIterations =
+            std::min(1000, cfg.viewportIterations > 0 ? cfg.viewportIterations : 200);
+        std::cerr << "  Executing " << switchIterations
+                  << " rapid 2D/3D viewport switch, resize, and QPainter render cycles...\n";
 
-        const std::pair<int, int> testSizes[] = {
-            {320, 240}, {400, 300}, {512, 384}, {640, 480}, {800, 600}, {256, 256}, {300, 200}
-        };
+        const std::pair<int, int> testSizes[] = {{320, 240}, {400, 300}, {512, 384}, {640, 480},
+                                                 {800, 600}, {256, 256}, {300, 200}};
 
         for (int i = 0; i < switchIterations; ++i) {
             const auto& sz = testSizes[i % std::size(testSizes)];
@@ -1707,7 +1718,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         }
 
         if (sharedRenderer->IsReady() && sharedRenderer->GetGpuDevice()) {
-            Check(sharedRenderer->GetGpuDevice()->WaitIdle(), "sharedRenderer WaitIdle after paint stress");
+            Check(sharedRenderer->GetGpuDevice()->WaitIdle(),
+                  "sharedRenderer WaitIdle after paint stress");
             Check(sharedRenderer->GetGpuDevice()->GetCounters().validationErrors == 0,
                   "zero validation errors after QPainter viewport paint stress");
             totalValidationErrors += sharedRenderer->GetGpuDevice()->GetCounters().validationErrors;
@@ -1719,8 +1731,9 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         {
             EngineSceneRenderer::SetForceAllowed(false);
             qputenv("LUX_EDITOR_SOFTWARE_VIEWPORT", "1");
-            SceneViewport2D sw2D(nullptr, doc, [](auto) {}, [](auto, const auto&) {},
-                                 [](auto, auto, auto, auto) {}, [] {}, [] {});
+            SceneViewport2D sw2D(
+                nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [](auto, auto, auto, auto) {},
+                [] {}, [] {});
             SceneViewport3D sw3D(nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {});
             sw2D.resize(320, 240);
             sw3D.resize(320, 240);
@@ -1728,7 +1741,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             QImage img3D(320, 240, QImage::Format_ARGB32_Premultiplied);
             sw2D.render(&img2D);
             sw3D.render(&img3D);
-            Check(!img2D.isNull() && !img3D.isNull(), "Software Viewport 2D and 3D render succeeded");
+            Check(!img2D.isNull() && !img3D.isNull(),
+                  "Software Viewport 2D and 3D render succeeded");
             qunsetenv("LUX_EDITOR_SOFTWARE_VIEWPORT");
         }
     }
@@ -1763,18 +1777,18 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
               << (static_cast<long long>(cpLast.gpuMem.allocationBytes) -
                   static_cast<long long>(cpFirst.gpuMem.allocationBytes))
               << " bytes\n"
-              << "  CPU Post-Destroy PrivateUsage (Iter 1 -> Iter " << cfg.gpuIterations << "): "
-              << (cpFirst.fourStage.postDestroy.privateBytes / 1024) << "KB -> "
+              << "  CPU Post-Destroy PrivateUsage (Iter 1 -> Iter " << cfg.gpuIterations
+              << "): " << (cpFirst.fourStage.postDestroy.privateBytes / 1024) << "KB -> "
               << (cpLast.fourStage.postDestroy.privateBytes / 1024) << "KB (delta="
               << (static_cast<long long>(cpLast.fourStage.postDestroy.privateBytes) -
                   static_cast<long long>(cpFirst.fourStage.postDestroy.privateBytes)) /
                      1024
               << "KB)\n"
-              << "  CPU DefaultHeap Busy (Iter 1 -> Iter " << cfg.gpuIterations << "): "
-              << (cpFirst.fourStage.detailedPostDestroy.defaultHeapBusyBytes / 1024) << "KB ("
-              << cpFirst.fourStage.detailedPostDestroy.defaultHeapBusyBlocks << " blks) -> "
-              << (cpLast.fourStage.detailedPostDestroy.defaultHeapBusyBytes / 1024) << "KB ("
-              << cpLast.fourStage.detailedPostDestroy.defaultHeapBusyBlocks << " blks)\n"
+              << "  CPU DefaultHeap Busy (Iter 1 -> Iter " << cfg.gpuIterations
+              << "): " << (cpFirst.fourStage.detailedPostDestroy.defaultHeapBusyBytes / 1024)
+              << "KB (" << cpFirst.fourStage.detailedPostDestroy.defaultHeapBusyBlocks
+              << " blks) -> " << (cpLast.fourStage.detailedPostDestroy.defaultHeapBusyBytes / 1024)
+              << "KB (" << cpLast.fourStage.detailedPostDestroy.defaultHeapBusyBlocks << " blks)\n"
               << "  Final Suite Teardown CPU: PrivateUsage=" << (finalSuiteCpu.privateBytes / 1024)
               << "KB, WorkingSet=" << (finalSuiteCpu.workingSetBytes / 1024)
               << "KB, DefaultHeapBusy=" << (finalSuiteCpu.defaultHeapBusyBytes / 1024) << "KB ("

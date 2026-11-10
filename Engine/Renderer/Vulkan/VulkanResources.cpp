@@ -509,7 +509,8 @@ bool DeviceState::EnsureVertexCapacity(FrameData& frame, VkDeviceSize bytes) {
 
 bool DeviceState::PushUniform(const void* data, VkDeviceSize size, uint32& offset) {
     VertexRing& ring = frames[frameSlot].uniforms;
-    const VkDeviceSize aligned = (ring.used + uniformAlignment - 1) / uniformAlignment * uniformAlignment;
+    const VkDeviceSize aligned =
+        (ring.used + uniformAlignment - 1) / uniformAlignment * uniformAlignment;
     if (!ring.mapped || aligned + size > ring.capacity)
         return Fail(GpuStatus::OutOfMemory, "Per-frame uniform budget exceeded");
     std::memcpy(ring.mapped + aligned, data, static_cast<size_t>(size));
@@ -547,7 +548,8 @@ bool DeviceState::EnsureCaptureBuffer(VkDeviceSize size) {
 }
 
 bool DeviceState::CreateFrames() {
-    uniformAlignment = std::max<VkDeviceSize>(properties.limits.minUniformBufferOffsetAlignment, 16);
+    uniformAlignment =
+        std::max<VkDeviceSize>(properties.limits.minUniformBufferOffsetAlignment, 16);
     VkDescriptorSetLayoutBinding bindings[2]{};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
@@ -618,12 +620,12 @@ bool DeviceState::CreateFrames() {
         uniformInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
         VmaAllocationCreateInfo uniformAllocation{};
         uniformAllocation.usage = VMA_MEMORY_USAGE_AUTO;
-        uniformAllocation.flags =
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        uniformAllocation.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                  VMA_ALLOCATION_CREATE_MAPPED_BIT;
         VmaAllocationInfo mapped{};
-        if (const VkResult result = vmaCreateBuffer(allocator, &uniformInfo, &uniformAllocation,
-                                                    &frame.uniforms.buffer,
-                                                    &frame.uniforms.allocation, &mapped);
+        if (const VkResult result =
+                vmaCreateBuffer(allocator, &uniformInfo, &uniformAllocation, &frame.uniforms.buffer,
+                                &frame.uniforms.allocation, &mapped);
             result != VK_SUCCESS) {
             frame.uniforms = {};
             return Fail(result, "Frame uniform buffer");

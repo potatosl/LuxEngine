@@ -1283,7 +1283,8 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     }
     const auto before = SnapshotScene();
     if (before.isEmpty()) {
-        Log(QStringLiteral("편집 기록 실패 (%1): 편집 전 장면 스냅샷을 생성하지 못했습니다.").arg(name),
+        Log(QStringLiteral("편집 기록 실패 (%1): 편집 전 장면 스냅샷을 생성하지 못했습니다.")
+                .arg(name),
             true);
         return;
     }
@@ -1298,7 +1299,8 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
         return;
     } catch (...) {
         RestoreScene(before, previous);
-        Log(QStringLiteral("편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
+        Log(QStringLiteral(
+                "편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
                 .arg(name),
             true);
         return;
@@ -1306,7 +1308,8 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     const auto after = SnapshotScene();
     if (after.isEmpty()) {
         RestoreScene(before, previous);
-        Log(QStringLiteral("편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
+        Log(QStringLiteral(
+                "편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
                 .arg(name),
             true);
         return;
@@ -1397,7 +1400,8 @@ void EditorWindow::CopyEntity() {
         const auto& col = selected.GetComponent<BoxCollider3DComponent>();
         QJsonObject colObj;
         colObj.insert(QStringLiteral("size"), QJsonArray{col.size.x, col.size.y, col.size.z});
-        colObj.insert(QStringLiteral("offset"), QJsonArray{col.offset.x, col.offset.y, col.offset.z});
+        colObj.insert(QStringLiteral("offset"),
+                      QJsonArray{col.offset.x, col.offset.y, col.offset.z});
         colObj.insert(QStringLiteral("trigger"), col.isTrigger);
         object.insert(QStringLiteral("collider3d"), colObj);
     }
@@ -1698,7 +1702,8 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             !ParseExactInt(mapObj.value(QStringLiteral("height")), h, 1, 256) ||
             !ParseFiniteFloat(mapObj.value(QStringLiteral("tileSize")), tileSize, 0.0f, 64.0f) ||
             tileSize <= 0.0f) {
-            errorMsg = QStringLiteral("타일맵 크기(최대 256x256) 또는 타일 크기가 유효하지 않습니다.");
+            errorMsg =
+                QStringLiteral("타일맵 크기(최대 256x256) 또는 타일 크기가 유효하지 않습니다.");
             return false;
         }
         const QJsonValue tilesVal = mapObj.value(QStringLiteral("tiles"));
@@ -1842,7 +1847,8 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         }
         const auto keysArr = keysVal.toArray();
         if (keysArr.size() > 4096) {
-            errorMsg = QStringLiteral("애니메이션 키프레임 수가 최대 허용치(4096개)를 초과했습니다.");
+            errorMsg =
+                QStringLiteral("애니메이션 키프레임 수가 최대 허용치(4096개)를 초과했습니다.");
             return false;
         }
         comp.clip.name = clipName.toUtf8().toStdString();
@@ -1880,11 +1886,13 @@ void EditorWindow::PasteEntity() {
         return;
     const QByteArray rawBytes = mime->data(QStringLiteral("application/x-lux-entity"));
     if (rawBytes.isEmpty() || rawBytes.size() > kMaxClipboardJsonBytes) {
-        Log(QStringLiteral("붙여넣기 실패: 클립보드 데이터가 비어 있거나 허용 크기(1MB)를 초과했습니다."));
+        Log(QStringLiteral(
+            "붙여넣기 실패: 클립보드 데이터가 비어 있거나 허용 크기(1MB)를 초과했습니다."));
         return;
     }
     if (!IsStrictValidUtf8(rawBytes)) {
-        Log(QStringLiteral("붙여넣기 실패: 클립보드 데이터에 잘못된 UTF-8 인코딩이 포함되어 있습니다."));
+        Log(QStringLiteral(
+            "붙여넣기 실패: 클립보드 데이터에 잘못된 UTF-8 인코딩이 포함되어 있습니다."));
         return;
     }
     QJsonParseError parse;

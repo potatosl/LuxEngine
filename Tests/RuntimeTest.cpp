@@ -27,13 +27,13 @@ using LuxEngine::ParseScenePlayerArguments;
 void Parse() {
     std::string error;
     auto options = ParseScenePlayerArguments({"scene.lux"}, error);
-    Check(options && options->scenePath == "scene.lux" && !options->view &&
-              !options->fullscreen && options->maxFrames == 0,
+    Check(options && options->scenePath == "scene.lux" && !options->view && !options->fullscreen &&
+              options->maxFrames == 0,
           "scene path alone");
-    options = ParseScenePlayerArguments({"a.lux", "--title", "게임", "--size", "800", "600",
-                                         "--fullscreen", "--view", "1.5", "-2", "3", "--frames",
-                                         "10"},
-                                        error);
+    options =
+        ParseScenePlayerArguments({"a.lux", "--title", "게임", "--size", "800", "600",
+                                   "--fullscreen", "--view", "1.5", "-2", "3", "--frames", "10"},
+                                  error);
     Check(options && options->title == "게임" && options->width == 800 && options->height == 600 &&
               options->fullscreen && options->maxFrames == 10,
           "all options");
@@ -53,14 +53,16 @@ void Parse() {
     };
     for (const auto& args : invalid) {
         error.clear();
-        Check(!ParseScenePlayerArguments(args, error) && !error.empty(), "invalid arguments rejected");
+        Check(!ParseScenePlayerArguments(args, error) && !error.empty(),
+              "invalid arguments rejected");
     }
 }
 
 void Fit() {
     LuxEngine::Scene empty;
     auto view = LuxEngine::FitSceneView(empty);
-    Check(Near(view.centerX, 0) && Near(view.centerY, 0) && view.halfHeight > 0, "empty scene view");
+    Check(Near(view.centerX, 0) && Near(view.centerY, 0) && view.halfHeight > 0,
+          "empty scene view");
     LuxEngine::Scene scene;
     auto a = scene.CreateEntity("a");
     a.GetComponent<LuxEngine::TransformComponent>().position = {-10, 0, 0};
@@ -100,7 +102,8 @@ void WriteScene(const std::string& path) {
         tiles.Set(x, 0, 2);
     auto cube3D = scene.CreateEntity("3D 배경 큐브");
     cube3D.GetComponent<LuxEngine::TransformComponent>().position = {2.5f, 1.5f, -2.0f};
-    cube3D.AddComponent<LuxEngine::MeshRendererComponent>().material.albedoColor = {0.4f, 0.7f, 0.9f, 1.0f};
+    cube3D.AddComponent<LuxEngine::MeshRendererComponent>().material.albedoColor = {0.4f, 0.7f,
+                                                                                    0.9f, 1.0f};
     Check(scene.Serialize(path), "smoke scene written");
     LuxEngine::Scene loaded;
     Check(loaded.Deserialize(path) && loaded.GetEntityCount() == 4, "smoke scene reloads");

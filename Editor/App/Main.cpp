@@ -25,8 +25,9 @@ int main(int argc, char** argv) {
 #if defined(_WIN32)
     // If stdout is not redirected to a pipe or file, attach to caller's console
     const HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    const DWORD outType =
-        (hStdOut != NULL && hStdOut != INVALID_HANDLE_VALUE) ? GetFileType(hStdOut) : FILE_TYPE_UNKNOWN;
+    const DWORD outType = (hStdOut != NULL && hStdOut != INVALID_HANDLE_VALUE)
+                              ? GetFileType(hStdOut)
+                              : FILE_TYPE_UNKNOWN;
     if (outType != FILE_TYPE_PIPE && outType != FILE_TYPE_DISK) {
         if (AttachConsole(ATTACH_PARENT_PROCESS)) {
             FILE* fp = nullptr;
@@ -71,8 +72,9 @@ int main(int argc, char** argv) {
                 window.close();
                 app.processEvents();
             }
-            std::cout << "[LuxEditor] Smoke test passed: LuxEditor initialized successfully (version "
-                      << LUX_EDITOR_ENGINE_VERSION << ")." << std::endl;
+            std::cout
+                << "[LuxEditor] Smoke test passed: LuxEditor initialized successfully (version "
+                << LUX_EDITOR_ENGINE_VERSION << ")." << std::endl;
             std::cout.flush();
             return 0;
         }

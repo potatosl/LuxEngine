@@ -24,11 +24,14 @@ public:
     static bool HasTexture(const std::string& filepath);
     static void UnloadTexture(const std::string& filepath);
 
-    // Validates image file format, dimensions (<= 8192), file size (<= 64 MiB), and memory budget (<= 256 MiB) on CPU.
-    static bool ValidateTextureFile(const std::string& filepath, int* outWidth = nullptr, int* outHeight = nullptr);
+    // Validates image file format, dimensions (<= 8192), file size (<= 64 MiB), and memory budget
+    // (<= 256 MiB) on CPU.
+    static bool ValidateTextureFile(const std::string& filepath, int* outWidth = nullptr,
+                                    int* outHeight = nullptr);
 
     // Decodes valid texture pixels to RGBA buffer on CPU without requiring a GPU device.
-    static bool DecodeTextureCpu(const std::string& filepath, int& outWidth, int& outHeight, std::vector<uint8>& outRgbaPixels);
+    static bool DecodeTextureCpu(const std::string& filepath, int& outWidth, int& outHeight,
+                                 std::vector<uint8>& outRgbaPixels);
 
     static bool LoadShaderBytes(const std::string& filepath, std::vector<uint8>& outBytes);
     static bool LoadMesh(const std::string& filepath, RawMeshData& outMesh);
