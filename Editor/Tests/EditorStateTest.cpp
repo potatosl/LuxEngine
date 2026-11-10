@@ -15,6 +15,7 @@
 #include <QTimer>
 #include <QUndoStack>
 #include <QUrl>
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -122,6 +123,58 @@ void TestSceneContext(QApplication& app) {
               "external scenes detach from the previous project consistently");
     }
 }
+void TestRecoveryHistory(QApplication& app) {
+    ProjectFixture fixture;
+    LuxEngine::Scene recovered;
+    recovered.CreateEntity("Recovered unsaved entity");
+    std::string error;
+    Check(fixture.project.SaveAutosave(fixture.project.GetSceneFile(), recovered, error),
+          error.c_str());
+    fs::last_write_time(fixture.project.GetSceneFile(),
+                        fs::file_time_type::clock::now() - std::chrono::minutes(5));
+    QTimer recover;
+    QObject::connect(&recover, &QTimer::timeout, &app, [] {
+        if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+            if (auto* yes = message->button(QMessageBox::Yes))
+                yes->click();
+    });
+    recover.start(5);
+    auto window = fixture.Open(app);
+    recover.stop();
+    auto& document = window->GetDocument();
+    Check(document.IsDirty() && document.GetScene().GetEntityCount() == 1,
+          "autosave recovery is unsaved");
+    auto* undo = window->findChild<QUndoStack*>();
+    window->findChild<QAction*>("addEntity")->trigger();
+    undo->undo();
+    Check(document.IsDirty() && document.GetScene().GetEntityCount() == 1 && !undo->isClean(),
+          "undo to a recovered baseline remains dirty");
+    undo->redo();
+    Check(document.IsDirty() && document.GetScene().GetEntityCount() == 2, "redo remains dirty");
+    undo->undo();
+    // Closing must still ask to save the recovered changes.
+    int prompts = 0;
+    QTimer cancel;
+    QObject::connect(&cancel, &QTimer::timeout, &app, [&] {
+        if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            ++prompts;
+            message->button(QMessageBox::Cancel)->click();
+        }
+    });
+    cancel.start(5);
+    Check(!window->close() && prompts == 1, "close asks to save recovered changes after undo");
+    cancel.stop();
+    window->findChild<QAction*>("saveScene")->trigger();
+    LuxEngine::Scene disk;
+    Check(!document.IsDirty() && undo->isClean() &&
+              disk.Deserialize(PathUtf8(fixture.project.GetSceneFile())) &&
+              disk.GetEntityCount() == 1,
+          "saving recovered content establishes the clean baseline");
+    undo->redo();
+    Check(document.IsDirty(), "redo away from the saved baseline is dirty");
+    undo->undo();
+    Check(!document.IsDirty(), "undo back to the saved baseline is clean");
+}
 } // namespace
 int main(int argc, char** argv) {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
@@ -137,6 +190,8 @@ int main(int argc, char** argv) {
         const std::string mode = argc > 1 ? argv[1] : "";
         if (mode == "scene-context")
             TestSceneContext(app);
+        else if (mode == "recovery-history")
+            TestRecoveryHistory(app);
         else
             throw std::runtime_error("Unknown editor state test mode");
         std::cout << "Editor state checks passed: " << mode << '\n';

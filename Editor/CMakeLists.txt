@@ -190,7 +190,8 @@ if(LUX_BUILD_TESTS)
     lux_editor_copy_runtime(LuxEditorStateTests)
     lux_editor_copy_qt_plugins(LuxEditorStateTests)
     add_test(NAME Editor_scene_context COMMAND LuxEditorStateTests scene-context)
-    set_tests_properties(Editor_scene_context PROPERTIES
+    add_test(NAME Editor_recovery_history COMMAND LuxEditorStateTests recovery-history)
+    set_tests_properties(Editor_scene_context Editor_recovery_history PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1"
         TIMEOUT 60 LABELS "headless;editor")
     add_executable(LuxEditorRegressionTests Tests/EditorRegressionTest.cpp)
