@@ -46,6 +46,7 @@ public:
     std::filesystem::path GetAutosaveFile(const std::filesystem::path& sceneFile) const;
     bool SaveAutosave(const std::filesystem::path& sceneFile, LuxEngine::Scene& scene,
                       std::string& error) const;
+    bool ContainsScene(const std::filesystem::path& sceneFile) const;
     bool HasNewerAutosave(const std::filesystem::path& sceneFile) const;
     bool ClearAutosave(const std::filesystem::path& sceneFile) const;
     size_t RescanResources(std::string& error) const;

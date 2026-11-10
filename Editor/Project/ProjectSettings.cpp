@@ -118,6 +118,12 @@ bool EditorProject::BumpVersion(int part, std::string& error) {
     return UpdateSettings(settings, error);
 }
 
+bool EditorProject::ContainsScene(const std::filesystem::path& sceneFile) const {
+    std::error_code ec;
+    const auto relative = std::filesystem::relative(sceneFile, file_.parent_path(), ec);
+    return !ec && WithinProject(relative) && relative.extension() == ".lux";
+}
+
 std::filesystem::path EditorProject::GetAutosaveFile(const std::filesystem::path& sceneFile) const {
     std::error_code ec;
     const auto relative = std::filesystem::relative(sceneFile, file_.parent_path(), ec);

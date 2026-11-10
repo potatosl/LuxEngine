@@ -127,7 +127,10 @@ bool EditorWindow::OpenProjectScene(const std::filesystem::path& file) {
         ShowError(QStringLiteral("장면 열기 실패"), QStringLiteral("장면 파일을 열 수 없습니다."));
         return false;
     }
+    if (project_ && !project_->ContainsScene(file))
+        project_.reset();
     undo_->clear();
+    ApplyProjectPreferences();
     RecoverAutosaveIfNeeded();
     RefreshAll();
     return true;

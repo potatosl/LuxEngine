@@ -180,22 +180,11 @@ void EditorWindow::BuildMenus() {
     });
     add(file, QStringLiteral("장면 열기..."), QStringLiteral("openScene"), QKeySequence::Open,
         [this] {
-            if (!ConfirmDiscardChanges())
-                return;
             const QString file =
                 QFileDialog::getOpenFileName(this, QStringLiteral("장면 열기"), {},
                                              QStringLiteral("Lux 장면 (*.lux);;모든 파일 (*)"));
-            if (file.isEmpty())
-                return;
-            if (!document_.Open(Utf8(file))) {
-                ShowError(QStringLiteral("열기 실패"),
-                          QStringLiteral("장면 파일을 열 수 없습니다."));
-                return;
-            }
-            project_.reset();
-            undo_->clear();
-            ApplyProjectPreferences();
-            RefreshAll();
+            if (!file.isEmpty())
+                OpenProjectScene(PathFromUtf8(Utf8(file)));
         });
     add(file, QStringLiteral("저장"), QStringLiteral("saveScene"), QKeySequence::Save,
         [this] { SaveScene(false); });
