@@ -50,7 +50,7 @@ endif()
 
 constexpr const char* GameSource = R"LUX(#include "Engine/LuxEngine.hpp"
 #include <SDL3/SDL_filesystem.h>
-#include <SDL3/SDL_main.h>
+#include "Engine/EntryPoint.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -183,7 +183,7 @@ private:
     int frames_ = 0;
 };
 
-int main(int argc, char* argv[]) {
+int RunGame(int argc, char* argv[]) {
     Game game(argc > 1 && std::string_view(argv[1]) == "--smoke-test");
     if (!game.Initialize())
         return 1;
@@ -191,6 +191,7 @@ int main(int argc, char* argv[]) {
     game.Shutdown();
     return result;
 }
+LUX_ENGINE_MAIN(RunGame)
 )LUX";
 } // namespace
 

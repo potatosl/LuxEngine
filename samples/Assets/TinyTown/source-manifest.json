@@ -1,0 +1,705 @@
+{
+  "name": "TinyTown",
+  "source": "https://kenney.nl/assets/tiny-town",
+  "download_endpoint": "https://kenney.nl/download-link/6173736574732f74696e792d746f776e",
+  "license": "CC0-1.0",
+  "archive_sha256": "9768692dccff1d706408a5aedd6ca4f6cd1409506cbc84cb2f862919764be977",
+  "verification": "Official source CC0 declaration; archive CRC and SHA256 roster; manual verification because game-dev CLI unavailable",
+  "files": [
+    {
+      "path": "Preview.png",
+      "bytes": 17645,
+      "sha256": "9a6a773a4e39bc2082b85f0778d8a106f644233b2b3612c5c2a6fd6e4ce2106b"
+    },
+    {
+      "path": "Sample.png",
+      "bytes": 112122,
+      "sha256": "cb909e46bf51deb2906eeeb14b323aa42e861a738a734f449dc460ad682e4ccc"
+    },
+    {
+      "path": "Tilesheet.txt",
+      "bytes": 238,
+      "sha256": "1b86fae0b27a628f18cfd89c6e148ea1d727f5ef02fc1dbeb5a6e9f9667bea00"
+    },
+    {
+      "path": "Tilemap/tilemap.png",
+      "bytes": 5392,
+      "sha256": "b9e9fb80b95d0b90b52f12d914f000cf16f8b22c1faa815aa94500abfa57bc50"
+    },
+    {
+      "path": "Tilemap/tilemap_packed.png",
+      "bytes": 5042,
+      "sha256": "3a54d99ecde790d4fdea207a3644cf130fc56fa838f1beb1507c185a95b8e902"
+    },
+    {
+      "path": "Tiles/tile_0000.png",
+      "bytes": 99,
+      "sha256": "d4c692ef80ee97b3395b885ae07020d42a106683ff3650df240f8e972bd5a041"
+    },
+    {
+      "path": "Tiles/tile_0001.png",
+      "bytes": 144,
+      "sha256": "cf3b3df8669e621af90944fb3155b15f13adf203dda464e6149d7318f3660713"
+    },
+    {
+      "path": "Tiles/tile_0002.png",
+      "bytes": 174,
+      "sha256": "ea524c6974ad6203f46a3e68a360883d0d53dbbdaa237f6cd81ac6fd5be6ea7c"
+    },
+    {
+      "path": "Tiles/tile_0003.png",
+      "bytes": 176,
+      "sha256": "05ae1d16efd39ec9ec7315d8dba74f3aa85d4a75780f768cbca584dc96e1d2f2"
+    },
+    {
+      "path": "Tiles/tile_0004.png",
+      "bytes": 175,
+      "sha256": "5de3dff614fb984dedcbfb7551d13a984f66d5a0a835df3048b51bc7cfddba57"
+    },
+    {
+      "path": "Tiles/tile_0005.png",
+      "bytes": 197,
+      "sha256": "5c09569d7e0351146e194d9beb7b573e0869978334cc9e093a57dea8705e81da"
+    },
+    {
+      "path": "Tiles/tile_0006.png",
+      "bytes": 180,
+      "sha256": "d8046421ac4db5a824d642d26e9fc6532f1b3aa52033f569f7e56e0885b2776d"
+    },
+    {
+      "path": "Tiles/tile_0007.png",
+      "bytes": 157,
+      "sha256": "741e857eba60e676711e0193f3b252fc70be469ddc55c7d5fb74fa343d6aae6b"
+    },
+    {
+      "path": "Tiles/tile_0008.png",
+      "bytes": 185,
+      "sha256": "d9c105e1f635e239dd0a87239c528c57406532ae4c4949ec9555d9fae6fc8bbb"
+    },
+    {
+      "path": "Tiles/tile_0009.png",
+      "bytes": 180,
+      "sha256": "1120f5a9a24c9dc40d0857885b9008860d17d89764a0621f90bfdb352930a72a"
+    },
+    {
+      "path": "Tiles/tile_0010.png",
+      "bytes": 157,
+      "sha256": "5f3aca3ab97afaa731c0a001725d31fd18874c37bb56d386b74b09430bc52d01"
+    },
+    {
+      "path": "Tiles/tile_0011.png",
+      "bytes": 185,
+      "sha256": "69c6e3e76d76356f16086e922d331cd3baf4b18aed2bf07d242b2c61d1c0719c"
+    },
+    {
+      "path": "Tiles/tile_0012.png",
+      "bytes": 161,
+      "sha256": "e1b87cceac398679e30d7cd4feecf4f40b8104515c255ed2d8e4fd4f868bb35c"
+    },
+    {
+      "path": "Tiles/tile_0013.png",
+      "bytes": 153,
+      "sha256": "dff7a37b7fa1be3648dcb1d01be3df26eed3ea5dfb8d8b7ffdcc2af06715c1ad"
+    },
+    {
+      "path": "Tiles/tile_0014.png",
+      "bytes": 161,
+      "sha256": "1209e77e92dc55b0c6aab326ccf714a6f48fdb8ca447c77aea779b1c95e4d41e"
+    },
+    {
+      "path": "Tiles/tile_0015.png",
+      "bytes": 193,
+      "sha256": "e1d230db0d9b559d564a5062ea574e8233d5b0c4cd143377756a38cf11f7027c"
+    },
+    {
+      "path": "Tiles/tile_0016.png",
+      "bytes": 192,
+      "sha256": "e491cc2d756b0fe14c19c1484fd79fe086621d2a21fd59f3e7a2d74eecaba561"
+    },
+    {
+      "path": "Tiles/tile_0017.png",
+      "bytes": 177,
+      "sha256": "6510f793c7dab1b8307dd23e795ce9c680c1ca0b220c9749c37d5705e2aae70e"
+    },
+    {
+      "path": "Tiles/tile_0018.png",
+      "bytes": 163,
+      "sha256": "167c8eeccd110c1c41095a7178524c8c6fa127e47098fcdc16e875bc2c8a8d76"
+    },
+    {
+      "path": "Tiles/tile_0019.png",
+      "bytes": 200,
+      "sha256": "f7617ce7df2660a9d4aca0aaf317be98bc561306b0e3eef02f7e0c17a0072142"
+    },
+    {
+      "path": "Tiles/tile_0020.png",
+      "bytes": 166,
+      "sha256": "9bbb26692c6a0b7ba00ad27b1a380f3ecec4d680c597204604bd312a154f7c5d"
+    },
+    {
+      "path": "Tiles/tile_0021.png",
+      "bytes": 163,
+      "sha256": "3e7b7419837373bf32542598d46d1328cce966e9dfed35fd852a37d227f5d6a4"
+    },
+    {
+      "path": "Tiles/tile_0022.png",
+      "bytes": 200,
+      "sha256": "5a6c92e91e67d3b4a9751250f5ffa73308f2d47bab5642677ea6c8c0448b9df1"
+    },
+    {
+      "path": "Tiles/tile_0023.png",
+      "bytes": 166,
+      "sha256": "e2231d052af8e58b280c881962407316a25df85d1baebc0a4c417833c9035d1e"
+    },
+    {
+      "path": "Tiles/tile_0024.png",
+      "bytes": 135,
+      "sha256": "3ffd3954dfb28615d813744ec3b0638d46f0cd9376426329221b70128719282a"
+    },
+    {
+      "path": "Tiles/tile_0025.png",
+      "bytes": 99,
+      "sha256": "63519065228f5f8af6200d979fa54cd7f00650034ceea10a1609203a34b3ff9b"
+    },
+    {
+      "path": "Tiles/tile_0026.png",
+      "bytes": 140,
+      "sha256": "1cc4348d99b6ca90b26e9cda7823a68d549fae0a9859ce3f31bfedff5a405bce"
+    },
+    {
+      "path": "Tiles/tile_0027.png",
+      "bytes": 191,
+      "sha256": "57a64b241ad12af171fda9d081a6641c12c51d1a9648e8c5ad50f314e3d660e2"
+    },
+    {
+      "path": "Tiles/tile_0028.png",
+      "bytes": 191,
+      "sha256": "a8b6bdb8954e01dbe6abebaec6d3eedf4fcfeb825b7d982ed488c57a573fdaac"
+    },
+    {
+      "path": "Tiles/tile_0029.png",
+      "bytes": 197,
+      "sha256": "0d55333ffe4c1d3be705978bdf1c176a871c25a6bde232dfba5c359b1a433294"
+    },
+    {
+      "path": "Tiles/tile_0030.png",
+      "bytes": 181,
+      "sha256": "e38e6cb14ff961f6e154483a62f963cdf9a310d91e6fd34c61e70653e0fe2713"
+    },
+    {
+      "path": "Tiles/tile_0031.png",
+      "bytes": 157,
+      "sha256": "b0330026a4ee1bb5d0895d2f1310d2caff75512522752ed0a30770783f97bb7a"
+    },
+    {
+      "path": "Tiles/tile_0032.png",
+      "bytes": 181,
+      "sha256": "6f527b7f7415362b0c0fc98e5e0c5b370db119dd171ccdfd444e64e46ad99055"
+    },
+    {
+      "path": "Tiles/tile_0033.png",
+      "bytes": 181,
+      "sha256": "5d03ae0b19ab782816f2c9faf809c6c6fb263a236e3afafd757f1e2411710875"
+    },
+    {
+      "path": "Tiles/tile_0034.png",
+      "bytes": 157,
+      "sha256": "23d25bce2e95ac64eb36ca34f0b529f7b6be9d2ba04d2dae48dd33138eb67444"
+    },
+    {
+      "path": "Tiles/tile_0035.png",
+      "bytes": 181,
+      "sha256": "0c007c5d64b29dc22c3d02fc7ac772efbe3b22cd353abb1b3f34f2d308ec49cd"
+    },
+    {
+      "path": "Tiles/tile_0036.png",
+      "bytes": 154,
+      "sha256": "87f81fe427117ff6fcee2cf40c1b30688e7bcea78cc2933c7354c9d985ffffac"
+    },
+    {
+      "path": "Tiles/tile_0037.png",
+      "bytes": 134,
+      "sha256": "ad8ed926be6b53a9a240d18dc332f4140552258d2c625773acbbdfc9b09a825e"
+    },
+    {
+      "path": "Tiles/tile_0038.png",
+      "bytes": 149,
+      "sha256": "6bd82dfc79a21d7eeeacaaa9e6094be415b7a5d2190183ae28bc6ad764623255"
+    },
+    {
+      "path": "Tiles/tile_0039.png",
+      "bytes": 129,
+      "sha256": "fd9127ce420b7e05ba2bb361a82c9301b95d2c55d3eab899198819e9ba78214a"
+    },
+    {
+      "path": "Tiles/tile_0040.png",
+      "bytes": 139,
+      "sha256": "1ab17e4b24be7eaeb6d8830c0e763b58a66fe2b8f70c15242fbde5138007d334"
+    },
+    {
+      "path": "Tiles/tile_0041.png",
+      "bytes": 126,
+      "sha256": "3db01ff694f3d9f1e492d45913c3f85ff5f704ac262a1404d368c9b272a3f42d"
+    },
+    {
+      "path": "Tiles/tile_0042.png",
+      "bytes": 137,
+      "sha256": "322a22e1567b667f5f5423767412014ac490968e0f6f6fd22f1721234784f9aa"
+    },
+    {
+      "path": "Tiles/tile_0043.png",
+      "bytes": 166,
+      "sha256": "1e4364629573e4cf27c3ce616e3003cf1a3fd5ba2928bc46b2aa47070b0a0d41"
+    },
+    {
+      "path": "Tiles/tile_0044.png",
+      "bytes": 164,
+      "sha256": "4653e4c38fe71ce96287eca370385c00c857b017eecb8458713f1e5f5a9ce262"
+    },
+    {
+      "path": "Tiles/tile_0045.png",
+      "bytes": 178,
+      "sha256": "4e64ae7ed028b443d8823ccbbb18b1b90b568b8ce34fb24b24bf07e8582853b5"
+    },
+    {
+      "path": "Tiles/tile_0046.png",
+      "bytes": 164,
+      "sha256": "4e2ce8474d9106596cd5c1108f157fb77fe98abbd5a0762a58bc9676f0e1d1a4"
+    },
+    {
+      "path": "Tiles/tile_0047.png",
+      "bytes": 144,
+      "sha256": "0928b0048900bad8a7d66b55634b099ed810b1dd2fdca7f80739c0ab8374825b"
+    },
+    {
+      "path": "Tiles/tile_0048.png",
+      "bytes": 166,
+      "sha256": "7362f4df34b78d83fa8960f193bc15a3efc392c9d5ae7b4e308647051353969a"
+    },
+    {
+      "path": "Tiles/tile_0049.png",
+      "bytes": 161,
+      "sha256": "674c9bb782acc6d640332167bbcee82e0d0984f147a1a6c9afaac983a863491c"
+    },
+    {
+      "path": "Tiles/tile_0050.png",
+      "bytes": 171,
+      "sha256": "c1060ed198ba2114f08972723e8af88b0ceae34300c69c6c81f2d7f17df1aba7"
+    },
+    {
+      "path": "Tiles/tile_0051.png",
+      "bytes": 167,
+      "sha256": "8b6383707b4648aef99273bab8be3623866cc2781f9793ca8335c61513381eeb"
+    },
+    {
+      "path": "Tiles/tile_0052.png",
+      "bytes": 180,
+      "sha256": "1ef23eadba9701c44658f19569d6f27322d497ef5c03c4b5dd9dfe793091be53"
+    },
+    {
+      "path": "Tiles/tile_0053.png",
+      "bytes": 178,
+      "sha256": "3d2d467efe3e81b6a0cd75d7260efc675a1833ebf31dd404f1a16622c63c62de"
+    },
+    {
+      "path": "Tiles/tile_0054.png",
+      "bytes": 181,
+      "sha256": "0681770aa287aececae7838587b8305579c6fd655f4bc0951a2027a60ae09c8a"
+    },
+    {
+      "path": "Tiles/tile_0055.png",
+      "bytes": 188,
+      "sha256": "4febdf70ccacf1d1c9235bcb1b90c2f6fc994b3024c14b51326c04951b3a40ec"
+    },
+    {
+      "path": "Tiles/tile_0056.png",
+      "bytes": 146,
+      "sha256": "932bc465b8e63e6aa052cdd3619facd172c757918bd6367791080044e4195987"
+    },
+    {
+      "path": "Tiles/tile_0057.png",
+      "bytes": 213,
+      "sha256": "b3fc5ffa2c39365a94f0496206a0248f196eacb95f379f25f3235aef6dfb97e4"
+    },
+    {
+      "path": "Tiles/tile_0058.png",
+      "bytes": 147,
+      "sha256": "784067a35d87df94dd0b4f7064437082e3dec99889f7481419548950ee191987"
+    },
+    {
+      "path": "Tiles/tile_0059.png",
+      "bytes": 145,
+      "sha256": "90f0a1089064abeb9701110ba5c0770ff13b3b1fc90c459e30523ccf4711f507"
+    },
+    {
+      "path": "Tiles/tile_0060.png",
+      "bytes": 177,
+      "sha256": "bd3479d2718ef0a19a30760028ecb21903e3e2c885f00df22164ad23adb85a6c"
+    },
+    {
+      "path": "Tiles/tile_0061.png",
+      "bytes": 166,
+      "sha256": "decb9f96369b248fb55d27282bcaf9d3b77f7dd214dad9a68f29509b09e1e754"
+    },
+    {
+      "path": "Tiles/tile_0062.png",
+      "bytes": 184,
+      "sha256": "0dd68a4e4894db1829dd68e66976238245dff035bc57feda7ae0be6aaaf53a43"
+    },
+    {
+      "path": "Tiles/tile_0063.png",
+      "bytes": 216,
+      "sha256": "516b1ad058739d1b8fc0872624e58c376f673a06be23ec6b9df4f101a6bced7b"
+    },
+    {
+      "path": "Tiles/tile_0064.png",
+      "bytes": 177,
+      "sha256": "79c68a61e262de5f9895e8d82133b01d492acc2ce2037f5fb751a0c8cfbfffe9"
+    },
+    {
+      "path": "Tiles/tile_0065.png",
+      "bytes": 166,
+      "sha256": "3436ff701d93e7d8c2cdb28e169c8707f544a36c626dd73d8025396cf5988ef0"
+    },
+    {
+      "path": "Tiles/tile_0066.png",
+      "bytes": 184,
+      "sha256": "8c622e9280a72751ff2131cdbeb4913b83cc723b86580c05b1cb35d64ed7f624"
+    },
+    {
+      "path": "Tiles/tile_0067.png",
+      "bytes": 216,
+      "sha256": "48919b108e67e1601e12b737e026c1c73e6f95fa1f1231483efe23f31e125cec"
+    },
+    {
+      "path": "Tiles/tile_0068.png",
+      "bytes": 164,
+      "sha256": "5f8175226f03497c12f39cb66780f5cbe58bcecaa4e5a1298de7a547f0bfbc1e"
+    },
+    {
+      "path": "Tiles/tile_0069.png",
+      "bytes": 171,
+      "sha256": "1a3a354c78a2e4a6461f5374b57f104c3270b50812d2565d488663b6f9c1f5a7"
+    },
+    {
+      "path": "Tiles/tile_0070.png",
+      "bytes": 165,
+      "sha256": "b207c0fff948c9c2125e6ec44328762004665275c9efad248694f9dc28bebbc8"
+    },
+    {
+      "path": "Tiles/tile_0071.png",
+      "bytes": 139,
+      "sha256": "a5e4e4db70672d69648f7d3924918b8202a2df9e88b9fafbcbcb7f7def8e6700"
+    },
+    {
+      "path": "Tiles/tile_0072.png",
+      "bytes": 137,
+      "sha256": "ff633e7a44d17849da050def1d96ebd431aa05147ac96938c3c5e1286d66b646"
+    },
+    {
+      "path": "Tiles/tile_0073.png",
+      "bytes": 129,
+      "sha256": "b20e305ce6c9c9b6e2d0cfec786fa45814d0a635b477d2084e2df0d31273ae8a"
+    },
+    {
+      "path": "Tiles/tile_0074.png",
+      "bytes": 155,
+      "sha256": "1cfedee7d389983b950901a197746a7d574b1fdee51840920dde20334eefff54"
+    },
+    {
+      "path": "Tiles/tile_0075.png",
+      "bytes": 143,
+      "sha256": "5c455ecf2c89e5bf6884cd02f63b3ecef79ea9669092ebfe3ac08933252ed0ff"
+    },
+    {
+      "path": "Tiles/tile_0076.png",
+      "bytes": 137,
+      "sha256": "8d36d3a43d2e9a7b75f4d05874b6c4019b0af6aff44fcab5325048c264c15742"
+    },
+    {
+      "path": "Tiles/tile_0077.png",
+      "bytes": 129,
+      "sha256": "41d237731631ec4179146a19605265169843d5ce923c5f89375041d09ca90a11"
+    },
+    {
+      "path": "Tiles/tile_0078.png",
+      "bytes": 155,
+      "sha256": "fe06ebf43b8efaec63c05bd9f690f2c36a33bd9eba327fc721d445e4f6745f2e"
+    },
+    {
+      "path": "Tiles/tile_0079.png",
+      "bytes": 143,
+      "sha256": "ea29e62b839d2b6495062c6269f885752ad6932137a5636da599fd216efa9e1e"
+    },
+    {
+      "path": "Tiles/tile_0080.png",
+      "bytes": 160,
+      "sha256": "c0270191499831acc29fb3f32eedc436acbc0c7e471c13ea0412ba76657090dd"
+    },
+    {
+      "path": "Tiles/tile_0081.png",
+      "bytes": 120,
+      "sha256": "ad179a7fc3d6438202c7f2762ceb13cb6decdd44fcc40e4465bdf763fc6915cc"
+    },
+    {
+      "path": "Tiles/tile_0082.png",
+      "bytes": 162,
+      "sha256": "f21b75210f83d5d937ab9fa37a24052222e96d9450b57baa9518d21e4431c8fb"
+    },
+    {
+      "path": "Tiles/tile_0083.png",
+      "bytes": 189,
+      "sha256": "07b9cf1d4c066f91979688db542bb7fbca663608c98e596a0882d9c3838324a8"
+    },
+    {
+      "path": "Tiles/tile_0084.png",
+      "bytes": 170,
+      "sha256": "a652e2b1fbf1cff607f83db9c810a9fa65c794c55bebef5cb07658d960b6b219"
+    },
+    {
+      "path": "Tiles/tile_0085.png",
+      "bytes": 163,
+      "sha256": "7ca5d76ab45b5aa9be4f19c9953e3bee4b64822642f47a4c9b8bd3f94ab6f737"
+    },
+    {
+      "path": "Tiles/tile_0086.png",
+      "bytes": 161,
+      "sha256": "1ed488f6faf0d68facc719882d2a1fd287d1979b8d0a21c07371bfeeb3923566"
+    },
+    {
+      "path": "Tiles/tile_0087.png",
+      "bytes": 161,
+      "sha256": "547c739a99c8fca12ce585db1ee4ab7ac5a0d9eafdda747dad6536325f5ed0fa"
+    },
+    {
+      "path": "Tiles/tile_0088.png",
+      "bytes": 167,
+      "sha256": "0230599ad30c0611af993c6f7e026eb752e6033b51209af5c83b234725a8b913"
+    },
+    {
+      "path": "Tiles/tile_0089.png",
+      "bytes": 163,
+      "sha256": "245aefd71d4c720401c6c33181266cc9da920a802cc275ee2da0c39a240bbc2b"
+    },
+    {
+      "path": "Tiles/tile_0090.png",
+      "bytes": 161,
+      "sha256": "cdb2b297444549e861cb091f0fbd2bc4d7c4b9203a1e0add4a6e7c4809d35cc4"
+    },
+    {
+      "path": "Tiles/tile_0091.png",
+      "bytes": 162,
+      "sha256": "d74235f5b7d9d5ef85acdd9d15c0db3d7e0cd52e19029055f483522dc58fd1a9"
+    },
+    {
+      "path": "Tiles/tile_0092.png",
+      "bytes": 158,
+      "sha256": "9e8df390488fef72d302553abb57028841b030e4ff91681d8fe8b36ef28b8d81"
+    },
+    {
+      "path": "Tiles/tile_0093.png",
+      "bytes": 162,
+      "sha256": "d432578df64a8e4cc5cefe559129badefd30a9e9ad988eef6e1470bba7eb9fc1"
+    },
+    {
+      "path": "Tiles/tile_0094.png",
+      "bytes": 185,
+      "sha256": "e513be719af08aa8e365bc6a731b950bb76feed4da04ef41836ffbaa4e387b15"
+    },
+    {
+      "path": "Tiles/tile_0095.png",
+      "bytes": 195,
+      "sha256": "4e67c3f041644af772b07705741d68ae4efee4b7ab642b64797b64c9ef1556e7"
+    },
+    {
+      "path": "Tiles/tile_0096.png",
+      "bytes": 189,
+      "sha256": "c62b7cd4a8397dc1d7be794246ee5a05aefef46ae320db1cf1aa9d2e752899ed"
+    },
+    {
+      "path": "Tiles/tile_0097.png",
+      "bytes": 139,
+      "sha256": "93ff83f1b5d2e4485215acefe592bfb02ef735a230ba067d9d4d81f9b6343902"
+    },
+    {
+      "path": "Tiles/tile_0098.png",
+      "bytes": 181,
+      "sha256": "61406b531c360228979cc37cb7f31af32aea8c099cc1c7a7e5a7df67a86bfe3f"
+    },
+    {
+      "path": "Tiles/tile_0099.png",
+      "bytes": 171,
+      "sha256": "703b8144c0a570d64d9a586d37ed41ff3b4f414aa9dfb042e1a1e54f546eee33"
+    },
+    {
+      "path": "Tiles/tile_0100.png",
+      "bytes": 132,
+      "sha256": "535aef9ec659d745835aa54be8ed322642f8397183a52af2e9fb902c21a2deed"
+    },
+    {
+      "path": "Tiles/tile_0101.png",
+      "bytes": 174,
+      "sha256": "b553572407b1587f0ef3b3de1dd0d600a02e6444a957c05d2402fcba2fb16bfa"
+    },
+    {
+      "path": "Tiles/tile_0102.png",
+      "bytes": 175,
+      "sha256": "13811299a06a324bbb873d4bbac79e5c74c5f19eaaa2176f509f7b9a206a6157"
+    },
+    {
+      "path": "Tiles/tile_0103.png",
+      "bytes": 196,
+      "sha256": "af835af3f3f517b324cd363460cef7eeff4f97d6db834627e6c945d2c92d87aa"
+    },
+    {
+      "path": "Tiles/tile_0104.png",
+      "bytes": 242,
+      "sha256": "3befce5d6373d4315f35eeed22752bb1cf7a2ab5d008ce26dd6b4aebbb278978"
+    },
+    {
+      "path": "Tiles/tile_0105.png",
+      "bytes": 198,
+      "sha256": "6a8405b5a036ca3ca902a500b74a4bfcf8a71eb5b343e45303a6949b0d67d36d"
+    },
+    {
+      "path": "Tiles/tile_0106.png",
+      "bytes": 178,
+      "sha256": "f915896f745a28497de7c86602b64b0a3bcabb7821103965926ea768b5476b18"
+    },
+    {
+      "path": "Tiles/tile_0107.png",
+      "bytes": 202,
+      "sha256": "a6783dabf3053b2a00c58fa7a8d7ff27b0ffdd08dcbe695b1ec82d0c2d312154"
+    },
+    {
+      "path": "Tiles/tile_0108.png",
+      "bytes": 122,
+      "sha256": "462f00726b47e1363d746524d37d9ef53de426b25cb651057c6f19db97cc5acc"
+    },
+    {
+      "path": "Tiles/tile_0109.png",
+      "bytes": 99,
+      "sha256": "d1ff475a1ad0d4fd5d2c2a8b1fe3b96657d10f9c5b87d204138f1d7a58ac9d04"
+    },
+    {
+      "path": "Tiles/tile_0110.png",
+      "bytes": 121,
+      "sha256": "0de41607a1269aa7a890461c249528d85b9eeb10745b130e95c8395c8a45b9c1"
+    },
+    {
+      "path": "Tiles/tile_0111.png",
+      "bytes": 203,
+      "sha256": "5af9d32868dfab9ff81d9f23db0d966c899c5942ebf167cb9d09eba052d1ca8c"
+    },
+    {
+      "path": "Tiles/tile_0112.png",
+      "bytes": 203,
+      "sha256": "6b92320e5dadb0062ab8d1fb06dc088a50f5a45660b8feca67a26c9687fe6a0a"
+    },
+    {
+      "path": "Tiles/tile_0113.png",
+      "bytes": 200,
+      "sha256": "3e78c40c8587a279b3ddd896230d8ab39013f38f854e675db69447c2c1b5c002"
+    },
+    {
+      "path": "Tiles/tile_0114.png",
+      "bytes": 200,
+      "sha256": "3d89b0b1ebed238aecfa84a251d9eb1bab87a5ae34fac5e91d788176ed523f41"
+    },
+    {
+      "path": "Tiles/tile_0115.png",
+      "bytes": 186,
+      "sha256": "3a2c43fb289410ebbe9a4301a664fdb3694583fc338743e0f9ecdb523db9bad3"
+    },
+    {
+      "path": "Tiles/tile_0116.png",
+      "bytes": 184,
+      "sha256": "5b5b45a7f2f756fe0251f84281ae5733b4bcff2b7167d432414c638a722fcc36"
+    },
+    {
+      "path": "Tiles/tile_0117.png",
+      "bytes": 172,
+      "sha256": "d2be7fbb7b9c2a278dcbe2fc54af0e9f08e0f0c565c5f6f96cf44562deef0665"
+    },
+    {
+      "path": "Tiles/tile_0118.png",
+      "bytes": 183,
+      "sha256": "81c5aeea97f62be85676741339089472d44e42cb907f08adb63c47b8db739bc1"
+    },
+    {
+      "path": "Tiles/tile_0119.png",
+      "bytes": 183,
+      "sha256": "30091d93126c683011d0866c54c755d631af69b97c396c3a6b3e285a9da6a2f8"
+    },
+    {
+      "path": "Tiles/tile_0120.png",
+      "bytes": 158,
+      "sha256": "42c3fe979bb36603b5349f87eb2beb31b29459ef72c5b34e421ea0ae67714fd2"
+    },
+    {
+      "path": "Tiles/tile_0121.png",
+      "bytes": 141,
+      "sha256": "c23db7cbd39871a8b57be75f3d4b528b8e787997f96fdf367b350f1241e43305"
+    },
+    {
+      "path": "Tiles/tile_0122.png",
+      "bytes": 163,
+      "sha256": "d8a941d06fd2373157dfcdcc3681ad2f930c044d64870ce5ef8500e9472d8c59"
+    },
+    {
+      "path": "Tiles/tile_0123.png",
+      "bytes": 145,
+      "sha256": "e3fd78cfaf7625dcd088a0d870568f1e186f67999ab4849eee4b988f6b796d1c"
+    },
+    {
+      "path": "Tiles/tile_0124.png",
+      "bytes": 146,
+      "sha256": "35195776721b22c59b4e6ac2b36534d5da18bc686ab98049d6466bcfae2ee96e"
+    },
+    {
+      "path": "Tiles/tile_0125.png",
+      "bytes": 186,
+      "sha256": "fd107e639cb7bde68f84ebd244bc7171a652a9b5b902661fb38a8dd8e2473f69"
+    },
+    {
+      "path": "Tiles/tile_0126.png",
+      "bytes": 140,
+      "sha256": "ef91491aabacc8a11c417f5aed4e40817fc0dafd1e772772dca3ea74466ed6b8"
+    },
+    {
+      "path": "Tiles/tile_0127.png",
+      "bytes": 184,
+      "sha256": "22dc3bd37cc7419f14b51f81e7e2b26794a4143b239c35d9d4288d69dc987432"
+    },
+    {
+      "path": "Tiles/tile_0128.png",
+      "bytes": 200,
+      "sha256": "28289aeb6de1a3a8fe051930365cbf9d0fbde24dbc875f96ee45dfcd2f225b28"
+    },
+    {
+      "path": "Tiles/tile_0129.png",
+      "bytes": 200,
+      "sha256": "0a273e03a72e29f6343647a511a98b14fa3b26e239f3df02a4e2e4da4b4470a4"
+    },
+    {
+      "path": "Tiles/tile_0130.png",
+      "bytes": 206,
+      "sha256": "1c6b4444519eddc55abe82de5855effc8e9754dc206186712272e8de8e139b26"
+    },
+    {
+      "path": "Tiles/tile_0131.png",
+      "bytes": 220,
+      "sha256": "a9592d792e563721dc5c38d9d922aad3fdc6c603a7d70822ef4194991ef42452"
+    },
+    {
+      "path": "License.txt",
+      "bytes": 567,
+      "sha256": "c483c167cc3bdfe17c15f957ff847d409f64d81b410b28783636cf3b2b7814c5"
+    }
+  ],
+  "version": "1.1",
+  "author": "Kenney",
+  "category": "2D",
+  "validation_policy": "Official CC0-1.0 license, safe ZIP paths and CRC, closed copied-file SHA-256 roster",
+  "validation_result": "passed (manual; game-dev CLI unavailable)"
+}

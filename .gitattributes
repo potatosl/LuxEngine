@@ -1,0 +1,3 @@
+
+# Preserve the verified bytes and original licenses of CC0 source packs.
+/samples/Assets/** -text

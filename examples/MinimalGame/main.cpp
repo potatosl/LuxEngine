@@ -1,9 +1,10 @@
+#include "Engine/EntryPoint.hpp"
 #include <Engine/Core/Math.hpp>
 #include <Engine/Scene/Entity.hpp>
 #include <Engine/Scene/Scene.hpp>
 #include <iostream>
 
-int main() {
+int RunMinimalGame(int, char**) {
     LuxEngine::Scene scene;
     auto entity = scene.CreateEntity("MinimalGameEntity");
     auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
@@ -19,3 +20,5 @@ int main() {
     std::cerr << "[MinimalGame] Verification: FAILED" << std::endl;
     return 1;
 }
+
+LUX_ENGINE_MAIN(RunMinimalGame)

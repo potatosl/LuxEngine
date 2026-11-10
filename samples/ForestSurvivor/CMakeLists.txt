@@ -1,0 +1,80 @@
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.24)
+    project(ForestSurvivor LANGUAGES CXX)
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    option(LUX_BUILD_TESTS "Build sample gameplay tests" ON)
+    if(LUX_BUILD_TESTS)
+        enable_testing()
+    endif()
+    find_package(LuxEngine CONFIG REQUIRED)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
+add_library(SampleForestSurvivorGame STATIC Game/SurvivalGame.cpp)
+target_include_directories(SampleForestSurvivorGame PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(SampleForestSurvivorGame PUBLIC LuxEngine::Engine)
+add_executable(SampleForestSurvivor
+    App/Main.cpp
+    App/ForestSurvivorApp.cpp
+    Presentation/ForestRenderer.cpp)
+find_path(FOREST_STB_INCLUDE_DIR NAMES stb_truetype.h
+    HINTS "${stb_SOURCE_DIR}" "${STB_IMAGE_INCLUDE_DIR}" PATH_SUFFIXES stb REQUIRED)
+target_include_directories(SampleForestSurvivor SYSTEM PRIVATE "${FOREST_STB_INCLUDE_DIR}")
+target_link_libraries(SampleForestSurvivor PRIVATE SampleForestSurvivorGame LuxEngine::Runtime)
+set_target_properties(SampleForestSurvivor PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:SampleForestSurvivor>")
+lux_copy_runtime(SampleForestSurvivor)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(LUX_SAMPLE_ASSET_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Assets" CACHE PATH "Shared CC0 sample assets")
+    if(EXISTS "${LUX_SAMPLE_ASSET_ROOT}")
+        add_custom_target(ForestSurvivorAssets ALL
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${LUX_SAMPLE_ASSET_ROOT}"
+                "$<TARGET_FILE_DIR:SampleForestSurvivor>/assets" VERBATIM)
+        add_dependencies(SampleForestSurvivor ForestSurvivorAssets)
+    endif()
+endif()
+if(COMMAND lux_set_target_warnings)
+    lux_set_target_warnings(SampleForestSurvivorGame)
+    lux_set_target_warnings(SampleForestSurvivor)
+elseif(MSVC)
+    target_compile_options(SampleForestSurvivorGame PRIVATE /utf-8)
+    target_compile_options(SampleForestSurvivor PRIVATE /utf-8)
+endif()
+if(LUX_BUILD_TESTS)
+    add_executable(SampleForestSurvivorTests Tests/SurvivalGameTest.cpp)
+    target_link_libraries(SampleForestSurvivorTests PRIVATE SampleForestSurvivorGame)
+    lux_copy_runtime(SampleForestSurvivorTests)
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(SampleForestSurvivorTests)
+    elseif(MSVC)
+        target_compile_options(SampleForestSurvivorTests PRIVATE /utf-8)
+    endif()
+    add_executable(SampleForestSurvivorUiTests
+        Tests/ForestUiTest.cpp App/ForestSurvivorApp.cpp Presentation/ForestRenderer.cpp)
+    target_link_libraries(SampleForestSurvivorUiTests PRIVATE SampleForestSurvivorGame LuxEngine::Runtime)
+    target_include_directories(SampleForestSurvivorUiTests SYSTEM PRIVATE "${FOREST_STB_INCLUDE_DIR}")
+    lux_copy_runtime(SampleForestSurvivorUiTests)
+    if(TARGET ForestSurvivorAssets)
+        add_dependencies(SampleForestSurvivorUiTests ForestSurvivorAssets)
+    endif()
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(SampleForestSurvivorUiTests)
+    elseif(MSVC)
+        target_compile_options(SampleForestSurvivorUiTests PRIVATE /utf-8)
+    endif()
+    add_test(NAME Sample_forest_survivor_ui COMMAND SampleForestSurvivorUiTests)
+    set_tests_properties(Sample_forest_survivor_ui PROPERTIES LABELS "gpu;samples" TIMEOUT 60
+        SKIP_RETURN_CODE 77 ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync"
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:SampleForestSurvivorUiTests>")
+    add_test(NAME Sample_forest_survivor_rules COMMAND SampleForestSurvivorTests)
+    set_tests_properties(Sample_forest_survivor_rules PROPERTIES LABELS "headless;samples" TIMEOUT 60)
+    add_test(NAME Sample_forest_survivor_silent COMMAND SampleForestSurvivor --smoke-test)
+    set_tests_properties(Sample_forest_survivor_silent PROPERTIES LABELS "gpu;samples" TIMEOUT 60
+        ENVIRONMENT "SDL_AUDIO_DRIVER=forest-invalid-driver;LUX_VULKAN_VALIDATION=sync"
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:SampleForestSurvivor>")
+    add_test(NAME Sample_forest_survivor_smoke COMMAND SampleForestSurvivor --smoke-test)
+    set_tests_properties(Sample_forest_survivor_smoke PROPERTIES LABELS "gpu;samples" TIMEOUT 60
+        ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync"
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:SampleForestSurvivor>")
+endif()

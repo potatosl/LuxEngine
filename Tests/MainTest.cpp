@@ -1970,6 +1970,65 @@ void RenderOutput(Graphics& graphics) {
     empty.Release();
     graphics.ValidationClean("render output checks");
 }
+void TextureFiltering() {
+    Graphics graphics;
+    const std::array<uint8, 8> pixels{255, 0, 0, 255, 0, 0, 255, 255};
+    GpuTexture smoothDefault, smoothExplicit, nearest, nearestPeer;
+    Check(smoothDefault.Initialize(&graphics.gpu, 2, 1, pixels.data()), "default filter texture");
+    Check(smoothExplicit.Initialize(&graphics.gpu, 2, 1, pixels.data(), TextureFilter::Linear),
+          "explicit linear filter texture");
+    Check(nearest.Initialize(&graphics.gpu, 2, 1, pixels.data(), TextureFilter::Nearest) &&
+              nearestPeer.Initialize(&graphics.gpu, 2, 1, pixels.data(), TextureFilter::Nearest),
+          "nearest textures initialized");
+    auto capture = [&](GpuTexture& texture) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            Renderer2D::Init(&graphics.gpu);
+            Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+            Renderer2D::DrawSprite({0, 0}, {2, 2}, &texture);
+            Renderer2D::EndScene();
+        });
+    };
+    const auto smooth = capture(smoothDefault);
+    Check(smooth.rgba == capture(smoothExplicit).rgba, "default filtering remains linear");
+    auto mixed = [](const auto& pixel) {
+        return pixel[0] > 40 && pixel[0] < 245 && pixel[1] < 5 && pixel[2] > 40 && pixel[2] < 245;
+    };
+    Check(mixed(Pixel(smooth, .49f, .5f)) && mixed(Pixel(smooth, .51f, .5f)),
+          "linear sampling blends the two texels at their boundary");
+    const auto sharp = capture(nearest);
+    Check(IsColor(Pixel(sharp, .49f, .5f), 255, 0, 0) &&
+              IsColor(Pixel(sharp, .51f, .5f), 0, 0, 255),
+          "nearest sampling preserves both pixel-art texel colors");
+    const auto alternating = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        Renderer2D::BeginScene(OrthographicCamera(-1, 1, -1, 1));
+        Renderer2D::DrawSprite({-.5f, 0}, {1, 2}, &nearest);
+        Renderer2D::DrawSprite({.5f, 0}, {1, 2}, &smoothDefault);
+        Renderer2D::EndScene();
+    });
+    Check(IsColor(Pixel(alternating, .245f, .5f), 255, 0, 0) &&
+              mixed(Pixel(alternating, .745f, .5f)),
+          "filter selection follows each texture descriptor within the same frame");
+    GpuTexture moved = std::move(nearest);
+    Check(!nearest.IsValid() && capture(moved).rgba == sharp.rgba,
+          "texture moves preserve filtering");
+    moved.Release();
+    Check(capture(nearestPeer).rgba == sharp.rgba,
+          "releasing one texture preserves the device-shared nearest sampler");
+    GpuTexture invalid;
+    Check(!invalid.Initialize(&graphics.gpu, 2, 1, pixels.data(), static_cast<TextureFilter>(99)) &&
+              !invalid.IsValid() && graphics.gpu.IsReady(),
+          "invalid filter is rejected without damaging the device");
+    graphics.ValidationClean("texture filters");
+    graphics.gpu.Shutdown();
+    Check(!nearestPeer.IsValid() && graphics.gpu.Initialize(graphics.window),
+          "device shutdown invalidates old textures and allows reinitialization");
+    Check(nearestPeer.Initialize(&graphics.gpu, 2, 1, pixels.data(), TextureFilter::Nearest) &&
+              capture(nearestPeer).rgba == sharp.rgba,
+          "device reinitialization recreates the shared nearest sampler");
+    graphics.ValidationClean("texture filters after device reinitialization");
+}
 void Gpu() {
     Graphics graphics;
     ReportValidation(graphics.gpu);
@@ -3010,6 +3069,8 @@ int main(int argc, char** argv) {
             WindowEvents();
         else if (suite == "gpu")
             Gpu();
+        else if (suite == "texture_filter")
+            TextureFiltering();
         else if (suite == "lifecycle")
             Lifecycle();
         else if (suite == "multidevice")

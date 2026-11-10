@@ -1,0 +1,70 @@
+{
+  "name": "InterfaceSounds",
+  "source": "https://kenney.nl/assets/interface-sounds",
+  "download_endpoint": "https://kenney.nl/download-link/6173736574732f696e746572666163652d736f756e6473",
+  "license": "CC0-1.0",
+  "archive_sha256": "f2193d072726d6758a5f7871b2dcc54dcce0d5c35c6f0a62f92549b327c81232",
+  "files": [
+    {
+      "path": "License.txt",
+      "bytes": 574,
+      "sha256": "f7966c773bbed0eca6a9c75081c44a178b38eae112724dbb5fdfbd4192d118a9"
+    },
+    {
+      "path": "Audio/click_001.ogg",
+      "bytes": 4876,
+      "sha256": "ccfb7fa0cccdd9faec0eb16033c732b1e308d139d80f799161495d58f7adcdb9"
+    },
+    {
+      "path": "Audio/click_001.wav",
+      "bytes": 8644,
+      "sha256": "c5e781a5549e5a0905873f69aad34c4b4ceb5e216e505c82b3a6e5664c73f848",
+      "derived_from": "Audio/click_001.ogg",
+      "source_sha256": "ccfb7fa0cccdd9faec0eb16033c732b1e308d139d80f799161495d58f7adcdb9",
+      "conversion": "ffmpeg to 44100 Hz mono PCM s16le WAV (engine WAV input)"
+    },
+    {
+      "path": "Audio/drop_001.ogg",
+      "bytes": 5859,
+      "sha256": "692ee3a6f1821402ca649ff735bee9591dc4846c8098fc7d6a90fd15fa57c1af"
+    },
+    {
+      "path": "Audio/drop_001.wav",
+      "bytes": 11726,
+      "sha256": "6bbfc0182036aa56de5bb373d06aa6bdeed2ae164c86300fb96abd79ef02c9d5",
+      "derived_from": "Audio/drop_001.ogg",
+      "source_sha256": "692ee3a6f1821402ca649ff735bee9591dc4846c8098fc7d6a90fd15fa57c1af",
+      "conversion": "ffmpeg to 44100 Hz mono PCM s16le WAV (engine WAV input)"
+    },
+    {
+      "path": "Audio/confirmation_001.ogg",
+      "bytes": 8968,
+      "sha256": "063564703b6094d70718a3e787a55cc9141611e4ecd6b6637f8828f79b4a8c3a"
+    },
+    {
+      "path": "Audio/confirmation_001.wav",
+      "bytes": 25642,
+      "sha256": "b45442f6f2e51a3ee353e373bd93ef2c2c9b8d170b4aa04912d14e0fb72302a4",
+      "derived_from": "Audio/confirmation_001.ogg",
+      "source_sha256": "063564703b6094d70718a3e787a55cc9141611e4ecd6b6637f8828f79b4a8c3a",
+      "conversion": "ffmpeg to 44100 Hz mono PCM s16le WAV (engine WAV input)"
+    },
+    {
+      "path": "Audio/error_001.ogg",
+      "bytes": 7373,
+      "sha256": "46e67425d16339772e8d328fb36a49426c9467418686e11beeb71ff84b0f6433"
+    },
+    {
+      "path": "Audio/error_001.wav",
+      "bytes": 14336,
+      "sha256": "2bc4e952c0da3b0427b02c9d21294944aa5d02172bb1b10906247f0508a6b25f",
+      "derived_from": "Audio/error_001.ogg",
+      "source_sha256": "46e67425d16339772e8d328fb36a49426c9467418686e11beeb71ff84b0f6433",
+      "conversion": "ffmpeg to 44100 Hz mono PCM s16le WAV (engine WAV input)"
+    }
+  ],
+  "version": "1.0",
+  "author": "Kenney",
+  "category": "Audio",
+  "validation_result": "passed; original CC0 license and hashes; documented PCM conversion"
+}

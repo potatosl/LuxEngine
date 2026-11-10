@@ -90,16 +90,14 @@ if (Test-Path $shaderSource) {
     Copy-Item -Path "$shaderSource/*" -Destination $shadersDir -Recurse -Force
 }
 
-# Copy demo scene
+# Bundle the standalone player's dedicated runtime-verification scene.
 $scenesDir = Join-Path $playerStaging "scenes"
 New-Item -ItemType Directory -Path $scenesDir -Force | Out-Null
-$demoSceneSource = Join-Path $root "scenes/Demo.lux"
-if (-not (Test-Path $demoSceneSource)) {
-    $demoSceneSource = Join-Path $root "$BuildDir/Tests/PlayerSmoke.lux"
+$playerSceneSource = Join-Path $root "samples/ScenePlayer/Scene.lux"
+if (-not (Test-Path $playerSceneSource -PathType Leaf)) {
+    throw "Packaging failure: Runtime verification scene not found: $playerSceneSource"
 }
-if (Test-Path $demoSceneSource) {
-    Copy-Item -Path $demoSceneSource -Destination (Join-Path $scenesDir "Demo.lux") -Force
-}
+Copy-Item -Path $playerSceneSource -Destination (Join-Path $scenesDir "ScenePlayer.lux") -Force
 
 # Copy licenses
 $licensesDir = Join-Path $playerStaging "licenses"
@@ -117,8 +115,8 @@ LuxEngine standalone player for running packaged 2D/3D games without editor or d
 - Vulkan 1.1+ compatible GPU and display driver
 
 ## Usage
-- Run demo scene:
-  LuxPlayer.exe scenes/Demo.lux
+- Run runtime verification scene:
+  LuxPlayer.exe scenes/ScenePlayer.lux
 - Run custom scene:
   LuxPlayer.exe <path/to/scene.lux> [--title "Game Title"] [--size 1280 720] [--fullscreen] [--frames N]
 
@@ -136,7 +134,7 @@ $requiredPlayerFiles = @(
     "SDL3.dll",
     "shaders/Basic.vert.spv",
     "shaders/Basic.frag.spv",
-    "scenes/Demo.lux",
+    "scenes/ScenePlayer.lux",
     "licenses/LICENSE-LuxEngine.txt",
     "licenses/DEPENDENCIES.md"
 )

@@ -221,6 +221,7 @@ struct DeviceState {
     VkDescriptorPool framePool = VK_NULL_HANDLE;
     VkDeviceSize uniformAlignment = 256;
     VkSampler sampler = VK_NULL_HANDLE;
+    VkSampler nearestSampler = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> descriptorPools;
 
     VkSemaphore timeline = VK_NULL_HANDLE;
@@ -287,7 +288,8 @@ struct DeviceState {
     bool CreateRenderPass(VkFormat colorFormat);
     bool CreatePipelines();
     void DestroyPipelines();
-    bool AllocateTextureSet(VkImageView view, VkDescriptorPool& pool, VkDescriptorSet& set);
+    bool AllocateTextureSet(VkImageView view, VkDescriptorPool& pool, VkDescriptorSet& set,
+                            TextureFilter filter);
 
     bool CreateSync();
     void DestroySync();
@@ -307,7 +309,7 @@ struct DeviceState {
     bool UploadBuffer(BufferRecord& record, const void* data, VkDeviceSize size,
                       VkDeviceSize offset);
     bool CreateTextureResource(uint32 width, uint32 height, const void* pixels,
-                               TextureRecord& record);
+                               TextureRecord& record, TextureFilter filter = TextureFilter::Linear);
     bool EnsureVertexCapacity(FrameData& frame, VkDeviceSize bytes);
     bool EnsureCaptureBuffer(VkDeviceSize size);
     bool PushUniform(const void* data, VkDeviceSize size, uint32& offset);

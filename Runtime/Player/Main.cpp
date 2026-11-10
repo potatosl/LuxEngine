@@ -1,6 +1,6 @@
 #include "Engine/Core/Log.hpp"
+#include "Engine/EntryPoint.hpp"
 #include "Runtime/ScenePlayer.hpp"
-#include <SDL3/SDL_main.h>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -10,7 +10,7 @@
 #endif
 
 // SDL_main gives UTF-8 arguments on every platform, so Korean scene paths work on Windows.
-int main(int argc, char* argv[]) {
+int RunPlayer(int argc, char* argv[]) {
     std::vector<std::string> args(argv + 1, argv + argc);
     for (const auto& arg : args) {
         if (arg == "--version" || arg == "-v") {
@@ -40,3 +40,5 @@ int main(int argc, char* argv[]) {
     player.Shutdown();
     return result;
 }
+
+LUX_ENGINE_MAIN(RunPlayer)

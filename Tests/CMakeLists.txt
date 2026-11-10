@@ -15,7 +15,7 @@ set_tests_properties(Engine_window PROPERTIES TIMEOUT 60 ENVIRONMENT "SDL_VIDEOD
 
 # GPU suites need a display and a Vulkan driver; they exit with 77 (skipped) when either is missing.
 set(LUX_GPU_TEST_ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")
-foreach(suite gpu vulkan failures stress lifecycle multidevice)
+foreach(suite gpu vulkan failures stress lifecycle multidevice texture_filter)
     add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
     set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 120 LABELS gpu SKIP_RETURN_CODE 77
         ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}"
@@ -28,11 +28,6 @@ add_test(NAME Engine_longrun COMMAND LuxEngineTests longrun)
 set_tests_properties(Engine_longrun PROPERTIES TIMEOUT 600 LABELS "gpu;long" SKIP_RETURN_CODE 77
     ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=off"
     WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
-
-add_test(NAME Engine_runtime COMMAND LuxEngineDemo --smoke-test)
-set_tests_properties(Engine_runtime PROPERTIES TIMEOUT 60 LABELS gpu
-    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineDemo>"
-    ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}")
 
 # Runtime: LuxPlayer argument parsing and view fitting, then a real LuxPlayer run.
 add_executable(LuxRuntimeTests RuntimeTest.cpp)

@@ -132,7 +132,7 @@ try {
         "SDL3.dll",
         "shaders/Basic.vert.spv",
         "shaders/Basic.frag.spv",
-        "scenes/Demo.lux",
+        "scenes/ScenePlayer.lux",
         "licenses/LICENSE-LuxEngine.txt",
         "licenses/DEPENDENCIES.md"
     )
@@ -201,8 +201,8 @@ try {
         throw "LuxPlayer.exe --help failed with exit code $($proc2.ExitCode): $err2"
     }
 
-    # 3. Test 'LuxPlayer.exe scenes/Demo.lux --frames 5'
-    Write-Host "3. Testing 'LuxPlayer.exe scenes/Demo.lux --frames 5'..."
+    # 3. Test 'LuxPlayer.exe scenes/ScenePlayer.lux --frames 5'
+    Write-Host "3. Testing 'LuxPlayer.exe scenes/ScenePlayer.lux --frames 5'..."
     $gpuCheck = Get-VulkanGpuStatus
     Write-Host "GPU probe result: Status=$($gpuCheck.Status), Device=$($gpuCheck.DeviceName)$($gpuCheck.HardwareGpu), Reason=$($gpuCheck.Reason)"
 
@@ -212,7 +212,7 @@ try {
 
     $psi3 = New-Object System.Diagnostics.ProcessStartInfo
     $psi3.FileName = $playerExe
-    $psi3.Arguments = "scenes/Demo.lux --frames 5"
+    $psi3.Arguments = "scenes/ScenePlayer.lux --frames 5"
     $psi3.WorkingDirectory = $testStaging
     $psi3.EnvironmentVariables["PATH"] = $cleanPath
     $psi3.UseShellExecute = $false
@@ -224,7 +224,7 @@ try {
     $stdErrTask3 = $proc3.StandardError.ReadToEndAsync()
     if (-not $proc3.WaitForExit(20000)) {
         $proc3.Kill()
-        throw "LuxPlayer.exe scenes/Demo.lux timed out after 20 seconds"
+        throw "LuxPlayer.exe scenes/ScenePlayer.lux timed out after 20 seconds"
     }
     $output3 = $stdOutTask3.Result
     $err3 = $stdErrTask3.Result
