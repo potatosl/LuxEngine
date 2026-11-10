@@ -94,6 +94,7 @@ add_library(LuxEditorUi STATIC
     Viewport/EngineSceneRenderer.cpp
     Viewport/SceneViewport2D.cpp
     Viewport/SceneViewport3D.cpp
+    Viewport/ViewportCamera3D.cpp
 )
 target_include_directories(LuxEditorUi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(LuxEditorUi PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
@@ -152,6 +153,8 @@ if(LUX_BUILD_TESTS)
     endif()
     lux_editor_copy_runtime(LuxEditorDocumentTests)
     add_test(NAME Editor_document COMMAND LuxEditorDocumentTests)
+    add_test(NAME Editor_archive_limits COMMAND LuxEditorDocumentTests archive-limits)
+    set_tests_properties(Editor_archive_limits PROPERTIES TIMEOUT 180 LABELS "headless;editor")
     add_executable(LuxEditorBuildTests
         Build/ProjectBuild.cpp
         Tests/EditorBuildTest.cpp
@@ -176,6 +179,28 @@ if(LUX_BUILD_TESTS)
     lux_editor_copy_runtime(LuxEditorUiTests)
     lux_editor_copy_qt_plugins(LuxEditorUiTests)
     add_test(NAME Editor_ui COMMAND LuxEditorUiTests ui)
+    add_executable(LuxEditorRegressionTests Tests/EditorRegressionTest.cpp)
+    target_link_libraries(LuxEditorRegressionTests PRIVATE LuxEditorUi)
+    if(MSVC)
+        target_compile_options(LuxEditorRegressionTests PRIVATE /utf-8)
+    endif()
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxEditorRegressionTests)
+    endif()
+    lux_editor_copy_runtime(LuxEditorRegressionTests)
+    lux_editor_copy_qt_plugins(LuxEditorRegressionTests)
+    add_test(NAME Editor_timeline COMMAND LuxEditorRegressionTests timeline)
+    add_test(NAME Editor_sparse_copy COMMAND LuxEditorRegressionTests sparse-copy)
+    add_test(NAME Editor_picking2d COMMAND LuxEditorRegressionTests picking2d)
+    add_test(NAME Editor_picking2d_gpu COMMAND LuxEditorRegressionTests picking2d-gpu)
+    add_test(NAME Editor_picking3d COMMAND LuxEditorRegressionTests picking3d)
+    add_test(NAME Editor_picking3d_gpu COMMAND LuxEditorRegressionTests picking3d-gpu)
+    add_test(NAME Editor_picking3d_hidpi COMMAND LuxEditorRegressionTests picking3d-gpu)
+    set_tests_properties(Editor_picking2d_gpu Editor_picking3d_gpu Editor_picking3d_hidpi PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120
+        LABELS "gpu;editor" ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_VULKAN_VALIDATION=sync")
+    set_property(TEST Editor_picking3d_hidpi APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=2")
+    set_tests_properties(Editor_timeline Editor_sparse_copy Editor_picking2d Editor_picking3d PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 60 LABELS "headless;editor")
     set_tests_properties(Editor_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300 LABELS "headless;editor")
     add_test(NAME Editor_ui_1000 COMMAND LuxEditorUiTests ui --iterations=1000)
     set_tests_properties(Editor_ui_1000 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 600 LABELS "long;headless;editor")

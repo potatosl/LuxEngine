@@ -20,10 +20,10 @@ find_dependency(box2d 2.4...<3 CONFIG HINTS
 )
 if(TARGET box2d::box2d)
     set_target_properties(box2d::box2d PROPERTIES
-        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
-        MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
-        MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
-        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
+        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;NOCONFIG;"
     )
 endif()
 find_dependency(Vulkan 1.1)
@@ -34,19 +34,19 @@ include("${CMAKE_CURRENT_LIST_DIR}/LuxEngineTargets.cmake")
 foreach(_lux_target LuxEngine::Engine LuxEngine::Runtime)
     if(TARGET ${_lux_target})
         set_target_properties(${_lux_target} PROPERTIES
-            MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
-            MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
-            MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
-            MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
+            MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;Debug;NOCONFIG;"
+            MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;Debug;NOCONFIG;"
+            MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo;Debug;NOCONFIG;"
+            MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;NOCONFIG;"
         )
     endif()
 endforeach()
 if(TARGET box2d::box2d)
     set_target_properties(box2d::box2d PROPERTIES
-        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
-        MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
-        MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
-        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
+        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;NOCONFIG;"
     )
 endif()
 

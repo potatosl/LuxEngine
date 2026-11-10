@@ -23,8 +23,9 @@ constexpr std::array<Vec3, 8> CubePositions{{{-0.5f, -0.5f, -0.5f},
                                              {0.5f, -0.5f, 0.5f},
                                              {0.5f, 0.5f, 0.5f},
                                              {-0.5f, 0.5f, 0.5f}}};
-constexpr std::array<uint32, 36> CubeIndices{{0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 4, 7, 0, 7, 3,
-                                              1, 2, 6, 1, 6, 5, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2}};
+constexpr std::array<uint32, 36> CubeIndices{{0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
+                                              0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5,
+                                              0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2}};
 
 Vec3 TransformPoint(const Mat4& m, const Vec3& v) {
     const auto& e = m.elements;
@@ -194,8 +195,7 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
     if (impl_->active)
         throw std::logic_error("3D scene already active");
     impl_->viewProjection = camera.GetViewProjectionMatrix();
-    const float sunIntensity =
-        std::isfinite(sun.intensity) ? std::max(0.0f, sun.intensity) : 0.0f;
+    const float sunIntensity = std::isfinite(sun.intensity) ? std::max(0.0f, sun.intensity) : 0.0f;
     const Vec3 sunDir = (std::isfinite(sun.direction.x) && std::isfinite(sun.direction.y) &&
                          std::isfinite(sun.direction.z))
                             ? sun.direction
@@ -215,16 +215,15 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
         for (size_t index = 0; index < impl_->pointLights.size(); ++index) {
             const auto& pt = impl_->pointLights[index];
             const float r = std::isfinite(pt.radius) ? std::max(0.0f, pt.radius) : 0.0f;
-            const float inten =
-                std::isfinite(pt.intensity) ? std::max(0.0f, pt.intensity) : 0.0f;
+            const float inten = std::isfinite(pt.intensity) ? std::max(0.0f, pt.intensity) : 0.0f;
             const Vec3 pos = (std::isfinite(pt.position.x) && std::isfinite(pt.position.y) &&
                               std::isfinite(pt.position.z))
                                  ? pt.position
                                  : Vec3{0.0f, 0.0f, 0.0f};
-            const Vec3 col =
-                (std::isfinite(pt.color.x) && std::isfinite(pt.color.y) && std::isfinite(pt.color.z))
-                    ? pt.color
-                    : Vec3{1.0f, 1.0f, 1.0f};
+            const Vec3 col = (std::isfinite(pt.color.x) && std::isfinite(pt.color.y) &&
+                              std::isfinite(pt.color.z))
+                                 ? pt.color
+                                 : Vec3{1.0f, 1.0f, 1.0f};
             gpuPoints[index] = {pos, r, col, inten};
         }
         impl_->device->SetLighting({impl_->light.direction, impl_->light.color,
@@ -263,9 +262,8 @@ void Renderer3D::Context::AbortScene() {
     impl_->pointLights.clear();
 }
 
-void Renderer3D::Context::DrawMesh(std::span<const Vec3> positions,
-                                   std::span<const uint32> indices, const Mat4& transform,
-                                   const Material3D& material) {
+void Renderer3D::Context::DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
+                                   const Mat4& transform, const Material3D& material) {
     if (!impl_ || !impl_->active || positions.empty() || indices.empty() || indices.size() % 3)
         return;
     for (auto index : indices)

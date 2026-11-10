@@ -2,16 +2,16 @@
 #include "Project/PathEncoding.hpp"
 #include <QApplication>
 #include <QDir>
+#include <QDockWidget>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QPlainTextEdit>
 #include <QProcess>
-#include <QProgressBar>
 #include <QProcessEnvironment>
+#include <QProgressBar>
 #include <QSettings>
 #include <QStatusBar>
-#include <QDockWidget>
 
 namespace LuxEngine {
 namespace {
@@ -45,8 +45,8 @@ void EditorWindow::ChooseEnginePackage() {
         current);
     if (directory.isEmpty())
         return;
-    BuildTools tools = DetectBuildTools(
-        FromQ(QCoreApplication::applicationDirPath()), [&](const char* name) {
+    BuildTools tools =
+        DetectBuildTools(FromQ(QCoreApplication::applicationDirPath()), [&](const char* name) {
             return std::string(name) == "LUX_ENGINE_DIR" ? directory.toUtf8().toStdString()
                                                          : std::string{};
         });
@@ -75,15 +75,15 @@ void EditorWindow::StartBuild(BuildConfiguration configuration, bool clean,
 
     // The SDK path set in the editor wins over the environment variable.
     const QString savedSdk = QSettings().value(QStringLiteral("build/engineSdk")).toString();
-    BuildTools tools = DetectBuildTools(
-        FromQ(QCoreApplication::applicationDirPath()), [&](const char* name) {
+    BuildTools tools =
+        DetectBuildTools(FromQ(QCoreApplication::applicationDirPath()), [&](const char* name) {
             if (std::string(name) == "LUX_ENGINE_DIR" && !savedSdk.isEmpty())
                 return savedSdk.toUtf8().toStdString();
             return qEnvironmentVariable(name).toUtf8().toStdString();
         });
     std::string error;
-    auto plan = PlanBuild(project_->GetFile().parent_path(), configuration, tools,
-                          GameExecutable, error);
+    auto plan =
+        PlanBuild(project_->GetFile().parent_path(), configuration, tools, GameExecutable, error);
     if (!plan) {
         ShowError(QStringLiteral("빌드"), QString::fromUtf8(error));
         return;
@@ -203,17 +203,14 @@ void EditorWindow::FinishBuild(bool success) {
         (isError ? errors : warnings) += 1;
         QString location = QString::fromUtf8(d.file);
         if (d.line > 0)
-            location += QStringLiteral("(%1%2)")
-                            .arg(d.line)
-                            .arg(d.column > 0 ? QStringLiteral(",%1").arg(d.column) : QString());
-        issuesOutput_->appendPlainText(QStringLiteral("%1 %2%3: %4")
-                                           .arg(isError ? QStringLiteral("오류")
-                                                        : QStringLiteral("경고"),
-                                                location,
-                                                d.code.empty() ? QString()
-                                                               : QStringLiteral(" [%1]")
-                                                                     .arg(QString::fromUtf8(d.code)),
-                                                QString::fromUtf8(d.message)));
+            location += QStringLiteral("(%1%2)").arg(d.line).arg(
+                d.column > 0 ? QStringLiteral(",%1").arg(d.column) : QString());
+        issuesOutput_->appendPlainText(
+            QStringLiteral("%1 %2%3: %4")
+                .arg(isError ? QStringLiteral("오류") : QStringLiteral("경고"), location,
+                     d.code.empty() ? QString()
+                                    : QStringLiteral(" [%1]").arg(QString::fromUtf8(d.code)),
+                     QString::fromUtf8(d.message)));
     }
     if (!success) {
         Log(QStringLiteral("빌드 실패: 오류 %1개, 경고 %2개").arg(errors).arg(warnings), true);

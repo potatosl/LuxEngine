@@ -63,6 +63,11 @@ bool EditorProject::SetIcon(const std::filesystem::path& image, std::string& err
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + extension);
     auto temporary = destination;
     temporary += ".tmp";
+    std::filesystem::create_directories(destination.parent_path(), ec);
+    if (ec) {
+        error = "아이콘을 저장할 Assets 폴더를 만들 수 없습니다.";
+        return false;
+    }
     std::filesystem::copy_file(image, temporary, std::filesystem::copy_options::overwrite_existing,
                                ec);
     if (ec) {

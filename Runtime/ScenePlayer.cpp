@@ -119,7 +119,8 @@ ScenePlayerView FitSceneView(Scene& scene) {
     view.centerX = (minX + maxX) * 0.5f;
     view.centerY = (minY + maxY) * 0.5f;
     // Fit both axes for a 16:9 window with a small margin.
-    view.halfHeight = std::max({(maxY - minY) * 0.5f, (maxX - minX) * 0.5f * 9.0f / 16.0f, 1.0f}) * 1.1f;
+    view.halfHeight =
+        std::max({(maxY - minY) * 0.5f, (maxX - minX) * 0.5f * 9.0f / 16.0f, 1.0f}) * 1.1f;
     return view;
 }
 
@@ -211,8 +212,8 @@ void ScenePlayer::OnUpdate(double dt) {
     if (player_ && player_.HasComponent<TransformComponent>()) {
         const float horizontal = (Input::IsActionDown("Right") ? 1.0f : 0.0f) -
                                  (Input::IsActionDown("Left") ? 1.0f : 0.0f);
-        const float vertical = (Input::IsActionDown("Up") ? 1.0f : 0.0f) -
-                               (Input::IsActionDown("Down") ? 1.0f : 0.0f);
+        const float vertical =
+            (Input::IsActionDown("Up") ? 1.0f : 0.0f) - (Input::IsActionDown("Down") ? 1.0f : 0.0f);
         if (player_.HasComponent<Rigidbody2DComponent>()) {
             auto& body = player_.GetComponent<Rigidbody2DComponent>();
             body.velocity.x = horizontal * 4.0f;

@@ -1,13 +1,15 @@
-#include "Engine/Scene/Scene.hpp"
+#include "Engine/Core/Log.hpp"
 #include "Engine/Physics/PhysicsWorld2D.h"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
-#include "Engine/Core/Log.hpp"
+#include "Engine/Scene/Scene.hpp"
 
 namespace __coe_win {
-bool ContinueOnError() { return false; }
-void RawWrite(const char*) {}
+bool ContinueOnError() {
+    return false;
 }
+void RawWrite(const char*) {}
+} // namespace __coe_win
 
 namespace LuxEngine {
 struct PhysicsWorld2D::Impl {};

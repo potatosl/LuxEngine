@@ -433,6 +433,7 @@ void EditorWindow::BuildLayout() {
     auto* durationRow = new QFormLayout;
     durationRow->addRow(QStringLiteral("길이 (초)"), animationDuration_);
     animationTimeline_ = new QSlider(Qt::Horizontal, animationGroup);
+    animationTimeline_->setObjectName(QStringLiteral("animationTimeline"));
     animationTimeline_->setRange(0, 1000);
     animationTimeline_->setToolTip(QStringLiteral("시간을 이동해 변환 애니메이션을 확인합니다."));
     keyframeList_ = new QListWidget(animationGroup);

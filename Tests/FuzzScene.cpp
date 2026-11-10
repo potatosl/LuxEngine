@@ -55,17 +55,22 @@ int main(int argc, char** argv) {
     // 0-byte, truncated, invalid versions, oversized entities, NaN/Inf, invalid UTF-8,
     // huge tilemaps, excessive keyframes, and negative physics attributes.
     std::vector<std::vector<uint8_t>> seeds = {
-        {}, // 0-byte empty
-        MakeBytes("LuxEngineScene"), // Truncated header
-        MakeBytes("LuxEngineScene 99 0\n"), // Unknown version 99
-        MakeBytes("LuxEngineScene 2 100001\n"), // Excessive entity count (> 100,000)
-        MakeBytes("LuxEngineScene 2 1\n0\n"), // Entity ID 0
+        {},                                         // 0-byte empty
+        MakeBytes("LuxEngineScene"),                // Truncated header
+        MakeBytes("LuxEngineScene 99 0\n"),         // Unknown version 99
+        MakeBytes("LuxEngineScene 2 100001\n"),     // Excessive entity count (> 100,000)
+        MakeBytes("LuxEngineScene 2 1\n0\n"),       // Entity ID 0
         {0xFFu, 0xFEu, 0xFDu, 0xFCu, 0x00u, 0x01u}, // Binary garbage
-        std::vector<uint8_t>(4096, 'A'), // Very long token
-        { 'L', 'u', 'x', 'E', 'n', 'g', 'i', 'n', 'e', 'S', 'c', 'e', 'n', 'e', ' ', '2', ' ', '1', '\n',
-          '1', '\n', '1', ' ', '"', 0xFFu, 0xFEu, '"', '\n' }, // Invalid UTF-8 in tag
+        std::vector<uint8_t>(4096, 'A'),            // Very long token
+        {'L', 'u', 'x', 'E',  'n', 'g',  'i', 'n', 'e', 'S',   'c',   'e', 'n', 'e', ' ',
+         '2', ' ', '1', '\n', '1', '\n', '1', ' ', '"', 0xFFu, 0xFEu, '"', '\n'}, // Invalid UTF-8
+                                                                                  // in tag
         MakeBytes("LuxEngineScene 2 1\n1\n0\n1 NaN 0 0 0 0 0 1 1 1\n"), // NaN in transform
-        MakeBytes("LuxEngineScene 2 1\n1\n0\n0\n0\n0\n0\n0\n0\n0\n0\n1 300 300 1 \"\"\n0\n"), // Oversized tilemap (> 256x256)
+        MakeBytes(
+            "LuxEngineScene 2 1\n1\n0\n0\n0\n0\n0\n0\n0\n0\n0\n1 300 300 1 \"\"\n0\n"), // Oversized
+                                                                                        // tilemap
+                                                                                        // (>
+                                                                                        // 256x256)
     };
 
     // Also test valid round-tripped Scene as seed
@@ -91,12 +96,34 @@ int main(int argc, char** argv) {
 
     if (targetRuns > 0) {
         std::mt19937_64 rng(1337);
-        std::vector<std::string> dict = {
-            "LuxEngineScene", "Transform", "Camera", "SpriteRenderer", "MeshRenderer",
-            "Tilemap", "Rigidbody2D", "BoxCollider2D", "CircleCollider2D", "Animation",
-            "AudioSource", "NaN", "Inf", "-Inf", "1e30", "-1e30", "0", "-1", "999999",
-            "\"\"", "\"\n\"", "\0", "\\", "/", "..", "null", "true", "false"
-        };
+        std::vector<std::string> dict = {"LuxEngineScene",
+                                         "Transform",
+                                         "Camera",
+                                         "SpriteRenderer",
+                                         "MeshRenderer",
+                                         "Tilemap",
+                                         "Rigidbody2D",
+                                         "BoxCollider2D",
+                                         "CircleCollider2D",
+                                         "Animation",
+                                         "AudioSource",
+                                         "NaN",
+                                         "Inf",
+                                         "-Inf",
+                                         "1e30",
+                                         "-1e30",
+                                         "0",
+                                         "-1",
+                                         "999999",
+                                         "\"\"",
+                                         "\"\n\"",
+                                         "\0",
+                                         "\\",
+                                         "/",
+                                         "..",
+                                         "null",
+                                         "true",
+                                         "false"};
 
         const auto start = std::chrono::steady_clock::now();
         size_t executed = 0;
@@ -142,12 +169,14 @@ int main(int argc, char** argv) {
 
             if ((i + 1) % 2000 == 0 || i + 1 == targetRuns) {
                 const auto now = std::chrono::steady_clock::now();
-                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+                const auto ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
                 std::cout << "[FuzzScene] Completed " << (i + 1) << " / " << targetRuns
                           << " mutational fuzz iterations (" << ms << " ms)\n";
             }
         }
-        std::cout << "FuzzScene mutational execution PASSED: " << executed << " iterations completed without crashes\n";
+        std::cout << "FuzzScene mutational execution PASSED: " << executed
+                  << " iterations completed without crashes\n";
         return 0;
     }
 
@@ -157,7 +186,8 @@ int main(int argc, char** argv) {
             TestSceneBytes(seed.data(), seed.size());
             ++executed;
         }
-        std::cout << "FuzzScene standalone corpus checks passed (" << executed << " seeds executed)\n";
+        std::cout << "FuzzScene standalone corpus checks passed (" << executed
+                  << " seeds executed)\n";
         return 0;
     }
 

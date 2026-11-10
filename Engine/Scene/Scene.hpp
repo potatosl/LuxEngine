@@ -23,6 +23,8 @@ public:
     Scene(Scene&&) = delete;
     Scene& operator=(Scene&&) = delete;
     std::vector<Entity> GetEntities();
+    // Stable ascending Z order within each 2D pass: tilemaps, then sprites.
+    std::vector<Entity> GetEntitiesIn2DLayerOrder();
     Entity CreateEntity(const std::string& name = "Entity");
     void DestroyEntity(Entity entity);
     void OnUpdate(double dt);

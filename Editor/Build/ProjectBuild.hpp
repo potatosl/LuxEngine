@@ -18,7 +18,7 @@ const char* ToString(BuildConfiguration configuration);
 struct BuildTools {
     std::filesystem::path cmake;
     std::filesystem::path enginePackage; // folder containing LuxEngineConfig.cmake
-    std::filesystem::path toolchainFile;  // optional vcpkg toolchain
+    std::filesystem::path toolchainFile; // optional vcpkg toolchain
 };
 
 using EnvironmentLookup = std::function<std::string(const char* name)>;

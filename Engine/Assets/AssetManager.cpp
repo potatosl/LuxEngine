@@ -2,6 +2,7 @@
 #include "Engine/Core/Log.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include <SDL3/SDL.h>
+#include <cstring>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
 #include <cmath>
@@ -24,13 +25,15 @@ std::mutex s_AssetMutex;
 std::unordered_map<std::string, size_t> s_TextureSizes;
 std::unordered_map<std::string, size_t> s_MeshSizes;
 
-constexpr uint64 MaxTextureFileSizeBytes = 64ull * 1024ull * 1024ull;  // 64 MiB max compressed texture file
-constexpr int MaxTextureDimension = 8192;                              // 8192 x 8192 max 2D texture width/height
-constexpr uint64 MaxDecodedTextureBytes = 256ull * 1024ull * 1024ull;  // 256 MiB max uncompressed pixel memory
-constexpr uint64 MaxMeshSizeBytes = 64ull * 1024ull * 1024ull;        // 64 MiB
-constexpr size_t MaxMeshVertexElements = 3'000'000;                     // 1,000,000 vertices (x,y,z)
-constexpr size_t MaxMeshIndexElements = 3'000'000;                      // 1,000,000 triangles
-constexpr size_t MaxFaceVertices = 1024;                               // 1024 vertices max per polygon face
+constexpr uint64 MaxTextureFileSizeBytes =
+    64ull * 1024ull * 1024ull;            // 64 MiB max compressed texture file
+constexpr int MaxTextureDimension = 8192; // 8192 x 8192 max 2D texture width/height
+constexpr uint64 MaxDecodedTextureBytes =
+    256ull * 1024ull * 1024ull; // 256 MiB max uncompressed pixel memory
+constexpr uint64 MaxMeshSizeBytes = 64ull * 1024ull * 1024ull; // 64 MiB
+constexpr size_t MaxMeshVertexElements = 3'000'000;            // 1,000,000 vertices (x,y,z)
+constexpr size_t MaxMeshIndexElements = 3'000'000;             // 1,000,000 triangles
+constexpr size_t MaxFaceVertices = 1024;                       // 1024 vertices max per polygon face
 
 std::filesystem::path Path(const std::string& path) {
     return std::filesystem::path(
@@ -73,8 +76,8 @@ stbi_uc* DecodeTexture(const std::string& filepath, int& width, int& height) {
 
     if (testW <= 0 || testH <= 0 || testW > MaxTextureDimension || testH > MaxTextureDimension) {
         SDL_free(fileData);
-        Log::Warn("Image dimensions exceed allowed maximum (" + std::to_string(MaxTextureDimension) +
-                  "): " + filepath);
+        Log::Warn("Image dimensions exceed allowed maximum (" +
+                  std::to_string(MaxTextureDimension) + "): " + filepath);
         return nullptr;
     }
 
@@ -88,12 +91,17 @@ stbi_uc* DecodeTexture(const std::string& filepath, int& width, int& height) {
     // Detect truncated BMP files where declared resolution exceeds actual file payload
     const auto* rawBytes = static_cast<const unsigned char*>(fileData);
     if (byteCount >= 54 && rawBytes[0] == 'B' && rawBytes[1] == 'M') {
-        const uint32 claimedFileSize = rawBytes[2] | (rawBytes[3] << 8) | (rawBytes[4] << 16) | (rawBytes[5] << 24);
-        const uint32 pixelOffset = rawBytes[10] | (rawBytes[11] << 8) | (rawBytes[12] << 16) | (rawBytes[13] << 24);
-        const int32 bmpW = static_cast<int32>(rawBytes[18] | (rawBytes[19] << 8) | (rawBytes[20] << 16) | (rawBytes[21] << 24));
-        const int32 bmpH = std::abs(static_cast<int32>(rawBytes[22] | (rawBytes[23] << 8) | (rawBytes[24] << 16) | (rawBytes[25] << 24)));
+        const uint32 claimedFileSize =
+            rawBytes[2] | (rawBytes[3] << 8) | (rawBytes[4] << 16) | (rawBytes[5] << 24);
+        const uint32 pixelOffset =
+            rawBytes[10] | (rawBytes[11] << 8) | (rawBytes[12] << 16) | (rawBytes[13] << 24);
+        const int32 bmpW = static_cast<int32>(rawBytes[18] | (rawBytes[19] << 8) |
+                                              (rawBytes[20] << 16) | (rawBytes[21] << 24));
+        const int32 bmpH = std::abs(static_cast<int32>(
+            rawBytes[22] | (rawBytes[23] << 8) | (rawBytes[24] << 16) | (rawBytes[25] << 24)));
         const uint16 bpp = rawBytes[28] | (rawBytes[29] << 8);
-        const uint32 compression = rawBytes[30] | (rawBytes[31] << 8) | (rawBytes[32] << 16) | (rawBytes[33] << 24);
+        const uint32 compression =
+            rawBytes[30] | (rawBytes[31] << 8) | (rawBytes[32] << 16) | (rawBytes[33] << 24);
         if (byteCount < pixelOffset || (claimedFileSize > 54 && byteCount < claimedFileSize)) {
             SDL_free(fileData);
             Log::Warn("BMP image file truncated before pixel data: " + filepath);
@@ -105,7 +113,8 @@ stbi_uc* DecodeTexture(const std::string& filepath, int& width, int& height) {
             if (byteCount < minExpected) {
                 SDL_free(fileData);
                 Log::Warn("BMP image file truncated: declared resolution requires " +
-                          std::to_string(minExpected) + " bytes but file has " + std::to_string(byteCount));
+                          std::to_string(minExpected) + " bytes but file has " +
+                          std::to_string(byteCount));
                 return nullptr;
             }
         }
@@ -118,7 +127,8 @@ stbi_uc* DecodeTexture(const std::string& filepath, int& width, int& height) {
     const char* failureReason = stbi_failure_reason();
     SDL_free(fileData);
     if (!pixels) {
-        Log::Warn(std::string("Image load failed: ") + filepath + " (reason: " + (failureReason ? failureReason : "unknown") + ")");
+        Log::Warn(std::string("Image load failed: ") + filepath +
+                  " (reason: " + (failureReason ? failureReason : "unknown") + ")");
         return nullptr;
     }
 
@@ -138,7 +148,8 @@ void AssetManager::EvictUnusedUnderBudget(size_t incomingBytes) {
 
     auto it = s_TextureCache.begin();
     while (it != s_TextureCache.end() &&
-           ((s_TextureCacheMemoryBytes + s_MeshCacheMemoryBytes) + incomingBytes > s_CacheMemoryBudget)) {
+           ((s_TextureCacheMemoryBytes + s_MeshCacheMemoryBytes) + incomingBytes >
+            s_CacheMemoryBudget)) {
         // Only evict if no outside references exist (use_count == 1)
         if (it->second.use_count() <= 1) {
             auto sizeIt = s_TextureSizes.find(it->first);
@@ -199,8 +210,10 @@ Ref<GpuTexture> AssetManager::LoadTexture(const std::string& filepath, GpuDevice
 }
 
 bool AssetManager::ValidateTextureFile(const std::string& filepath, int* outWidth, int* outHeight) {
-    if (outWidth) *outWidth = 0;
-    if (outHeight) *outHeight = 0;
+    if (outWidth)
+        *outWidth = 0;
+    if (outHeight)
+        *outHeight = 0;
 
     std::error_code ec;
     const auto p = Path(filepath);
@@ -219,8 +232,9 @@ bool AssetManager::ValidateTextureFile(const std::string& filepath, int* outWidt
     }
 
     int testW = 0, testH = 0, testChannels = 0;
-    const int infoResult = stbi_info_from_memory(static_cast<const stbi_uc*>(fileData),
-                                                 static_cast<int>(byteCount), &testW, &testH, &testChannels);
+    const int infoResult =
+        stbi_info_from_memory(static_cast<const stbi_uc*>(fileData), static_cast<int>(byteCount),
+                              &testW, &testH, &testChannels);
     SDL_free(fileData);
     if (!infoResult)
         return false;
@@ -232,8 +246,10 @@ bool AssetManager::ValidateTextureFile(const std::string& filepath, int* outWidt
     if (requiredMemory > MaxDecodedTextureBytes)
         return false;
 
-    if (outWidth) *outWidth = testW;
-    if (outHeight) *outHeight = testH;
+    if (outWidth)
+        *outWidth = testW;
+    if (outHeight)
+        *outHeight = testH;
     return true;
 }
 
@@ -327,7 +343,8 @@ bool AssetManager::LoadMesh(const std::string& filepath, RawMeshData& outMesh) {
                     if (token.starts_with('#'))
                         break;
                     const auto slash = token.find('/');
-                    const auto indexText = slash == std::string::npos ? token : token.substr(0, slash);
+                    const auto indexText =
+                        slash == std::string::npos ? token : token.substr(0, slash);
                     if (indexText.empty())
                         return false;
                     size_t used = 0;
@@ -360,7 +377,8 @@ bool AssetManager::LoadMesh(const std::string& filepath, RawMeshData& outMesh) {
     }
     if (in.bad() || mesh.vertices.empty() || mesh.indices.empty())
         return false;
-    const size_t meshBytes = mesh.vertices.size() * sizeof(float) + mesh.indices.size() * sizeof(uint32);
+    const size_t meshBytes =
+        mesh.vertices.size() * sizeof(float) + mesh.indices.size() * sizeof(uint32);
     {
         std::lock_guard<std::mutex> lock(s_AssetMutex);
         EvictUnusedUnderBudget(meshBytes);

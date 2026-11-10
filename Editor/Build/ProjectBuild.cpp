@@ -116,9 +116,18 @@ std::string LowerAscii(std::string text) {
 }
 
 bool SkipInPackage(const fs::path& relative) {
-    static const std::set<std::string> skippedExtensions = {
-        ".pdb", ".ilk", ".obj", ".o",   ".exp", ".lib", ".a",
-        ".idb", ".tlog", ".log", ".lastbuildstate", ".recipe"};
+    static const std::set<std::string> skippedExtensions = {".pdb",
+                                                            ".ilk",
+                                                            ".obj",
+                                                            ".o",
+                                                            ".exp",
+                                                            ".lib",
+                                                            ".a",
+                                                            ".idb",
+                                                            ".tlog",
+                                                            ".log",
+                                                            ".lastbuildstate",
+                                                            ".recipe"};
     const std::string extension = LowerAscii(PathUtf8(relative.extension()));
     if (skippedExtensions.contains(extension))
         return true;
@@ -138,7 +147,9 @@ const char* ToString(BuildConfiguration configuration) {
 BuildTools DetectBuildTools(const fs::path& applicationDirectory,
                             const EnvironmentLookup& environment) {
     BuildTools tools;
-    const auto env = [&](const char* name) { return environment ? environment(name) : std::string{}; };
+    const auto env = [&](const char* name) {
+        return environment ? environment(name) : std::string{};
+    };
 
     if (const std::string explicitCMake = env("LUX_CMAKE"); !explicitCMake.empty()) {
         if (IsFile(PathFromUtf8(explicitCMake)))
@@ -171,8 +182,8 @@ BuildTools DetectBuildTools(const fs::path& applicationDirectory,
                     end = prefix.size();
                 if (end > start) {
                     const fs::path candRoot = PathFromUtf8(prefix.substr(start, end - start));
-                    for (const fs::path& c :
-                         {candRoot, candRoot / "lib/cmake/LuxEngine", candRoot / "cmake/LuxEngine"}) {
+                    for (const fs::path& c : {candRoot, candRoot / "lib/cmake/LuxEngine",
+                                              candRoot / "cmake/LuxEngine"}) {
                         if (HasEnginePackage(c)) {
                             tools.enginePackage = c;
                             break;
@@ -208,16 +219,18 @@ BuildTools DetectBuildTools(const fs::path& applicationDirectory,
 std::string DescribeMissingTools(const BuildTools& tools) {
     std::string message;
     if (tools.cmake.empty())
-        message += "CMake를 찾을 수 없습니다. CMake를 설치하거나 환경 변수 LUX_CMAKE에 cmake 경로를 지정하세요.\n";
+        message += "CMake를 찾을 수 없습니다. CMake를 설치하거나 환경 변수 LUX_CMAKE에 cmake "
+                   "경로를 지정하세요.\n";
     if (tools.enginePackage.empty())
-        message += "설치된 LuxEngine 패키지를 찾을 수 없습니다. 엔진을 `cmake --install`로 설치하고 환경 변수 "
+        message += "설치된 LuxEngine 패키지를 찾을 수 없습니다. 엔진을 `cmake --install`로 "
+                   "설치하고 환경 변수 "
                    "LUX_ENGINE_DIR 또는 CMAKE_PREFIX_PATH에 설치 폴더를 지정하세요.\n";
     return message;
 }
 
-std::optional<BuildPlan> PlanBuild(const fs::path& projectDirectory, BuildConfiguration configuration,
-                                   const BuildTools& tools, const std::string& executableName,
-                                   std::string& error) {
+std::optional<BuildPlan> PlanBuild(const fs::path& projectDirectory,
+                                   BuildConfiguration configuration, const BuildTools& tools,
+                                   const std::string& executableName, std::string& error) {
     error.clear();
     if (!IsFile(projectDirectory / "CMakeLists.txt")) {
         error = "프로젝트 폴더에 CMakeLists.txt가 없습니다.";
@@ -227,8 +240,7 @@ std::optional<BuildPlan> PlanBuild(const fs::path& projectDirectory, BuildConfig
         error = missing;
         return std::nullopt;
     }
-    if (executableName.empty() ||
-        executableName.find_first_of("/\\:") != std::string::npos) {
+    if (executableName.empty() || executableName.find_first_of("/\\:") != std::string::npos) {
         error = "실행 파일 이름이 올바르지 않습니다.";
         return std::nullopt;
     }
@@ -248,7 +260,8 @@ std::optional<BuildPlan> PlanBuild(const fs::path& projectDirectory, BuildConfig
                            std::string("-DCMAKE_BUILD_TYPE=") + ToString(configuration),
                            "-DLuxEngine_DIR=" + GenericPathUtf8(tools.enginePackage)};
     if (!tools.toolchainFile.empty()) {
-        configure.arguments.push_back("-DCMAKE_TOOLCHAIN_FILE=" + GenericPathUtf8(tools.toolchainFile));
+        configure.arguments.push_back("-DCMAKE_TOOLCHAIN_FILE=" +
+                                      GenericPathUtf8(tools.toolchainFile));
 #ifdef _WIN32
         configure.arguments.push_back("-DVCPKG_TARGET_TRIPLET=x64-windows");
 #endif
@@ -296,7 +309,8 @@ std::optional<fs::path> FindBuiltExecutable(const BuildPlan& plan) {
     return std::nullopt;
 }
 
-// MSBuild appends " [C:\\path\\project.vcxproj]" to every diagnostic; it is noise in the issue list.
+// MSBuild appends " [C:\\path\\project.vcxproj]" to every diagnostic; it is noise in the issue
+// list.
 static std::string StripProjectSuffix(std::string message) {
     if (message.size() > 2 && message.back() == ']') {
         const size_t open = message.rfind(" [");
@@ -348,10 +362,11 @@ std::optional<BuildDiagnostic> ParseBuildLine(const std::string& rawLine) {
         return diagnostic;
     }
     // CMake: CMake Error at CMakeLists.txt:7 (find_package):
-    static const std::regex cmakeAt(R"(^CMake (Error|Warning)(?: \(dev\))? at (.+?):(\d{1,9}) \(.*\):?\s*$)");
+    static const std::regex cmakeAt(
+        R"(^CMake (Error|Warning)(?: \(dev\))? at (.+?):(\d{1,9}) \(.*\):?\s*$)");
     if (std::regex_match(line, match, cmakeAt)) {
-        diagnostic.severity = match[1] == "Warning" ? DiagnosticSeverity::Warning
-                                                     : DiagnosticSeverity::Error;
+        diagnostic.severity =
+            match[1] == "Warning" ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
         diagnostic.file = match[2];
         diagnostic.line = std::stoi(match[3]);
         diagnostic.message = line;
@@ -359,8 +374,8 @@ std::optional<BuildDiagnostic> ParseBuildLine(const std::string& rawLine) {
     }
     static const std::regex cmakePlain(R"(^CMake (Error|Warning)(?: \(dev\))?: (.*)$)");
     if (std::regex_match(line, match, cmakePlain)) {
-        diagnostic.severity = match[1] == "Warning" ? DiagnosticSeverity::Warning
-                                                     : DiagnosticSeverity::Error;
+        diagnostic.severity =
+            match[1] == "Warning" ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
         diagnostic.message = Trim(match[2]);
         return diagnostic;
     }
@@ -401,7 +416,8 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
     std::vector<std::pair<fs::path, fs::path>> files; // absolute, relative
     uint64_t total = 0;
     std::error_code ec;
-    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec),
+    for (fs::recursive_directory_iterator
+             it(root, fs::directory_options::skip_permission_denied, ec),
          end;
          !ec && it != end; it.increment(ec)) {
         const fs::path relative = it->path().lexically_relative(root);
@@ -411,7 +427,8 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
             continue;
         }
         if (it->is_symlink(ec)) {
-            error = "심볼릭 링크가 있어 배포 패키지를 만들 수 없습니다: " + GenericPathUtf8(relative);
+            error =
+                "심볼릭 링크가 있어 배포 패키지를 만들 수 없습니다: " + GenericPathUtf8(relative);
             return std::nullopt;
         }
         if (!it->is_regular_file(ec))
@@ -432,8 +449,8 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
               [](const auto& a, const auto& b) { return a.second < b.second; });
 
     fs::path temporary = archive;
-    temporary += ".tmp-" + std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
+    temporary +=
+        ".tmp-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     fs::create_directories(archive.parent_path(), ec);
     int zipError = 0;
     zip_t* zip = zip_open(PathUtf8(temporary).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipError);

@@ -462,7 +462,8 @@ void TestArchiveSecurityAndFuzzing() {
         return "LUXPROJECT 2\nname \"" + name + "\"\nengine_version \"" +
                std::string(EditorProject::CurrentEngineVersion()) +
                "\"\nproject_version \"1.0.0\"\ntemplate \"empty\"\nstart_scene \"" + sceneRel +
-               "\"\nicon \"\"\nautosave_seconds 300\nbackup_limit 5\nsnap_to_grid 0\ndependency_count 0\n";
+               "\"\nicon \"\"\nautosave_seconds 300\nbackup_limit 5\nsnap_to_grid "
+               "0\ndependency_count 0\n";
     };
     const std::string validSceneData = "LuxEngineScene 2 0\n";
 
@@ -486,8 +487,11 @@ void TestArchiveSecurityAndFuzzing() {
     Check(z != nullptr, "fixture zip created");
     zip_source_t* src1 = zip_source_buffer(z, "malicious", 9, 0);
     Check(zip_file_add(z, "/escape.txt", src1, ZIP_FL_ENC_UTF_8) >= 0, "root escape entry added");
-    zip_source_t* src2 = zip_source_buffer(z, "LUXPROJECT 2\nname \"Escape\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 71, 0);
-    Check(zip_file_add(z, EditorProject::FileName, src2, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    zip_source_t* src2 = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"Escape\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n",
+        71, 0);
+    Check(zip_file_add(z, EditorProject::FileName, src2, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "escape fixture zip finalized");
 
     Check(!ImportProject(escapeZip, files.path / "escape_imported", error),
@@ -499,8 +503,11 @@ void TestArchiveSecurityAndFuzzing() {
     Check(z != nullptr, "reserved zip created");
     zip_source_t* src3 = zip_source_buffer(z, "reserved", 8, 0);
     Check(zip_file_add(z, "CON.txt", src3, ZIP_FL_ENC_UTF_8) >= 0, "CON entry added");
-    zip_source_t* src4 = zip_source_buffer(z, "LUXPROJECT 2\nname \"Reserved\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 73, 0);
-    Check(zip_file_add(z, EditorProject::FileName, src4, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    zip_source_t* src4 = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"Reserved\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n",
+        73, 0);
+    Check(zip_file_add(z, EditorProject::FileName, src4, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "reserved fixture zip finalized");
 
     Check(!ImportProject(conZip, files.path / "reserved_imported", error),
@@ -512,8 +519,11 @@ void TestArchiveSecurityAndFuzzing() {
     Check(z != nullptr, "ads zip created");
     zip_source_t* srcAds = zip_source_buffer(z, "stream data", 11, 0);
     Check(zip_file_add(z, "file.txt:hidden", srcAds, ZIP_FL_ENC_UTF_8) >= 0, "ADS entry added");
-    zip_source_t* srcProjAds = zip_source_buffer(z, "LUXPROJECT 2\nname \"ADS\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68, 0);
-    Check(zip_file_add(z, EditorProject::FileName, srcProjAds, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    zip_source_t* srcProjAds = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"ADS\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68,
+        0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjAds, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "ads fixture zip finalized");
     Check(!ImportProject(adsZip, files.path / "ads_imported", error),
           "Alternate Data Stream (:) in zip safely rejected");
@@ -524,8 +534,11 @@ void TestArchiveSecurityAndFuzzing() {
     Check(z != nullptr, "trailing zip created");
     zip_source_t* srcDot = zip_source_buffer(z, "dot data", 8, 0);
     Check(zip_file_add(z, "bad_name.", srcDot, ZIP_FL_ENC_UTF_8) >= 0, "trailing dot entry added");
-    zip_source_t* srcProjTrailing = zip_source_buffer(z, "LUXPROJECT 2\nname \"Trailing\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 73, 0);
-    Check(zip_file_add(z, EditorProject::FileName, srcProjTrailing, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    zip_source_t* srcProjTrailing = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"Trailing\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n",
+        73, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjTrailing, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "trailing fixture zip finalized");
     Check(!ImportProject(trailingZip, files.path / "trailing_imported", error),
           "Trailing dot/space in zip path safely rejected");
@@ -538,8 +551,11 @@ void TestArchiveSecurityAndFuzzing() {
     Check(zip_file_add(z, "Asset.txt", srcCase1, ZIP_FL_ENC_UTF_8) >= 0, "Asset.txt entry added");
     zip_source_t* srcCase2 = zip_source_buffer(z, "case2", 5, 0);
     Check(zip_file_add(z, "asset.txt", srcCase2, ZIP_FL_ENC_UTF_8) >= 0, "asset.txt entry added");
-    zip_source_t* srcProjCase = zip_source_buffer(z, "LUXPROJECT 2\nname \"Case\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 69, 0);
-    Check(zip_file_add(z, EditorProject::FileName, srcProjCase, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    zip_source_t* srcProjCase = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"Case\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 69,
+        0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjCase, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "case fixture zip finalized");
     Check(!ImportProject(caseZip, files.path / "case_imported", error),
           "Case-collision entries in zip safely rejected");
@@ -551,9 +567,13 @@ void TestArchiveSecurityAndFuzzing() {
     zip_source_t* srcFile = zip_source_buffer(z, "file content", 12, 0);
     Check(zip_file_add(z, "conflict", srcFile, ZIP_FL_ENC_UTF_8) >= 0, "conflict file entry added");
     zip_source_t* srcChild = zip_source_buffer(z, "child content", 13, 0);
-    Check(zip_file_add(z, "conflict/child.txt", srcChild, ZIP_FL_ENC_UTF_8) >= 0, "conflict/child.txt entry added");
-    zip_source_t* srcProjColl = zip_source_buffer(z, "LUXPROJECT 2\nname \"Coll\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 69, 0);
-    Check(zip_file_add(z, EditorProject::FileName, srcProjColl, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_file_add(z, "conflict/child.txt", srcChild, ZIP_FL_ENC_UTF_8) >= 0,
+          "conflict/child.txt entry added");
+    zip_source_t* srcProjColl = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"Coll\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 69,
+        0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjColl, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "collision fixture zip finalized");
     Check(!ImportProject(collZip, files.path / "coll_imported", error),
           "File-directory collision in zip safely rejected");
@@ -574,8 +594,11 @@ void TestArchiveSecurityAndFuzzing() {
     Check(z != nullptr, "git zip created");
     zip_source_t* srcGit = zip_source_buffer(z, "[core]\n", 7, 0);
     Check(zip_file_add(z, ".GIT/config", srcGit, ZIP_FL_ENC_UTF_8) >= 0, ".GIT/config entry added");
-    zip_source_t* srcProjGit = zip_source_buffer(z, "LUXPROJECT 2\nname \"Git\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68, 0);
-    Check(zip_file_add(z, EditorProject::FileName, srcProjGit, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    zip_source_t* srcProjGit = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"Git\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68,
+        0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjGit, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "git fixture zip finalized");
     Check(!ImportProject(gitZip, files.path / "git_imported", error),
           "Case-insensitive .GIT directory in zip safely rejected");
@@ -584,23 +607,33 @@ void TestArchiveSecurityAndFuzzing() {
     z = zip_open(PathUtf8(luxDirZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
     Check(z != nullptr, "lux dir zip created");
     zip_source_t* srcLux = zip_source_buffer(z, "cache data", 10, 0);
-    Check(zip_file_add(z, ".Lux/internal", srcLux, ZIP_FL_ENC_UTF_8) >= 0, ".Lux/internal entry added");
-    zip_source_t* srcProjLux = zip_source_buffer(z, "LUXPROJECT 2\nname \"Lux\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68, 0);
-    Check(zip_file_add(z, EditorProject::FileName, srcProjLux, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_file_add(z, ".Lux/internal", srcLux, ZIP_FL_ENC_UTF_8) >= 0,
+          ".Lux/internal entry added");
+    zip_source_t* srcProjLux = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"Lux\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 68,
+        0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjLux, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "lux fixture zip finalized");
     Check(!ImportProject(luxDirZip, files.path / "lux_imported", error),
           "Case-insensitive .Lux directory in zip safely rejected");
 
-    // 11. Order-reversed file-directory collision ("folder/child.txt" FIRST, "folder" SECOND as file)
+    // 11. Order-reversed file-directory collision ("folder/child.txt" FIRST, "folder" SECOND as
+    // file)
     const auto revCollZip = files.path / "rev_file_dir_collision.luxpack";
     z = zip_open(PathUtf8(revCollZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
     Check(z != nullptr, "rev collision zip created");
     zip_source_t* srcRevChild = zip_source_buffer(z, "child content", 13, 0);
-    Check(zip_file_add(z, "rev_dir/nested.txt", srcRevChild, ZIP_FL_ENC_UTF_8) >= 0, "rev_dir/nested.txt entry added first");
+    Check(zip_file_add(z, "rev_dir/nested.txt", srcRevChild, ZIP_FL_ENC_UTF_8) >= 0,
+          "rev_dir/nested.txt entry added first");
     zip_source_t* srcRevFile = zip_source_buffer(z, "file content", 12, 0);
-    Check(zip_file_add(z, "rev_dir", srcRevFile, ZIP_FL_ENC_UTF_8) >= 0, "rev_dir file entry added second");
-    zip_source_t* srcProjRev = zip_source_buffer(z, "LUXPROJECT 2\nname \"RevColl\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n", 72, 0);
-    Check(zip_file_add(z, EditorProject::FileName, srcProjRev, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_file_add(z, "rev_dir", srcRevFile, ZIP_FL_ENC_UTF_8) >= 0,
+          "rev_dir file entry added second");
+    zip_source_t* srcProjRev = zip_source_buffer(
+        z, "LUXPROJECT 2\nname \"RevColl\"\nengine_version \"0.1.0\"\nstart_scene \"Scene.lux\"\n",
+        72, 0);
+    Check(zip_file_add(z, EditorProject::FileName, srcProjRev, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "rev collision fixture zip finalized");
     Check(!ImportProject(revCollZip, files.path / "rev_coll_imported", error),
           "Order-reversed file-directory collision in zip safely rejected");
@@ -615,7 +648,8 @@ void TestArchiveSecurityAndFuzzing() {
     std::ofstream(externalTarget / "secret.txt") << "sensitive system data";
 
     const auto junctionLink = juncProjDir / "Assets" / "LinkedJunction";
-    std::string cmd = "cmd /c mklink /J \"" + junctionLink.string() + "\" \"" + externalTarget.string() + "\" >nul 2>nul";
+    std::string cmd = "cmd /c mklink /J \"" + junctionLink.string() + "\" \"" +
+                      externalTarget.string() + "\" >nul 2>nul";
     system(cmd.c_str());
 
     const auto juncArchive = files.path / "junc_test.luxpack";
@@ -633,19 +667,27 @@ void TestArchiveSecurityAndFuzzing() {
     Check(zip_dir_add(z, "Assets", ZIP_FL_ENC_UTF_8) >= 0, "Assets/ dir entry added");
     Check(zip_dir_add(z, "Scenes", ZIP_FL_ENC_UTF_8) >= 0, "Scenes/ dir entry added");
     zip_source_t* srcTex = zip_source_buffer(z, "texture data", 12, 0);
-    Check(zip_file_add(z, "Assets/texture.txt", srcTex, ZIP_FL_ENC_UTF_8) >= 0, "Assets/texture.txt added");
+    Check(zip_file_add(z, "Assets/texture.txt", srcTex, ZIP_FL_ENC_UTF_8) >= 0,
+          "Assets/texture.txt added");
     zip_source_t* srcScene = zip_source_buffer(z, validSceneData.c_str(), validSceneData.size(), 0);
-    Check(zip_file_add(z, "Scenes/Main.lux", srcScene, ZIP_FL_ENC_UTF_8) >= 0, "Scenes/Main.lux added");
+    Check(zip_file_add(z, "Scenes/Main.lux", srcScene, ZIP_FL_ENC_UTF_8) >= 0,
+          "Scenes/Main.lux added");
     const std::string projStr = makeValidProj("DirSuccess", "Scenes/Main.lux");
     zip_source_t* srcProjDir = zip_source_buffer(z, projStr.c_str(), projStr.size(), 0);
-    Check(zip_file_add(z, EditorProject::FileName, srcProjDir, ZIP_FL_ENC_UTF_8) >= 0, "project file added");
+    Check(zip_file_add(z, EditorProject::FileName, srcProjDir, ZIP_FL_ENC_UTF_8) >= 0,
+          "project file added");
     Check(zip_close(z) == 0, "dir entries zip finalized");
 
     auto dirImported = ImportProject(dirEntriesZip, files.path / "dir_success_imported", error);
-    Check(dirImported.has_value(), "Archive with standard directory entries (Assets/, Scenes/) imported successfully");
-    Check(std::filesystem::is_directory(files.path / "dir_success_imported" / "Assets"), "Assets directory created");
-    Check(std::filesystem::is_directory(files.path / "dir_success_imported" / "Scenes"), "Scenes directory created");
-    Check(std::filesystem::is_regular_file(files.path / "dir_success_imported" / "Assets" / "texture.txt"), "nested asset file preserved");
+    Check(dirImported.has_value(),
+          "Archive with standard directory entries (Assets/, Scenes/) imported successfully");
+    Check(std::filesystem::is_directory(files.path / "dir_success_imported" / "Assets"),
+          "Assets directory created");
+    Check(std::filesystem::is_directory(files.path / "dir_success_imported" / "Scenes"),
+          "Scenes directory created");
+    Check(std::filesystem::is_regular_file(files.path / "dir_success_imported" / "Assets" /
+                                           "texture.txt"),
+          "nested asset file preserved");
 
     // Attack ZIP with leading slash directory entry
     const auto slashDirZip = files.path / "slash_dir.luxpack";
@@ -653,7 +695,8 @@ void TestArchiveSecurityAndFuzzing() {
     zip_source_t* srcSlashDir = zip_source_buffer(z, "data", 4, 0);
     zip_file_add(z, "/absolute.txt", srcSlashDir, ZIP_FL_ENC_UTF_8);
     zip_close(z);
-    Check(!ImportProject(slashDirZip, files.path / "slash_dir_imported", error), "leading slash entry rejected");
+    Check(!ImportProject(slashDirZip, files.path / "slash_dir_imported", error),
+          "leading slash entry rejected");
 
     // Attack ZIP with drive letter entry
     const auto driveZip = files.path / "drive.luxpack";
@@ -661,7 +704,8 @@ void TestArchiveSecurityAndFuzzing() {
     zip_source_t* srcDrive = zip_source_buffer(z, "data", 4, 0);
     zip_file_add(z, "C:/Windows/test.txt", srcDrive, ZIP_FL_ENC_UTF_8);
     zip_close(z);
-    Check(!ImportProject(driveZip, files.path / "drive_imported", error), "drive letter entry rejected");
+    Check(!ImportProject(driveZip, files.path / "drive_imported", error),
+          "drive letter entry rejected");
 
     // Attack ZIP with double slash
     const auto doubleSlashZip = files.path / "double_slash.luxpack";
@@ -669,7 +713,8 @@ void TestArchiveSecurityAndFuzzing() {
     zip_source_t* srcDoubleSlash = zip_source_buffer(z, "data", 4, 0);
     zip_file_add(z, "folder//unexpected.txt", srcDoubleSlash, ZIP_FL_ENC_UTF_8);
     zip_close(z);
-    Check(!ImportProject(doubleSlashZip, files.path / "double_slash_imported", error), "double slash entry rejected");
+    Check(!ImportProject(doubleSlashZip, files.path / "double_slash_imported", error),
+          "double slash entry rejected");
 
     // 14. UTF-8 Boundary and Code Point Validation (BUG-04)
     // 14.1. Invalid 4-byte sequence > U+10FFFF (e.g. \xF5\x80\x80\x80)
@@ -704,7 +749,8 @@ void TestArchiveSecurityAndFuzzing() {
     z = zip_open(PathUtf8(maxUnicodeZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
     zip_source_t* srcMax = zip_source_buffer(z, "good", 4, 0);
     zip_file_add(z, "max_\xF4\x8F\xBF\xBF.txt", srcMax, ZIP_FL_ENC_UTF_8);
-    zip_source_t* srcSceneMax = zip_source_buffer(z, validSceneData.c_str(), validSceneData.size(), 0);
+    zip_source_t* srcSceneMax =
+        zip_source_buffer(z, validSceneData.c_str(), validSceneData.size(), 0);
     zip_file_add(z, "Scene.lux", srcSceneMax, ZIP_FL_ENC_UTF_8);
     const std::string projMaxStr = makeValidProj("MaxU", "Scene.lux");
     zip_source_t* srcProjMax = zip_source_buffer(z, projMaxStr.c_str(), projMaxStr.size(), 0);
@@ -714,10 +760,105 @@ void TestArchiveSecurityAndFuzzing() {
           "Maximum valid Unicode U+10FFFF accepted");
 }
 
+void TestArchiveSizeLimits() {
+    using namespace LuxEngine;
+    constexpr uint64_t limit = 256ull * 1024 * 1024;
+    for (const uint64_t size : {limit + 1, limit - 1, limit}) {
+        TempDirectory files;
+        std::string error;
+        auto project = EditorProject::Create(files.path / "original", "SizeLimit",
+                                             ProjectTemplate::Empty, error);
+        Check(project.has_value(), "size-limit project creates");
+        std::filesystem::path originalBackup;
+        if (size > limit) {
+            auto settings = project->GetSettings();
+            settings.backupLimit = 1;
+            Check(project->UpdateSettings(settings, error) &&
+                      CreateProjectBackup(*project, originalBackup, error),
+                  "valid backup exists before an oversized asset is added");
+        }
+        const auto asset = project->GetFile().parent_path() / "Assets" / "large.bin";
+        std::ofstream(asset, std::ios::binary).close();
+        std::filesystem::resize_file(asset, size);
+        const auto archive = files.path / "export.luxpack";
+        if (size > limit) {
+            std::ofstream(archive, std::ios::binary) << "existing archive";
+            Check(!ExportProject(*project, archive, error) && !error.empty(),
+                  "export rejects an asset above the import limit");
+            std::ifstream previous(archive, std::ios::binary);
+            Check(std::string(std::istreambuf_iterator<char>(previous), {}) == "existing archive",
+                  "rejected export preserves the previous archive");
+            std::filesystem::path backup;
+            Check(!CreateProjectBackup(*project, backup, error) && !std::filesystem::exists(backup),
+                  "backup rejects an unrestorable project without leaving an archive");
+            Check(std::filesystem::is_regular_file(originalBackup),
+                  "failed backup does not prune the last valid backup");
+            Check(!CloneProject(*project, files.path / "clone", "Clone", error) &&
+                      !std::filesystem::exists(files.path / "clone"),
+                  "clone rejects an oversized asset without leaving a project");
+            continue;
+        }
+        Check(ExportProject(*project, archive, error), "boundary-size asset exports");
+        auto imported = ImportProject(archive, files.path / "imported", error);
+        Check(imported.has_value() &&
+                  std::filesystem::file_size(files.path / "imported/Assets/large.bin") == size,
+              "successful boundary-size export imports without truncation");
+        std::filesystem::remove_all(files.path / "imported");
+        std::filesystem::path backup;
+        Check(CreateProjectBackup(*project, backup, error), "boundary-size backup succeeds");
+        Check(RestoreProjectBackup(*project, backup, error) &&
+                  std::filesystem::file_size(asset) == size,
+              "successful boundary-size backup restores without truncation");
+    }
+}
+
+void TestEmptyProjectDirectories() {
+    using namespace LuxEngine;
+    TempDirectory files;
+    std::string error;
+    auto original =
+        EditorProject::Create(files.path / "original", "Empty", ProjectTemplate::Empty, error);
+    Check(original.has_value(), "empty project creates");
+    std::filesystem::create_directories(files.path / "original/Assets/Empty/Nested");
+    const auto archive = files.path / "empty.luxpack";
+    Check(ExportProject(*original, archive, error), "empty project exports");
+    auto imported = ImportProject(archive, files.path / "imported", error);
+    auto cloned = CloneProject(*original, files.path / "cloned", "Clone", error);
+    Check(imported && cloned, "empty project imports and clones");
+    QImage image(2, 2, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    const auto icon = files.path / "icon.png";
+    Check(image.save(QString::fromUtf8(PathUtf8(icon))), "icon fixture saves");
+    for (EditorProject* project : {&*imported, &*cloned}) {
+        const auto root = project->GetFile().parent_path();
+        Check(std::filesystem::is_directory(root / "Assets/Empty/Nested"),
+              "export preserves nested empty directories");
+        Check(project->SetIcon(icon, error) &&
+                  std::filesystem::is_regular_file(root / project->GetIcon()),
+              "imported and cloned empty projects accept an icon");
+        std::filesystem::remove_all(root / "Assets");
+        Check(project->SetIcon(icon, error) &&
+                  std::filesystem::is_regular_file(root / project->GetIcon()),
+              "icon storage recreates a missing Assets directory");
+    }
+    std::filesystem::remove_all(files.path / "original/Assets");
+    Check(ExportProject(*original, files.path / "legacy.luxpack", error),
+          "package without an Assets directory exports");
+    auto legacy = ImportProject(files.path / "legacy.luxpack", files.path / "legacy", error);
+    Check(legacy && std::filesystem::is_directory(files.path / "legacy/Assets") &&
+              legacy->SetIcon(icon, error),
+          "import repairs the basic layout of older packages without empty directory entries");
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "archive-limits") {
+            TestArchiveSizeLimits();
+            std::cout << "Archive size-limit checks passed\n";
+            return 0;
+        }
         TestDocument();
         Test3DEditorEntity();
         Test2DEditorComponents();
@@ -725,6 +866,7 @@ int main() {
         TestProjectOperations();
         TestUnicodeProjectPaths();
         TestArchiveSecurityAndFuzzing();
+        TestEmptyProjectDirectories();
         std::cout << "Editor document checks passed\n";
         return 0;
     } catch (const std::exception& error) {

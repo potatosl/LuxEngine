@@ -1,4 +1,6 @@
-struct Camera { column_major float4x4 viewProjection; };
+struct Camera {
+    column_major float4x4 viewProjection;
+};
 [[vk::push_constant]] ConstantBuffer<Camera> camera;
 struct Object {
     column_major float4x4 model;

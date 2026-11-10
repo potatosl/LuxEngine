@@ -680,6 +680,7 @@ void EditorWindow::RefreshInspector() {
                                       : QStringLiteral("선택된 엔티티 없음"));
     inspectorBody_->setEnabled(static_cast<bool>(selected) && !previewActive_);
     if (selected) {
+        name_->setEnabled(selected.HasComponent<TagComponent>());
         name_->setText(selected.HasComponent<TagComponent>()
                            ? Q(selected.GetComponent<TagComponent>().tag)
                            : QString());
@@ -692,8 +693,10 @@ void EditorWindow::RefreshInspector() {
              {{value.rotation.x * degrees, value.rotation.y * degrees, value.rotation.z * degrees}},
              {{value.scale.x, value.scale.y, value.scale.z}}}};
         for (size_t row = 0; row < 3; ++row)
-            for (size_t col = 0; col < 3; ++col)
+            for (size_t col = 0; col < 3; ++col) {
                 transform_[row][col]->setValue(rows[row][col]);
+                transform_[row][col]->setEnabled(selected.HasComponent<TransformComponent>());
+            }
         const bool sprite = selected.HasComponent<SpriteRendererComponent>();
         spriteEnabled_->setChecked(sprite);
         const Vec4 color =
@@ -747,7 +750,9 @@ void EditorWindow::RefreshInspector() {
             field->setEnabled(hasCollider);
         triggerEnabled_->setEnabled(hasCollider);
         const bool animated = selected.HasComponent<AnimationComponent>();
+        const bool canAnimate = selected.HasComponent<TransformComponent>();
         animationEnabled_->setChecked(animated);
+        animationEnabled_->setEnabled(canAnimate);
         const AnimationComponent animation =
             animated ? selected.GetComponent<AnimationComponent>() : AnimationComponent{};
         animationLoop_->setChecked(animation.clip.loop);
@@ -761,9 +766,9 @@ void EditorWindow::RefreshInspector() {
         keyframeList_->clear();
         for (const auto& key : animation.clip.keyframes)
             keyframeList_->addItem(QStringLiteral("%1 s").arg(key.time, 0, 'f', 3));
-        animationLoop_->setEnabled(animated);
-        animationDuration_->setEnabled(animated);
-        animationTimeline_->setEnabled(animated);
+        animationLoop_->setEnabled(animated && canAnimate);
+        animationDuration_->setEnabled(animated && canAnimate);
+        animationTimeline_->setEnabled(animated && canAnimate);
         keyframeList_->setEnabled(animated);
     }
     refreshingInspector_ = false;
@@ -847,7 +852,7 @@ void EditorWindow::OnNameChanged() {
     if (refreshingInspector_)
         return;
     Entity selected = document_.GetSelected();
-    if (!selected)
+    if (!selected || !selected.HasComponent<TagComponent>())
         return;
     const std::string value = Utf8(name_->text());
     if (selected.GetComponent<TagComponent>().tag == value)
@@ -862,7 +867,8 @@ void EditorWindow::OnNameChanged() {
     UpdateChrome();
 }
 void EditorWindow::OnTransformChanged() {
-    if (refreshingInspector_ || !document_.GetSelected())
+    if (refreshingInspector_ || !document_.GetSelected() ||
+        !document_.GetSelected().HasComponent<TransformComponent>())
         return;
     RecordEdit(QStringLiteral("변환 변경"), [this] {
         auto& value = document_.GetSelected().GetComponent<TransformComponent>();
@@ -987,7 +993,8 @@ void EditorWindow::OnPhysicsChanged() {
     UpdateChrome();
 }
 void EditorWindow::OnAnimationChanged() {
-    if (refreshingInspector_ || previewActive_ || !document_.GetSelected())
+    if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
+        !document_.GetSelected().HasComponent<TransformComponent>())
         return;
     RecordEdit(QStringLiteral("애니메이션 변경"), [this] {
         Entity entity = document_.GetSelected();
@@ -1013,6 +1020,7 @@ void EditorWindow::OnAnimationChanged() {
 }
 void EditorWindow::AddKeyframe() {
     if (previewActive_ || !document_.GetSelected() ||
+        !document_.GetSelected().HasComponent<TransformComponent>() ||
         !document_.GetSelected().HasComponent<AnimationComponent>())
         return;
     RecordEdit(QStringLiteral("애니메이션 키 추가"), [this] {
@@ -1044,6 +1052,7 @@ void EditorWindow::RemoveKeyframe() {
 }
 void EditorWindow::ScrubAnimation(int value) {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
+        !document_.GetSelected().HasComponent<TransformComponent>() ||
         !document_.GetSelected().HasComponent<AnimationComponent>())
         return;
     auto& animation = document_.GetSelected().GetComponent<AnimationComponent>();
@@ -1058,9 +1067,9 @@ void EditorWindow::ScrubAnimation(int value) {
     UpdateChrome();
 }
 void EditorWindow::EndTimelineEdit() {
-    const QByteArray after = SnapshotScene();
+    const auto after = SnapshotScene();
     if (!timelineBefore_.isEmpty() && !after.isEmpty() && timelineBefore_ != after) {
-        const QByteArray before = timelineBefore_;
+        const auto before = timelineBefore_;
         const auto id = SelectedId(document_);
         undo_->push(new SceneEditCommand(
             QStringLiteral("애니메이션 시간 이동"),
@@ -1221,13 +1230,13 @@ void EditorWindow::ApplyViewportTransform(uint32 id, const TransformComponent& v
     UpdateChrome();
 }
 void EditorWindow::EndViewportEdit() {
-    const QByteArray after = SnapshotScene();
+    const auto after = SnapshotScene();
     const auto next = SelectedId(document_);
     if (!viewportEditBefore_.isEmpty() && !after.isEmpty() && viewportEditBefore_ != after) {
         const char* names[] = {"선택", "이동", "회전", "크기", "타일 붓", "타일 지우개"};
         const QString title =
             QString::fromUtf8(names[static_cast<int>(tool_)]) + QStringLiteral(" 도구");
-        const QByteArray before = viewportEditBefore_;
+        const auto before = viewportEditBefore_;
         const auto previous = viewportEditSelected_;
         undo_->push(new SceneEditCommand(
             title, [this, before, previous] { RestoreScene(before, previous); },
@@ -1236,20 +1245,31 @@ void EditorWindow::EndViewportEdit() {
     viewportEditBefore_.clear();
     viewportEditSelected_.reset();
 }
-QByteArray EditorWindow::SnapshotScene() {
+EditorSnapshot EditorWindow::SnapshotScene() {
     std::string serialized;
     if (!document_.GetScene().SerializeToString(serialized))
         return {};
-    return QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+    EditorSnapshot snapshot;
+    snapshot.scene = QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+    for (Entity entity : document_.GetScene().GetEntities())
+        if (entity.HasComponent<AnimationComponent>())
+            snapshot.animationTimes.emplace_back(
+                entity.GetId(), entity.GetComponent<AnimationComponent>().currentTime);
+    return snapshot;
 }
-void EditorWindow::RestoreScene(const QByteArray& bytes, std::optional<uint32> selected) {
-    if (bytes.isEmpty())
+void EditorWindow::RestoreScene(const EditorSnapshot& snapshot, std::optional<uint32> selected) {
+    if (snapshot.isEmpty())
         return;
+    const auto& bytes = snapshot.scene;
     const std::string serialized(bytes.constData(), static_cast<size_t>(bytes.size()));
     restoringHistory_ = true;
     const bool restored = document_.ReplaceSceneFromData(serialized, selected);
-    if (restored)
+    if (restored) {
+        for (const auto& [id, time] : snapshot.animationTimes)
+            if (auto* animation = document_.GetScene().TryGetComponent<AnimationComponent>(id))
+                animation->currentTime = time;
         RefreshAll();
+    }
     restoringHistory_ = false;
     if (!restored)
         Log(QStringLiteral("장면 상태 복원에 실패했습니다."), true);
@@ -1263,7 +1283,8 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     }
     const auto before = SnapshotScene();
     if (before.isEmpty()) {
-        Log(QStringLiteral("편집 기록 실패 (%1): 편집 전 장면 스냅샷을 생성하지 못했습니다.").arg(name),
+        Log(QStringLiteral("편집 기록 실패 (%1): 편집 전 장면 스냅샷을 생성하지 못했습니다.")
+                .arg(name),
             true);
         return;
     }
@@ -1278,7 +1299,8 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
         return;
     } catch (...) {
         RestoreScene(before, previous);
-        Log(QStringLiteral("편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
+        Log(QStringLiteral(
+                "편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
                 .arg(name),
             true);
         return;
@@ -1286,7 +1308,8 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     const auto after = SnapshotScene();
     if (after.isEmpty()) {
         RestoreScene(before, previous);
-        Log(QStringLiteral("편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
+        Log(QStringLiteral(
+                "편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
                 .arg(name),
             true);
         return;
@@ -1302,11 +1325,19 @@ void EditorWindow::CopyEntity() {
     if (!selected)
         return;
     QJsonObject object;
-    object.insert(QStringLiteral("name"), Q(selected.GetComponent<TagComponent>().tag));
-    const auto& t = selected.GetComponent<TransformComponent>();
-    object.insert(QStringLiteral("position"), QJsonArray{t.position.x, t.position.y, t.position.z});
-    object.insert(QStringLiteral("rotation"), QJsonArray{t.rotation.x, t.rotation.y, t.rotation.z});
-    object.insert(QStringLiteral("scale"), QJsonArray{t.scale.x, t.scale.y, t.scale.z});
+    object.insert(QStringLiteral("version"), 2);
+    object.insert(QStringLiteral("hasTag"), selected.HasComponent<TagComponent>());
+    object.insert(QStringLiteral("hasTransform"), selected.HasComponent<TransformComponent>());
+    if (selected.HasComponent<TagComponent>())
+        object.insert(QStringLiteral("name"), Q(selected.GetComponent<TagComponent>().tag));
+    if (selected.HasComponent<TransformComponent>()) {
+        const auto& t = selected.GetComponent<TransformComponent>();
+        object.insert(QStringLiteral("position"),
+                      QJsonArray{t.position.x, t.position.y, t.position.z});
+        object.insert(QStringLiteral("rotation"),
+                      QJsonArray{t.rotation.x, t.rotation.y, t.rotation.z});
+        object.insert(QStringLiteral("scale"), QJsonArray{t.scale.x, t.scale.y, t.scale.z});
+    }
     if (selected.HasComponent<SpriteRendererComponent>()) {
         const auto& c = selected.GetComponent<SpriteRendererComponent>().color;
         object.insert(QStringLiteral("sprite"), QJsonArray{c.x, c.y, c.z, c.w});
@@ -1369,7 +1400,8 @@ void EditorWindow::CopyEntity() {
         const auto& col = selected.GetComponent<BoxCollider3DComponent>();
         QJsonObject colObj;
         colObj.insert(QStringLiteral("size"), QJsonArray{col.size.x, col.size.y, col.size.z});
-        colObj.insert(QStringLiteral("offset"), QJsonArray{col.offset.x, col.offset.y, col.offset.z});
+        colObj.insert(QStringLiteral("offset"),
+                      QJsonArray{col.offset.x, col.offset.y, col.offset.z});
         colObj.insert(QStringLiteral("trigger"), col.isTrigger);
         object.insert(QStringLiteral("collider3d"), colObj);
     }
@@ -1507,6 +1539,8 @@ bool ParseVec4(const QJsonValue& val, Vec4& out, float minVal = -kMaxClipboardCo
 }
 
 struct ValidatedClipboardEntity {
+    bool hasTag = true;
+    bool hasTransform = true;
     QString name;
     TransformComponent transform;
     std::optional<SpriteRendererComponent> sprite;
@@ -1530,42 +1564,69 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             key != QStringLiteral("camera") && key != QStringLiteral("tilemap") &&
             key != QStringLiteral("rigidbody2d") && key != QStringLiteral("collider2d") &&
             key != QStringLiteral("rigidbody3d") && key != QStringLiteral("collider3d") &&
-            key != QStringLiteral("animation")) {
+            key != QStringLiteral("animation") && key != QStringLiteral("version") &&
+            key != QStringLiteral("hasTag") && key != QStringLiteral("hasTransform")) {
             errorMsg = QStringLiteral("알 수 없는 클립보드 필드가 포함되어 있습니다: %1").arg(key);
             return false;
         }
     }
 
-    const QJsonValue nameVal = object.value(QStringLiteral("name"));
-    if (!nameVal.isString()) {
-        errorMsg = QStringLiteral("엔티티 이름(name) 필드가 누락되었거나 문자열이 아닙니다.");
+    if (object.contains(QStringLiteral("version"))) {
+        const auto version = object.value(QStringLiteral("version"));
+        if (!version.isDouble() || version.toDouble() != 2 ||
+            !object.value(QStringLiteral("hasTag")).isBool() ||
+            !object.value(QStringLiteral("hasTransform")).isBool()) {
+            errorMsg = QStringLiteral("클립보드 버전 또는 컴포넌트 존재 정보가 올바르지 않습니다.");
+            return false;
+        }
+        parsed.hasTag = object.value(QStringLiteral("hasTag")).toBool();
+        parsed.hasTransform = object.value(QStringLiteral("hasTransform")).toBool();
+    } else if (object.contains(QStringLiteral("hasTag")) ||
+               object.contains(QStringLiteral("hasTransform"))) {
+        errorMsg = QStringLiteral("클립보드 컴포넌트 존재 정보에 버전이 없습니다.");
         return false;
     }
-    parsed.name = nameVal.toString().trimmed();
-    if (parsed.name.isEmpty() || parsed.name.size() > 256 ||
-        parsed.name.contains(QChar::ReplacementCharacter)) {
-        errorMsg = QStringLiteral("엔티티 이름이 비어 있거나 허용 길이를 초과했습니다.");
+    if ((!parsed.hasTag && object.contains(QStringLiteral("name"))) ||
+        (!parsed.hasTransform && (object.contains(QStringLiteral("position")) ||
+                                  object.contains(QStringLiteral("rotation")) ||
+                                  object.contains(QStringLiteral("scale"))))) {
+        errorMsg = QStringLiteral("클립보드 컴포넌트 존재 정보와 값이 일치하지 않습니다.");
         return false;
     }
-
-    if (!object.contains(QStringLiteral("position")) ||
-        !object.contains(QStringLiteral("rotation")) ||
-        !object.contains(QStringLiteral("scale"))) {
-        errorMsg = QStringLiteral("필수 Transform 필드(position, rotation, scale)가 누락되었습니다.");
-        return false;
+    if (parsed.hasTag) {
+        const QJsonValue nameVal = object.value(QStringLiteral("name"));
+        if (!nameVal.isString()) {
+            errorMsg = QStringLiteral("엔티티 이름(name) 필드가 누락되었거나 문자열이 아닙니다.");
+            return false;
+        }
+        parsed.name = nameVal.toString().trimmed();
+        if (parsed.name.isEmpty() || parsed.name.size() > 256 ||
+            parsed.name.contains(QChar::ReplacementCharacter)) {
+            errorMsg = QStringLiteral("엔티티 이름이 비어 있거나 허용 길이를 초과했습니다.");
+            return false;
+        }
     }
-    if (!ParseVec3(object.value(QStringLiteral("position")), parsed.transform.position) ||
-        !ParseVec3(object.value(QStringLiteral("rotation")), parsed.transform.rotation) ||
-        !ParseVec3(object.value(QStringLiteral("scale")), parsed.transform.scale)) {
-        errorMsg = QStringLiteral("Transform 수치가 유효하지 않거나 허용 범위를 벗어났습니다.");
-        return false;
+    if (parsed.hasTransform) {
+        if (!object.contains(QStringLiteral("position")) ||
+            !object.contains(QStringLiteral("rotation")) ||
+            !object.contains(QStringLiteral("scale"))) {
+            errorMsg =
+                QStringLiteral("필수 Transform 필드(position, rotation, scale)가 누락되었습니다.");
+            return false;
+        }
+        if (!ParseVec3(object.value(QStringLiteral("position")), parsed.transform.position) ||
+            !ParseVec3(object.value(QStringLiteral("rotation")), parsed.transform.rotation) ||
+            !ParseVec3(object.value(QStringLiteral("scale")), parsed.transform.scale)) {
+            errorMsg = QStringLiteral("Transform 수치가 유효하지 않거나 허용 범위를 벗어났습니다.");
+            return false;
+        }
+        if (std::abs(parsed.transform.scale.x) < 1e-5f ||
+            std::abs(parsed.transform.scale.y) < 1e-5f ||
+            std::abs(parsed.transform.scale.z) < 1e-5f) {
+            errorMsg = QStringLiteral("Transform 크기는 0이 될 수 없습니다.");
+            return false;
+        }
     }
-    if (std::abs(parsed.transform.scale.x) < 1e-5f || std::abs(parsed.transform.scale.y) < 1e-5f ||
-        std::abs(parsed.transform.scale.z) < 1e-5f) {
-        errorMsg = QStringLiteral("Transform 크기는 0이 될 수 없습니다.");
-        return false;
-    }
-
     if (object.contains(QStringLiteral("sprite"))) {
         SpriteRendererComponent comp;
         if (!ParseVec4(object.value(QStringLiteral("sprite")), comp.color, 0.0f, 100.0f)) {
@@ -1641,7 +1702,8 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             !ParseExactInt(mapObj.value(QStringLiteral("height")), h, 1, 256) ||
             !ParseFiniteFloat(mapObj.value(QStringLiteral("tileSize")), tileSize, 0.0f, 64.0f) ||
             tileSize <= 0.0f) {
-            errorMsg = QStringLiteral("타일맵 크기(최대 256x256) 또는 타일 크기가 유효하지 않습니다.");
+            errorMsg =
+                QStringLiteral("타일맵 크기(최대 256x256) 또는 타일 크기가 유효하지 않습니다.");
             return false;
         }
         const QJsonValue tilesVal = mapObj.value(QStringLiteral("tiles"));
@@ -1785,7 +1847,8 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         }
         const auto keysArr = keysVal.toArray();
         if (keysArr.size() > 4096) {
-            errorMsg = QStringLiteral("애니메이션 키프레임 수가 최대 허용치(4096개)를 초과했습니다.");
+            errorMsg =
+                QStringLiteral("애니메이션 키프레임 수가 최대 허용치(4096개)를 초과했습니다.");
             return false;
         }
         comp.clip.name = clipName.toUtf8().toStdString();
@@ -1823,11 +1886,13 @@ void EditorWindow::PasteEntity() {
         return;
     const QByteArray rawBytes = mime->data(QStringLiteral("application/x-lux-entity"));
     if (rawBytes.isEmpty() || rawBytes.size() > kMaxClipboardJsonBytes) {
-        Log(QStringLiteral("붙여넣기 실패: 클립보드 데이터가 비어 있거나 허용 크기(1MB)를 초과했습니다."));
+        Log(QStringLiteral(
+            "붙여넣기 실패: 클립보드 데이터가 비어 있거나 허용 크기(1MB)를 초과했습니다."));
         return;
     }
     if (!IsStrictValidUtf8(rawBytes)) {
-        Log(QStringLiteral("붙여넣기 실패: 클립보드 데이터에 잘못된 UTF-8 인코딩이 포함되어 있습니다."));
+        Log(QStringLiteral(
+            "붙여넣기 실패: 클립보드 데이터에 잘못된 UTF-8 인코딩이 포함되어 있습니다."));
         return;
     }
     QJsonParseError parse;
@@ -1846,7 +1911,12 @@ void EditorWindow::PasteEntity() {
     RecordEdit(QStringLiteral("엔티티 붙여넣기"), [this, validated = std::move(validated)] {
         Entity entity = document_.CreateEntity(Utf8(validated.name + QStringLiteral(" 복사본")));
         try {
-            entity.GetComponent<TransformComponent>() = validated.transform;
+            if (!validated.hasTag)
+                entity.RemoveComponent<TagComponent>();
+            if (validated.hasTransform)
+                entity.GetComponent<TransformComponent>() = validated.transform;
+            else
+                entity.RemoveComponent<TransformComponent>();
             if (validated.sprite)
                 entity.AddComponent<SpriteRendererComponent>(*validated.sprite);
             if (validated.mesh)

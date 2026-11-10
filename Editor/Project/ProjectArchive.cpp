@@ -23,9 +23,14 @@
 
 namespace LuxEngine {
 namespace {
-constexpr uint64_t MaxArchiveBytes = 1024ull * 1024ull * 1024ull; // 1 GiB total extracted size
+constexpr uint64_t MaxArchiveBytes = 1024ull * 1024ull * 1024ull;    // 1 GiB total extracted size
 constexpr uint64_t MaxSingleEntryBytes = 256ull * 1024ull * 1024ull; // 256 MiB per single file
 constexpr size_t MaxEntries = 10000;
+
+bool FitsArchiveSizeLimits(uint64_t size, uint64_t total) {
+    return size <= MaxSingleEntryBytes && total <= MaxArchiveBytes &&
+           size <= MaxArchiveBytes - total;
+}
 
 // Validates that a string is strictly valid UTF-8 and contains no control characters.
 bool IsValidUtf8Filename(std::string_view str) {
@@ -56,7 +61,8 @@ bool IsValidUtf8Filename(std::string_view str) {
                 return false;
             i += 3;
         } else if ((c & 0xF8) == 0xF0) {
-            if (c > 0xF4) // RFC 3629: UTF-8 code points above U+10FFFF (0xF4 0x8F 0xBF 0xBF) are strictly invalid
+            if (c > 0xF4) // RFC 3629: UTF-8 code points above U+10FFFF (0xF4 0x8F 0xBF 0xBF) are
+                          // strictly invalid
                 return false;
             if (i + 3 >= str.size())
                 return false;
@@ -77,7 +83,8 @@ bool IsValidUtf8Filename(std::string_view str) {
     return true;
 }
 
-// Converts a path component to lowercase for case-insensitive duplicate and collision detection on Windows.
+// Converts a path component to lowercase for case-insensitive duplicate and collision detection on
+// Windows.
 std::string ToLowerAscii(std::string_view s) {
     std::string out;
     out.reserve(s.size());
@@ -150,7 +157,8 @@ bool SafeArchivePath(const std::filesystem::path& relative, bool isDirectory = f
         if (p.back() == '.' || p.back() == ' ')
             return false;
 
-        // Check Windows DOS device reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9, CONIN$, CONOUT$)
+        // Check Windows DOS device reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9, CONIN$,
+        // CONOUT$)
         std::string stem = p;
         const auto dot = stem.find('.');
         if (dot != std::string::npos)
@@ -163,8 +171,9 @@ bool SafeArchivePath(const std::filesystem::path& relative, bool isDirectory = f
         if (upperStem == "CON" || upperStem == "PRN" || upperStem == "AUX" || upperStem == "NUL" ||
             upperStem == "CONIN$" || upperStem == "CONOUT$")
             return false;
-        if (upperStem.size() == 4 && (upperStem.starts_with("COM") || upperStem.starts_with("LPT")) &&
-            upperStem[3] >= '1' && upperStem[3] <= '9')
+        if (upperStem.size() == 4 &&
+            (upperStem.starts_with("COM") || upperStem.starts_with("LPT")) && upperStem[3] >= '1' &&
+            upperStem[3] <= '9')
             return false;
     }
     return true;
@@ -195,8 +204,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
     }
 
     // === PASS 1: Strict Verification Pass ===
-    // Verify all headers, names, paths, sizes, symlinks, duplicate entries, and file/directory collisions
-    // BEFORE writing any file to disk.
+    // Verify all headers, names, paths, sizes, symlinks, duplicate entries, and file/directory
+    // collisions BEFORE writing any file to disk.
     std::vector<ValidatedZipEntry> entries;
     entries.reserve(static_cast<size_t>(count));
     std::set<std::string> exactNames;
@@ -232,9 +241,13 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
         // Disallow symlinks: check Unix symlink attributes and Windows reparse/link attributes
         zip_uint8_t opsys = 0;
         zip_uint32_t attributes = 0;
-        const bool hasAttributes = (zip_file_get_external_attributes(zip, index, 0, &opsys, &attributes) == 0);
-        const bool isUnixSymlink = hasAttributes && (opsys == ZIP_OPSYS_UNIX && ((attributes >> 16) & 0170000) == 0120000);
-        const bool isWindowsReparse = hasAttributes && (opsys == ZIP_OPSYS_WINDOWS_NTFS && (attributes & 0x400) != 0); // FILE_ATTRIBUTE_REPARSE_POINT
+        const bool hasAttributes =
+            (zip_file_get_external_attributes(zip, index, 0, &opsys, &attributes) == 0);
+        const bool isUnixSymlink =
+            hasAttributes && (opsys == ZIP_OPSYS_UNIX && ((attributes >> 16) & 0170000) == 0120000);
+        const bool isWindowsReparse =
+            hasAttributes && (opsys == ZIP_OPSYS_WINDOWS_NTFS &&
+                              (attributes & 0x400) != 0); // FILE_ATTRIBUTE_REPARSE_POINT
 
         if (isUnixSymlink || isWindowsReparse) {
             error = "압축 파일 내 심볼릭 링크 또는 리파스 포인트 항목은 보안상 허용되지 않습니다.";
@@ -242,7 +255,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
         }
 
         if (!SafeArchivePath(relative, directory)) {
-            error = "압축 파일의 경로 또는 파일명이 올바르지 않거나 보안 규칙을 위반했습니다: " + name;
+            error =
+                "압축 파일의 경로 또는 파일명이 올바르지 않거나 보안 규칙을 위반했습니다: " + name;
             break;
         }
 
@@ -259,7 +273,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
             break;
         }
 
-        // File-Directory collision check (e.g. entry "foo" is a file, but "foo/bar" is a file inside it)
+        // File-Directory collision check (e.g. entry "foo" is a file, but "foo/bar" is a file
+        // inside it)
         const std::string cleanFolded = directory && foldedName.back() == '/'
                                             ? foldedName.substr(0, foldedName.size() - 1)
                                             : foldedName;
@@ -282,7 +297,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
                     break;
                 parentCheck = parentCheck.substr(0, slash);
                 if (caseFoldedFiles.contains(parentCheck)) {
-                    error = "압축 파일 내 상위 파일과 하위 디렉터리 경로 충돌이 발견되었습니다: " + name;
+                    error = "압축 파일 내 상위 파일과 하위 디렉터리 경로 충돌이 발견되었습니다: " +
+                            name;
                     break;
                 }
                 caseFoldedDirs.insert(parentCheck);
@@ -293,7 +309,7 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
         }
 
         // Check single entry and cumulative size limits (prevent Zip Bomb and integer overflow)
-        if (stat.size > MaxSingleEntryBytes || stat.size > MaxArchiveBytes - totalUncompressed) {
+        if (!FitsArchiveSizeLimits(stat.size, totalUncompressed)) {
             error = "압축 파일의 용량이 허용된 최대 크기를 초과했습니다 (Zip Bomb 방지).";
             break;
         }
@@ -318,7 +334,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
     }
 
     if (!foundProjectFile) {
-        error = "프로젝트 파일(" + std::string(EditorProject::FileName) + ")이 압축 파일에 없습니다.";
+        error =
+            "프로젝트 파일(" + std::string(EditorProject::FileName) + ")이 압축 파일에 없습니다.";
         zip_close(zip);
         return false;
     }
@@ -327,7 +344,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
     // Extract entries to staging directory and verify strict filesystem boundaries.
     const auto stagingNorm = staging.lexically_normal();
     if (IsReparsePointOrSymlink(stagingNorm)) {
-        error = "압축 해제 대상 기본 폴더가 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)입니다.";
+        error = "압축 해제 대상 기본 폴더가 보안상 허용되지 않는 심볼릭 링크 또는 "
+                "접점(Junction)입니다.";
         zip_close(zip);
         return false;
     }
@@ -342,9 +360,11 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
             break;
         }
 
-        // Boundary check: ensure target and all parent components in staging are not symlinks or junctions
+        // Boundary check: ensure target and all parent components in staging are not symlinks or
+        // junctions
         if (IsReparsePointOrSymlink(target)) {
-            error = "압축 해제 대상 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 존재합니다.";
+            error = "압축 해제 대상 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 "
+                    "존재합니다.";
             break;
         }
 
@@ -352,7 +372,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
         auto cur = target.parent_path();
         while (cur != stagingNorm && cur.has_relative_path()) {
             if (IsReparsePointOrSymlink(cur)) {
-                error = "압축 해제 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 감지되었습니다.";
+                error = "압축 해제 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 "
+                        "감지되었습니다.";
                 break;
             }
             cur = cur.parent_path();
@@ -366,7 +387,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
             break;
         }
         if (IsReparsePointOrSymlink(entry.isDirectory ? target : target.parent_path())) {
-            error = "압축 해제 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 감지되었습니다.";
+            error = "압축 해제 경로에 보안상 허용되지 않는 심볼릭 링크 또는 접점(Junction)이 "
+                    "감지되었습니다.";
             break;
         }
         if (entry.isDirectory)
@@ -444,6 +466,15 @@ bool StageArchive(const std::filesystem::path& archive, const std::filesystem::p
         std::filesystem::remove_all(staging, ec);
         return false;
     }
+    // Older packages omitted empty directories. Restore the standard project layout too.
+    for (const auto* directory : {"Assets", "Scenes"}) {
+        std::filesystem::create_directories(staging / directory, ec);
+        if (ec) {
+            error = "프로젝트 기본 폴더를 만들 수 없습니다: " + std::string(directory);
+            std::filesystem::remove_all(staging, ec);
+            return false;
+        }
+    }
     return true;
 }
 } // namespace
@@ -483,12 +514,28 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
             error = "심볼릭 링크 또는 접점(Junction)이 있는 프로젝트는 보안상 내보낼 수 없습니다.";
             break;
         }
-        if (!iterator->is_regular_file(ec))
+        const bool directory = iterator->is_directory(ec);
+        if (!directory && !iterator->is_regular_file(ec))
             continue;
-        const uint64_t size = iterator->file_size(ec);
-        if (ec || ++entries > MaxEntries || !SafeArchivePath(relative) ||
-            size > MaxArchiveBytes - total) {
+        if (ec || ++entries > MaxEntries || !SafeArchivePath(relative)) {
             error = "프로젝트 파일 수 또는 크기가 제한을 넘었습니다.";
+            break;
+        }
+        if (directory) {
+            if (zip_dir_add(zip, GenericPathUtf8(relative).c_str(), ZIP_FL_ENC_UTF_8) < 0) {
+                error = "프로젝트 폴더를 압축하지 못했습니다: " + GenericPathUtf8(relative);
+                break;
+            }
+            continue;
+        }
+        const uint64_t size = iterator->file_size(ec);
+        if (ec) {
+            error = "프로젝트 파일 크기를 읽지 못했습니다.";
+            break;
+        }
+        if (!FitsArchiveSizeLimits(size, total)) {
+            error = "프로젝트 파일의 크기가 제한을 넘었습니다 (파일당 256 MiB, 전체 1 GiB): " +
+                    GenericPathUtf8(relative);
             break;
         }
         const std::string sourcePath = PathUtf8(iterator->path());
@@ -661,7 +708,8 @@ bool RestoreProjectBackup(const EditorProject& project, const std::filesystem::p
         std::error_code rollback;
         std::filesystem::rename(previous, root, rollback);
         if (rollback) {
-            error = "백업 복구 및 이전 프로젝트 롤백에 실패했습니다. 이전 프로젝트는 임시 위치에 보존되었습니다: " +
+            error = "백업 복구 및 이전 프로젝트 롤백에 실패했습니다. 이전 프로젝트는 임시 위치에 "
+                    "보존되었습니다: " +
                     PathUtf8(previous);
         } else {
             error = "백업 복구에 실패했습니다. 이전 프로젝트를 정상 복원했습니다.";

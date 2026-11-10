@@ -32,9 +32,11 @@ float4 main(Input input) : SV_Target0 {
             const float distance = length(toLight);
             if (source.positionRadius.w <= 0.0 || distance >= source.positionRadius.w)
                 continue;
-            const float facing = distance > 0.00001 ? max(0.0, dot(normal, toLight / distance)) : 1.0;
+            const float facing =
+                distance > 0.00001 ? max(0.0, dot(normal, toLight / distance)) : 1.0;
             const float falloff = 1.0 - distance / source.positionRadius.w;
-            light += source.colorIntensity.rgb * (facing * falloff * falloff * max(0.0, source.colorIntensity.w));
+            light += source.colorIntensity.rgb *
+                     (facing * falloff * falloff * max(0.0, source.colorIntensity.w));
         }
         color.rgb *= 0.15 + light;
     }

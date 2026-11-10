@@ -1,6 +1,6 @@
 #include "SceneViewport2D.hpp"
-#include "EngineSceneRenderer.hpp"
 #include "Engine/ECS/ECS.hpp"
+#include "EngineSceneRenderer.hpp"
 #include "Scene/EditorDocument.hpp"
 #include <QMouseEvent>
 #include <QPainter>
@@ -106,7 +106,8 @@ void SceneViewport2D::DrawGrid(QPainter& painter, int alpha) const {
 void SceneViewport2D::paintEvent(QPaintEvent*) {
     // Decouple GPU render/readback phase from QPainter lifecycle.
     // Vulkan offscreen rendering must complete before QPainter opens on this QWidget
-    // to prevent re-entrant Qt event loop message dispatch from invalidating the raster paint engine.
+    // to prevent re-entrant Qt event loop message dispatch from invalidating the raster paint
+    // engine.
     engineFrame_ = false;
     if (EngineSceneRenderer::Allowed()) {
         if (!engineRenderer_)
@@ -135,16 +136,7 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         painter.drawImage(rect(), cachedFrame_);
     }
     DrawGrid(painter, engineFrame_ ? 70 : 255);
-    auto entities = document_.GetScene().GetEntities();
-    std::stable_sort(entities.begin(), entities.end(), [](Entity a, Entity b) {
-        const float az = a.HasComponent<TransformComponent>()
-                             ? a.GetComponent<TransformComponent>().position.z
-                             : 0.0f;
-        const float bz = b.HasComponent<TransformComponent>()
-                             ? b.GetComponent<TransformComponent>().position.z
-                             : 0.0f;
-        return az < bz;
-    });
+    const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
     const Entity selected = document_.GetSelected();
     for (Entity entity : entities) {
         if (!entity.HasComponent<TilemapComponent>() || !entity.HasComponent<TransformComponent>())
@@ -198,9 +190,9 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         if (engineFrame_)
             painter.setBrush(Qt::NoBrush);
         else
-            painter.setBrush(QColor::fromRgbF(
-                std::clamp(color.x, 0.0f, 1.0f), std::clamp(color.y, 0.0f, 1.0f),
-                std::clamp(color.z, 0.0f, 1.0f), std::clamp(color.w, 0.0f, 1.0f)));
+            painter.setBrush(
+                QColor::fromRgbF(std::clamp(color.x, 0.0f, 1.0f), std::clamp(color.y, 0.0f, 1.0f),
+                                 std::clamp(color.z, 0.0f, 1.0f), std::clamp(color.w, 0.0f, 1.0f)));
         painter.drawPolygon(polygon);
         painter.setPen(active ? Selection : QColor(215, 222, 231));
         painter.drawText(polygon.boundingRect().topLeft() - QPointF(0, 6), Name(entity));
@@ -233,11 +225,11 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         }
     }
     painter.setPen(QColor(219, 226, 235));
-    painter.drawText(12, 22,
-                     QStringLiteral("2D 장면  |  %1 px/단위  |  %2")
-                         .arg(pixelsPerUnit_, 0, 'f', 0)
-                         .arg(engineFrame_ ? QStringLiteral("엔진 Vulkan")
-                                           : QStringLiteral("소프트웨어")));
+    painter.drawText(
+        12, 22,
+        QStringLiteral("2D 장면  |  %1 px/단위  |  %2")
+            .arg(pixelsPerUnit_, 0, 'f', 0)
+            .arg(engineFrame_ ? QStringLiteral("엔진 Vulkan") : QStringLiteral("소프트웨어")));
     painter.setPen(QColor(166, 178, 194));
     const QString help = snapToGrid_ ? QStringLiteral("휠 확대 · 가운데 드래그 이동 · 스냅 켜짐")
                                      : QStringLiteral("휠 확대 · 가운데 드래그 이동 · 스냅 꺼짐");
@@ -278,30 +270,35 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
     }
     const QPointF world = ScreenToWorld(event->position());
     std::optional<uint32> hit;
-    auto entities = document_.GetScene().GetEntities();
-    for (auto it = entities.rbegin(); it != entities.rend(); ++it) {
-        Entity entity = *it;
-        if (!entity.HasComponent<TransformComponent>())
-            continue;
-        const auto& t = entity.GetComponent<TransformComponent>();
-        if (entity.HasComponent<TilemapComponent>()) {
-            const auto& map = entity.GetComponent<TilemapComponent>();
-            if (world.x() >= t.position.x && world.y() >= t.position.y &&
-                world.x() < t.position.x + map.width * map.tileSize &&
-                world.y() < t.position.y + map.height * map.tileSize) {
+    const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
+    // Reverse the actual painter passes: sprites are in front of the tilemap pass.
+    for (const bool sprites : {true, false}) {
+        for (auto it = entities.rbegin(); it != entities.rend(); ++it) {
+            Entity entity = *it;
+            if (!entity.HasComponent<TransformComponent>())
+                continue;
+            const auto& t = entity.GetComponent<TransformComponent>();
+            if (!sprites && entity.HasComponent<TilemapComponent>()) {
+                const auto& map = entity.GetComponent<TilemapComponent>();
+                if (world.x() >= t.position.x && world.y() >= t.position.y &&
+                    world.x() < t.position.x + map.width * map.tileSize &&
+                    world.y() < t.position.y + map.height * map.tileSize) {
+                    hit = entity.GetId();
+                    break;
+                }
+            }
+            if (!sprites || !entity.HasComponent<SpriteRendererComponent>())
+                continue;
+            const double dx = world.x() - t.position.x, dy = world.y() - t.position.y;
+            const double c = std::cos(t.rotation.z), s = std::sin(t.rotation.z);
+            if (std::abs(dx * c + dy * s) <= std::abs(t.scale.x) * .5 &&
+                std::abs(-dx * s + dy * c) <= std::abs(t.scale.y) * .5) {
                 hit = entity.GetId();
                 break;
             }
         }
-        if (!entity.HasComponent<SpriteRendererComponent>())
-            continue;
-        const double dx = world.x() - t.position.x, dy = world.y() - t.position.y;
-        const double c = std::cos(t.rotation.z), s = std::sin(t.rotation.z);
-        if (std::abs(dx * c + dy * s) <= std::abs(t.scale.x) * .5 &&
-            std::abs(-dx * s + dy * c) <= std::abs(t.scale.y) * .5) {
-            hit = entity.GetId();
+        if (hit)
             break;
-        }
     }
     onSelect_(hit);
     if (hit && tool_ != EditorTool::Select) {

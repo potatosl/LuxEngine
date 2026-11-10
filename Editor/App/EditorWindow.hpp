@@ -2,6 +2,7 @@
 #include "Build/ProjectBuild.hpp"
 #include "Project/EditorProject.hpp"
 #include "Scene/EditorDocument.hpp"
+#include "Scene/EditorSnapshot.hpp"
 #include "Viewport/EditorTool.hpp"
 #include <QMainWindow>
 #include <QTimer>
@@ -134,8 +135,8 @@ private:
     void CopyEntity();
     void PasteEntity();
     void RecordEdit(const QString& name, const std::function<void()>& edit);
-    QByteArray SnapshotScene();
-    void RestoreScene(const QByteArray& scene, std::optional<uint32> selected);
+    EditorSnapshot SnapshotScene();
+    void RestoreScene(const EditorSnapshot& snapshot, std::optional<uint32> selected);
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -220,9 +221,9 @@ private:
     bool refreshingInspector_ = false;
     bool restoringHistory_ = false;
     EditorTool tool_ = EditorTool::Select;
-    QByteArray viewportEditBefore_;
-    QByteArray timelineBefore_;
-    QByteArray previewBefore_;
+    EditorSnapshot viewportEditBefore_;
+    EditorSnapshot timelineBefore_;
+    EditorSnapshot previewBefore_;
     std::optional<uint32> viewportEditSelected_;
     std::optional<uint32> previewSelected_;
     uint64_t previewFrame_ = 0;
