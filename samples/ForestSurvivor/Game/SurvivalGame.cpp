@@ -128,7 +128,7 @@ void SurvivalGame::Tick(double dt, Vec2 movement, bool dash) {
     if (dash && player_.dashCooldown <= 0) {
         dashDirection_ = facing_;
         dashRemaining_ = .16f;
-        player_.dashCooldown = 2.2f;
+        player_.dashCooldown = DashRecharge;
         player_.invulnerable = std::max(player_.invulnerable, .2f);
         AddEffect(player_.position, .6f, 3);
     }

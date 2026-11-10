@@ -59,6 +59,7 @@ struct Rules {
 class SurvivalGame {
 public:
     static constexpr float RunDuration = 300;
+    static constexpr float DashRecharge = 2.2f;
     static constexpr float ArenaHalfSize = 30;
     static constexpr size_t MaxEnemies = 220;
     static constexpr size_t MaxProjectiles = 500;
