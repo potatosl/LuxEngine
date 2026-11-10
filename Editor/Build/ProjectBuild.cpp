@@ -10,6 +10,13 @@
 #include <utility>
 #include <zip.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace LuxEditor {
 namespace fs = std::filesystem;
 
@@ -285,14 +292,40 @@ bool CleanBuildDirectory(const BuildPlan& plan, std::string& error) {
         return false;
     }
     std::error_code ec;
-    const auto status = fs::symlink_status(expected, ec);
-    if (ec || !fs::exists(status))
-        return true; // nothing to clean
-    if (fs::is_symlink(status)) {
-        error = "빌드 폴더가 심볼릭 링크라서 지우지 않습니다.";
+    // Inspect every component below the project, not just build: .lux can itself be a link.
+    fs::path component = fs::canonical(plan.projectDirectory, ec);
+    if (ec) {
+        error = "프로젝트 경로를 확인할 수 없습니다: " + ec.message();
         return false;
     }
-    fs::remove_all(expected, ec);
+    for (const char* name : {".lux", "build"}) {
+        component /= name;
+        const auto status = fs::symlink_status(component, ec);
+        if (ec == std::errc::no_such_file_or_directory || (!ec && !fs::exists(status)))
+            return true;
+        if (ec) {
+            error = "빌드 폴더를 확인할 수 없습니다: " + ec.message();
+            return false;
+        }
+        bool linked = fs::is_symlink(status);
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(component.c_str());
+        linked = linked || (attributes != INVALID_FILE_ATTRIBUTES &&
+                            (attributes & FILE_ATTRIBUTE_REPARSE_POINT));
+#endif
+        if (linked || !fs::is_directory(status)) {
+            error = "빌드 경로에 링크 또는 일반 폴더가 아닌 항목이 있어 지우지 않습니다.";
+            return false;
+        }
+    }
+    const auto requested = fs::canonical(plan.buildDirectory, ec);
+    if (ec || !fs::equivalent(requested, component, ec)) {
+        error = "빌드 경로의 실제 위치가 프로젝트 내부 경로와 다릅니다.";
+        return false;
+    }
+    // Delete the same physical path that was inspected. Lexically removing '..' before resolving
+    // a symlink can change its meaning and select a different project directory.
+    fs::remove_all(component, ec);
     if (ec) {
         error = "빌드 폴더를 지울 수 없습니다: " + ec.message();
         return false;

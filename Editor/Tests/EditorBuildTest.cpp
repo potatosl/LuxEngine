@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -197,6 +198,67 @@ void TestPlan() {
           "clean refuses other folders");
     hostile.buildDirectory = project / ".lux" / "build" / ".." / "..";
     Check(!CleanBuildDirectory(hostile, error), "clean refuses parent paths");
+
+    const auto outside = files.path / "outside";
+    Write(outside / "build/keep.txt", "keep");
+    fs::remove_all(project / ".lux");
+    std::error_code linkError;
+    fs::create_directory_symlink(outside, project / ".lux", linkError);
+    if (!linkError) {
+        Check(!CleanBuildDirectory(*plan, error) && !error.empty(),
+              "clean refuses a linked .lux ancestor");
+        Check(fs::exists(outside / "build/keep.txt"), "clean preserves files outside the project");
+        fs::remove(project / ".lux");
+        fs::create_directories(project / ".lux");
+        fs::create_directory_symlink(outside / "build", plan->buildDirectory);
+        Check(!CleanBuildDirectory(*plan, error) && fs::exists(outside / "build/keep.txt"),
+              "clean refuses a linked build directory");
+        fs::remove(plan->buildDirectory);
+        fs::create_directory_symlink(outside / "missing", plan->buildDirectory);
+        Check(!CleanBuildDirectory(*plan, error), "clean refuses dangling links");
+        fs::remove(plan->buildDirectory);
+        fs::create_directories(outside / "child");
+        Write(outside / ".lux/build/cache.txt");
+        fs::create_directory_symlink(outside / "child", project / "link");
+        const auto victim = files.path / "victim";
+        Write(victim / "build/keep.txt");
+        fs::remove_all(project / ".lux");
+        fs::create_directory_symlink(victim, project / ".lux");
+        BuildPlan alias = *plan;
+        alias.projectDirectory = project / "link/..";
+        alias.buildDirectory = (alias.projectDirectory / ".lux/build").lexically_normal();
+        Check(!CleanBuildDirectory(alias, error) && fs::exists(victim / "build/keep.txt") &&
+                  fs::exists(outside / ".lux/build"),
+              "clean rejects lexically matching but physically different build paths");
+        alias.buildDirectory = alias.projectDirectory / ".lux/build";
+        Check(CleanBuildDirectory(alias, error) && fs::exists(victim / "build/keep.txt") &&
+                  !fs::exists(outside / ".lux/build"),
+              "clean resolves project symlinks before parent components and deletes the inspected "
+              "path");
+        fs::remove(project / ".lux");
+    } else {
+        std::cerr << "Link checks unavailable: " << linkError.message() << '\n';
+    }
+
+#ifdef _WIN32
+    // Directory junctions require no symlink privilege, so Windows CI must exercise reparse points
+    // even when create_directory_symlink above is unavailable.
+    fs::remove_all(project / ".lux");
+    const auto junction = [&](const fs::path& link, const fs::path& target) {
+        const std::wstring command =
+            L"cmd /d /c mklink /J \"" + link.wstring() + L"\" \"" + target.wstring() + L"\" >nul";
+        Check(_wsystem(command.c_str()) == 0, "junction fixture creates");
+    };
+    junction(project / ".lux", outside);
+    Check(!CleanBuildDirectory(*plan, error) && fs::exists(outside / "build/keep.txt"),
+          "clean refuses an ancestor junction without deleting its target");
+    fs::remove(project / ".lux");
+    fs::create_directory(project / ".lux");
+    junction(plan->buildDirectory, outside / "build");
+    Check(!CleanBuildDirectory(*plan, error) && fs::exists(outside / "build/keep.txt"),
+          "clean refuses a build junction without deleting its target");
+    fs::remove(plan->buildDirectory);
+#endif
 
     Check(!FindBuiltExecutable(*plan), "no executable before a build");
     const std::string exe = std::string("LuxGame")
