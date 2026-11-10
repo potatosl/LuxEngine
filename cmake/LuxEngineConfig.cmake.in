@@ -5,6 +5,7 @@ set(LuxEngine_LICENSES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/licenses")
 set(LuxEngine_EXAMPLES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/examples")
 
 include(CMakeFindDependencyMacro)
+find_dependency(Threads)
 # The hints point at the packages the engine was built with, as well as the SDK prefix directory,
 # so games find them even when relocated or without the same CMAKE_PREFIX_PATH or vcpkg toolchain.
 find_dependency(SDL3 3.2 CONFIG HINTS

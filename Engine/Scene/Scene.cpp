@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <locale>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -48,10 +49,27 @@ Entity Scene::CreateEntity(const std::string& name) {
 void Scene::DestroyEntity(Entity entity) {
     if (entity.GetScene() != this || !entity.IsValid())
         return;
-    RemovePhysicsBody2D(entity.GetId());
-    for (auto& [type, pool] : pools_)
-        pool->Erase(entity.GetId());
-    entities_.erase(entity.GetId());
+    std::unordered_map<uint32, std::vector<uint32>> children;
+    for (const uint32 id : entities_)
+        children[GetParent(id)].push_back(id);
+    std::vector<uint32> pending{entity.GetId()};
+    std::unordered_set<uint32> removed;
+    while (!pending.empty()) {
+        const auto id = pending.back();
+        pending.pop_back();
+        if (!removed.insert(id).second)
+            continue;
+        const auto found = children.find(id);
+        if (found != children.end())
+            pending.insert(pending.end(), found->second.begin(), found->second.end());
+    }
+    for (const auto id : removed) {
+        RemovePhysicsBody2D(id);
+        for (auto& [type, pool] : pools_)
+            pool->Erase(id);
+        entities_.erase(id);
+    }
+    RepairReferenceLinks();
 }
 std::vector<Entity> Scene::GetEntities() {
     std::vector<uint32> ids(entities_.begin(), entities_.end());
@@ -68,9 +86,8 @@ std::vector<Entity> Scene::GetEntitiesIn2DLayerOrder() {
         const auto* transform = entity.TryGetComponent<TransformComponent>();
         return !transform || !std::isfinite(transform->position.z);
     });
-    std::stable_sort(entities.begin(), entities.end(), [](Entity a, Entity b) {
-        return a.GetComponent<TransformComponent>().position.z <
-               b.GetComponent<TransformComponent>().position.z;
+    std::stable_sort(entities.begin(), entities.end(), [this](Entity a, Entity b) {
+        return GetWorldTransform(a.GetId()).position.z < GetWorldTransform(b.GetId()).position.z;
     });
     return entities;
 }
@@ -91,23 +108,56 @@ void Scene::OnUpdate(double dt) {
     }
     if (!physics2D_)
         physics2D_ = std::make_unique<PhysicsWorld2D>();
-    physics2D_->Step(*this, dt, collisionEvents2D_);
-    updateBuffer_.assign(entities_.begin(), entities_.end());
-    for (auto id : updateBuffer_) {
-        if (!entities_.contains(id))
-            continue;
-        if (!HasComponent<TransformComponent>(id))
-            continue;
-        auto& transform = GetComponent<TransformComponent>(id);
-        if (!(HasComponent<Rigidbody2DComponent>(id) && HasComponent<BoxCollider2DComponent>(id)) &&
-            HasComponent<Rigidbody3DComponent>(id) && HasComponent<BoxCollider3DComponent>(id))
-            PhysicsEngine::Step3D(transform.position, GetComponent<Rigidbody3DComponent>(id),
-                                  GetComponent<BoxCollider3DComponent>(id), dt);
+    collisionEvents2D_.clear();
+    physicsAccumulator_ += std::min(dt, .25);
+    const double fixedStep = settings_.fixedStep;
+    while (physicsAccumulator_ + 1e-8 >= fixedStep) {
+        physicsAccumulator_ = std::max(0.0, physicsAccumulator_ - fixedStep);
+        const double substep = fixedStep / settings_.physicsSubsteps;
+        for (uint32 index = 0; index < settings_.physicsSubsteps; ++index) {
+            std::unordered_map<uint32, TransformComponent> world3D;
+            std::unordered_map<uint32, Rigidbody3DComponent> bodies3D;
+            const auto hierarchy = GetEntitiesInHierarchyOrder();
+            for (const auto& entity : hierarchy) {
+                const auto id = entity.GetId();
+                if (!HasComponent<TransformComponent>(id) ||
+                    (HasComponent<Rigidbody2DComponent>(id) &&
+                     HasComponent<BoxCollider2DComponent>(id)) ||
+                    !HasComponent<Rigidbody3DComponent>(id) ||
+                    !HasComponent<BoxCollider3DComponent>(id))
+                    continue;
+                auto world = GetWorldTransform(id);
+                auto body = GetComponent<Rigidbody3DComponent>(id);
+                PhysicsEngine::Step3D(world.position, body,
+                                      GetComponent<BoxCollider3DComponent>(id), substep,
+                                      settings_.overrideGravity ? settings_.gravity3D
+                                                                : PhysicsEngine::GetGravity3D());
+                world3D.emplace(id, world);
+                bodies3D.emplace(id, body);
+            }
+            std::vector<Collision2DEvent> contacts;
+            physics2D_->Step(*this, substep, contacts);
+            collisionEvents2D_.insert(collisionEvents2D_.end(), contacts.begin(), contacts.end());
+            const auto world2D = physics2D_->GetWorldPoses(*this);
+            // Apply every physics family together, parent before child. A hierarchy may contain
+            // both 2D and 3D bodies; each simulation's absolute world pose must remain independent.
+            for (const auto& entity : hierarchy) {
+                const auto id = entity.GetId();
+                if (const auto pose = world3D.find(id); pose != world3D.end()) {
+                    if (SetWorldTransform(id, pose->second))
+                        GetComponent<Rigidbody3DComponent>(id) = bodies3D.at(id);
+                } else if (const auto pose2D = world2D.find(id); pose2D != world2D.end()) {
+                    SetWorldTransform(id, pose2D->second);
+                }
+            }
+        }
     }
 }
 void Scene::RemovePhysicsBody2D(uint32 id) {
     if (physics2D_)
         physics2D_->Remove(id);
+    if (auto* body = TryGetComponent<Rigidbody2DComponent>(id))
+        body->isGrounded = false;
     std::erase_if(collisionEvents2D_,
                   [id](const auto& event) { return event.entityA == id || event.entityB == id; });
 }
@@ -140,6 +190,12 @@ bool Finite(const Vec3& v) {
 bool Finite(const Vec4& v) {
     return Finite(v.x) && Finite(v.y) && Finite(v.z) && Finite(v.w);
 }
+Vec4 Exposed(Vec4 color, float exposure) {
+    color.x *= exposure;
+    color.y *= exposure;
+    color.z *= exposure;
+    return color;
+}
 } // namespace
 void Scene::OnRender() {
     // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직 연결되지 않았습니다.
@@ -148,7 +204,8 @@ void Scene::OnRender() {
         for (Entity entity : entities) {
             if (!entity.HasComponent<TransformComponent>())
                 continue;
-            const auto& transform = entity.GetComponent<TransformComponent>();
+            const auto transform = GetWorldTransform(entity.GetId());
+            const auto matrix = GetWorldMatrix(entity.GetId());
             if (!Finite(transform.position) || !Finite(transform.rotation) ||
                 !Finite(transform.scale))
                 continue;
@@ -164,17 +221,16 @@ void Scene::OnRender() {
                         if (tile == 0)
                             continue;
                         const float size = map.tileSize;
-                        Renderer2D::DrawQuad({transform.position.x + (x + .5f) * size,
-                                              transform.position.y + (y + .5f) * size, 0.0f},
-                                             {size, size}, TileColor(tile));
+                        Renderer2D::DrawQuad(
+                            matrix * Mat4::Translate({(x + .5f) * size, (y + .5f) * size, 0}) *
+                                Mat4::Scale({size, size, 1}),
+                            Exposed(TileColor(tile), settings_.exposure));
                     }
             }
             if (!tilemaps && entity.HasComponent<SpriteRendererComponent>()) {
                 const auto& sprite = entity.GetComponent<SpriteRendererComponent>();
                 if (Finite(sprite.color))
-                    Renderer2D::DrawRotatedQuad({transform.position.x, transform.position.y},
-                                                {transform.scale.x, transform.scale.y},
-                                                transform.rotation.z, sprite.color);
+                    Renderer2D::DrawQuad(matrix, Exposed(sprite.color, settings_.exposure));
             }
         }
     }
@@ -184,13 +240,16 @@ void Scene::OnRender3D() {
         if (!entity.HasComponent<TransformComponent>() ||
             !entity.HasComponent<MeshRendererComponent>())
             continue;
-        const auto& transform = entity.GetComponent<TransformComponent>();
+        const auto transform = GetWorldTransform(entity.GetId());
         if (!Finite(transform.position) || !Finite(transform.rotation) || !Finite(transform.scale))
             continue;
         const auto& meshComp = entity.GetComponent<MeshRendererComponent>();
         if (Finite(meshComp.material.albedoColor) && Finite(meshComp.material.metallic) &&
-            Finite(meshComp.material.roughness))
-            Renderer3D::DrawMesh(transform.GetTransform(), meshComp.material);
+            Finite(meshComp.material.roughness)) {
+            auto material = meshComp.material;
+            material.albedoColor = Exposed(material.albedoColor, settings_.exposure);
+            Renderer3D::DrawMesh(GetWorldMatrix(entity.GetId()), material);
+        }
     }
 }
 namespace {
@@ -329,7 +388,7 @@ bool WriteTempFileFlushed(const std::filesystem::path& tempPath, const std::stri
 }
 
 bool AtomicReplaceFile(const std::filesystem::path& tempPath,
-                       const std::filesystem::path& targetPath, uint64 seq) {
+                       const std::filesystem::path& targetPath, [[maybe_unused]] uint64 seq) {
     namespace fs = std::filesystem;
     std::error_code ec;
 
@@ -563,10 +622,70 @@ bool IsValidUtf8(std::string_view str) {
     }
     return true;
 }
+
+bool ValidSceneMetadata(Scene& scene) {
+    if (!scene.ValidateHierarchy())
+        return false;
+    const auto entities = scene.GetEntities();
+    std::unordered_map<uint32, std::vector<uint32>> children;
+    for (const auto& entity : entities)
+        children[scene.GetParent(entity.GetId())].push_back(entity.GetId());
+    // Pre/post indices make ancestry validation linear even for a very deep hierarchy.
+    std::unordered_map<uint32, std::pair<uint32, uint32>> intervals;
+    std::vector<std::pair<uint32, bool>> pending;
+    for (const auto root : children[0])
+        pending.emplace_back(root, false);
+    uint32 sequence = 0;
+    while (!pending.empty()) {
+        const auto [id, leaving] = pending.back();
+        pending.pop_back();
+        if (leaving) {
+            intervals[id].second = ++sequence;
+            continue;
+        }
+        intervals[id].first = ++sequence;
+        pending.emplace_back(id, true);
+        for (const auto child : children[id])
+            pending.emplace_back(child, false);
+    }
+    const auto descendant = [&](uint32 child, uint32 parent) {
+        if (child == parent || !intervals.contains(child) || !intervals.contains(parent))
+            return false;
+        return intervals.at(parent).first < intervals.at(child).first &&
+               intervals.at(child).second < intervals.at(parent).second;
+    };
+    uint64 referenceBytes = 0;
+    for (const auto& entity : entities) {
+        if (const auto* reference = entity.TryGetComponent<SceneReferenceComponent>()) {
+            const auto mode = static_cast<int>(reference->mode);
+            referenceBytes +=
+                reference->path.size() + reference->baseline.size() + reference->suspended.size();
+            if (reference->path.empty() || reference->path.size() > 4096 ||
+                reference->path.find('\0') != std::string::npos || !IsValidUtf8(reference->path) ||
+                !IsValidUtf8(reference->baseline) || !IsValidUtf8(reference->suspended) ||
+                referenceBytes > MaxSceneSizeBytes || mode < 0 || mode > 2 ||
+                !Finite(reference->streamCenter) || !Finite(reference->streamLoadRadius) ||
+                !Finite(reference->streamUnloadRadius) || reference->streamLoadRadius < 0 ||
+                reference->streamUnloadRadius < reference->streamLoadRadius ||
+                reference->entityMap.size() > MaxSceneEntities)
+                return false;
+            std::unordered_set<uint32> sources, locals;
+            for (const auto& [source, local] : reference->entityMap)
+                if (!source || !descendant(local, entity.GetId()) ||
+                    !sources.insert(source).second || !locals.insert(local).second)
+                    return false;
+        }
+        if (const auto* source = entity.TryGetComponent<InstanceSourceComponent>())
+            if (!source->sourceEntity || !descendant(entity.GetId(), source->instanceRoot) ||
+                !scene.HasComponent<SceneReferenceComponent>(source->instanceRoot))
+                return false;
+    }
+    return true;
+}
 } // namespace
 
 bool Scene::SerializeToString(std::string& output) {
-    if (entities_.size() > MaxSceneEntities)
+    if (entities_.size() > MaxSceneEntities || !ValidSceneMetadata(*this))
         return false;
     const std::unordered_set<std::type_index> supported{typeid(TagComponent),
                                                         typeid(TransformComponent),
@@ -578,7 +697,10 @@ bool Scene::SerializeToString(std::string& output) {
                                                         typeid(Rigidbody3DComponent),
                                                         typeid(BoxCollider3DComponent),
                                                         typeid(TilemapComponent),
-                                                        typeid(AnimationComponent)};
+                                                        typeid(AnimationComponent),
+                                                        typeid(HierarchyComponent),
+                                                        typeid(SceneReferenceComponent),
+                                                        typeid(InstanceSourceComponent)};
     for (const auto& [type, pool] : pools_)
         if (!pool->Empty() && !supported.contains(type))
             return false;
@@ -647,8 +769,12 @@ bool Scene::SerializeToString(std::string& output) {
         }
     }
     std::ostringstream out;
-    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 2 "
+    out.imbue(std::locale::classic());
+    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 3 "
         << entities_.size() << '\n';
+    out << "Settings " << settings_.clearColor << settings_.exposure << ' ' << settings_.gravity
+        << settings_.gravity3D << settings_.overrideGravity << ' ' << settings_.fixedStep << ' '
+        << settings_.physicsSubsteps << '\n';
     std::vector<uint32> ids(entities_.begin(), entities_.end());
     std::sort(ids.begin(), ids.end());
     for (auto id : ids) {
@@ -694,6 +820,20 @@ bool Scene::SerializeToString(std::string& output) {
             for (const auto& key : c.clip.keyframes)
                 out << ' ' << key.time << ' ' << key.position << key.rotation << key.scale;
         });
+        save.operator()<HierarchyComponent>(
+            [&](const auto& c) { out << c.parent << ' ' << c.group; });
+        save.operator()<SceneReferenceComponent>([&](const auto& c) {
+            out << std::quoted(c.path) << ' ' << static_cast<int>(c.mode) << ' '
+                << std::quoted(c.baseline) << ' ' << std::quoted(c.suspended) << ' '
+                << c.streamCenter << c.streamLoadRadius << ' ' << c.streamUnloadRadius << ' '
+                << c.loaded << ' ' << c.entityMap.size();
+            for (const auto& [source, local] : c.entityMap)
+                out << ' ' << source << ' ' << local;
+        });
+        save.operator()<InstanceSourceComponent>(
+            [&](const auto& c) { out << c.instanceRoot << ' ' << c.sourceEntity; });
+        if (!out || out.tellp() > static_cast<std::streamoff>(MaxSceneSizeBytes))
+            return false;
     }
     if (!out || out.tellp() > static_cast<std::streamoff>(MaxSceneSizeBytes))
         return false;
@@ -756,18 +896,28 @@ bool Scene::Serialize(const std::string& filepath) {
 }
 
 bool Scene::DeserializeStream(std::istream& in) {
+    in.imbue(std::locale::classic());
     std::string header;
     unsigned version = 0;
     uint64 count = 0;
     if (!(in >> header >> version >> count) || header != "LuxEngineScene" ||
-        (version != 1 && version != 2) || count > MaxSceneEntities)
+        (version < 1 || version > 3) || count > MaxSceneEntities)
         return false;
     Scene parsed;
     parsed.nextEntityId_ = 1;
     uint32 lastId = 0;
     try {
+        if (version >= 3) {
+            std::string marker;
+            SceneSettings settings;
+            if (!(in >> marker >> settings.clearColor >> settings.exposure >> settings.gravity >>
+                  settings.gravity3D >> settings.overrideGravity >> settings.fixedStep >>
+                  settings.physicsSubsteps) ||
+                marker != "Settings" || !parsed.SetSettings(settings))
+                return false;
+        }
         for (uint64 n = 0; n < count; ++n) {
-            if (version == 2) {
+            if (version >= 2) {
                 uint32 id = 0;
                 if (!(in >> id) || id == 0 || id <= lastId ||
                     id == std::numeric_limits<uint32>::max())
@@ -841,7 +991,7 @@ bool Scene::DeserializeStream(std::istream& in) {
                     !Finite(c.offset))
                     in.setstate(std::ios::failbit);
             });
-            if (version == 2) {
+            if (version >= 2) {
                 load.operator()<TilemapComponent>([&](auto& c) {
                     std::string cells;
                     in >> c.width >> c.height >> c.tileSize >> std::quoted(cells);
@@ -884,7 +1034,31 @@ bool Scene::DeserializeStream(std::istream& in) {
                     }
                 });
             }
+            if (version >= 3) {
+                load.operator()<HierarchyComponent>([&](auto& c) { in >> c.parent >> c.group; });
+                load.operator()<SceneReferenceComponent>([&](auto& c) {
+                    int mode = 0;
+                    uint64 mappingCount = 0;
+                    in >> std::quoted(c.path) >> mode >> std::quoted(c.baseline) >>
+                        std::quoted(c.suspended) >> c.streamCenter >> c.streamLoadRadius >>
+                        c.streamUnloadRadius >> c.loaded >> mappingCount;
+                    if (mappingCount > MaxSceneEntities || mode < 0 || mode > 2) {
+                        in.setstate(std::ios::failbit);
+                        return;
+                    }
+                    c.mode = static_cast<SceneReferenceMode>(mode);
+                    for (uint64 index = 0; index < mappingCount && in; ++index) {
+                        uint32 source = 0, local = 0;
+                        in >> source >> local;
+                        c.entityMap.emplace_back(source, local);
+                    }
+                });
+                load.operator()<InstanceSourceComponent>(
+                    [&](auto& c) { in >> c.instanceRoot >> c.sourceEntity; });
+            }
         }
+        if (!ValidSceneMetadata(parsed))
+            return false;
         in >> std::ws;
         if (!in.eof())
             return false;
@@ -894,6 +1068,8 @@ bool Scene::DeserializeStream(std::istream& in) {
     pools_.swap(parsed.pools_);
     entities_.swap(parsed.entities_);
     nextEntityId_ = parsed.nextEntityId_;
+    settings_ = parsed.settings_;
+    physicsAccumulator_ = 0;
     physics2D_.reset();
     collisionEvents2D_.clear();
     lifetime_ = std::make_shared<int>(0);
@@ -917,6 +1093,11 @@ bool Scene::Deserialize(const std::string& filepath) {
     std::ifstream in(Utf8Path(filepath), std::ios::binary);
     if (!in)
         return false;
-    return DeserializeStream(in);
+    std::string data(static_cast<size_t>(fileSize), '\0');
+    if (!in.read(data.data(), static_cast<std::streamsize>(data.size())) ||
+        in.peek() != std::char_traits<char>::eof() || !DeserializeFromString(data))
+        return false;
+    sourcePath_ = filepath;
+    return true;
 }
 } // namespace LuxEngine

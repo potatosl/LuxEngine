@@ -5,6 +5,7 @@
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/Scene.hpp"
+#include "Engine/Scene/SceneManager.hpp"
 #include <optional>
 #include <string>
 #include <vector>
@@ -28,6 +29,17 @@ struct ScenePlayerOptions {
     // Stops after this many frames when non-zero (smoke tests).
     uint32 maxFrames = 0;
 };
+
+struct ScenePlayerCameraView {
+    Vec3 position{0, 3, 9};
+    Vec3 target{};
+    Vec3 up{0, 1, 0};
+    float fovDegrees = 60;
+};
+
+// Primary perspective cameras follow their complete world transform: local -Z is forward and
+// +Y is up. Scale is normalized away; collapsed/parallel axes use a finite orthonormal fallback.
+ScenePlayerCameraView ResolveScenePlayerCamera(Scene& scene, const ScenePlayerView& fallback);
 
 // Parses: <scene> [--title T] [--size W H] [--fullscreen] [--view X Y HALF_HEIGHT] [--frames N]
 // Returns std::nullopt and sets error on invalid arguments.
@@ -53,16 +65,20 @@ protected:
 
 private:
     bool LoadScene();
+    void FindPlayer();
     void UpdateCamera();
 
     ScenePlayerOptions options_;
-    Scene scene_;
+    SceneManager sceneManager_;
+    std::shared_ptr<Scene> scene_ = std::make_shared<Scene>();
     Entity player_;
     OrthographicCamera camera_;
     PerspectiveCamera camera3D_;
     ScenePlayerView view_;
     bool loaded_ = false;
     uint32 frames_ = 0;
+    double streamingAccumulator_ = 0;
+    std::string lastStreamingError_;
 };
 
 // Computes a view that frames every entity with a transform; used when no view is given.

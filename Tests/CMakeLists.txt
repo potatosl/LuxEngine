@@ -1,4 +1,16 @@
 add_executable(LuxEngineTests MainTest.cpp)
+add_executable(LuxSceneCoreTests SceneCoreTest.cpp)
+target_link_libraries(LuxSceneCoreTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxSceneCoreTests)
+lux_copy_runtime(LuxSceneCoreTests)
+add_test(NAME Engine_scene_management COMMAND LuxSceneCoreTests)
+set_tests_properties(Engine_scene_management PROPERTIES LABELS "headless;scene" TIMEOUT 60)
+add_executable(LuxSceneManagerTests SceneManagerTest.cpp)
+target_link_libraries(LuxSceneManagerTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxSceneManagerTests)
+lux_copy_runtime(LuxSceneManagerTests)
+add_test(NAME Engine_scene_loading COMMAND LuxSceneManagerTests)
+set_tests_properties(Engine_scene_loading PROPERTIES LABELS "headless;scene" TIMEOUT 90)
 target_link_libraries(LuxEngineTests PRIVATE LuxEngine::Engine)
 target_include_directories(LuxEngineTests SYSTEM PRIVATE ${stb_SOURCE_DIR})
 lux_set_target_warnings(LuxEngineTests)
@@ -15,6 +27,9 @@ set_tests_properties(Engine_window PROPERTIES TIMEOUT 60 ENVIRONMENT "SDL_VIDEOD
 
 # GPU suites need a display and a Vulkan driver; they exit with 77 (skipped) when either is missing.
 set(LUX_GPU_TEST_ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")
+add_test(NAME Engine_scene_hierarchy_gpu COMMAND LuxSceneCoreTests --gpu)
+set_tests_properties(Engine_scene_hierarchy_gpu PROPERTIES LABELS "gpu;scene" TIMEOUT 60 SKIP_RETURN_CODE 77
+    ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}" WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxSceneCoreTests>")
 foreach(suite gpu vulkan failures stress lifecycle multidevice texture_filter)
     add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
     set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 120 LABELS gpu SKIP_RETURN_CODE 77
@@ -37,6 +52,9 @@ if(MSVC)
     target_compile_options(LuxRuntimeTests PRIVATE /utf-8)
 endif()
 lux_copy_runtime(LuxRuntimeTests)
+add_test(NAME Runtime_scene_management_gpu COMMAND LuxRuntimeTests scene-management-gpu)
+set_tests_properties(Runtime_scene_management_gpu PROPERTIES LABELS "gpu;scene" TIMEOUT 90 SKIP_RETURN_CODE 77
+    ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}" WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxRuntimeTests>")
 foreach(suite parse fit)
     add_test(NAME Runtime_${suite} COMMAND LuxRuntimeTests ${suite})
     set_tests_properties(Runtime_${suite} PROPERTIES TIMEOUT 30 LABELS headless)

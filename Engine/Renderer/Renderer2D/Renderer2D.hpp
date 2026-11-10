@@ -85,6 +85,7 @@ public:
 
         void DrawQuad(const Vec2& position, const Vec2& size, const Vec4& color);
         void DrawQuad(const Vec3& position, const Vec2& size, const Vec4& color);
+        void DrawQuad(const Mat4& transform, const Vec4& color);
         void DrawRotatedQuad(const Vec2& position, const Vec2& size, float rotationRadians,
                              const Vec4& color);
         void DrawSprite(const Vec2& position, const Vec2& size, GpuTexture* texture,
@@ -119,6 +120,7 @@ public:
 
     static void DrawQuad(const Vec2& position, const Vec2& size, const Vec4& color);
     static void DrawQuad(const Vec3& position, const Vec2& size, const Vec4& color);
+    static void DrawQuad(const Mat4& transform, const Vec4& color);
     static void DrawRotatedQuad(const Vec2& position, const Vec2& size, float rotationRadians,
                                 const Vec4& color);
     static void DrawSprite(const Vec2& position, const Vec2& size, GpuTexture* texture,
