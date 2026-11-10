@@ -23,9 +23,14 @@
 
 namespace LuxEngine {
 namespace {
-constexpr uint64_t MaxArchiveBytes = 1024ull * 1024ull * 1024ull; // 1 GiB total extracted size
+constexpr uint64_t MaxArchiveBytes = 1024ull * 1024ull * 1024ull;    // 1 GiB total extracted size
 constexpr uint64_t MaxSingleEntryBytes = 256ull * 1024ull * 1024ull; // 256 MiB per single file
 constexpr size_t MaxEntries = 10000;
+
+bool FitsArchiveSizeLimits(uint64_t size, uint64_t total) {
+    return size <= MaxSingleEntryBytes && total <= MaxArchiveBytes &&
+           size <= MaxArchiveBytes - total;
+}
 
 // Validates that a string is strictly valid UTF-8 and contains no control characters.
 bool IsValidUtf8Filename(std::string_view str) {
@@ -293,7 +298,7 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
         }
 
         // Check single entry and cumulative size limits (prevent Zip Bomb and integer overflow)
-        if (stat.size > MaxSingleEntryBytes || stat.size > MaxArchiveBytes - totalUncompressed) {
+        if (!FitsArchiveSizeLimits(stat.size, totalUncompressed)) {
             error = "압축 파일의 용량이 허용된 최대 크기를 초과했습니다 (Zip Bomb 방지).";
             break;
         }
@@ -486,9 +491,13 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
         if (!iterator->is_regular_file(ec))
             continue;
         const uint64_t size = iterator->file_size(ec);
-        if (ec || ++entries > MaxEntries || !SafeArchivePath(relative) ||
-            size > MaxArchiveBytes - total) {
+        if (ec || ++entries > MaxEntries || !SafeArchivePath(relative)) {
             error = "프로젝트 파일 수 또는 크기가 제한을 넘었습니다.";
+            break;
+        }
+        if (!FitsArchiveSizeLimits(size, total)) {
+            error = "프로젝트 파일의 크기가 제한을 넘었습니다 (파일당 256 MiB, 전체 1 GiB): " +
+                    GenericPathUtf8(relative);
             break;
         }
         const std::string sourcePath = PathUtf8(iterator->path());

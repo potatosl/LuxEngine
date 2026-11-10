@@ -152,6 +152,8 @@ if(LUX_BUILD_TESTS)
     endif()
     lux_editor_copy_runtime(LuxEditorDocumentTests)
     add_test(NAME Editor_document COMMAND LuxEditorDocumentTests)
+    add_test(NAME Editor_archive_limits COMMAND LuxEditorDocumentTests archive-limits)
+    set_tests_properties(Editor_archive_limits PROPERTIES TIMEOUT 180 LABELS "headless;editor")
     add_executable(LuxEditorBuildTests
         Build/ProjectBuild.cpp
         Tests/EditorBuildTest.cpp

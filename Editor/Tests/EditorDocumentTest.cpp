@@ -714,10 +714,67 @@ void TestArchiveSecurityAndFuzzing() {
           "Maximum valid Unicode U+10FFFF accepted");
 }
 
+void TestArchiveSizeLimits() {
+    using namespace LuxEngine;
+    constexpr uint64_t limit = 256ull * 1024 * 1024;
+    for (const uint64_t size : {limit + 1, limit - 1, limit}) {
+        TempDirectory files;
+        std::string error;
+        auto project = EditorProject::Create(files.path / "original", "SizeLimit",
+                                             ProjectTemplate::Empty, error);
+        Check(project.has_value(), "size-limit project creates");
+        std::filesystem::path originalBackup;
+        if (size > limit) {
+            auto settings = project->GetSettings();
+            settings.backupLimit = 1;
+            Check(project->UpdateSettings(settings, error) &&
+                      CreateProjectBackup(*project, originalBackup, error),
+                  "valid backup exists before an oversized asset is added");
+        }
+        const auto asset = project->GetFile().parent_path() / "Assets" / "large.bin";
+        std::ofstream(asset, std::ios::binary).close();
+        std::filesystem::resize_file(asset, size);
+        const auto archive = files.path / "export.luxpack";
+        if (size > limit) {
+            std::ofstream(archive, std::ios::binary) << "existing archive";
+            Check(!ExportProject(*project, archive, error) && !error.empty(),
+                  "export rejects an asset above the import limit");
+            std::ifstream previous(archive, std::ios::binary);
+            Check(std::string(std::istreambuf_iterator<char>(previous), {}) == "existing archive",
+                  "rejected export preserves the previous archive");
+            std::filesystem::path backup;
+            Check(!CreateProjectBackup(*project, backup, error) && !std::filesystem::exists(backup),
+                  "backup rejects an unrestorable project without leaving an archive");
+            Check(std::filesystem::is_regular_file(originalBackup),
+                  "failed backup does not prune the last valid backup");
+            Check(!CloneProject(*project, files.path / "clone", "Clone", error) &&
+                      !std::filesystem::exists(files.path / "clone"),
+                  "clone rejects an oversized asset without leaving a project");
+            continue;
+        }
+        Check(ExportProject(*project, archive, error), "boundary-size asset exports");
+        auto imported = ImportProject(archive, files.path / "imported", error);
+        Check(imported.has_value() &&
+                  std::filesystem::file_size(files.path / "imported/Assets/large.bin") == size,
+              "successful boundary-size export imports without truncation");
+        std::filesystem::remove_all(files.path / "imported");
+        std::filesystem::path backup;
+        Check(CreateProjectBackup(*project, backup, error), "boundary-size backup succeeds");
+        Check(RestoreProjectBackup(*project, backup, error) &&
+                  std::filesystem::file_size(asset) == size,
+              "successful boundary-size backup restores without truncation");
+    }
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "archive-limits") {
+            TestArchiveSizeLimits();
+            std::cout << "Archive size-limit checks passed\n";
+            return 0;
+        }
         TestDocument();
         Test3DEditorEntity();
         Test2DEditorComponents();
