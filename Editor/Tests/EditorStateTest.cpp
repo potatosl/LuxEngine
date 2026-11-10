@@ -23,6 +23,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 
 namespace {
 namespace fs = std::filesystem;
@@ -284,12 +285,18 @@ void TestSessionScene(QApplication& app) {
         auto window = fixture.Open(app);
         OpenViaMenu(*window, fixture.secondary);
         Check(window->close(), "clean secondary scene window closes");
-        Check(QSettings().value("lastScene").toString() == Q(fixture.secondary),
+        // QFileDialog uses Qt separators, while filesystem paths may use native Windows ones.
+        // Verify the persisted scene identity rather than its platform-specific spelling.
+        const auto stored =
+            PathFromUtf8(QSettings().value("lastScene").toString().toUtf8().toStdString());
+        std::error_code error;
+        Check(!stored.empty() && fs::equivalent(stored, fixture.secondary, error) && !error,
               "closing stores the current project scene");
     }
     {
         EditorWindow restored;
         Check(PathFromUtf8(restored.GetDocument().GetPath()) == fixture.secondary &&
+                  restored.GetDocument().GetScene().GetEntityCount() == 1 &&
                   restored.findChild<QAction*>("projectSettings")->isEnabled(),
               "startup restores both the project and its last edited scene");
     }
