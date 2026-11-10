@@ -869,25 +869,22 @@ void EditorWindow::OnNameChanged() {
     canvas3D_->RefreshScene();
     UpdateChrome();
 }
-void EditorWindow::OnTransformChanged() {
+void EditorWindow::OnTransformChanged(int row, int axis) {
     if (refreshingInspector_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
         return;
-    RecordEdit(QStringLiteral("변환 변경"), [this] {
+    // Display values can be rounded or clamped; write only the field that the user edited.
+    RecordEdit(QStringLiteral("변환 변경"), [this, row, axis] {
         auto& value = document_.GetSelected().GetComponent<LuxEngine::TransformComponent>();
-        value.position = {static_cast<float>(transform_[0][0]->value()),
-                          static_cast<float>(transform_[0][1]->value()),
-                          static_cast<float>(transform_[0][2]->value())};
-        value.rotation = {LuxEngine::ToRadians(static_cast<float>(transform_[1][0]->value())),
-                          LuxEngine::ToRadians(static_cast<float>(transform_[1][1]->value())),
-                          LuxEngine::ToRadians(static_cast<float>(transform_[1][2]->value()))};
-        value.scale = {static_cast<float>(transform_[2][0]->value()),
-                       static_cast<float>(transform_[2][1]->value()),
-                       static_cast<float>(transform_[2][2]->value())};
+        auto& vector = row == 0 ? value.position : row == 1 ? value.rotation : value.scale;
+        const std::array<float*, 3> components{&vector.x, &vector.y, &vector.z};
+        float edited = static_cast<float>(transform_[row][axis]->value());
+        *components[axis] = row == 1 ? LuxEngine::ToRadians(edited) : edited;
         document_.MarkDirty();
     });
     canvas_->RefreshScene();
     canvas3D_->RefreshScene();
+    overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
 void EditorWindow::OnSpriteChanged() {
@@ -907,33 +904,39 @@ void EditorWindow::OnSpriteChanged() {
     canvas_->RefreshScene();
     UpdateChrome();
 }
-void EditorWindow::OnColorChanged() {
+void EditorWindow::OnColorChanged(int channel) {
     if (refreshingInspector_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::SpriteRendererComponent>())
         return;
-    RecordEdit(QStringLiteral("색상 변경"), [this] {
-        document_.GetSelected().GetComponent<LuxEngine::SpriteRendererComponent>().color = {
-            static_cast<float>(color_[0]->value()), static_cast<float>(color_[1]->value()),
-            static_cast<float>(color_[2]->value()), static_cast<float>(color_[3]->value())};
+    RecordEdit(QStringLiteral("색상 변경"), [this, channel] {
+        auto& color =
+            document_.GetSelected().GetComponent<LuxEngine::SpriteRendererComponent>().color;
+        const std::array<float*, 4> components{&color.x, &color.y, &color.z, &color.w};
+        *components[channel] = static_cast<float>(color_[channel]->value());
         document_.MarkDirty();
     });
     canvas_->RefreshScene();
+    overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
-void EditorWindow::OnMeshChanged() {
+void EditorWindow::OnMeshChanged(const QWidget* field) {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
-    RecordEdit(QStringLiteral("메시 변경"), [this] {
+    RecordEdit(QStringLiteral("메시 변경"), [this, field] {
         LuxEngine::Entity selected = document_.GetSelected();
-        if (meshEnabled_->isChecked() && !selected.HasComponent<LuxEngine::MeshRendererComponent>())
-            selected.AddComponent<LuxEngine::MeshRendererComponent>();
-        else if (!meshEnabled_->isChecked() &&
-                 selected.HasComponent<LuxEngine::MeshRendererComponent>())
-            selected.RemoveComponent<LuxEngine::MeshRendererComponent>();
-        if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
+        if (field == meshEnabled_) {
+            if (meshEnabled_->isChecked() &&
+                !selected.HasComponent<LuxEngine::MeshRendererComponent>())
+                selected.AddComponent<LuxEngine::MeshRendererComponent>();
+            else if (!meshEnabled_->isChecked() &&
+                     selected.HasComponent<LuxEngine::MeshRendererComponent>())
+                selected.RemoveComponent<LuxEngine::MeshRendererComponent>();
+        } else if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
             auto& material = selected.GetComponent<LuxEngine::MeshRendererComponent>().material;
-            material.metallic = static_cast<float>(metallic_->value());
-            material.roughness = static_cast<float>(roughness_->value());
+            if (field == metallic_)
+                material.metallic = static_cast<float>(metallic_->value());
+            else if (field == roughness_)
+                material.roughness = static_cast<float>(roughness_->value());
         }
         document_.MarkDirty();
     });
@@ -941,21 +944,25 @@ void EditorWindow::OnMeshChanged() {
     canvas3D_->RefreshScene();
     UpdateChrome();
 }
-void EditorWindow::OnTilemapChanged() {
+void EditorWindow::OnTilemapChanged(const QWidget* field) {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
-    RecordEdit(QStringLiteral("타일맵 변경"), [this] {
+    RecordEdit(QStringLiteral("타일맵 변경"), [this, field] {
         LuxEngine::Entity entity = document_.GetSelected();
-        if (tilemapEnabled_->isChecked() && !entity.HasComponent<LuxEngine::TilemapComponent>())
-            entity.AddComponent<LuxEngine::TilemapComponent>();
-        else if (!tilemapEnabled_->isChecked() &&
-                 entity.HasComponent<LuxEngine::TilemapComponent>())
-            entity.RemoveComponent<LuxEngine::TilemapComponent>();
-        if (entity.HasComponent<LuxEngine::TilemapComponent>()) {
+        if (field == tilemapEnabled_) {
+            if (tilemapEnabled_->isChecked() && !entity.HasComponent<LuxEngine::TilemapComponent>())
+                entity.AddComponent<LuxEngine::TilemapComponent>();
+            else if (!tilemapEnabled_->isChecked() &&
+                     entity.HasComponent<LuxEngine::TilemapComponent>())
+                entity.RemoveComponent<LuxEngine::TilemapComponent>();
+        } else if (entity.HasComponent<LuxEngine::TilemapComponent>()) {
             auto& map = entity.GetComponent<LuxEngine::TilemapComponent>();
-            map.Resize(static_cast<LuxEngine::uint32>(tilemapWidth_->value()),
-                       static_cast<LuxEngine::uint32>(tilemapHeight_->value()));
-            map.tileSize = static_cast<float>(tilemapSize_->value());
+            if (field == tilemapWidth_)
+                map.Resize(static_cast<LuxEngine::uint32>(tilemapWidth_->value()), map.height);
+            else if (field == tilemapHeight_)
+                map.Resize(map.width, static_cast<LuxEngine::uint32>(tilemapHeight_->value()));
+            else if (field == tilemapSize_)
+                map.tileSize = static_cast<float>(tilemapSize_->value());
         }
         document_.MarkDirty();
     });
@@ -964,36 +971,46 @@ void EditorWindow::OnTilemapChanged() {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
-void EditorWindow::OnPhysicsChanged() {
+void EditorWindow::OnPhysicsChanged(const QWidget* field) {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected())
         return;
-    RecordEdit(QStringLiteral("2D 물리 변경"), [this] {
+    RecordEdit(QStringLiteral("2D 물리 변경"), [this, field] {
         LuxEngine::Entity entity = document_.GetSelected();
-        if (bodyEnabled_->isChecked() && !entity.HasComponent<LuxEngine::Rigidbody2DComponent>())
-            entity.AddComponent<LuxEngine::Rigidbody2DComponent>();
-        else if (!bodyEnabled_->isChecked() &&
-                 entity.HasComponent<LuxEngine::Rigidbody2DComponent>())
-            entity.RemoveComponent<LuxEngine::Rigidbody2DComponent>();
-        if (entity.HasComponent<LuxEngine::Rigidbody2DComponent>()) {
+        if (field == bodyEnabled_) {
+            if (bodyEnabled_->isChecked() &&
+                !entity.HasComponent<LuxEngine::Rigidbody2DComponent>())
+                entity.AddComponent<LuxEngine::Rigidbody2DComponent>();
+            else if (!bodyEnabled_->isChecked() &&
+                     entity.HasComponent<LuxEngine::Rigidbody2DComponent>())
+                entity.RemoveComponent<LuxEngine::Rigidbody2DComponent>();
+        } else if (entity.HasComponent<LuxEngine::Rigidbody2DComponent>()) {
             auto& body = entity.GetComponent<LuxEngine::Rigidbody2DComponent>();
-            body.type = bodyType_->currentIndex() == 0   ? LuxEngine::BodyType::Static
-                        : bodyType_->currentIndex() == 1 ? LuxEngine::BodyType::Dynamic
-                                                         : LuxEngine::BodyType::Kinematic;
-            body.gravityScale = static_cast<float>(gravityScale_->value());
+            if (field == bodyType_)
+                body.type = bodyType_->currentIndex() == 0   ? LuxEngine::BodyType::Static
+                            : bodyType_->currentIndex() == 1 ? LuxEngine::BodyType::Dynamic
+                                                             : LuxEngine::BodyType::Kinematic;
+            else if (field == gravityScale_)
+                body.gravityScale = static_cast<float>(gravityScale_->value());
         }
-        if (colliderEnabled_->isChecked() &&
-            !entity.HasComponent<LuxEngine::BoxCollider2DComponent>())
-            entity.AddComponent<LuxEngine::BoxCollider2DComponent>();
-        else if (!colliderEnabled_->isChecked() &&
-                 entity.HasComponent<LuxEngine::BoxCollider2DComponent>())
-            entity.RemoveComponent<LuxEngine::BoxCollider2DComponent>();
-        if (entity.HasComponent<LuxEngine::BoxCollider2DComponent>()) {
+        if (field == colliderEnabled_) {
+            if (colliderEnabled_->isChecked() &&
+                !entity.HasComponent<LuxEngine::BoxCollider2DComponent>())
+                entity.AddComponent<LuxEngine::BoxCollider2DComponent>();
+            else if (!colliderEnabled_->isChecked() &&
+                     entity.HasComponent<LuxEngine::BoxCollider2DComponent>())
+                entity.RemoveComponent<LuxEngine::BoxCollider2DComponent>();
+        } else if (entity.HasComponent<LuxEngine::BoxCollider2DComponent>()) {
             auto& collider = entity.GetComponent<LuxEngine::BoxCollider2DComponent>();
-            collider.size = {static_cast<float>(colliderSize_[0]->value()),
-                             static_cast<float>(colliderSize_[1]->value())};
-            collider.offset = {static_cast<float>(colliderOffset_[0]->value()),
-                               static_cast<float>(colliderOffset_[1]->value())};
-            collider.isTrigger = triggerEnabled_->isChecked();
+            if (field == colliderSize_[0])
+                collider.size.x = static_cast<float>(colliderSize_[0]->value());
+            else if (field == colliderSize_[1])
+                collider.size.y = static_cast<float>(colliderSize_[1]->value());
+            else if (field == colliderOffset_[0])
+                collider.offset.x = static_cast<float>(colliderOffset_[0]->value());
+            else if (field == colliderOffset_[1])
+                collider.offset.y = static_cast<float>(colliderOffset_[1]->value());
+            else if (field == triggerEnabled_)
+                collider.isTrigger = triggerEnabled_->isChecked();
         }
         document_.MarkDirty();
     });
@@ -1002,29 +1019,32 @@ void EditorWindow::OnPhysicsChanged() {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
-void EditorWindow::OnAnimationChanged() {
+void EditorWindow::OnAnimationChanged(const QWidget* field) {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
         return;
-    RecordEdit(QStringLiteral("애니메이션 변경"), [this] {
+    RecordEdit(QStringLiteral("애니메이션 변경"), [this, field] {
         LuxEngine::Entity entity = document_.GetSelected();
-        if (animationEnabled_->isChecked() &&
-            !entity.HasComponent<LuxEngine::AnimationComponent>()) {
-            auto& animation = entity.AddComponent<LuxEngine::AnimationComponent>();
-            animation.clip.name = "Transform";
-            animation.clip.AddKeyframe(
-                {0, entity.GetComponent<LuxEngine::TransformComponent>().position,
-                 entity.GetComponent<LuxEngine::TransformComponent>().rotation,
-                 entity.GetComponent<LuxEngine::TransformComponent>().scale});
-        } else if (!animationEnabled_->isChecked() &&
-                   entity.HasComponent<LuxEngine::AnimationComponent>())
-            entity.RemoveComponent<LuxEngine::AnimationComponent>();
-        if (entity.HasComponent<LuxEngine::AnimationComponent>()) {
+        if (field == animationEnabled_) {
+            if (animationEnabled_->isChecked() &&
+                !entity.HasComponent<LuxEngine::AnimationComponent>()) {
+                auto& animation = entity.AddComponent<LuxEngine::AnimationComponent>();
+                animation.clip.name = "Transform";
+                const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
+                animation.clip.AddKeyframe(
+                    {0, transform.position, transform.rotation, transform.scale});
+            } else if (!animationEnabled_->isChecked() &&
+                       entity.HasComponent<LuxEngine::AnimationComponent>())
+                entity.RemoveComponent<LuxEngine::AnimationComponent>();
+        } else if (entity.HasComponent<LuxEngine::AnimationComponent>()) {
             auto& clip = entity.GetComponent<LuxEngine::AnimationComponent>().clip;
-            clip.loop = animationLoop_->isChecked();
-            clip.duration = static_cast<float>(animationDuration_->value());
-            if (!clip.keyframes.empty())
-                clip.duration = std::max(clip.duration, clip.keyframes.back().time);
+            if (field == animationLoop_)
+                clip.loop = animationLoop_->isChecked();
+            else if (field == animationDuration_) {
+                clip.duration = static_cast<float>(animationDuration_->value());
+                if (!clip.keyframes.empty())
+                    clip.duration = std::max(clip.duration, clip.keyframes.back().time);
+            }
         }
         document_.MarkDirty();
     });
