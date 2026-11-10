@@ -786,18 +786,29 @@ void Scenes() {
 
             Scene::InjectSaveFault(Scene::SaveFault::DiskFull);
             Check(!scene.Serialize(faultPath), "DiskFull fault rejected");
+            Check(Scene::GetLastSaveError().find("disk full") != std::string::npos,
+                  "DiskFull reports the write failure");
+#ifdef _WIN32
             Check(Scene::GetLastSaveError().find("112") != std::string::npos,
                   "DiskFull reports ERROR_DISK_FULL (112)");
+#endif
             Check(Sha256Hex(bytes(faultPath)) == baselineSha,
                   "original SHA256 preserved on DiskFull");
 
             Scene::InjectSaveFault(Scene::SaveFault::ReplaceAccessDenied);
             Check(!scene.Serialize(faultPath), "ReplaceAccessDenied fault rejected");
+#ifdef _WIN32
             Check(Scene::GetLastSaveError().find("Win32 error 5") != std::string::npos,
                   "ReplaceAccessDenied reports ERROR_ACCESS_DENIED (5)");
+#else
+            Check(Scene::GetLastSaveError().find("access denied") != std::string::npos,
+                  "ReplaceAccessDenied reports the replacement failure");
+#endif
             Check(Sha256Hex(bytes(faultPath)) == baselineSha,
                   "original SHA256 preserved on ReplaceAccessDenied");
 
+#ifdef _WIN32
+            // Backup staging and its failure modes belong to the ReplaceFileW implementation.
             Scene::InjectSaveFault(Scene::SaveFault::ReplaceFailedAfterBackup);
             Check(!scene.Serialize(faultPath), "ReplaceFailedAfterBackup fault rejected");
             Check(Scene::GetLastSaveError().find("1177") != std::string::npos &&
@@ -805,6 +816,7 @@ void Scenes() {
                   "ReplaceFailedAfterBackup reports 1177 and restores backup");
             Check(Sha256Hex(bytes(faultPath)) == baselineSha,
                   "original SHA256 restored and verified after ReplaceFailedAfterBackup");
+#endif
 
             scene.DestroyEntity(dirtyEnt);
             Scene::ClearSaveFaults();
@@ -824,7 +836,8 @@ void Scenes() {
                   "zero temporary or backup files leaked after recoverable operations");
         }
 
-        // 10. Fault Injection: BackupRestoreFailure MUST NOT delete backup file and MUST log its path
+#ifdef _WIN32
+        // 10. ReplaceFileW backup restoration failure preserves the original backup.
         {
             const std::string unrecoverablePath = files.Path("backup_preserved.lux");
             Check(scene.Serialize(unrecoverablePath), "initial save for BackupRestoreFailure test");
@@ -859,6 +872,7 @@ void Scenes() {
             Scene::ClearSaveFaults();
         }
 
+#endif
         // 11. Korean and whitespace directory/file paths
         {
             const std::filesystem::path koreanDir =
