@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -356,7 +357,8 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
         return false;
 
     auto& s = *state_;
-    s.gpu.Clear(30.0f / 255.0f, 34.0f / 255.0f, 42.0f / 255.0f, 1.0f);
+    const auto background = scene.GetSettings().clearColor;
+    s.gpu.Clear(background.x, background.y, background.z, background.w);
     const LuxEngine::OrthographicCamera camera(
         static_cast<float>(worldBounds.left()), static_cast<float>(worldBounds.right()),
         static_cast<float>(worldBounds.bottom()), static_cast<float>(worldBounds.top()));
@@ -408,7 +410,8 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
         return false;
 
     auto& s = *state_;
-    s.gpu.Clear(27.0f / 255.0f, 33.0f / 255.0f, 42.0f / 255.0f, 1.0f);
+    const auto background = scene.GetSettings().clearColor;
+    s.gpu.Clear(background.x, background.y, background.z, background.w);
 
     const auto camera = MakeViewportCamera3D(QSizeF(width, height), focus, yaw, pitch, distance);
 
@@ -424,27 +427,44 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
         for (LuxEngine::Entity entity : scene.GetEntities()) {
             if (!entity.HasComponent<LuxEngine::TransformComponent>())
                 continue;
-            const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
-            if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
-                !std::isfinite(transform.position.z) || !std::isfinite(transform.rotation.x) ||
-                !std::isfinite(transform.rotation.y) || !std::isfinite(transform.rotation.z) ||
-                !std::isfinite(transform.scale.x) || !std::isfinite(transform.scale.y) ||
-                !std::isfinite(transform.scale.z))
-                continue;
-
-            if (entity.HasComponent<LuxEngine::MeshRendererComponent>()) {
-                const auto& meshComp = entity.GetComponent<LuxEngine::MeshRendererComponent>();
-                LuxEngine::Renderer3D::DrawMesh(transform.GetTransform(), meshComp.material);
-            } else if (entity.HasComponent<LuxEngine::SpriteRendererComponent>()) {
-                const auto& sprite = entity.GetComponent<LuxEngine::SpriteRendererComponent>();
-                LuxEngine::Material3D mat;
-                mat.albedoColor = sprite.color;
-                LuxEngine::Renderer3D::DrawMesh(
-                    LuxEngine::Mat4::Translate(transform.position) *
-                        LuxEngine::Mat4::RotateZ(transform.rotation.z) *
-                        LuxEngine::Mat4::Scale(
-                            LuxEngine::Vec3{transform.scale.x, transform.scale.y, 0.02f}),
-                    mat);
+            const auto world = scene.GetWorldMatrix(entity.GetId());
+            const auto expose = [&](LuxEngine::Vec4 color) {
+                color.x *= scene.GetSettings().exposure;
+                color.y *= scene.GetSettings().exposure;
+                color.z *= scene.GetSettings().exposure;
+                return color;
+            };
+            if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>()) {
+                auto material = mesh->material;
+                material.albedoColor = expose(material.albedoColor);
+                LuxEngine::Renderer3D::DrawMesh(world, material);
+            } else if (const auto* sprite =
+                           entity.TryGetComponent<LuxEngine::SpriteRendererComponent>()) {
+                LuxEngine::Material3D material;
+                material.albedoColor = expose(sprite->color);
+                LuxEngine::Renderer3D::DrawMesh(world * LuxEngine::Mat4::Scale({1, 1, .02f}),
+                                                material);
+            } else if (const auto* map = entity.TryGetComponent<LuxEngine::TilemapComponent>()) {
+                const std::array<LuxEngine::Vec4, 6> colors{{{},
+                                                             {.36f, .65f, .27f, 1},
+                                                             {.43f, .31f, .21f, 1},
+                                                             {.48f, .51f, .54f, 1},
+                                                             {.22f, .46f, .74f, .82f},
+                                                             {.76f, .66f, .42f, 1}}};
+                for (LuxEngine::uint32 y = 0; y < map->height; ++y)
+                    for (LuxEngine::uint32 x = 0; x < map->width; ++x) {
+                        const auto tile = map->Get(x, y);
+                        if (tile == 0 || tile >= colors.size())
+                            continue;
+                        LuxEngine::Material3D material;
+                        material.albedoColor = expose(colors[tile]);
+                        const auto model =
+                            world *
+                            LuxEngine::Mat4::Translate(
+                                {(x + .5f) * map->tileSize, (y + .5f) * map->tileSize, 0}) *
+                            LuxEngine::Mat4::Scale({map->tileSize, map->tileSize, .02f});
+                        LuxEngine::Renderer3D::DrawMesh(model, material);
+                    }
             }
         }
         LuxEngine::Renderer3D::EndScene();

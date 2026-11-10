@@ -1,5 +1,6 @@
 #pragma once
 #include "Build/ProjectBuild.hpp"
+#include "Engine/Scene/SceneManager.hpp"
 #include "Project/EditorProject.hpp"
 #include "Scene/EditorDocument.hpp"
 #include "Scene/EditorSnapshot.hpp"
@@ -7,8 +8,11 @@
 #include <QMainWindow>
 #include <QTimer>
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <functional>
+#include <future>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -26,12 +30,14 @@ class QSpinBox;
 class QResizeEvent;
 class QComboBox;
 class QTabWidget;
+class QTabBar;
 class QTreeWidget;
 class QUndoStack;
 class QWidget;
 class QSlider;
 class QPushButton;
 class QProcess;
+class QPixmap;
 class QProgressBar;
 
 namespace LuxEngine {
@@ -42,6 +48,7 @@ namespace LuxEditor {
 class SceneViewport2D;
 class SceneViewport3D;
 class DebugPanel;
+class SceneEditCommand;
 class EditorWindow final : public QMainWindow {
 public:
     explicit EditorWindow(QWidget* parent = nullptr);
@@ -58,10 +65,48 @@ public:
     }
     void ExecuteRecordedEdit(const QString& name, const std::function<void()>& edit) {
         RecordEdit(name, edit);
+        RefreshAll();
+    }
+    EditorDocument::TabId NewSceneDocument();
+    bool OpenSceneDocument(const std::filesystem::path& path, bool asynchronous = false);
+    bool SwitchSceneDocument(EditorDocument::TabId id, bool animate = true);
+    bool CloseSceneDocument(EditorDocument::TabId id, bool discardDirty = false);
+    bool MoveSelectionToScene(EditorDocument::TabId destination);
+    size_t PendingSceneLoadCount() const noexcept {
+        return pendingSceneLoads_.size();
     }
 
 private:
     void BuildMenus();
+    void BuildSceneMenus();
+    void RefreshSceneTabs();
+    void ResetSceneWorkspace();
+    void PollSceneLoads();
+    void LoadSceneAsync(const std::filesystem::path& path, bool preload);
+    void DuplicateScene();
+    void DeleteSceneFile();
+    void SetStartupScene();
+    void EditSceneSettings();
+    void AddSceneReference(LuxEngine::SceneReferenceMode mode);
+    void RefreshSceneReferences();
+    void RelinkSceneReference();
+    void ConfigureSceneStreaming();
+    void TickSceneStreaming();
+    void GroupSelection();
+    void UngroupSelection();
+    void ReparentSelection(const std::vector<LuxEngine::uint32>& children,
+                           LuxEngine::uint32 parent);
+    void ChooseMoveDestination();
+    bool SaveAllScenes(bool currentProjectOnly = false);
+    bool RequestCloseScene(EditorDocument::TabId id);
+    void RememberSceneBaseline(bool clean = true);
+    void UpdateSceneDirty(EditorDocument::TabId id, const EditorSnapshot& snapshot);
+    EditorSnapshot SnapshotScene(EditorDocument::TabId id);
+    void RestoreSceneAt(EditorDocument::TabId id, const EditorSnapshot& snapshot,
+                        std::optional<LuxEngine::uint32> selected, bool activate = true);
+    void InvalidateSceneHistory(EditorDocument::TabId id);
+    void PushSceneCommand(SceneEditCommand* command);
+    void AnimateSceneTransition(const QPixmap& previous);
     void BuildLayout();
     void ApplyTheme();
     void RestoreWorkspaceLayout();
@@ -102,7 +147,7 @@ private:
     void AddTilemap();
     void PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngine::uint32 y, uint8_t tile);
     void DeleteEntity();
-    void SelectEntity(std::optional<LuxEngine::uint32> id);
+    void SelectEntity(std::optional<LuxEngine::uint32> id, bool syncHierarchy = true);
     void OnNameChanged();
     void OnTransformChanged(int row, int axis);
     void OnSpriteChanged();
@@ -154,12 +199,33 @@ private:
     RecentProjects recentProjects_;
     QTimer autosaveTimer_;
     QTimer previewTimer_;
+    QTimer sceneLoadTimer_;
+    QTimer sceneStreamingTimer_;
+    LuxEngine::SceneManager sceneManager_;
+    struct PendingSceneLoad {
+        std::filesystem::path path;
+        std::future<LuxEngine::SceneLoadResult> result;
+        std::optional<EditorProject> project;
+        uint64_t generation = 0;
+        EditorDocument::TabId origin = 0;
+        bool preload = false;
+    };
+    std::vector<PendingSceneLoad> pendingSceneLoads_;
+    uint64_t sceneLoadGeneration_ = 0;
+    bool refreshingSceneTabs_ = false;
+    bool sceneTransitions_ = true;
+    QTabBar* sceneTabs_ = nullptr;
+    QProgressBar* sceneLoadProgress_ = nullptr;
+    std::map<EditorDocument::TabId, EditorSnapshot> cleanScenes_;
+    std::map<EditorDocument::TabId, std::optional<EditorProject>> sceneProjects_;
+    const std::chrono::steady_clock::time_point openedAt_ = std::chrono::steady_clock::now();
+    std::map<EditorDocument::TabId, std::chrono::steady_clock::time_point> autosavedAt_;
     QUndoStack* undo_ = nullptr;
     QTabWidget* viewportTabs_ = nullptr;
     SceneViewport2D* canvas_ = nullptr;
     SceneViewport2D* overviewCanvas_ = nullptr;
     SceneViewport3D* canvas3D_ = nullptr;
-    QListWidget* hierarchy_ = nullptr;
+    QTreeWidget* hierarchy_ = nullptr;
     QTreeWidget* groupTree_ = nullptr;
     int groupFilter_ = 0;
     QLineEdit* hierarchySearch_ = nullptr;
@@ -173,6 +239,9 @@ private:
     QLabel* toolHint_ = nullptr;
     QLabel* selectionLabel_ = nullptr;
     QWidget* inspectorBody_ = nullptr;
+    QWidget* sceneReferencePanel_ = nullptr;
+    QLineEdit* sceneReferencePath_ = nullptr;
+    QLabel* sceneReferenceState_ = nullptr;
     QLineEdit* name_ = nullptr;
     QCheckBox* spriteEnabled_ = nullptr;
     QCheckBox* meshEnabled_ = nullptr;

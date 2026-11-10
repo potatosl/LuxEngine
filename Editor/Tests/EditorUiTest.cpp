@@ -104,7 +104,7 @@ CpuMemorySample QueryCpuMemory() {
     return sample;
 }
 
-void CompactProcessHeaps() {
+[[maybe_unused]] void CompactProcessHeaps() {
 #if defined(_WIN32)
     _heapmin();
     const DWORD count = GetProcessHeaps(0, nullptr);
@@ -527,23 +527,23 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     const QByteArray state = window.saveState(1);
     Check(!state.isEmpty() && window.restoreState(state, 1), "dock layout roundtrip");
 
-    auto* hierarchy = window.findChildren<QListWidget*>().front();
+    auto* hierarchy = window.findChild<QTreeWidget*>(QStringLiteral("sceneOutliner"));
     auto* add = window.findChild<QAction*>(QStringLiteral("addEntity"));
-    Check(add && hierarchy->count() == 0, "new document starts empty");
+    Check(add && hierarchy->topLevelItemCount() == 0, "new document starts empty");
     add->trigger();
-    Check(hierarchy->count() == 1, "entity can be added from menu");
+    Check(hierarchy->topLevelItemCount() == 1, "entity can be added from menu");
 
     auto* undo = window.findChild<QUndoStack*>();
     Check(undo && undo->canUndo(), "scene edit enters undo history");
     undo->undo();
-    Check(hierarchy->count() == 0 && undo->canRedo(), "undo restores scene");
+    Check(hierarchy->topLevelItemCount() == 0 && undo->canRedo(), "undo restores scene");
     undo->redo();
-    Check(hierarchy->count() == 1, "redo restores edit");
+    Check(hierarchy->topLevelItemCount() == 1, "redo restores edit");
 
     auto* addTilemap = window.findChild<QAction*>(QStringLiteral("addTilemap"));
     Check(addTilemap != nullptr, "tilemap action exists");
     addTilemap->trigger();
-    Check(hierarchy->count() == 2, "tilemap can be added");
+    Check(hierarchy->topLevelItemCount() == 2, "tilemap can be added");
     app.processEvents();
 
     auto* canvas = window.findChild<QWidget*>(QStringLiteral("sceneViewport2D"));
@@ -576,7 +576,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
               << cfg.undoIterations << "x Undo/Redo\n";
     copyAction->trigger();
     pasteAction->trigger();
-    Check(hierarchy->count() == 3, "copy and paste entity duplicates all components");
+    Check(hierarchy->topLevelItemCount() == 3, "copy and paste entity duplicates all components");
     for (const QString& id : {QStringLiteral("editorBody2D"), QStringLiteral("editorCollider2D"),
                               QStringLiteral("editorAnimation")}) {
         auto* checkbox = window.findChild<QCheckBox*>(id);
@@ -585,12 +585,13 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     }
 
     undo->undo();
-    Check(hierarchy->count() == 2, "undo before full-component paste");
+    Check(hierarchy->topLevelItemCount() == 2, "undo before full-component paste");
 
     // Paste full 11-component entity and run N-iteration Undo/Redo loop
     SetClipboardJsonObject(MakeValidClipboardEntityJson());
     pasteAction->trigger();
-    Check(hierarchy->count() == 3 && window.GetDocument().GetScene().GetEntityCount() == 3,
+    Check(hierarchy->topLevelItemCount() == 3 &&
+              window.GetDocument().GetScene().GetEntityCount() == 3,
           "valid full-component clipboard JSON pasted");
     for (const QString& id :
          {QStringLiteral("editorSprite"), QStringLiteral("editorMesh"),
@@ -614,23 +615,25 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
 
     for (int iter = 1; iter <= cfg.undoIterations; ++iter) {
         undo->undo();
-        if (hierarchy->count() != 2 || window.GetDocument().GetScene().GetEntityCount() != 2 ||
+        if (hierarchy->topLevelItemCount() != 2 ||
+            window.GetDocument().GetScene().GetEntityCount() != 2 ||
             FindEntityByTag(window.GetDocument().GetScene(), "검증엔티티 복사본").IsValid()) {
             const auto cpu = QueryCpuMemory();
             std::ostringstream oss;
             oss << "[Undo/Redo FAILURE] iteration=" << iter
-                << " phase=undo hierarchyCount=" << hierarchy->count()
+                << " phase=undo hierarchyCount=" << hierarchy->topLevelItemCount()
                 << " sceneEntities=" << window.GetDocument().GetScene().GetEntityCount()
                 << " cpuWorkingSetBytes=" << cpu.workingSetBytes
                 << " cpuPrivateBytes=" << cpu.privateBytes;
             throw std::runtime_error(oss.str());
         }
         undo->redo();
-        if (hierarchy->count() != 3 || window.GetDocument().GetScene().GetEntityCount() != 3) {
+        if (hierarchy->topLevelItemCount() != 3 ||
+            window.GetDocument().GetScene().GetEntityCount() != 3) {
             const auto cpu = QueryCpuMemory();
             std::ostringstream oss;
             oss << "[Undo/Redo FAILURE] iteration=" << iter
-                << " phase=redo hierarchyCount=" << hierarchy->count()
+                << " phase=redo hierarchyCount=" << hierarchy->topLevelItemCount()
                 << " sceneEntities=" << window.GetDocument().GetScene().GetEntityCount()
                 << " cpuWorkingSetBytes=" << cpu.workingSetBytes
                 << " cpuPrivateBytes=" << cpu.privateBytes;
@@ -701,11 +704,11 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
 
     // --- PART 3.2: 13 Independent Invalid Clipboard Inputs ---
     std::cerr << "[Editor_ui] PART 3.2: Validating 13 independent abnormal clipboard inputs\n";
-    const int stableEntityCount = hierarchy->count();
+    const int stableEntityCount = hierarchy->topLevelItemCount();
     const size_t stableSceneEntityCount = window.GetDocument().GetScene().GetEntityCount();
     const int stableUndoCount = undo->count();
     const int stableUndoIndex = undo->index();
-    const int stableSelectedRow = hierarchy->currentRow();
+    const int stableSelectedRow = hierarchy->indexOfTopLevelItem(hierarchy->currentItem());
     const uint32 stableSelectedId =
         window.GetDocument().GetSelected() ? window.GetDocument().GetSelected().GetId() : 0;
 
@@ -716,10 +719,11 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
               "scene serializes after rejected paste");
         const uint32 currentSelectedId =
             window.GetDocument().GetSelected() ? window.GetDocument().GetSelected().GetId() : 0;
-        Check(currentSerialized == baselineSerialized && hierarchy->count() == stableEntityCount &&
+        Check(currentSerialized == baselineSerialized &&
+                  hierarchy->topLevelItemCount() == stableEntityCount &&
                   window.GetDocument().GetScene().GetEntityCount() == stableSceneEntityCount &&
                   undo->count() == stableUndoCount && undo->index() == stableUndoIndex &&
-                  hierarchy->currentRow() == stableSelectedRow &&
+                  hierarchy->indexOfTopLevelItem(hierarchy->currentItem()) == stableSelectedRow &&
                   currentSelectedId == stableSelectedId &&
                   window.LastLogMessage().contains(QStringLiteral("붙여넣기 실패")),
               label);
@@ -874,8 +878,8 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
         Check(window.GetDocument().GetScene().SerializeToString(afterExceptionSerialized) &&
                   afterExceptionSerialized == baselineSerialized,
               "RecordEdit rolls back scene state on exception");
-        Check(hierarchy->count() == stableEntityCount && undo->count() == stableUndoCount &&
-                  undo->index() == stableUndoIndex &&
+        Check(hierarchy->topLevelItemCount() == stableEntityCount &&
+                  undo->count() == stableUndoCount && undo->index() == stableUndoIndex &&
                   window.LastLogMessage().contains(QStringLiteral("편집 실패")),
               "RecordEdit preserves undo stack and logs user-visible error on exception");
     }
@@ -885,9 +889,10 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     std::cerr << "[Editor_ui] PART 3.3: Verifying actual pasted entity Scene Save & Reopen\n";
     {
         undo->undo();
-        Check(hierarchy->count() == 2, "undo before save roundtrip");
+        Check(hierarchy->topLevelItemCount() == 2, "undo before save roundtrip");
         undo->redo();
-        Check(hierarchy->count() == 3, "redo restores pasted entity before save roundtrip");
+        Check(hierarchy->topLevelItemCount() == 3,
+              "redo restores pasted entity before save roundtrip");
 
         std::string preSaveSerialized;
         Check(window.GetDocument().GetScene().SerializeToString(preSaveSerialized) &&
@@ -922,7 +927,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     std::cerr << "[Editor_ui] PART 3.3 PASS: Actual pasted entity save and reopen verified\n";
 
     undo->undo();
-    Check(hierarchy->count() == 2, "undo after save/reopen test returns to 2 entities");
+    Check(hierarchy->topLevelItemCount() == 2, "undo after save/reopen test returns to 2 entities");
 
     auto* startPreview = window.findChild<QAction*>(QStringLiteral("previewStart"));
     auto* stepPreview = window.findChild<QAction*>(QStringLiteral("previewStep"));
@@ -934,7 +939,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     auto* debugState = window.findChild<QTreeWidget*>(QStringLiteral("debugState"));
     Check(debugState && debugState->topLevelItemCount() > 0, "debugger shows runtime state");
     stopPreview->trigger();
-    Check(hierarchy->count() == 2, "preview restores editable scene");
+    Check(hierarchy->topLevelItemCount() == 2, "preview restores editable scene");
 
     tabs->setCurrentIndex(0);
     std::cerr << "[Editor_ui] offscreen widget render\n";

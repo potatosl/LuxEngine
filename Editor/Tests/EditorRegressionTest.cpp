@@ -18,6 +18,7 @@
 #include <QSettings>
 #include <QSlider>
 #include <QTemporaryDir>
+#include <QTreeWidget>
 #include <QUndoStack>
 #include <cmath>
 #include <iostream>
@@ -43,9 +44,9 @@ std::unique_ptr<EditorWindow> OpenScene(QApplication& app, Scene& scene, QTempor
     auto window = std::make_unique<EditorWindow>();
     window->show();
     app.processEvents();
-    auto* hierarchy = window->findChild<QListWidget*>(QStringLiteral("sceneOutliner"));
-    Check(hierarchy && hierarchy->count() > 0, "saved scene opens in the editor");
-    hierarchy->setCurrentRow(0);
+    auto* hierarchy = window->findChild<QTreeWidget*>(QStringLiteral("sceneOutliner"));
+    Check(hierarchy && hierarchy->topLevelItemCount() > 0, "saved scene opens in the editor");
+    hierarchy->setCurrentItem(hierarchy->topLevelItem(0));
     return window;
 }
 void TestTimeline(QApplication& app) {
@@ -343,7 +344,7 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
         [](uint32, const TransformComponent&) {}, [] {}, [] {}, renderer);
     for (int variant = 0; variant < 2; ++variant) {
         const double yaw = variant == 0 ? .65 : .89;
-        const double pitch = variant == 0 ? .48 : .36;
+        const double pitch = variant == 0 ? -.48 : -.60;
         if (variant == 1) {
             const QPointF start(200, 200), finish(230, 185);
             QMouseEvent press(QEvent::MouseButtonPress, start, view.mapToGlobal(start.toPoint()),

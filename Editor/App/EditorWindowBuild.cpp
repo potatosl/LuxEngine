@@ -1,5 +1,6 @@
 #include "App/EditorWindow.hpp"
 #include "Project/PathEncoding.hpp"
+#include "Scene/SceneDependencies.hpp"
 #include <QApplication>
 #include <QDir>
 #include <QDockWidget>
@@ -70,7 +71,7 @@ void EditorWindow::StartBuild(BuildConfiguration configuration, bool clean,
         Log(QStringLiteral("이미 빌드가 진행 중입니다."), true);
         return;
     }
-    if (document_.IsDirty() && !document_.GetPath().empty() && !SaveScene(false))
+    if (!SaveAllScenes(true) || !project_)
         return;
 
     // The SDK path set in the editor wins over the environment variable.
@@ -82,6 +83,10 @@ void EditorWindow::StartBuild(BuildConfiguration configuration, bool clean,
             return qEnvironmentVariable(name).toUtf8().toStdString();
         });
     std::string error;
+    if (!ValidateProjectScenes(*project_, error)) {
+        ShowError(QStringLiteral("씬 의존성 오류"), QString::fromUtf8(error));
+        return;
+    }
     auto plan =
         PlanBuild(project_->GetFile().parent_path(), configuration, tools, GameExecutable, error);
     if (!plan) {

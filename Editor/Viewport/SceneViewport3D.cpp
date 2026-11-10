@@ -3,33 +3,32 @@
 #include "EngineSceneRenderer.hpp"
 #include "Scene/EditorDocument.hpp"
 #include "ViewportCamera3D.hpp"
+#include <QFocusEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <vector>
 
 namespace LuxEditor {
 namespace {
 LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity) {
-    const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
+    const auto world = entity.GetScene()->GetWorldMatrix(entity.GetId());
     if (entity.HasComponent<LuxEngine::MeshRendererComponent>())
-        return transform.GetTransform();
+        return world;
     if (entity.HasComponent<LuxEngine::SpriteRendererComponent>())
-        return LuxEngine::Mat4::Translate(transform.position) *
-               LuxEngine::Mat4::RotateZ(transform.rotation.z) *
-               LuxEngine::Mat4::Scale({transform.scale.x, transform.scale.y, .02f});
+        return world * LuxEngine::Mat4::Scale({1, 1, .02f});
     if (entity.HasComponent<LuxEngine::TilemapComponent>()) {
         const auto& map = entity.GetComponent<LuxEngine::TilemapComponent>();
         const float width = map.width * map.tileSize, height = map.height * map.tileSize;
-        return LuxEngine::Mat4::Translate(transform.position +
-                                          LuxEngine::Vec3{width * .5f, height * .5f, 0}) *
+        return world * LuxEngine::Mat4::Translate({width * .5f, height * .5f, 0}) *
                LuxEngine::Mat4::Scale({width, height, .04f});
     }
-    return transform.GetTransform();
+    return world;
 }
 LuxEngine::Vec3 TransformCorner(const LuxEngine::Mat4& model, LuxEngine::Vec3 point) {
     const auto& m = model.elements;
@@ -49,6 +48,17 @@ SceneViewport3D::SceneViewport3D(
       onEndEdit_(std::move(onEndEdit)), engineRenderer_(std::move(renderer)) {
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(300, 200);
+}
+void SceneViewport3D::CancelInteraction() {
+    orbiting_ = panning_ = dragging_ = false;
+    dragId_ = 0;
+}
+void SceneViewport3D::focusOutEvent(QFocusEvent* event) {
+    const bool editing = dragging_;
+    CancelInteraction();
+    if (editing)
+        onEndEdit_();
+    QWidget::focusOutEvent(event);
 }
 void SceneViewport3D::FocusSelection() {
     LuxEngine::Entity selected = document_.GetSelected();
@@ -81,7 +91,8 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
     if (!painter.isActive())
         return;
 
-    painter.fillRect(rect(), QColor(27, 33, 42));
+    const auto& color = document_.GetScene().GetSettings().clearColor;
+    painter.fillRect(rect(), QColor::fromRgbF(color.x, color.y, color.z, color.w));
     painter.setRenderHint(QPainter::Antialiasing);
 
     if (engineFrame_ && !cachedFrame_.isNull()) {
@@ -126,10 +137,9 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
-        const auto& t = entity.GetComponent<LuxEngine::TransformComponent>();
-        if (!std::isfinite(t.position.x) || !std::isfinite(t.position.y) ||
-            !std::isfinite(t.position.z) || !std::isfinite(t.scale.x) ||
-            !std::isfinite(t.scale.y) || !std::isfinite(t.scale.z))
+        const auto matrix = entity.GetScene()->GetWorldMatrix(entity.GetId());
+        if (std::any_of(std::begin(matrix.elements), std::end(matrix.elements),
+                        [](float value) { return !std::isfinite(value); }))
             continue;
         const bool sprite = entity.HasComponent<LuxEngine::SpriteRendererComponent>();
         const bool mesh = entity.HasComponent<LuxEngine::MeshRendererComponent>();
@@ -182,16 +192,6 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
             painter.drawText(labelRect.bottomLeft(), label);
         }
     }
-    painter.setPen(QColor(227, 235, 243));
-    const QString help =
-        QStringLiteral("3D 배치 미리보기  |  우클릭 회전 · 휠 확대 · F 선택 포커스");
-    painter.drawText(
-        14, 22, painter.fontMetrics().elidedText(help, Qt::ElideRight, std::max(0, width() - 28)));
-    painter.setPen(QColor(153, 169, 185));
-    painter.drawText(
-        14, 44,
-        painter.fontMetrics().elidedText(QStringLiteral("현재는 엔티티 경계 프록시를 표시합니다."),
-                                         Qt::ElideRight, std::max(0, width() - 28)));
 }
 void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
     setFocus();
@@ -228,7 +228,15 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
     onSelect_(nearest);
     if (nearest && tool_ != EditorTool::Select) {
         LuxEngine::Entity selected = document_.GetSelected();
-        const auto& transform = selected.GetComponent<LuxEngine::TransformComponent>();
+        if (!selected || selected.GetId() != *nearest)
+            return;
+        LuxEngine::TransformComponent transform;
+        try {
+            transform = selected.GetScene()->GetWorldTransform(selected.GetId());
+        } catch (const std::exception&) {
+            CancelInteraction();
+            return;
+        }
         dragId_ = *nearest;
         dragStart_ = event->position();
         initialPosition_ = transform.position;
@@ -262,9 +270,19 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
     } else if (dragging_ && (event->buttons() & Qt::LeftButton)) {
         LuxEngine::Entity entity = document_.GetSelected();
         if (!entity || entity.GetId() != dragId_ ||
-            !entity.HasComponent<LuxEngine::TransformComponent>())
+            !entity.HasComponent<LuxEngine::TransformComponent>()) {
+            CancelInteraction();
+            onEndEdit_();
             return;
-        LuxEngine::TransformComponent value = entity.GetComponent<LuxEngine::TransformComponent>();
+        }
+        LuxEngine::TransformComponent value;
+        try {
+            value = entity.GetScene()->GetWorldTransform(entity.GetId());
+        } catch (const std::exception&) {
+            CancelInteraction();
+            onEndEdit_();
+            return;
+        }
         const QPointF drag = event->position() - dragStart_;
         if (tool_ == EditorTool::Move) {
             const double scale = distance_ / std::max(1, height());

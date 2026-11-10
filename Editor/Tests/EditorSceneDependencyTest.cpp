@@ -1,0 +1,214 @@
+#include "Engine/EntryPoint.hpp"
+#include "Engine/Scene/Entity.hpp"
+#include "Project/EditorProject.hpp"
+#include "Project/PathEncoding.hpp"
+#include "Scene/SceneDependencies.hpp"
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <stdexcept>
+
+namespace {
+namespace fs = std::filesystem;
+using namespace LuxEditor;
+using namespace LuxEngine;
+void Check(bool condition, const char* description) {
+    if (!condition)
+        throw std::runtime_error(description);
+}
+std::string Data(Scene& scene) {
+    std::string data;
+    Check(scene.SerializeToString(data), "fixture scene serializes");
+    return data;
+}
+std::string Bytes(const fs::path& file) {
+    std::ifstream input(file, std::ios::binary);
+    Check(input.is_open(), "fixture file opens");
+    return {std::istreambuf_iterator<char>(input), {}};
+}
+struct Fixture {
+    fs::path root = fs::temp_directory_path() /
+                    ("lux-scene-dependencies-" +
+                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    EditorProject project;
+    fs::path internal, external;
+    Fixture() {
+        fs::create_directories(root);
+        std::string error;
+        auto created =
+            EditorProject::Create(root / "project", "Dependencies", ProjectTemplate::Empty, error);
+        Check(created.has_value(), error.c_str());
+        project = std::move(*created);
+        internal = project.GetSceneFile().parent_path() / "Internal.lux";
+        external = root / "External.lux";
+        Scene source;
+        source.CreateEntity("Source");
+        Check(source.Serialize(PathUtf8(internal)) && source.Serialize(PathUtf8(external)),
+              "internal and external sources save");
+    }
+    ~Fixture() {
+        std::error_code error;
+        fs::remove_all(root, error);
+    }
+};
+SceneReferenceComponent& Reference(Scene& scene, const fs::path& source) {
+    auto entity = scene.CreateEntity("Reference");
+    auto& reference = entity.AddComponent<SceneReferenceComponent>();
+    reference.path = PathUtf8(source);
+    reference.loaded = false;
+    return reference;
+}
+void RejectWithoutMutation(Fixture& fixture, Scene& scene, const char* reason) {
+    const auto before = Data(scene);
+    const auto origin = scene.GetSourcePath();
+    const auto descriptor = Bytes(fixture.project.GetFile());
+    const auto source = Bytes(fixture.internal);
+    std::string error;
+    Check(!ValidateProjectSceneReferences(fixture.project, scene, error) && !error.empty(), reason);
+    Check(Data(scene) == before && scene.GetSourcePath() == origin &&
+              Bytes(fixture.project.GetFile()) == descriptor && Bytes(fixture.internal) == source,
+          "failed dependency validation preserves in-memory data and source files");
+}
+void TestSourcesAndSnapshots() {
+    Fixture fixture;
+    std::string error;
+    Scene scene;
+    auto& reference = Reference(scene, fixture.internal);
+    Check(ValidateProjectSceneReferences(fixture.project, scene, error) && error.empty(),
+          "valid internal scene dependency is accepted");
+    reference.path = PathUtf8(fixture.external);
+    RejectWithoutMutation(fixture, scene, "direct external dependency is rejected");
+    reference.path = PathUtf8(fixture.internal);
+    Scene hidden;
+    Reference(hidden, fixture.external);
+    reference.baseline = Data(hidden);
+    RejectWithoutMutation(fixture, scene, "external dependency hidden in a baseline is rejected");
+    reference.baseline.clear();
+    reference.suspended = Data(hidden);
+    RejectWithoutMutation(fixture, scene,
+                          "external dependency hidden in unloaded streaming data is rejected");
+    reference.suspended.clear();
+    Scene valid;
+    Reference(valid, fixture.internal.filename());
+    reference.baseline = Data(valid);
+    reference.suspended = reference.baseline;
+    Check(ValidateProjectSceneReferences(fixture.project, scene, error),
+          "relative references in snapshots use the containing scene's directory");
+    reference.baseline.clear();
+    reference.suspended.clear();
+    reference.path = PathUtf8(fixture.internal.parent_path() / "Missing.lux");
+    RejectWithoutMutation(fixture, scene, "missing internal dependency is rejected");
+    reference.path = PathUtf8(fixture.internal);
+    reference.baseline = "broken snapshot";
+    RejectWithoutMutation(fixture, scene, "malformed stored dependency state is rejected");
+}
+void TestTransitiveSources() {
+    Fixture fixture;
+    Scene current, nested;
+    Reference(current, fixture.internal);
+    Reference(nested, fixture.external);
+    Check(nested.Serialize(PathUtf8(fixture.internal)), "transitive source fixture saves");
+    RejectWithoutMutation(fixture, current,
+                          "an internal file cannot conceal a transitive external source");
+    std::string error;
+    Check(!ValidateProjectScenes(fixture.project, error),
+          "whole-project validation catches external sources in currently unloaded scenes");
+}
+void TestAliasesAndProjectScan() {
+    Fixture fixture;
+    std::string error;
+    Check(ValidateProjectScenes(fixture.project, error), "a valid authored project validates");
+    for (const auto* directory : {".git", ".lux/cache", "build", "out", "cmake-build-debug"}) {
+        const auto path = fixture.project.GetFile().parent_path() / directory / "Broken.lux";
+        fs::create_directories(path.parent_path());
+        std::ofstream(path) << "metadata and build products are not authored scenes";
+    }
+    Check(ValidateProjectScenes(fixture.project, error), "metadata and build folders are excluded");
+    const auto bad = fixture.internal.parent_path() / "Broken.lux";
+    std::ofstream(bad) << "invalid scene";
+    Check(!ValidateProjectScenes(fixture.project, error),
+          "invalid unused authored scenes are rejected before packaging");
+    fs::remove(bad);
+    const auto link = fixture.internal.parent_path() / "ExternalAlias.lux";
+    std::error_code ec;
+    fs::create_symlink(fixture.external, link, ec);
+    if (!ec) {
+        Scene scene;
+        Reference(scene, link);
+        RejectWithoutMutation(fixture, scene, "symbolic links cannot escape the project boundary");
+        Check(!ValidateProjectScenes(fixture.project, error),
+              "unreferenced external scene aliases are not admitted into Content");
+    }
+}
+void TestDepth() {
+    Fixture fixture;
+    fs::path next = fixture.internal;
+    for (int index = 18; index >= 0; --index) {
+        Scene source;
+        Reference(source, next);
+        next = fixture.internal.parent_path() / ("Depth" + std::to_string(index) + ".lux");
+        Check(source.Serialize(PathUtf8(next)), "depth fixture saves");
+    }
+    Scene scene;
+    Reference(scene, next);
+    RejectWithoutMutation(fixture, scene, "dependency depth is bounded without loading forever");
+
+    // A shared subtree first visited near the root still needs validation at greater depth.
+    Scene shared;
+    Reference(shared, fixture.internal.parent_path() / "Depth9.lux");
+    Reference(shared, next);
+    RejectWithoutMutation(fixture, shared,
+                          "cached shallow dependencies cannot bypass the depth limit");
+}
+void TestFileBudget() {
+    Fixture fixture;
+    const auto oversized = fixture.internal.parent_path() / "Oversized.lux";
+    std::ofstream(oversized) << "LUX_SCENE 3\n";
+    fs::resize_file(oversized, 128 * 1024 * 1024 + 1);
+    Scene scene;
+    Reference(scene, oversized);
+    RejectWithoutMutation(fixture, scene,
+                          "oversized scene files are rejected before allocating their contents");
+}
+
+void TestIndependentSceneBudgets() {
+    Fixture fixture;
+    Scene scene;
+    scene.CreateEntity("Independent graph");
+    const auto first = fixture.internal.parent_path() / "Large0.lux";
+    Check(scene.Serialize(PathUtf8(first)), "independent graph fixture saves");
+    {
+        // Trailing whitespace is valid scene data. It exercises real file-byte limits without
+        // adding unrelated entity or renderer costs to this dependency-boundary regression.
+        std::ofstream padded(first, std::ios::binary | std::ios::app);
+        const std::string block(1024 * 1024, ' ');
+        for (int index = 0; index < 44; ++index)
+            padded.write(block.data(), static_cast<std::streamsize>(block.size()));
+        Check(static_cast<bool>(padded), "large independent graph fixture writes");
+    }
+    for (int index = 1; index < 3; ++index)
+        fs::copy_file(first,
+                      fixture.internal.parent_path() / ("Large" + std::to_string(index) + ".lux"));
+    std::string error;
+    Check(ValidateProjectScenes(fixture.project, error) && error.empty(),
+          "a project may exceed 128 MiB when each independent scene graph stays within limits");
+}
+} // namespace
+int RunDependencyChecks(int, char**) {
+    try {
+        TestSourcesAndSnapshots();
+        TestTransitiveSources();
+        TestAliasesAndProjectScan();
+        TestDepth();
+        TestFileBudget();
+        TestIndependentSceneBudgets();
+        std::cout << "프로젝트 씬 참조와 배포 경계 검증을 통과했습니다.\n";
+        return 0;
+    } catch (const std::exception& failure) {
+        std::cerr << failure.what() << '\n';
+        return 1;
+    }
+}
+LUX_ENGINE_MAIN(RunDependencyChecks)

@@ -2,6 +2,7 @@
 #include "EditorWindow.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Project/PathEncoding.hpp"
+#include "Scene/SceneHierarchy.hpp"
 #include "Ui/IconFactory.hpp"
 #include "Viewport/EngineSceneRenderer.hpp"
 #include "Viewport/SceneViewport2D.hpp"
@@ -15,12 +16,16 @@
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFont>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
@@ -28,6 +33,7 @@
 #include <QMenu>
 #include <QPixmap>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
@@ -93,6 +99,28 @@ void EditorWindow::BuildLayout() {
     auto* sceneLayout = new QVBoxLayout(sceneFrame);
     sceneLayout->setContentsMargins(0, 0, 0, 0);
     sceneLayout->setSpacing(0);
+    sceneTabs_ = new QTabBar(sceneFrame);
+    sceneTabs_->setObjectName(QStringLiteral("sceneDocuments"));
+    sceneTabs_->setExpanding(false);
+    sceneTabs_->setTabsClosable(true);
+    sceneTabs_->setUsesScrollButtons(true);
+    sceneTabs_->setElideMode(Qt::ElideMiddle);
+    sceneLayout->addWidget(sceneTabs_);
+    sceneLoadProgress_ = new QProgressBar(sceneFrame);
+    sceneLoadProgress_->setObjectName(QStringLiteral("sceneLoadProgress"));
+    sceneLoadProgress_->setRange(0, 0);
+    sceneLoadProgress_->setTextVisible(false);
+    sceneLoadProgress_->setFixedHeight(3);
+    sceneLoadProgress_->hide();
+    sceneLayout->addWidget(sceneLoadProgress_);
+    connect(sceneTabs_, &QTabBar::currentChanged, this, [this](int index) {
+        if (!refreshingSceneTabs_ && index >= 0)
+            SwitchSceneDocument(sceneTabs_->tabData(index).toULongLong());
+    });
+    connect(sceneTabs_, &QTabBar::tabCloseRequested, this, [this](int index) {
+        if (index >= 0)
+            RequestCloseScene(sceneTabs_->tabData(index).toULongLong());
+    });
     auto* sceneBar = new QWidget(sceneFrame);
     sceneBar->setObjectName(QStringLiteral("sceneBar"));
     auto* sceneBarLayout = new QHBoxLayout(sceneBar);
@@ -103,8 +131,6 @@ void EditorWindow::BuildLayout() {
     viewChoice->addItems({QStringLiteral("3D 원근 화면"), QStringLiteral("2D 평면 화면")});
     viewChoice->setMinimumWidth(128);
     sceneBarLayout->addWidget(viewChoice);
-    sceneBarLayout->addWidget(Caption(QStringLiteral("DISPLAY"), sceneBar));
-    sceneBarLayout->addWidget(new QLabel(QStringLiteral("경계 프록시"), sceneBar));
     sceneBarLayout->addStretch();
     auto* focus = new QToolButton(sceneBar);
     focus->setIcon(MakeEditorIcon(EditorIcon::Focus));
@@ -152,9 +178,11 @@ void EditorWindow::BuildLayout() {
     hierarchySearch_ = new QLineEdit(hierarchyPanel);
     hierarchySearch_->setPlaceholderText(QStringLiteral("엔티티 이름 검색"));
     hierarchyLayout->addWidget(hierarchySearch_);
-    hierarchy_ = new QListWidget(hierarchyPanel);
+    auto* tree = new SceneHierarchy(hierarchyPanel);
+    tree->reparent = [this](const std::vector<LuxEngine::uint32>& children,
+                            LuxEngine::uint32 parent) { ReparentSelection(children, parent); };
+    hierarchy_ = tree;
     hierarchy_->setObjectName(QStringLiteral("sceneOutliner"));
-    hierarchy_->setSelectionMode(QAbstractItemView::SingleSelection);
     hierarchy_->setContextMenuPolicy(Qt::CustomContextMenu);
     hierarchyLayout->addWidget(hierarchy_, 1);
     auto* entityActions = new QHBoxLayout;
@@ -181,15 +209,15 @@ void EditorWindow::BuildLayout() {
         RefreshHierarchy();
     });
     connect(hierarchySearch_, &QLineEdit::textChanged, this, [this] { RefreshHierarchy(); });
-    connect(hierarchy_, &QListWidget::currentRowChanged, this, [this](int row) {
+    connect(hierarchy_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
         if (!refreshingHierarchy_)
             SelectEntity(
-                row < 0 || static_cast<size_t>(row) >= hierarchyIds_.size()
-                    ? std::nullopt
-                    : std::optional<LuxEngine::uint32>(hierarchyIds_[static_cast<size_t>(row)]));
+                item ? std::optional<LuxEngine::uint32>(item->data(0, Qt::UserRole).toUInt())
+                     : std::nullopt,
+                false);
     });
     connect(
-        hierarchy_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& point) {
+        hierarchy_, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& point) {
             QMenu menu(this);
             menu.addAction(MakeEditorIcon(EditorIcon::Sprite), QStringLiteral("2D 엔티티 추가"),
                            this, [this] { AddEntity(); });
@@ -199,6 +227,11 @@ void EditorWindow::BuildLayout() {
             menu.addAction(QStringLiteral("복사"), this, [this] { CopyEntity(); });
             menu.addAction(QStringLiteral("붙여넣기"), this, [this] { PasteEntity(); });
             menu.addAction(QStringLiteral("선택 삭제"), this, [this] { DeleteEntity(); });
+            menu.addSeparator();
+            for (const char* id :
+                 {"groupEntities", "ungroupEntities", "detachEntity", "moveEntityToScene"})
+                if (auto* action = findChild<QAction*>(QString::fromLatin1(id)))
+                    menu.addAction(action);
             menu.exec(hierarchy_->mapToGlobal(point));
         });
     connect(add2D, &QToolButton::clicked, this, [this] { AddEntity(); });
@@ -241,9 +274,10 @@ void EditorWindow::BuildLayout() {
     auto* previewLayout = new QVBoxLayout(previewPanel);
     previewLayout->setContentsMargins(4, 4, 4, 4);
     previewLayout->addWidget(Caption(QStringLiteral("PREVIEW"), previewPanel));
-    assetPreview_ = new QLabel(QStringLiteral("프로젝트를 열어 주세요."), previewPanel);
+    assetPreview_ = new QLabel(previewPanel);
     assetPreview_->setAlignment(Qt::AlignCenter);
     assetPreview_->setMinimumWidth(90);
+    assetPreview_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     assetDetails_ = new QLabel(previewPanel);
     assetDetails_->setWordWrap(true);
     previewLayout->addWidget(assetPreview_, 1);
@@ -266,8 +300,7 @@ void EditorWindow::BuildLayout() {
     });
     connect(projectFiles_, &QListWidget::currentRowChanged, this, [this](int row) {
         if (row < 0 || static_cast<size_t>(row) >= projectFilePaths_.size()) {
-            assetPreview_->setPixmap(QPixmap());
-            assetPreview_->setText(QStringLiteral("에셋을 선택해 주세요."));
+            assetPreview_->clear();
             assetDetails_->clear();
             return;
         }
@@ -275,10 +308,13 @@ void EditorWindow::BuildLayout() {
         QPixmap image(QString::fromUtf8(PathUtf8(path)));
         if (!image.isNull()) {
             assetPreview_->setPixmap(
-                image.scaled(220, 180, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                image.scaled(std::max(1, std::min(220, assetPreview_->width())),
+                             std::max(1, std::min(180, assetPreview_->height())),
+                             Qt::KeepAspectRatio, Qt::SmoothTransformation));
         } else {
-            assetPreview_->setPixmap(QPixmap());
-            assetPreview_->setText(QStringLiteral("미리보기를 사용할 수 없습니다."));
+            assetPreview_->setPixmap(QFileIconProvider()
+                                         .icon(QFileInfo(QString::fromUtf8(PathUtf8(path))))
+                                         .pixmap(64, 64));
         }
         QFileInfo info(QString::fromUtf8(PathUtf8(path)));
         assetDetails_->setText(
@@ -309,6 +345,29 @@ void EditorWindow::BuildLayout() {
     name_ = new QLineEdit(inspectorBody_);
     nameRow->addRow(QStringLiteral("이름"), name_);
     body->addLayout(nameRow);
+    sceneReferencePanel_ = new QGroupBox(QStringLiteral("SCENE REFERENCE"), inspectorBody_);
+    sceneReferencePanel_->setObjectName(QStringLiteral("sceneReferencePanel"));
+    auto* referenceLayout = new QVBoxLayout(sceneReferencePanel_);
+    sceneReferencePath_ = new QLineEdit(sceneReferencePanel_);
+    sceneReferencePath_->setObjectName(QStringLiteral("sceneReferencePath"));
+    sceneReferencePath_->setReadOnly(true);
+    referenceLayout->addWidget(sceneReferencePath_);
+    sceneReferenceState_ = new QLabel(sceneReferencePanel_);
+    referenceLayout->addWidget(sceneReferenceState_);
+    auto* referenceButtons = new QHBoxLayout;
+    auto* openReference = new QPushButton(QStringLiteral("열기"), sceneReferencePanel_);
+    auto* relinkReference = new QPushButton(QStringLiteral("경로 변경"), sceneReferencePanel_);
+    referenceButtons->addWidget(openReference);
+    referenceButtons->addWidget(relinkReference);
+    referenceLayout->addLayout(referenceButtons);
+    connect(openReference, &QPushButton::clicked, this, [this] {
+        const auto selected = document_.GetSelected();
+        if (selected && selected.HasComponent<LuxEngine::SceneReferenceComponent>())
+            OpenSceneDocument(
+                PathFromUtf8(selected.GetComponent<LuxEngine::SceneReferenceComponent>().path));
+    });
+    connect(relinkReference, &QPushButton::clicked, this, [this] { RelinkSceneReference(); });
+    body->addWidget(sceneReferencePanel_);
     auto* transformGroup = new QGroupBox(QStringLiteral("TRANSFORM"), inspectorBody_);
     auto* grid = new QGridLayout(transformGroup);
     grid->setContentsMargins(6, 8, 6, 6);
@@ -527,8 +586,7 @@ void EditorWindow::BuildLayout() {
     propertiesLayout->setContentsMargins(7, 7, 7, 7);
     propertiesLayout->addWidget(Caption(QStringLiteral("TOOL PROPERTIES"), toolProperties));
     propertiesLayout->addWidget(new QLabel(QStringLiteral("오브젝트 편집"), toolProperties));
-    toolHint_ =
-        new QLabel(QStringLiteral("선택 도구\n객체를 클릭해 속성을 편집합니다."), toolProperties);
+    toolHint_ = new QLabel(QStringLiteral("선택"), toolProperties);
     toolHint_->setObjectName(QStringLiteral("toolHelp"));
     toolHint_->setWordWrap(true);
     toolHint_->setAlignment(Qt::AlignTop);
@@ -542,12 +600,6 @@ void EditorWindow::BuildLayout() {
         tileId_ = static_cast<uint8_t>(index + 1);
         canvas_->SetTileId(tileId_);
     });
-    auto* navigationHelp = new QLabel(
-        QStringLiteral("오른쪽 드래그: 시점 회전\n가운데 드래그: 화면 이동\nShift+이동: 높이 변경"),
-        toolProperties);
-    navigationHelp->setObjectName(QStringLiteral("toolHelp"));
-    navigationHelp->setWordWrap(true);
-    propertiesLayout->addWidget(navigationHelp);
     propertiesLayout->addStretch();
     toolsRow->addWidget(toolProperties, 1);
     toolsLayout->addLayout(toolsRow, 1);
@@ -558,9 +610,11 @@ void EditorWindow::BuildLayout() {
     overviewCanvas_->SetTool(EditorTool::Select);
     consoleOutput_ = new QPlainTextEdit(this);
     consoleOutput_->setReadOnly(true);
-    consoleOutput_->appendPlainText(QStringLiteral("작업 기록을 표시합니다."));
+    consoleOutput_->setObjectName(QStringLiteral("editorConsole"));
+    consoleOutput_->setMaximumBlockCount(2000);
     issuesOutput_ = new QPlainTextEdit(this);
     issuesOutput_->setReadOnly(true);
+    issuesOutput_->setObjectName(QStringLiteral("editorProblems"));
     issuesOutput_->setPlaceholderText(QStringLiteral("오류와 경고가 여기에 표시됩니다."));
     debugPanel_ = new DebugPanel(this, [this](LuxEngine::uint32 id) { SelectEntity(id); });
 
@@ -676,7 +730,7 @@ void EditorWindow::BuildLayout() {
         assetSearch->setFocus();
         assetSearch->selectAll();
     });
-    statusBar()->showMessage(QStringLiteral("준비되었습니다."));
+
     statusBar()->addPermanentWidget(new QLabel(QStringLiteral("GRID 1u"), this));
     statusBar()->addPermanentWidget(new QLabel(QStringLiteral("SNAP ON"), this));
     defaultLayout_ = saveState(3);
@@ -785,6 +839,20 @@ void EditorWindow::SaveWorkspaceLayout() {
     else
         settings.remove(QStringLiteral("lastProject"));
     settings.setValue(QStringLiteral("lastScene"), QString::fromUtf8(document_.GetPath()));
+    QJsonArray scenes;
+    for (const auto& tab : document_.ListTabs()) {
+        if (tab.path.empty())
+            continue;
+        QJsonObject record;
+        record.insert(QStringLiteral("path"), QString::fromUtf8(tab.path));
+        const auto context = sceneProjects_.find(tab.id);
+        if (context != sceneProjects_.end() && context->second)
+            record.insert(QStringLiteral("project"),
+                          QString::fromUtf8(PathUtf8(context->second->GetFile())));
+        scenes.push_back(record);
+    }
+    settings.setValue(QStringLiteral("openSceneDocuments"),
+                      QJsonDocument(scenes).toJson(QJsonDocument::Compact));
 }
 void EditorWindow::ResetWorkspaceLayout() {
     restoreState(defaultLayout_, 3);

@@ -15,6 +15,7 @@ struct ViewportRay3D {
 };
 std::optional<ViewportRay3D> MakeViewportRay3D(const LuxEngine::PerspectiveCamera& camera,
                                                QSizeF size, QPointF point);
-// Models contain translation, rotation and scale; the mesh bounds are the local unit cube.
+// The local unit cube may have a full affine world transform, including parent-induced shear.
+// The result uses the original ray parameter, so normalized rays return world-space distance.
 std::optional<double> IntersectViewportBox(const ViewportRay3D& ray, const LuxEngine::Mat4& model);
 } // namespace LuxEditor

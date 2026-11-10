@@ -27,6 +27,7 @@ public:
         update();
     }
     void FocusSelection();
+    void CancelInteraction();
     void SetTool(EditorTool tool) {
         tool_ = tool;
     }
@@ -37,13 +38,14 @@ private:
     void mouseReleaseEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
+    void focusOutEvent(QFocusEvent*) override;
     EditorDocument& document_;
     std::function<void(std::optional<LuxEngine::uint32>)> onSelect_;
     std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform_;
     std::function<void()> onBeginEdit_;
     std::function<void()> onEndEdit_;
     LuxEngine::Vec3 focus_{0, 0, 0};
-    double yaw_ = .65, pitch_ = .48, distance_ = 22;
+    double yaw_ = .65, pitch_ = -.48, distance_ = 22;
     QPointF lastMouse_{};
     QPointF dragStart_{};
     LuxEngine::Vec3 initialPosition_{};
