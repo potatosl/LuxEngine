@@ -62,6 +62,18 @@ std::vector<Entity> Scene::GetEntities() {
         result.emplace_back(id, this);
     return result;
 }
+std::vector<Entity> Scene::GetEntitiesIn2DLayerOrder() {
+    auto entities = GetEntities();
+    std::erase_if(entities, [](Entity entity) {
+        const auto* transform = entity.TryGetComponent<TransformComponent>();
+        return !transform || !std::isfinite(transform->position.z);
+    });
+    std::stable_sort(entities.begin(), entities.end(), [](Entity a, Entity b) {
+        return a.GetComponent<TransformComponent>().position.z <
+               b.GetComponent<TransformComponent>().position.z;
+    });
+    return entities;
+}
 void Scene::OnUpdate(double dt) {
     if (!std::isfinite(dt) || dt <= 0.0)
         return;
@@ -132,36 +144,39 @@ bool Finite(const Vec4& v) {
 } // namespace
 void Scene::OnRender() {
     // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직 연결되지 않았습니다.
-    for (Entity entity : GetEntities()) {
-        if (!entity.HasComponent<TransformComponent>())
-            continue;
-        const auto& transform = entity.GetComponent<TransformComponent>();
-        if (!Finite(transform.position) || !Finite(transform.rotation) || !Finite(transform.scale))
-            continue;
-        if (entity.HasComponent<TilemapComponent>()) {
-            const auto& map = entity.GetComponent<TilemapComponent>();
-            if (map.width == 0 || map.width > 256 || map.height == 0 || map.height > 256 ||
-                !std::isfinite(map.tileSize) || map.tileSize <= 0.0f || map.tileSize > 64.0f ||
-                map.tiles.size() != static_cast<size_t>(map.width) * map.height)
+    const auto entities = GetEntitiesIn2DLayerOrder();
+    for (const bool tilemaps : {true, false}) {
+        for (Entity entity : entities) {
+            if (!entity.HasComponent<TransformComponent>())
                 continue;
-            for (uint32 y = 0; y < map.height; ++y)
-                for (uint32 x = 0; x < map.width; ++x) {
-                    const uint8_t tile = map.Get(x, y);
-                    if (tile == 0)
-                        continue;
-                    const float size = map.tileSize;
-                    Renderer2D::DrawQuad({transform.position.x + (x + .5f) * size,
-                                          transform.position.y + (y + .5f) * size,
-                                          transform.position.z},
-                                         {size, size}, TileColor(tile));
-                }
-        }
-        if (entity.HasComponent<SpriteRendererComponent>()) {
-            const auto& sprite = entity.GetComponent<SpriteRendererComponent>();
-            if (Finite(sprite.color))
-                Renderer2D::DrawRotatedQuad({transform.position.x, transform.position.y},
-                                            {transform.scale.x, transform.scale.y},
-                                            transform.rotation.z, sprite.color);
+            const auto& transform = entity.GetComponent<TransformComponent>();
+            if (!Finite(transform.position) || !Finite(transform.rotation) ||
+                !Finite(transform.scale))
+                continue;
+            if (tilemaps && entity.HasComponent<TilemapComponent>()) {
+                const auto& map = entity.GetComponent<TilemapComponent>();
+                if (map.width == 0 || map.width > 256 || map.height == 0 || map.height > 256 ||
+                    !std::isfinite(map.tileSize) || map.tileSize <= 0.0f || map.tileSize > 64.0f ||
+                    map.tiles.size() != static_cast<size_t>(map.width) * map.height)
+                    continue;
+                for (uint32 y = 0; y < map.height; ++y)
+                    for (uint32 x = 0; x < map.width; ++x) {
+                        const uint8_t tile = map.Get(x, y);
+                        if (tile == 0)
+                            continue;
+                        const float size = map.tileSize;
+                        Renderer2D::DrawQuad({transform.position.x + (x + .5f) * size,
+                                              transform.position.y + (y + .5f) * size, 0.0f},
+                                             {size, size}, TileColor(tile));
+                    }
+            }
+            if (!tilemaps && entity.HasComponent<SpriteRendererComponent>()) {
+                const auto& sprite = entity.GetComponent<SpriteRendererComponent>();
+                if (Finite(sprite.color))
+                    Renderer2D::DrawRotatedQuad({transform.position.x, transform.position.y},
+                                                {transform.scale.x, transform.scale.y},
+                                                transform.rotation.z, sprite.color);
+            }
         }
     }
 }

@@ -190,7 +190,11 @@ if(LUX_BUILD_TESTS)
     lux_editor_copy_qt_plugins(LuxEditorRegressionTests)
     add_test(NAME Editor_timeline COMMAND LuxEditorRegressionTests timeline)
     add_test(NAME Editor_sparse_copy COMMAND LuxEditorRegressionTests sparse-copy)
-    set_tests_properties(Editor_timeline Editor_sparse_copy PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    add_test(NAME Editor_picking2d COMMAND LuxEditorRegressionTests picking2d)
+    add_test(NAME Editor_picking2d_gpu COMMAND LuxEditorRegressionTests picking2d-gpu)
+    set_tests_properties(Editor_picking2d_gpu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120
+        LABELS "gpu;editor" ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_VULKAN_VALIDATION=sync")
+    set_tests_properties(Editor_timeline Editor_sparse_copy Editor_picking2d PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 60 LABELS "headless;editor")
     set_tests_properties(Editor_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300 LABELS "headless;editor")
     add_test(NAME Editor_ui_1000 COMMAND LuxEditorUiTests ui --iterations=1000)

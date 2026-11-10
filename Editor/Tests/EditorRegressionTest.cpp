@@ -1,6 +1,7 @@
 #include "App/EditorWindow.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Viewport/EngineSceneRenderer.hpp"
+#include "Viewport/SceneViewport2D.hpp"
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
@@ -8,6 +9,7 @@
 #include <QJsonObject>
 #include <QListWidget>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
@@ -20,6 +22,9 @@
 
 namespace {
 using namespace LuxEngine;
+struct GpuUnavailable : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
@@ -149,6 +154,68 @@ void TestSparseCopy(QApplication& app) {
         window->close();
     }
 }
+void Click(QWidget& view, QPointF point) {
+    const QPointF global = view.mapToGlobal(point.toPoint());
+    QMouseEvent press(QEvent::MouseButtonPress, point, global, Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, point, global, Qt::LeftButton, Qt::NoButton,
+                        Qt::NoModifier);
+    QApplication::sendEvent(&view, &press);
+    QApplication::sendEvent(&view, &release);
+}
+void TestPicking2D(QApplication& app, bool gpu = false) {
+    std::shared_ptr<EngineSceneRenderer> renderer;
+    if (gpu) {
+        renderer = std::make_shared<EngineSceneRenderer>();
+        if (!renderer->EnsureReady())
+            throw GpuUnavailable(renderer->LastError().toStdString());
+    }
+    for (const auto [equalZ, withTilemap] : {std::pair{false, false}, std::pair{true, false},
+                                             std::pair{false, true}, std::pair{true, true}}) {
+        EditorDocument document;
+        auto first = document.CreateEntity("First");
+        auto& firstTransform = first.GetComponent<TransformComponent>();
+        firstTransform.position.z = equalZ ? 0 : 10;
+        firstTransform.scale = {4, 4, 1};
+        first.AddComponent<SpriteRendererComponent>().color = {1, 0, 0, 1};
+        auto second = document.CreateEntity("Second");
+        second.GetComponent<TransformComponent>().scale = {4, 4, 1};
+        second.AddComponent<SpriteRendererComponent>().color = {0, 0, 1, 1};
+        // Tilemaps are drawn in the background pass, regardless of their creation order.
+        if (withTilemap) {
+            auto map = document.CreateEntity("Tilemap");
+            map.GetComponent<TransformComponent>().position = {-1, -1, 20};
+            map.AddComponent<TilemapComponent>().Set(0, 0, 1);
+        }
+        SceneViewport2D view(
+            nullptr, document, [&](std::optional<uint32> id) { document.Select(id); },
+            [](uint32, const TransformComponent&) {}, [](uint32, uint32, uint32, uint8_t) {}, [] {},
+            [] {}, renderer);
+        view.resize(640, 480);
+        view.show();
+        app.processEvents();
+        QImage image(view.size(), QImage::Format_RGBA8888);
+        view.render(&image);
+        const QPoint point(340, 260);
+        const QColor visible = image.pixelColor(point);
+        Check(equalZ ? visible.blue() > 240 : visible.red() > 240,
+              "overlap fixture displays the expected front sprite");
+        if (gpu) {
+            QImage engineImage;
+            Check(renderer->Render(document.GetScene(), 640, 480,
+                                   QRectF(-640.0 / 144, 480.0 / 144, 640.0 / 72, -480.0 / 72),
+                                   engineImage),
+                  "Vulkan renders the overlapping scene without falling back to software");
+            const QColor engineVisible = engineImage.pixelColor(point);
+            Check(equalZ ? engineVisible.blue() > 240 : engineVisible.red() > 240,
+                  "Vulkan and software agree on the visible front sprite");
+        }
+        Click(view, point);
+        const auto selected = document.GetSelected();
+        Check(selected && selected.GetId() == (equalZ ? second.GetId() : first.GetId()),
+              "click selects the visible front sprite with stable equal-Z ordering");
+    }
+}
 } // namespace
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -167,10 +234,18 @@ int main(int argc, char** argv) {
             TestTimeline(app);
         else if (suite == "sparse-copy")
             TestSparseCopy(app);
-        else
+        else if (suite == "picking2d")
+            TestPicking2D(app);
+        else if (suite == "picking2d-gpu") {
+            EngineSceneRenderer::SetForceAllowed(true);
+            TestPicking2D(app, true);
+        } else
             throw std::runtime_error("unknown regression suite");
         std::cout << suite << " regression checks passed\n";
         return 0;
+    } catch (const GpuUnavailable& error) {
+        std::cerr << "GPU unavailable: " << error.what() << '\n';
+        return 77;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
