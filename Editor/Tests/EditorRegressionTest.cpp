@@ -233,6 +233,34 @@ void Click(QWidget& view, QPointF point) {
     QApplication::sendEvent(&view, &press);
     QApplication::sendEvent(&view, &release);
 }
+void TestSparseTilemap(QApplication& app) {
+    for (const auto tool : {EditorTool::TileBrush, EditorTool::TileErase}) {
+        for (const bool selected : {false, true}) {
+            EditorDocument document;
+            auto sparse = document.CreateEntity("Sparse map");
+            sparse.AddComponent<TilemapComponent>();
+            sparse.RemoveComponent<TransformComponent>();
+            if (!selected)
+                document.Select(std::nullopt);
+            int edits = 0, paints = 0;
+            SceneViewport2D view(
+                nullptr, document, [&](auto id) { document.Select(id); }, [](auto, const auto&) {},
+                [&](auto, auto, auto, auto) { ++paints; }, [&] { ++edits; }, [&] { --edits; });
+            view.resize(640, 480);
+            view.SetTool(tool);
+            view.show();
+            app.processEvents();
+            Click(view, {340, 220});
+            Check(edits == 0 && paints == 0, "invalid maps cannot start a brush transaction");
+            auto valid = document.CreateEntity("Valid map");
+            valid.AddComponent<TilemapComponent>();
+            document.Select(sparse.GetId());
+            Click(view, {340, 220});
+            Check(document.GetSelected() == valid && edits == 0 && paints == 1,
+                  "brush skips sparse maps and selects a valid map under the cursor");
+        }
+    }
+}
 void TestPicking2D(QApplication& app, bool gpu = false) {
     std::shared_ptr<EngineSceneRenderer> renderer;
     if (gpu) {
@@ -424,6 +452,8 @@ int main(int argc, char** argv) {
             TestSparseCopy(app);
         else if (suite == "names")
             TestNameLimits(app);
+        else if (suite == "sparse-tilemap")
+            TestSparseTilemap(app);
         else if (suite == "picking2d")
             TestPicking2D(app);
         else if (suite == "picking2d-gpu") {

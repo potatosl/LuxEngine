@@ -252,9 +252,11 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
     if (tool_ == EditorTool::TileBrush || tool_ == EditorTool::TileErase) {
         const QPointF world = ScreenToWorld(event->position());
         LuxEngine::Entity mapEntity = document_.GetSelected();
-        if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>()) {
+        if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>() ||
+            !mapEntity.HasComponent<LuxEngine::TransformComponent>()) {
             for (LuxEngine::Entity candidate : document_.GetScene().GetEntities()) {
-                if (!candidate.HasComponent<LuxEngine::TilemapComponent>())
+                if (!candidate.HasComponent<LuxEngine::TilemapComponent>() ||
+                    !candidate.HasComponent<LuxEngine::TransformComponent>())
                     continue;
                 const auto& map = candidate.GetComponent<LuxEngine::TilemapComponent>();
                 const auto& position =
@@ -267,6 +269,10 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
                 }
             }
         }
+        mapEntity = document_.GetSelected();
+        if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>() ||
+            !mapEntity.HasComponent<LuxEngine::TransformComponent>())
+            return;
         tilePainting_ = true;
         onBeginEdit_();
         PaintAt(event->position());
@@ -377,9 +383,11 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
 void SceneViewport2D::PaintAt(QPointF point) {
     const QPointF world = ScreenToWorld(point);
     LuxEngine::Entity mapEntity = document_.GetSelected();
-    if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>()) {
+    if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>() ||
+        !mapEntity.HasComponent<LuxEngine::TransformComponent>()) {
         for (LuxEngine::Entity candidate : document_.GetScene().GetEntities()) {
-            if (!candidate.HasComponent<LuxEngine::TilemapComponent>())
+            if (!candidate.HasComponent<LuxEngine::TilemapComponent>() ||
+                !candidate.HasComponent<LuxEngine::TransformComponent>())
                 continue;
             const auto& map = candidate.GetComponent<LuxEngine::TilemapComponent>();
             const auto& position = candidate.GetComponent<LuxEngine::TransformComponent>().position;
@@ -392,16 +400,20 @@ void SceneViewport2D::PaintAt(QPointF point) {
             }
         }
     }
-    if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>())
+    if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>() ||
+        !mapEntity.HasComponent<LuxEngine::TransformComponent>())
         return;
     const auto& map = mapEntity.GetComponent<LuxEngine::TilemapComponent>();
     const auto& position = mapEntity.GetComponent<LuxEngine::TransformComponent>().position;
-    const int x = static_cast<int>(std::floor((world.x() - position.x) / map.tileSize));
-    const int y = static_cast<int>(std::floor((world.y() - position.y) / map.tileSize));
-    if (x >= 0 && y >= 0 && x < static_cast<int>(map.width) && y < static_cast<int>(map.height))
-        onPaintTile_(mapEntity.GetId(), static_cast<LuxEngine::uint32>(x),
-                     static_cast<LuxEngine::uint32>(y),
-                     tool_ == EditorTool::TileErase ? 0 : tileId_);
+    if (!std::isfinite(map.tileSize) || map.tileSize <= 0)
+        return;
+    const double cellX = std::floor((world.x() - position.x) / map.tileSize);
+    const double cellY = std::floor((world.y() - position.y) / map.tileSize);
+    if (!(cellX >= 0 && cellY >= 0 && cellX < map.width && cellY < map.height))
+        return;
+    onPaintTile_(mapEntity.GetId(), static_cast<LuxEngine::uint32>(cellX),
+                 static_cast<LuxEngine::uint32>(cellY),
+                 tool_ == EditorTool::TileErase ? 0 : tileId_);
 }
 void SceneViewport2D::wheelEvent(QWheelEvent* event) {
     const QPointF world = ScreenToWorld(event->position());
