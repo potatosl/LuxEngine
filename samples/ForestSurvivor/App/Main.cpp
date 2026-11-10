@@ -1,10 +1,10 @@
 #include "Engine/EntryPoint.hpp"
 #include "ForestSurvivorApp.hpp"
 #include <charconv>
-#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace {
 unsigned Number(std::string_view text) {

@@ -28,9 +28,10 @@ lux_copy_runtime(SampleForestSurvivor)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(LUX_SAMPLE_ASSET_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Assets" CACHE PATH "Shared CC0 sample assets")
     if(EXISTS "${LUX_SAMPLE_ASSET_ROOT}")
-        add_custom_command(TARGET SampleForestSurvivor POST_BUILD
+        add_custom_target(ForestSurvivorAssets ALL
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${LUX_SAMPLE_ASSET_ROOT}"
-                "$<TARGET_FILE_DIR:SampleForestSurvivor>/assets")
+                "$<TARGET_FILE_DIR:SampleForestSurvivor>/assets" VERBATIM)
+        add_dependencies(SampleForestSurvivor ForestSurvivorAssets)
     endif()
 endif()
 if(COMMAND lux_set_target_warnings)
@@ -40,22 +41,23 @@ elseif(MSVC)
     target_compile_options(SampleForestSurvivorGame PRIVATE /utf-8)
     target_compile_options(SampleForestSurvivor PRIVATE /utf-8)
 endif()
-if(WIN32 AND LUX_BUILD_SHARED)
-    add_custom_command(TARGET SampleForestSurvivor POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:LuxEngine>
-            $<TARGET_FILE_DIR:SampleForestSurvivor>)
-endif()
 if(LUX_BUILD_TESTS)
     add_executable(SampleForestSurvivorTests Tests/SurvivalGameTest.cpp)
     target_link_libraries(SampleForestSurvivorTests PRIVATE SampleForestSurvivorGame)
+    lux_copy_runtime(SampleForestSurvivorTests)
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(SampleForestSurvivorTests)
+    elseif(MSVC)
+        target_compile_options(SampleForestSurvivorTests PRIVATE /utf-8)
     endif()
     add_executable(SampleForestSurvivorUiTests
         Tests/ForestUiTest.cpp App/ForestSurvivorApp.cpp Presentation/ForestRenderer.cpp)
     target_link_libraries(SampleForestSurvivorUiTests PRIVATE SampleForestSurvivorGame LuxEngine::Runtime)
     target_include_directories(SampleForestSurvivorUiTests SYSTEM PRIVATE "${FOREST_STB_INCLUDE_DIR}")
     lux_copy_runtime(SampleForestSurvivorUiTests)
+    if(TARGET ForestSurvivorAssets)
+        add_dependencies(SampleForestSurvivorUiTests ForestSurvivorAssets)
+    endif()
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(SampleForestSurvivorUiTests)
     elseif(MSVC)
@@ -67,6 +69,10 @@ if(LUX_BUILD_TESTS)
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:SampleForestSurvivorUiTests>")
     add_test(NAME Sample_forest_survivor_rules COMMAND SampleForestSurvivorTests)
     set_tests_properties(Sample_forest_survivor_rules PROPERTIES LABELS "headless;samples" TIMEOUT 60)
+    add_test(NAME Sample_forest_survivor_silent COMMAND SampleForestSurvivor --smoke-test)
+    set_tests_properties(Sample_forest_survivor_silent PROPERTIES LABELS "gpu;samples" TIMEOUT 60
+        ENVIRONMENT "SDL_AUDIO_DRIVER=forest-invalid-driver;LUX_VULKAN_VALIDATION=sync"
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:SampleForestSurvivor>")
     add_test(NAME Sample_forest_survivor_smoke COMMAND SampleForestSurvivor --smoke-test)
     set_tests_properties(Sample_forest_survivor_smoke PROPERTIES LABELS "gpu;samples" TIMEOUT 60
         ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync"

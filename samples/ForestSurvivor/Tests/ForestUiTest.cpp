@@ -1,9 +1,12 @@
 #include "App/ForestSurvivorApp.hpp"
+#include "Engine/Audio/AudioEngine.hpp"
 #include "Engine/EntryPoint.hpp"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
 using namespace ForestGame;
@@ -43,21 +46,43 @@ void Key(ForestSurvivorApp& app, SDL_Keycode key, bool pressed) {
     Check(SDL_PushEvent(&event), "keyboard event queues");
 }
 LuxEngine::Vec2 Find(ForestSurvivorApp& app, UiAction action) {
+    LuxEngine::Vec2 low{1, 1}, high{0, 0};
+    bool found = false;
     for (int row = 1; row < 100; ++row)
         for (int column = 1; column < 100; ++column) {
             const LuxEngine::Vec2 point{column / 100.0f, row / 100.0f};
-            if (app.ActionAt(point.x, point.y) == action)
-                return point;
+            if (app.ActionAt(point.x, point.y) == action) {
+                found = true;
+                low.x = std::min(low.x, point.x);
+                low.y = std::min(low.y, point.y);
+                high.x = std::max(high.x, point.x);
+                high.y = std::max(high.y, point.y);
+            }
         }
-    throw std::runtime_error("Expected visible UI button has no hit target");
+    Check(found, "Expected visible UI button has no hit target");
+    const auto center = (low + high) * .5f;
+    Check(app.ActionAt(center.x, center.y) == action, "button center belongs to its hit target");
+    return center;
 }
-void Click(ForestSurvivorApp& app, UiAction action) {
+void QueueClick(ForestSurvivorApp& app, UiAction action) {
     const auto point = Find(app, action);
+    // Queue a complete gesture together so native pointer motion cannot split the synthetic click.
     Motion(app, point.x, point.y);
     Button(app, true);
-    Frames(app, 1);
+    Motion(app, point.x, point.y);
     Button(app, false);
-    Frames(app);
+}
+void Click(ForestSurvivorApp& app, UiAction action) {
+    QueueClick(app, action);
+    const auto expected = action == UiAction::Pause ? Phase::Paused : Phase::Playing;
+    const auto deadline = SDL_GetTicks() + 2000;
+    // UI actions are consumed by the next fixed update, which need not run in every rendered frame.
+    do {
+        Frames(app, 1);
+        if (app.GetGame().GetPhase() == expected)
+            return;
+    } while (SDL_GetTicks() < deadline);
+    Check(false, "a confirmed button click reaches the expected phase within two seconds");
 }
 } // namespace
 
@@ -93,6 +118,10 @@ int TestMenuButtons() {
           "dragging out of a pressed button cancels activation");
     Click(app, UiAction::Start);
     Check(app.GetGame().GetPhase() == Phase::Playing, "releasing the start button starts play");
+    if (std::string_view(SDL_getenv("SDL_AUDIO_DRIVER") ? SDL_getenv("SDL_AUDIO_DRIVER") : "") ==
+        "dummy")
+        Check(LuxEngine::AudioEngine::GetCachedFileCount() > 0,
+              "a confirmed menu click loads and plays the bundled CC0 sound");
     Click(app, UiAction::Pause);
     const auto stoppedAt = app.GetGame().Elapsed();
     Frames(app, 5);
@@ -117,13 +146,16 @@ int TestMenuButtons() {
               app.GetGame().GetPlayer().level == 1,
           "restart button resets the run");
     Click(app, UiAction::Pause);
-    const auto quit = Find(app, UiAction::Quit);
-    Motion(app, quit.x, quit.y);
-    Button(app, true);
-    Frames(app, 1);
-    Button(app, false);
-    SDL_Delay(18);
-    Check(app.RunFrame() == LuxEngine::Application::FrameResult::Stopped,
+    QueueClick(app, UiAction::Quit);
+    auto result = LuxEngine::Application::FrameResult::Continue;
+    const auto deadline = SDL_GetTicks() + 2000;
+    while (result != LuxEngine::Application::FrameResult::Stopped && SDL_GetTicks() < deadline) {
+        SDL_Delay(18);
+        result = app.RunFrame();
+        Check(result != LuxEngine::Application::FrameResult::Error,
+              "quit gesture has no GPU error");
+    }
+    Check(result == LuxEngine::Application::FrameResult::Stopped,
           "quit button closes the application");
     std::cout << "Forest Survivor UI interaction checks passed\n";
     return 0;

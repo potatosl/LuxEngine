@@ -90,28 +90,23 @@ struct Sheet {
         std::vector<le::uint8> pixels;
         if (!le::AssetManager::DecodeTextureCpu(Utf8(path), width, height, pixels))
             throw std::runtime_error("CC0 이미지 에셋을 읽을 수 없습니다: " + Utf8(path));
-        // Source art stays unchanged. Nearest expansion keeps pixel edges sharp with the engine's
-        // linear sampler; atlas UVs inset half a GPU texel below prevent neighboring tile bleed.
-        constexpr int factor = 4;
-        std::vector<le::uint8> enlarged(static_cast<size_t>(width * height * factor * factor * 4));
-        for (int y = 0; y < height * factor; ++y)
-            for (int x = 0; x < width * factor; ++x) {
-                const size_t source = static_cast<size_t>(((y / factor) * width + x / factor) * 4);
-                const size_t destination = static_cast<size_t>((y * width * factor + x) * 4);
-                std::copy_n(pixels.data() + source, 4, enlarged.data() + destination);
-            }
-        if (!texture.Initialize(&device, static_cast<le::uint32>(width * factor),
-                                static_cast<le::uint32>(height * factor), enlarged.data()))
+        if (!texture.Initialize(&device, static_cast<le::uint32>(width),
+                                static_cast<le::uint32>(height), pixels.data(),
+                                le::TextureFilter::Nearest))
             throw std::runtime_error("CC0 이미지 GPU 리소스를 만들 수 없습니다: " + Utf8(path));
     }
     Region Tile(int index, int columns, int pixels, int wide = 1, int high = 1) const {
+        if (index < 0 || columns <= 0 || pixels <= 0 || wide <= 0 || high <= 0)
+            throw std::out_of_range("CC0 타일 선택 값이 올바르지 않습니다.");
         const float w = static_cast<float>(texture.GetWidth()),
                     h = static_cast<float>(texture.GetHeight());
-        const int x = (index % columns) * pixels * 4, y = (index / columns) * pixels * 4;
+        const int x = (index % columns) * pixels, y = (index / columns) * pixels;
+        if (x + pixels * wide > w || y + pixels * high > h)
+            throw std::out_of_range("CC0 타일 선택 범위가 원본 이미지 크기를 넘었습니다.");
         return {(x + .5f) / w,
                 (y + .5f) / h,
-                (x + pixels * wide * 4 - .5f) / w,
-                (y + pixels * high * 4 - .5f) / h,
+                (x + pixels * wide - .5f) / w,
+                (y + pixels * high - .5f) / h,
                 pixels * wide,
                 pixels * high};
     }
@@ -208,6 +203,7 @@ struct ForestRenderer::State {
     float uiWidth = 1280;
     float pointerX = -1, pointerY = -1;
     bool pressed = false;
+    bool keyboardChoice = false;
     int selectedChoice = 0;
     Phase phase = Phase::Title;
 
@@ -365,9 +361,13 @@ struct ForestRenderer::State {
                 const bool covered = std::abs(player.position.x - actor.position.x) < 1.4f &&
                                      player.position.y > actor.position.y &&
                                      player.position.y < actor.position.y + 2.5f;
-                const int tile = std::array<int, 4>{4, 3, 16, 15}[actor.index];
-                Town(tile, actor.position + le::Vec2{0, .62f}, actor.index < 2 ? 2.2f : 2.0f,
-                     {1, 1, 1, covered ? .45f : 1});
+                const bool tall = actor.index < 2;
+                const int tile = std::array<int, 4>{4, 3, 28, 27}[actor.index];
+                // The tall source trees span two tile rows; preserve the whole sprite and trunk.
+                const le::Vec2 size = tall ? le::Vec2{1.55f, 3.1f} : le::Vec2{1.25f, 1.25f};
+                batch.Sprite(&town.texture, town.Tile(tile, 12, 16, 1, tall ? 2 : 1),
+                             actor.position + le::Vec2{0, size.y * .45f}, size,
+                             {1, 1, 1, covered ? .45f : 1});
             } else if (actor.kind == 1) {
                 const auto& enemy = game.GetEnemies()[actor.index];
                 const float size = enemy.boss ? 3.2f : enemy.radius * 3.0f;
@@ -509,7 +509,8 @@ struct ForestRenderer::State {
         const std::array<int, 9> icons{104, 119, 129, 116, 93, 105, 118, 2, 114};
         for (int i = 0; i < 3; ++i) {
             const Rect card = ChoiceCard(i);
-            NineSlice(Hover(card) ? 18 : 15, card,
+            const bool focused = keyboardChoice && selectedChoice == i;
+            NineSlice(Hover(card) || focused ? 18 : 15, card,
                       Hover(card) && pressed ? Color{.9f, .9f, .9f, 1} : White);
             const auto& choice = game.GetChoices()[i];
             const int id = std::clamp(static_cast<int>(choice.id), 0, 8);
@@ -520,7 +521,8 @@ struct ForestRenderer::State {
                         52);
             Wrap(choice.title, card.x + 22, card.y + 99, card.width - 44, 27, 2, Ink);
             Wrap(choice.description, card.x + 22, card.y + 166, card.width - 44, 21, 3, Muted);
-            Text("CLICK TO SELECT", card.x + 22, card.y + 252, 17, Accent);
+            Text(focused ? "ENTER TO SELECT" : "CLICK TO SELECT", card.x + 22, card.y + 252, 17,
+                 Accent);
             buttons.emplace_back(card,
                                  static_cast<UiAction>(static_cast<int>(UiAction::Choice0) + i));
         }
@@ -612,11 +614,16 @@ int ForestRenderer::HitChoice(float x, float y) const {
                : -1;
 }
 void ForestRenderer::SetPointer(float x, float y, bool down) {
+    if (std::abs(x - state_->pointerX) > .001f || std::abs(y - state_->pointerY) > .001f)
+        state_->keyboardChoice = false;
     state_->pointerX = x;
     state_->pointerY = y;
     state_->pressed = down;
 }
 void ForestRenderer::SetSelectedChoice(int index) {
-    state_->selectedChoice = std::clamp(index, 0, 2);
+    index = std::clamp(index, 0, 2);
+    if (index != state_->selectedChoice)
+        state_->keyboardChoice = true;
+    state_->selectedChoice = index;
 }
 } // namespace ForestGame

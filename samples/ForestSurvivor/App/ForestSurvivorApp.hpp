@@ -2,6 +2,7 @@
 #include "Engine/Application.hpp"
 #include "Game/SurvivalGame.hpp"
 #include "Presentation/ForestRenderer.hpp"
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -42,6 +43,7 @@ private:
     LuxEngine::Vec2 AutomaticMovement() const;
     void AdvanceAutoplay(double dt);
     void SaveCapture();
+    void UpdateSound(double dt);
     RunOptions options_;
     SurvivalGame game_;
     ForestRenderer renderer_;
@@ -52,5 +54,10 @@ private:
     bool pointerDown_ = false;
     UiAction downAction_ = UiAction::None;
     UiAction queuedAction_ = UiAction::None;
+    bool audioReady_ = false;
+    std::array<std::string, 4> sounds_{};
+    Phase lastPhase_ = Phase::Title;
+    float lastHealth_ = 100, soundCooldown_ = 0;
+    int lastXp_ = 0;
 };
 } // namespace ForestGame

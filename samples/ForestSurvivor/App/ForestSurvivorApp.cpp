@@ -1,4 +1,5 @@
 #include "ForestSurvivorApp.hpp"
+#include "Engine/Audio/AudioEngine.hpp"
 #include "Engine/Platform/Input.hpp"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Runtime/Runtime.hpp"
@@ -42,6 +43,15 @@ void ForestSurvivorApp::OnInit() {
     const auto assets =
         options_.assets.empty() ? fromUtf8(basePath) / "assets" : fromUtf8(options_.assets);
     renderer_.Initialize(GetGpuDevice(), assets);
+    const std::array<const char*, 4> soundFiles{"click_001.wav", "drop_001.wav",
+                                                "confirmation_001.wav", "error_001.wav"};
+    for (size_t i = 0; i < soundFiles.size(); ++i) {
+        const auto bytes = (assets / "InterfaceSounds/Audio" / soundFiles[i]).u8string();
+        sounds_[i] = std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    }
+    audioReady_ = le::AudioEngine::Init();
+    if (!audioReady_)
+        le::Log::Warn("오디오 장치를 열지 못했습니다. 소리 없이 게임을 계속 실행합니다.");
     const auto bindMove = [](const char* action, le::LuxKey first, le::LuxKey second,
                              le::LuxGamepadButton pad) {
         le::Input::BindAction(action, first);
@@ -75,6 +85,9 @@ void ForestSurvivorApp::OnInit() {
             AdvanceAutoplay(1.0 / 60.0);
         }
     }
+    lastPhase_ = game_.GetPhase();
+    lastHealth_ = game_.GetPlayer().health;
+    lastXp_ = game_.GetPlayer().xp;
     le::Log::Info("숲의 수호자 샘플이 준비되었습니다. 화면의 시작 버튼을 눌러 주세요.");
 }
 
@@ -148,35 +161,49 @@ void ForestSurvivorApp::OnEvent(le::Event& event) {
 
 void ForestSurvivorApp::ExecuteButton(UiAction action) {
     const auto phase = game_.GetPhase();
+    bool activated = false;
     switch (action) {
     case UiAction::Start:
-        if (phase == Phase::Title)
+        if (phase == Phase::Title) {
             game_.Start();
+            activated = true;
+        }
         break;
     case UiAction::Pause:
-        if (phase == Phase::Playing)
+        if (phase == Phase::Playing) {
             game_.TogglePause();
+            activated = true;
+        }
         break;
     case UiAction::Resume:
-        if (phase == Phase::Paused)
+        if (phase == Phase::Paused) {
             game_.TogglePause();
+            activated = true;
+        }
         break;
     case UiAction::Restart:
-        if (phase == Phase::Paused || phase == Phase::Defeat || phase == Phase::Victory)
+        if (phase == Phase::Paused || phase == Phase::Defeat || phase == Phase::Victory) {
             game_.Restart();
+            activated = true;
+        }
         break;
     case UiAction::Quit:
         Close();
+        activated = true;
         break;
     case UiAction::Choice0:
     case UiAction::Choice1:
     case UiAction::Choice2:
-        if (game_.ChooseUpgrade(static_cast<int>(action) - static_cast<int>(UiAction::Choice0)))
+        if (game_.ChooseUpgrade(static_cast<int>(action) - static_cast<int>(UiAction::Choice0))) {
             selectedChoice_ = 0;
+            activated = true;
+        }
         break;
     case UiAction::None:
         break;
     }
+    if (activated && audioReady_)
+        le::AudioEngine::PlaySound(sounds_[0], .10f);
 }
 
 void ForestSurvivorApp::ProcessControls() {
@@ -224,6 +251,28 @@ void ForestSurvivorApp::SaveCapture() {
     Close();
 }
 
+void ForestSurvivorApp::UpdateSound(double dt) {
+    soundCooldown_ = std::max(0.0f, soundCooldown_ - static_cast<float>(dt));
+    const auto phase = game_.GetPhase();
+    const auto& player = game_.GetPlayer();
+    if (audioReady_ && phase != lastPhase_ &&
+        (phase == Phase::Upgrade || phase == Phase::Victory || phase == Phase::Defeat)) {
+        le::AudioEngine::PlaySound(sounds_[phase == Phase::Defeat ? 3 : 2], .15f);
+        soundCooldown_ = .15f;
+    } else if (audioReady_ && soundCooldown_ <= 0) {
+        if (player.health < lastHealth_) {
+            le::AudioEngine::PlaySound(sounds_[3], .12f);
+            soundCooldown_ = .15f;
+        } else if (player.xp > lastXp_) {
+            le::AudioEngine::PlaySound(sounds_[1], .07f);
+            soundCooldown_ = .12f;
+        }
+    }
+    lastPhase_ = phase;
+    lastHealth_ = player.health;
+    lastXp_ = player.xp;
+}
+
 void ForestSurvivorApp::OnUpdate(double dt) {
     ProcessControls();
     if (options_.pauseOnFocusLoss && !GetWindow().HasFocus()) {
@@ -236,6 +285,7 @@ void ForestSurvivorApp::OnUpdate(double dt) {
         AdvanceAutoplay(dt);
     else
         game_.Tick(dt, Movement(), Pressed("Forest.Dash"));
+    UpdateSound(dt);
     if (options_.maxFrames != 0 && ++frames_ >= options_.maxFrames) {
         if (options_.capture.empty())
             Close();
@@ -261,6 +311,8 @@ void ForestSurvivorApp::OnShutdown() {
     for (const char* action : Actions)
         le::Input::ClearAction(action);
     renderer_.Shutdown();
+    le::AudioEngine::Shutdown();
+    audioReady_ = false;
     le::Renderer2D::Shutdown();
     le::Log::Info("숲의 수호자 샘플을 종료했습니다.");
 }
