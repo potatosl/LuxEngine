@@ -239,7 +239,9 @@ GpuDevice::FrameStart GpuDevice::BeginFrame() {
     Vk::FrameData& frame = s.frames[s.frameSlot];
     s.frameStats = {};
     const auto waitStart = std::chrono::steady_clock::now();
-    if (!s.WaitForSerial(frame.serial))
+    // Drain this slot's previous present before acquiring another image. If a bounded wait
+    // times out, no new acquire semaphore has been signaled and the same slot remains retryable.
+    if (!s.WaitForSerial(frame.serial) || !s.WaitForPresent(frame, s.config.gpuTimeoutNs))
         return FrameStart::Error;
     s.frameStats.cpuWaitMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
@@ -648,7 +650,34 @@ bool GpuDevice::EndFrame() {
     present.swapchainCount = 1;
     present.pSwapchains = &s.swapchain.handle;
     present.pImageIndices = &s.imageIndex;
-    const VkResult presented = vkQueuePresentKHR(s.presentQueue, &present);
+#if defined(VK_EXT_swapchain_maintenance1)
+    VkSwapchainPresentFenceInfoEXT presentFenceInfo{};
+    presentFenceInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT;
+    presentFenceInfo.swapchainCount = 1;
+    presentFenceInfo.pFences = &frame.presentFence;
+    if (s.info.presentFences)
+        present.pNext = &presentFenceInfo;
+#endif
+    const bool skippedPresent = Vk::ConsumeFault(Vk::Fault::PresentOutOfHostMemory);
+    VkResult presented =
+        skippedPresent ? VK_ERROR_OUT_OF_HOST_MEMORY : vkQueuePresentKHR(s.presentQueue, &present);
+    // These WSI errors still enqueue the semaphore wait and present-fence signal. Allocation
+    // failures leave every synchronization primitive unaffected, so their fences stay unowned.
+    bool queued = !skippedPresent && (presented == VK_SUCCESS || presented == VK_SUBOPTIMAL_KHR ||
+                                      presented == VK_ERROR_OUT_OF_DATE_KHR ||
+                                      presented == VK_ERROR_SURFACE_LOST_KHR ||
+                                      presented == VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT);
+#if defined(VK_EXT_present_timing)
+    queued = queued || (!skippedPresent && presented == VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT);
+#endif
+    if (queued && s.info.presentFences) {
+        frame.presentPending = true;
+        ++s.counters.presentFencesSubmitted;
+    }
+    // Fault injection preserves a real enqueue; fabricating OUT_OF_DATE before the call would
+    // leave an unsignaled, unsubmitted fence and could deadlock teardown.
+    if (queued && Vk::ConsumeFault(Vk::Fault::PresentOutOfDate))
+        presented = VK_ERROR_OUT_OF_DATE_KHR;
     if (rendered) {
         s.lastFrameStats = s.frameStats;
         ++s.counters.framesSubmitted;
@@ -659,8 +688,13 @@ bool GpuDevice::EndFrame() {
     }
     if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR)
         s.swapchainDirty = true;
-    else if (presented != VK_SUCCESS)
+    else if (presented != VK_SUCCESS) {
+        // An unqueued present retains the acquired image and its signaled render semaphore.
+        // Reinitialize instead of trying to reuse that incomplete frame on this device.
+        if (!queued && presented != VK_ERROR_DEVICE_LOST)
+            s.status = GpuStatus::Error;
         return s.Fail(presented, "vkQueuePresentKHR");
+    }
     return rendered;
 }
 
@@ -700,6 +734,8 @@ bool GpuDevice::WaitIdle() {
         return false;
     if (const VkResult result = vkDeviceWaitIdle(state_->device); result != VK_SUCCESS)
         return state_->Fail(result, "vkDeviceWaitIdle");
+    if (!state_->WaitForPresents(state_->config.gpuTimeoutNs))
+        return false;
     state_->CollectGarbage();
     return state_->Usable();
 }

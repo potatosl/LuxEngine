@@ -103,6 +103,32 @@ bool DeviceState::WaitForSerial(uint64 serial) {
     return Usable();
 }
 
+bool DeviceState::WaitForPresent(FrameData& frame, uint64 timeout, bool reset) {
+    if (!frame.presentPending || !frame.presentFence)
+        return true;
+    const auto waited = vkWaitForFences(device, 1, &frame.presentFence, VK_TRUE, timeout);
+    if (waited != VK_SUCCESS)
+        return Fail(waited, "Waiting for presentation resources");
+    frame.presentPending = false;
+    ++counters.presentFencesWaited;
+    if (reset) {
+        if (const auto result = vkResetFences(device, 1, &frame.presentFence);
+            result != VK_SUCCESS) {
+            status = GpuStatus::Error;
+            return Fail(result, "Resetting presentation fence");
+        }
+    }
+    return true;
+}
+
+bool DeviceState::WaitForPresents(uint64 timeout, bool reset) {
+    bool completed = true;
+    for (auto& frame : frames)
+        if (!WaitForPresent(frame, timeout, reset))
+            completed = false;
+    return completed;
+}
+
 VkResult DeviceState::Submit(VkCommandBuffer cmd, VkSemaphore wait, VkPipelineStageFlags waitStage,
                              VkSemaphore signal, uint64& serial) {
     if (ConsumeFault(Fault::Submit))
@@ -614,6 +640,17 @@ bool DeviceState::CreateFrames() {
             frame.imageAvailable = VK_NULL_HANDLE;
             return Fail(result, "Image-available semaphore");
         }
+        if (info.presentFences) {
+            if (ConsumeFault(Fault::PresentFenceAllocation))
+                return Fail(VK_ERROR_OUT_OF_HOST_MEMORY, "Presentation fence allocation");
+            VkFenceCreateInfo fenceInfo{};
+            fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+            if (const auto result = vkCreateFence(device, &fenceInfo, nullptr, &frame.presentFence);
+                result != VK_SUCCESS) {
+                frame.presentFence = VK_NULL_HANDLE;
+                return Fail(result, "Presentation fence allocation");
+            }
+        }
         if (ConsumeFault(Fault::BufferAllocation))
             return Fail(VK_ERROR_OUT_OF_DEVICE_MEMORY, "Frame uniform buffer");
         VkBufferCreateInfo uniformInfo{};
@@ -684,6 +721,8 @@ void DeviceState::DestroyFrames() {
             vkDestroyQueryPool(device, frame.queries, nullptr);
         if (frame.imageAvailable)
             vkDestroySemaphore(device, frame.imageAvailable, nullptr);
+        if (frame.presentFence)
+            vkDestroyFence(device, frame.presentFence, nullptr);
         if (frame.pool)
             vkDestroyCommandPool(device, frame.pool, nullptr);
         frame = {};
@@ -708,6 +747,13 @@ void DeviceState::Shutdown() {
             uploadRecording = VK_NULL_HANDLE;
         }
         vkDeviceWaitIdle(device);
+        // Queue/device idle does not cover the presentation engine's references. Only present
+        // fences prove these semaphores and the swapchain are safe to release. A truly lost
+        // device makes vkWaitForFences return DEVICE_LOST, which also permits lost cleanup.
+        while (!WaitForPresents(UINT64_MAX, false) && status != GpuStatus::DeviceLost) {
+            // An unexpected host-allocation failure is not completion evidence. Retry rather
+            // than release presentation payloads that the implementation may still reference.
+        }
         for (const Retired& resource : uploadStaging)
             DestroyRetired(resource);
         for (const Retired& resource : pendingRetire)

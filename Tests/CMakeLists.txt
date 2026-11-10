@@ -30,7 +30,7 @@ set(LUX_GPU_TEST_ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync"
 add_test(NAME Engine_scene_hierarchy_gpu COMMAND LuxSceneCoreTests --gpu)
 set_tests_properties(Engine_scene_hierarchy_gpu PROPERTIES LABELS "gpu;scene" TIMEOUT 60 SKIP_RETURN_CODE 77
     ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}" WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxSceneCoreTests>")
-foreach(suite gpu vulkan failures stress lifecycle multidevice texture_filter)
+foreach(suite gpu vulkan failures stress lifecycle multidevice texture_filter present_completion)
     add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
     set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 120 LABELS gpu SKIP_RETURN_CODE 77
         ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}"

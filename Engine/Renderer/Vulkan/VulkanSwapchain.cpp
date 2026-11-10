@@ -238,6 +238,8 @@ SwapchainResult DeviceState::CreateSwapchain() {
 bool DeviceState::RecreateSwapchain() {
     if (const VkResult result = vkDeviceWaitIdle(device); result != VK_SUCCESS)
         return Fail(result, "vkDeviceWaitIdle before swapchain recreation");
+    if (!WaitForPresents(config.gpuTimeoutNs))
+        return false;
     PollCompleted();
     CollectGarbage();
     const SwapchainResult result = CreateSwapchain();

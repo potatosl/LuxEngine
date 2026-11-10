@@ -21,6 +21,10 @@ enum class Fault : uint32 {
     AcquireOutOfDate,
     SurfaceZeroExtent,
     GpuTimeout,
+    PresentFencesUnsupported,
+    PresentFenceAllocation,
+    PresentOutOfDate,
+    PresentOutOfHostMemory,
     Count
 };
 

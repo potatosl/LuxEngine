@@ -50,6 +50,7 @@ struct GpuDeviceInfo {
     bool gpuTimestamps = false;
     bool validation = false;
     bool synchronizationValidation = false;
+    bool presentFences = false;
 };
 
 struct GpuFrameStats {
@@ -72,6 +73,8 @@ struct GpuDeviceCounters {
     uint64 submissions = 0;
     uint64 swapchainRecreations = 0;
     uint64 pipelinesCreated = 0;
+    uint64 presentFencesSubmitted = 0;
+    uint64 presentFencesWaited = 0;
     // Messages from the shared Vulkan instance since this device initialized. Concurrent
     // devices sharing an instance observe the same messages, but never inherit older history.
     uint32 validationErrors = 0;

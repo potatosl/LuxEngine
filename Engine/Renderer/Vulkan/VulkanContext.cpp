@@ -321,6 +321,20 @@ bool DeviceState::CreateInstance() {
             return Fail(VK_ERROR_EXTENSION_NOT_PRESENT,
                         std::string("Required instance extension ") + name);
 
+#if defined(VK_EXT_surface_maintenance1) && defined(VK_EXT_swapchain_maintenance1)
+    // Present fences require both instance extensions, in addition to the device feature.
+    if (HasExtension(available, VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME) &&
+        HasExtension(available, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME)) {
+        for (const char* name : {VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+                                 VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME})
+            if (std::none_of(extensions.begin(), extensions.end(), [name](const char* existing) {
+                    return std::strcmp(existing, name) == 0;
+                }))
+                extensions.push_back(name);
+        surfaceMaintenance1 = true;
+    }
+#endif
+
     const GpuValidation validation = ResolveValidation(config.validation);
     std::vector<const char*> layers;
     bool debugUtils = false;
@@ -581,12 +595,34 @@ bool DeviceState::CreateDevice() {
     supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     if (apiVersion >= VK_API_VERSION_1_2)
         supported.pNext = &supported12;
+#if defined(VK_EXT_surface_maintenance1) && defined(VK_EXT_swapchain_maintenance1)
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT supportedPresent{};
+    supportedPresent.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+    const bool presentExtension =
+        surfaceMaintenance1 &&
+        HasExtension(available, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+    if (presentExtension) {
+        supportedPresent.pNext = supported.pNext;
+        supported.pNext = &supportedPresent;
+    }
+#endif
     vkGetPhysicalDeviceFeatures2(physical, &supported);
 
     VkPhysicalDeviceVulkan12Features enabled12{};
     enabled12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     enabled12.timelineSemaphore = supported12.timelineSemaphore;
     info.timelineSemaphores = apiVersion >= VK_API_VERSION_1_2 && supported12.timelineSemaphore;
+#if defined(VK_EXT_surface_maintenance1) && defined(VK_EXT_swapchain_maintenance1)
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT enabledPresent{};
+    enabledPresent.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+    const bool disablePresent = ConsumeFault(Fault::PresentFencesUnsupported);
+    info.presentFences =
+        presentExtension && supportedPresent.swapchainMaintenance1 && !disablePresent;
+    if (info.presentFences) {
+        extensions.push_back(VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+        enabledPresent.swapchainMaintenance1 = VK_TRUE;
+    }
+#endif
 
     const float priority = 1.0f;
     std::set<uint32> families{info.graphicsQueueFamily, info.presentQueueFamily};
@@ -602,6 +638,12 @@ bool DeviceState::CreateDevice() {
     VkDeviceCreateInfo create{};
     create.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     create.pNext = info.timelineSemaphores ? &enabled12 : nullptr;
+#if defined(VK_EXT_surface_maintenance1) && defined(VK_EXT_swapchain_maintenance1)
+    if (info.presentFences) {
+        enabledPresent.pNext = info.timelineSemaphores ? &enabled12 : nullptr;
+        create.pNext = &enabledPresent;
+    }
+#endif
     create.queueCreateInfoCount = static_cast<uint32>(queues.size());
     create.pQueueCreateInfos = queues.data();
     create.enabledExtensionCount = static_cast<uint32>(extensions.size());
