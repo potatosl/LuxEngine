@@ -1058,9 +1058,9 @@ void EditorWindow::ScrubAnimation(int value) {
     UpdateChrome();
 }
 void EditorWindow::EndTimelineEdit() {
-    const QByteArray after = SnapshotScene();
+    const auto after = SnapshotScene();
     if (!timelineBefore_.isEmpty() && !after.isEmpty() && timelineBefore_ != after) {
-        const QByteArray before = timelineBefore_;
+        const auto before = timelineBefore_;
         const auto id = SelectedId(document_);
         undo_->push(new SceneEditCommand(
             QStringLiteral("애니메이션 시간 이동"),
@@ -1221,13 +1221,13 @@ void EditorWindow::ApplyViewportTransform(uint32 id, const TransformComponent& v
     UpdateChrome();
 }
 void EditorWindow::EndViewportEdit() {
-    const QByteArray after = SnapshotScene();
+    const auto after = SnapshotScene();
     const auto next = SelectedId(document_);
     if (!viewportEditBefore_.isEmpty() && !after.isEmpty() && viewportEditBefore_ != after) {
         const char* names[] = {"선택", "이동", "회전", "크기", "타일 붓", "타일 지우개"};
         const QString title =
             QString::fromUtf8(names[static_cast<int>(tool_)]) + QStringLiteral(" 도구");
-        const QByteArray before = viewportEditBefore_;
+        const auto before = viewportEditBefore_;
         const auto previous = viewportEditSelected_;
         undo_->push(new SceneEditCommand(
             title, [this, before, previous] { RestoreScene(before, previous); },
@@ -1236,20 +1236,31 @@ void EditorWindow::EndViewportEdit() {
     viewportEditBefore_.clear();
     viewportEditSelected_.reset();
 }
-QByteArray EditorWindow::SnapshotScene() {
+EditorSnapshot EditorWindow::SnapshotScene() {
     std::string serialized;
     if (!document_.GetScene().SerializeToString(serialized))
         return {};
-    return QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+    EditorSnapshot snapshot;
+    snapshot.scene = QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+    for (Entity entity : document_.GetScene().GetEntities())
+        if (entity.HasComponent<AnimationComponent>())
+            snapshot.animationTimes.emplace_back(
+                entity.GetId(), entity.GetComponent<AnimationComponent>().currentTime);
+    return snapshot;
 }
-void EditorWindow::RestoreScene(const QByteArray& bytes, std::optional<uint32> selected) {
-    if (bytes.isEmpty())
+void EditorWindow::RestoreScene(const EditorSnapshot& snapshot, std::optional<uint32> selected) {
+    if (snapshot.isEmpty())
         return;
+    const auto& bytes = snapshot.scene;
     const std::string serialized(bytes.constData(), static_cast<size_t>(bytes.size()));
     restoringHistory_ = true;
     const bool restored = document_.ReplaceSceneFromData(serialized, selected);
-    if (restored)
+    if (restored) {
+        for (const auto& [id, time] : snapshot.animationTimes)
+            if (auto* animation = document_.GetScene().TryGetComponent<AnimationComponent>(id))
+                animation->currentTime = time;
         RefreshAll();
+    }
     restoringHistory_ = false;
     if (!restored)
         Log(QStringLiteral("장면 상태 복원에 실패했습니다."), true);
