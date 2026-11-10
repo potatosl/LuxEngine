@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine/LuxEngine.hpp"
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -33,11 +34,13 @@ private:
     LuxEngine::Ref<LuxEngine::GpuTexture> white_;
     std::vector<Draw> draws_;
     LuxEngine::GpuTexture* Texture(const std::string& relative);
-    Glyph& GetGlyph(unsigned char character);
+    Glyph& GetGlyph(std::uint32_t character);
     LuxEngine::GpuDevice& device_;
     std::filesystem::path root_;
     std::map<std::string, LuxEngine::Ref<LuxEngine::GpuTexture>> textures_;
-    std::map<unsigned char, Glyph> glyphs_;
+    std::map<std::uint32_t, Glyph> glyphs_;
     std::vector<unsigned char> fontBytes_;
+    float fontAscent_ = 0;
+    float lineHeight_ = 32;
 };
 } // namespace LuxSamples

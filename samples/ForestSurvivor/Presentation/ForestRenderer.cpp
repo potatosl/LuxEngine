@@ -2,6 +2,8 @@
 #include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Game/SurvivalGame.hpp"
+#include "Presentation/KoreanUi.hpp"
+#include "Presentation/TextLayout.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -117,45 +119,85 @@ public:
         std::ifstream file(path, std::ios::binary);
         std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)), {});
         if (!file || bytes.empty() || bytes.size() > 16 * 1024 * 1024)
-            throw std::runtime_error("CC0 폰트 에셋을 읽을 수 없습니다.");
+            throw std::runtime_error("공개 도메인 폰트 에셋을 읽을 수 없습니다.");
         stbtt_fontinfo info{};
         const int offset = stbtt_GetFontOffsetForIndex(bytes.data(), 0);
         if (offset < 0 || !stbtt_InitFont(&info, bytes.data(), offset))
-            throw std::runtime_error("CC0 폰트 형식이 올바르지 않습니다.");
+            throw std::runtime_error("폰트 형식이 올바르지 않습니다.");
+        std::vector<int> codepoints;
+        for (int codepoint = 32; codepoint <= 126; ++codepoint)
+            codepoints.push_back(codepoint);
+        const auto addText = [&](std::string_view text) {
+            size_t position = 0;
+            while (position < text.size()) {
+                const auto codepoint = LuxSamples::NextCodepoint(text, position);
+                if (codepoint == 0xFFFD)
+                    throw std::runtime_error("게임 UI에 올바르지 않은 UTF-8 문자열이 있습니다.");
+                if (codepoint >= 32)
+                    codepoints.push_back(static_cast<int>(codepoint));
+            }
+        };
+        addText("가힣"); // Verify both ends of the precomposed Hangul syllable block.
+        for (const auto label : UiText::All)
+            addText(label);
+        for (const auto& upgrade : SurvivalGame::UpgradeCatalog()) {
+            addText(upgrade.title);
+            addText(upgrade.description);
+        }
+        std::sort(codepoints.begin(), codepoints.end());
+        codepoints.erase(std::unique(codepoints.begin(), codepoints.end()), codepoints.end());
+        for (const int codepoint : codepoints)
+            if (stbtt_FindGlyphIndex(&info, codepoint) == 0)
+                throw std::runtime_error("한국어 UI에 필요한 글리프가 폰트에 없습니다: " +
+                                         std::to_string(codepoint));
         int ascent, descent, gap;
         stbtt_GetFontVMetrics(&info, &ascent, &descent, &gap);
         ascent_ = static_cast<float>(ascent) * stbtt_ScaleForPixelHeight(&info, BaseSize);
-        std::vector<unsigned char> alpha(1024 * 512);
+        std::vector<unsigned char> alpha(AtlasSize * AtlasSize);
+        std::vector<stbtt_packedchar> packed(codepoints.size());
         stbtt_pack_context context{};
-        if (!stbtt_PackBegin(&context, alpha.data(), 1024, 512, 0, 2, nullptr))
-            throw std::runtime_error("폰트 아틀라스를 만들 수 없습니다.");
-        const bool packed =
-            stbtt_PackFontRange(&context, bytes.data(), 0, BaseSize, 32, 95, glyphs_.data()) != 0;
+        if (!stbtt_PackBegin(&context, alpha.data(), AtlasSize, AtlasSize, 0, 2, nullptr))
+            throw std::runtime_error("한국어 폰트 아틀라스를 만들 수 없습니다.");
+        stbtt_pack_range range{};
+        range.font_size = BaseSize;
+        range.array_of_unicode_codepoints = codepoints.data();
+        range.num_chars = static_cast<int>(codepoints.size());
+        range.chardata_for_range = packed.data();
+        const bool complete = stbtt_PackFontRanges(&context, bytes.data(), 0, &range, 1) != 0;
         stbtt_PackEnd(&context);
-        if (!packed)
-            throw std::runtime_error("폰트 글리프를 준비할 수 없습니다.");
+        if (!complete)
+            throw std::runtime_error("한국어 폰트 글리프를 아틀라스에 배치할 수 없습니다.");
+        for (size_t index = 0; index < codepoints.size(); ++index)
+            glyphs_.emplace(static_cast<std::uint32_t>(codepoints[index]), packed[index]);
         std::vector<le::uint8> rgba(alpha.size() * 4, 255);
-        for (size_t i = 0; i < alpha.size(); ++i)
-            rgba[i * 4 + 3] = alpha[i];
-        if (!texture_.Initialize(&device, 1024, 512, rgba.data()))
-            throw std::runtime_error("폰트 GPU 리소스를 만들 수 없습니다.");
+        for (size_t index = 0; index < alpha.size(); ++index)
+            rgba[index * 4 + 3] = alpha[index];
+        if (!texture_.Initialize(&device, AtlasSize, AtlasSize, rgba.data(),
+                                 le::TextureFilter::Nearest))
+            throw std::runtime_error("한국어 폰트 GPU 리소스를 만들 수 없습니다.");
     }
     float Width(std::string_view text, float height) const {
         float width = 0;
-        for (unsigned char c : text)
-            width += glyphs_[Character(c)].xadvance;
+        size_t position = 0;
+        while (position < text.size())
+            width += Glyph(LuxSamples::NextCodepoint(text, position)).xadvance;
         return width * height / BaseSize;
     }
     void Draw(SpriteBatch& batch, std::string_view text, float x, float y, float height,
               Color color) {
         const float scale = height / BaseSize;
         const float baseline = y + ascent_ * scale;
-        for (unsigned char c : text) {
-            const auto& glyph = glyphs_[Character(c)];
+        size_t position = 0;
+        while (position < text.size()) {
+            const auto& glyph = Glyph(LuxSamples::NextCodepoint(text, position));
             const float w = static_cast<float>(glyph.x1 - glyph.x0),
                         h = static_cast<float>(glyph.y1 - glyph.y0);
-            Region uv{glyph.x0 / 1024.0f, glyph.y0 / 512.0f,   glyph.x1 / 1024.0f,
-                      glyph.y1 / 512.0f,  static_cast<int>(w), static_cast<int>(h)};
+            Region uv{glyph.x0 / static_cast<float>(AtlasSize),
+                      glyph.y0 / static_cast<float>(AtlasSize),
+                      glyph.x1 / static_cast<float>(AtlasSize),
+                      glyph.y1 / static_cast<float>(AtlasSize),
+                      static_cast<int>(w),
+                      static_cast<int>(h)};
             if (w > 0 && h > 0)
                 batch.Sprite(
                     &texture_, uv,
@@ -166,12 +208,21 @@ public:
     }
 
 private:
-    static size_t Character(unsigned char value) {
-        return value >= 32 && value <= 126 ? value - 32 : '?' - 32;
+    const stbtt_packedchar& Glyph(std::uint32_t codepoint) const {
+        if (codepoint == 0xFFFD)
+            codepoint = '?';
+        const auto found = glyphs_.find(codepoint);
+        if (found == glyphs_.end())
+            throw std::runtime_error("게임 UI 글리프 캐시에 없는 문자입니다: " +
+                                     std::to_string(codepoint));
+        return found->second;
     }
     static constexpr float BaseSize = 32;
+    static constexpr int AtlasSize = 1024;
     le::GpuTexture texture_;
-    std::array<stbtt_packedchar, 95> glyphs_{};
+    // All actual UI codepoints are packed at load time, so const measurements never mutate the
+    // atlas.
+    std::map<std::uint32_t, stbtt_packedchar> glyphs_;
     float ascent_ = 0;
 };
 constexpr Color White{1, 1, 1, 1};
@@ -206,6 +257,7 @@ struct ForestRenderer::State {
     bool keyboardChoice = false;
     int selectedChoice = 0;
     Phase phase = Phase::Title;
+    bool textLayoutFits = true;
 
     void Sprite(Sheet& sheet, int index, int columns, int size, le::Vec2 center, le::Vec2 scale,
                 Color tint = White, float angle = 0) {
@@ -218,6 +270,8 @@ struct ForestRenderer::State {
         Sprite(dungeon, index, 12, 16, center, {size, size}, tint, angle);
     }
     void Text(std::string_view text, float x, float y, float size = 22, Color color = Ink) {
+        textLayoutFits = textLayoutFits && x >= 0 && y >= 0 &&
+                         x + font.Width(text, size) <= uiWidth + .5f && y + size <= 720.5f;
         font.Draw(batch, text, x, y, size, color);
     }
     void Center(std::string_view text, float x, float y, float size = 22, Color color = Ink) {
@@ -225,22 +279,11 @@ struct ForestRenderer::State {
     }
     void Wrap(std::string_view text, float x, float y, float width, float size = 22, int lines = 4,
               Color color = Muted) {
-        for (int line = 0; line < lines && !text.empty(); ++line) {
-            size_t count = 0;
-            while (count < text.size() && font.Width(text.substr(0, count + 1), size) <= width)
-                ++count;
-            if (count == 0)
-                return;
-            if (count < text.size()) {
-                const auto space = text.rfind(' ', count);
-                if (space != std::string_view::npos && space > 0)
-                    count = space;
-            }
-            Text(text.substr(0, count), x, y + line * size * 1.15f, size, color);
-            text.remove_prefix(count);
-            while (!text.empty() && text.front() == ' ')
-                text.remove_prefix(1);
-        }
+        const auto wrapped = WrapText(
+            text, width, lines, [&](std::string_view line) { return font.Width(line, size); });
+        textLayoutFits = textLayoutFits && wrapped.complete;
+        for (size_t line = 0; line < wrapped.lines.size(); ++line)
+            Text(wrapped.lines[line], x, y + static_cast<float>(line) * size * 1.25f, size, color);
     }
     void NineSlice(int tile, Rect rect, Color tint = White) {
         const auto source = ui.Tile(tile, 13, 32);
@@ -268,8 +311,10 @@ struct ForestRenderer::State {
         const float offset = hover && pressed ? 3 : 0;
         const Color tint = hover ? Color{1.10f, 1.10f, 1.07f, 1} : White;
         NineSlice(primary ? 0 : 15, {rect.x, rect.y + offset, rect.width, rect.height}, tint);
-        Center(label, rect.x + rect.width * .5f, rect.y + offset + (rect.height - 30) * .5f, 30,
-               Ink);
+        const float labelSize = std::min(30.0f, (rect.width - 24) / font.Width(label, 1));
+        textLayoutFits = textLayoutFits && labelSize >= 18;
+        Center(label, rect.x + rect.width * .5f, rect.y + offset + (rect.height - labelSize) * .5f,
+               labelSize, Ink);
         buttons.emplace_back(rect, action);
     }
     Rect ChoiceCard(int index) const {
@@ -435,44 +480,44 @@ struct ForestRenderer::State {
     void DrawTitle(const SurvivalGame&, float time) {
         const float panelWidth = std::min(440.0f, uiWidth * .46f);
         NineSlice(18, {44, 42, panelWidth, 634});
-        Text("LUXENGINE ORIGINAL", 76, 78, 16, Muted);
-        Text("MOSSBOUND", 76, 122, 52, Ink);
-        Wrap("THE LAST GROVE", 78, 184, panelWidth - 64, 24, 1, Accent);
+        Text(UiText::Original, 76, 78, 16, Muted);
+        Text(UiText::Brand, 76, 122, 52, Ink);
+        Wrap(UiText::Subtitle, 78, 184, panelWidth - 64, 24, 1, Accent);
         Sprite(town, 4, 12, 16, {91, 251}, {36, 36});
-        Text("FOREST SURVIVOR", 120, 238, 21, Ink);
-        Wrap("Stay alive. Gather essence. Become the guardian.", 78, 286, panelWidth - 66, 23, 3,
-             Muted);
-        Button({78, 397, panelWidth - 68, 62}, "PLAY", UiAction::Start, true);
-        Button({78, 475, panelWidth - 68, 54}, "QUIT", UiAction::Quit);
-        Text("CLICK PLAY TO BEGIN", 80, 550, 17, Accent);
-        Text("WASD / ARROWS  MOVE", 80, 588, 18, Muted);
-        Text("SPACE  DASH    P / ESC  PAUSE", 80, 616, 16, Muted);
+        Text(UiText::Genre, 120, 238, 21, Ink);
+        Wrap(UiText::Story, 78, 286, panelWidth - 66, 23, 3, Muted);
+        Button({78, 397, panelWidth - 68, 62}, UiText::Play, UiAction::Start, true);
+        Button({78, 475, panelWidth - 68, 54}, UiText::Quit, UiAction::Quit);
+        Text(UiText::ClickPlay, 80, 550, 17, Accent);
+        Text(UiText::Move, 80, 588, 18, Muted);
+        Text(UiText::Controls, 80, 616, 16, Muted);
         const float right = std::max(panelWidth + 100, (uiWidth + panelWidth) * .5f);
         NineSlice(15, {right - 213, 80, 426, 100});
-        Center("A FIVE-MINUTE ADVENTURE", right, 98, 29, Ink);
-        Center("ONE GROVE. ENDLESS COURAGE.", right, 139, 19, Muted);
+        Center(UiText::Adventure, right, 98, 29, Ink);
+        Center(UiText::Tagline, right, 141, 18, Muted);
         Dungeon(112, {right, 361 + std::sin(time * 2) * 3}, 170);
         Town(118, {right + 73, 377}, 88);
         Town(93, {right - 108, 447}, 42);
         Dungeon(120, {right + 132, 497}, 70);
         Dungeon(121, {right - 125, 325}, 56);
         NineSlice(15, {right - 173, 556, 346, 76});
-        Center("AUTO ATTACK / LEVEL UP / BOSS", right, 577, 20, Ink);
-        Center("CC0 ART BY KENNEY", right, 649, 18, Ink);
+        Center(UiText::Features, right, 577, 20, Ink);
+        Center(UiText::Art, right, 646, 16, Ink);
+        Center(UiText::Typeface, right, 671, 16, Ink);
     }
     void DrawHud(const SurvivalGame& game) {
         const auto& player = game.GetPlayer();
         NineSlice(15, {uiWidth * .5f - 117, 16, 234, 76});
         Center(Clock(game.Elapsed()), uiWidth * .5f, 27, 38, Ink);
-        Center("SURVIVE " + Clock(game.Duration()), uiWidth * .5f, 69, 13, Muted);
+        Center(std::string(UiText::Survive) + Clock(game.Duration()), uiWidth * .5f, 69, 13, Muted);
         NineSlice(18, {20, 18, 208, 57});
-        Text("LEVEL " + std::to_string(player.level), 40, 29, 26, Ink);
+        Text(std::string(UiText::Level) + std::to_string(player.level), 40, 29, 26, Ink);
         NineSlice(15, {20, 83, 208, 45});
-        Text("SLAIN  " + std::to_string(game.Kills()), 40, 95, 20, Ink);
-        Button({uiWidth - 138, 20, 118, 49}, "PAUSE", UiAction::Pause);
+        Text(std::string(UiText::Slain) + std::to_string(game.Kills()), 40, 95, 20, Ink);
+        Button({uiWidth - 138, 20, 118, 49}, UiText::Pause, UiAction::Pause);
         NineSlice(18, {20, 596, 300, 104});
         Dungeon(112, {56, 631}, 52);
-        Text("KEEPER", 89, 614, 22, Ink);
+        Text(UiText::Keeper, 89, 614, 22, Ink);
         Text(std::to_string(static_cast<int>(std::ceil(std::max(0.0f, player.health)))) + " / " +
                  std::to_string(static_cast<int>(player.maxHealth)),
              89, 641, 20, Muted);
@@ -480,32 +525,33 @@ struct ForestRenderer::State {
               {.83f, .26f, .24f, 1});
         const float middleWidth = std::max(220.0f, uiWidth - 660);
         NineSlice(15, {336, 646, middleWidth, 54});
-        Text("ESSENCE  " + std::to_string(player.xp) + " / " + std::to_string(player.xpNeeded), 352,
-             655, 16, Ink);
+        Text(std::string(UiText::Essence) + std::to_string(player.xp) + " / " +
+                 std::to_string(player.xpNeeded),
+             352, 655, 16, Ink);
         Meter({351, 680, middleWidth - 30, 10},
               static_cast<float>(player.xp) / std::max(1, player.xpNeeded), {.23f, .58f, .72f, 1});
         NineSlice(18, {uiWidth - 308, 630, 288, 70});
         Dungeon(104, {uiWidth - 270, 663}, 40);
         const bool ready = player.dashCooldown <= 0;
-        Text(ready ? "DASH READY" : "DASH CHARGING", uiWidth - 239, 643, 18, Ink);
+        Text(ready ? UiText::DashReady : UiText::DashCharging, uiWidth - 239, 643, 18, Ink);
         Meter({uiWidth - 240, 677, 200, 10}, 1 - player.dashCooldown / SurvivalGame::DashRecharge,
               {.85f, .62f, .27f, 1});
         for (const auto& enemy : game.GetEnemies())
             if (enemy.boss) {
                 NineSlice(18, {uiWidth * .5f - 230, 105, 460, 58});
-                Center("THE THORN KING", uiWidth * .5f, 111, 20, Ink);
+                Center(UiText::Boss, uiWidth * .5f, 111, 20, Ink);
                 Meter({uiWidth * .5f - 210, 143, 420, 9},
                       enemy.health / std::max(1.0f, enemy.maxHealth), {.73f, .24f, .24f, 1});
                 break;
             }
         if (game.Elapsed() < 7) {
             NineSlice(15, {uiWidth * .5f - 215, 526, 430, 43});
-            Center("YOUR BOW FIRES AUTOMATICALLY", uiWidth * .5f, 538, 18, Ink);
+            Center(UiText::AutoAttack, uiWidth * .5f, 538, 18, Ink);
         }
     }
     void DrawChoices(const SurvivalGame& game) {
-        Center("A NEW GIFT", uiWidth * .5f, 130, 44, Light);
-        Center("CHOOSE ONE UPGRADE", uiWidth * .5f, 181, 22, Light);
+        Center(UiText::Gift, uiWidth * .5f, 130, 44, Light);
+        Center(UiText::Choose, uiWidth * .5f, 181, 22, Light);
         const std::array<int, 9> icons{104, 119, 129, 116, 93, 105, 118, 2, 114};
         for (int i = 0; i < 3; ++i) {
             const Rect card = ChoiceCard(i);
@@ -521,12 +567,11 @@ struct ForestRenderer::State {
                         52);
             Wrap(choice.title, card.x + 22, card.y + 99, card.width - 44, 27, 2, Ink);
             Wrap(choice.description, card.x + 22, card.y + 166, card.width - 44, 21, 3, Muted);
-            Text(focused ? "ENTER TO SELECT" : "CLICK TO SELECT", card.x + 22, card.y + 252, 17,
-                 Accent);
+            Text(focused ? UiText::Enter : UiText::Click, card.x + 22, card.y + 252, 17, Accent);
             buttons.emplace_back(card,
                                  static_cast<UiAction>(static_cast<int>(UiAction::Choice0) + i));
         }
-        Center("THE WORLD WAITS WHILE YOU CHOOSE", uiWidth * .5f, 550, 18, Light);
+        Center(UiText::Wait, uiWidth * .5f, 550, 18, Light);
     }
     void DrawOverlay(const SurvivalGame& game) {
         const auto phase = game.GetPhase();
@@ -538,25 +583,26 @@ struct ForestRenderer::State {
         const bool paused = phase == Phase::Paused, won = phase == Phase::Victory;
         const float width = std::min(640.0f, uiWidth - 80), x = (uiWidth - width) * .5f;
         NineSlice(18, {x, 113, width, 490});
-        Center(paused ? "TAKE A BREATHER"
-               : won  ? "GROVE SAVED!"
-                      : "JOURNEY'S END",
+        Center(paused ? UiText::Paused
+               : won  ? UiText::Victory
+                      : UiText::Defeat,
                uiWidth * .5f, 155, 40, Ink);
-        Center(paused ? "YOUR ADVENTURE IS ON HOLD"
-               : won  ? "YOU DEFEATED THE THORN KING"
-                      : "THE FOREST REMEMBERS YOUR COURAGE",
+        Center(paused ? UiText::PausedDetail
+               : won  ? UiText::VictoryDetail
+                      : UiText::DefeatDetail,
                uiWidth * .5f, 212, 20, Muted);
-        Center(Clock(game.Elapsed()) + "  /  " + std::to_string(game.Kills()) +
-                   " SLAIN  /  LEVEL " + std::to_string(game.GetPlayer().level),
+        Center(Clock(game.Elapsed()) + "  /  " + std::string(UiText::Slain) +
+                   std::to_string(game.Kills()) + "  /  " + std::string(UiText::Level) +
+                   std::to_string(game.GetPlayer().level),
                uiWidth * .5f, 268, 24, Ink);
         const float buttonX = x + 90, buttonWidth = width - 180;
         if (paused) {
-            Button({buttonX, 326, buttonWidth, 60}, "RESUME", UiAction::Resume, true);
-            Button({buttonX, 403, buttonWidth, 55}, "NEW RUN", UiAction::Restart);
-            Button({buttonX, 474, buttonWidth, 55}, "QUIT", UiAction::Quit);
+            Button({buttonX, 326, buttonWidth, 60}, UiText::Resume, UiAction::Resume, true);
+            Button({buttonX, 403, buttonWidth, 55}, UiText::Restart, UiAction::Restart);
+            Button({buttonX, 474, buttonWidth, 55}, UiText::Quit, UiAction::Quit);
         } else {
-            Button({buttonX, 343, buttonWidth, 66}, "PLAY AGAIN", UiAction::Restart, true);
-            Button({buttonX, 433, buttonWidth, 58}, "QUIT", UiAction::Quit);
+            Button({buttonX, 343, buttonWidth, 66}, UiText::Restart, UiAction::Restart, true);
+            Button({buttonX, 433, buttonWidth, 58}, UiText::Quit, UiAction::Quit);
         }
     }
 };
@@ -569,8 +615,21 @@ void ForestRenderer::Initialize(le::GpuDevice& device, const std::filesystem::pa
     next->dungeon.Load(device, root / "TinyDungeon/Tilemap/tilemap_packed.png");
     next->ui.Load(device,
                   root / "PixelAdventureUI/Tilesheets/Large tiles/Thin outline/tilemap_packed.png");
-    next->font.Load(device, root / "KenneyFonts/Fonts/Kenney Pixel.ttf");
+    next->font.Load(device, root / "DungGeunMo/DungGeunMo.ttf");
+    constexpr float minimumCardTextWidth = (936.0f - 80 - 44) / 3 - 44;
+    for (const auto& upgrade : SurvivalGame::UpgradeCatalog()) {
+        const auto fits = [&](std::string_view text, float size, int lines) {
+            return WrapText(text, minimumCardTextWidth, lines,
+                            [&](std::string_view line) { return next->font.Width(line, size); })
+                .complete;
+        };
+        if (!fits(upgrade.title, 27, 2) || !fits(upgrade.description, 21, 3))
+            throw std::runtime_error("한국어 강화 설명이 최소 창 크기의 카드 영역을 넘었습니다.");
+    }
     state_ = std::move(next);
+}
+bool ForestRenderer::TextLayoutFits() const {
+    return state_->textLayoutFits;
 }
 void ForestRenderer::Shutdown() {
     state_ = std::make_unique<State>();
@@ -585,6 +644,7 @@ void ForestRenderer::Render(const SurvivalGame& game, float time, float aspect) 
     s.uiWidth = 720 * aspect;
     s.phase = game.GetPhase();
     s.buttons.clear();
+    s.textLayoutFits = true;
     s.DrawWorld(game, time, aspect);
     const le::OrthographicCamera ui(0, s.uiWidth, 720, 0);
     s.batch.Begin(*s.device, ui.GetViewProjectionMatrix(), true);

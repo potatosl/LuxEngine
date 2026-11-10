@@ -7,9 +7,11 @@ namespace le = LuxEngine;
 namespace {
 class Basic2D final : public LuxSamples::SampleApplication {
 public:
-    static constexpr std::string_view Help = "Basic2D: WASD/Arrows/D-pad move the sprite.";
+    static constexpr std::string_view Help =
+        "기본 2D: WASD·방향키·게임패드 십자키로 캐릭터를 이동합니다.";
     explicit Basic2D(LuxSamples::Options options)
-        : SampleApplication("BASIC 2D", "WASD / ARROWS / DPAD MOVE", std::move(options)) {}
+        : SampleApplication("기본 2D", "WASD / 방향키 / 게임패드 십자키로 이동",
+                            std::move(options)) {}
 
 private:
     le::Scene scene_;
@@ -48,8 +50,8 @@ private:
                            {t.position.x, t.position.y + .04f * std::sin(elapsed * 6)},
                            {1.2f, 1.2f}, {1, 1, 1, 1}, t.rotation.z);
         LuxSamples::Panel({5, -3.5f}, {6.7f, 1.4f});
-        LuxSamples::Text("SCENE / ENTITY / TRANSFORM", {2.1f, -3.16f}, .04f);
-        LuxSamples::Text("CC0 TILES AND SPRITES", {2.1f, -3.65f}, .036f);
+        LuxSamples::Text("씬 / 엔티티 / 변환", {2.1f, -3.16f}, .04f);
+        LuxSamples::Text("CC0 타일과 스프라이트", {2.1f, -3.65f}, .036f);
     }
 };
 } // namespace

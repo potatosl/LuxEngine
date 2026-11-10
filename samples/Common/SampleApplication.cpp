@@ -120,10 +120,10 @@ void SampleApplication::OnRender(float elapsed) {
     Text(title_, {-halfWidth_ + .4f, 5.75f}, .055f);
     Text(instructions_, {-halfWidth_ + .4f, 5.05f}, .04f);
     Panel({0, -5.6f}, {halfWidth_ * 2, .75f});
-    Text("P PAUSE   R RESET   ESC EXIT", {-halfWidth_ + .4f, -5.5f}, .035f);
+    Text("P 일시정지   R 다시 시작   Esc 종료", {-halfWidth_ + .4f, -5.5f}, .035f);
     if (paused_) {
         Panel({0, 0}, {5, 1.3f});
-        Text("PAUSED", {-1.1f, .22f}, .065f);
+        Text("일시정지", {-1.0f, .22f}, .065f);
     }
     artwork_->Flush(camera_.GetViewProjectionMatrix());
     ++rendered_;

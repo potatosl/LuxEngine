@@ -8,9 +8,9 @@ namespace {
 class Physics2D final : public LuxSamples::SampleApplication {
 public:
     static constexpr std::string_view Help =
-        "Physics2D: Space/Mouse left/Gamepad South drops a box.";
+        "2D 물리: Space·마우스 왼쪽 버튼·게임패드 아래쪽 버튼으로 상자를 떨어뜨립니다.";
     explicit Physics2D(LuxSamples::Options options)
-        : SampleApplication("PHYSICS 2D", "SPACE / LEFT CLICK / PAD A DROP A BOX",
+        : SampleApplication("2D 물리", "Space / 마우스 왼쪽 / 게임패드 A로 상자 추가",
                             std::move(options)) {}
 
 private:
@@ -74,8 +74,8 @@ private:
                 {t.position.x, t.position.y}, {t.scale.x, t.scale.y}, {1, 1, 1, 1}, t.rotation.z);
         }
         LuxSamples::Panel({4.8f, 3.7f}, {5.3f, 1.3f});
-        LuxSamples::Text("BOX2D RIGID BODIES", {2.5f, 4.03f}, .04f);
-        LuxSamples::Text("BOXES " + std::to_string(spawned_) + " / 64", {2.5f, 3.54f}, .04f);
+        LuxSamples::Text("Box2D 물리 시뮬레이션", {2.5f, 4.03f}, .04f);
+        LuxSamples::Text("상자 " + std::to_string(spawned_) + " / 64", {2.5f, 3.54f}, .04f);
     }
 };
 } // namespace

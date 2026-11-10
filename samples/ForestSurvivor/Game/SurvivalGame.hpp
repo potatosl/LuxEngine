@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <random>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -66,6 +67,7 @@ public:
     static constexpr size_t MaxGems = 400;
     static constexpr size_t MaxEffects = 140;
     explicit SurvivalGame(std::uint32_t seed = 0x51a7e123u, Rules rules = {});
+    static std::span<const Upgrade> UpgradeCatalog();
     void Start();
     void Restart();
     void TogglePause();

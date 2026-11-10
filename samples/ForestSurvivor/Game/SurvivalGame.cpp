@@ -20,17 +20,21 @@ Vec2 ClampPosition(Vec2 position, float radius = .4f) {
     return {std::clamp(position.x, -extent, extent), std::clamp(position.y, -extent, extent)};
 }
 constexpr std::array<Upgrade, 9> Upgrades{{
-    {UpgradeId::Might, "WILD THORNS", "+30% weapon damage"},
-    {UpgradeId::Haste, "QUICKENING", "Fire seeds 18% faster"},
-    {UpgradeId::Stride, "WINDSTEP", "+15% movement speed"},
-    {UpgradeId::Vitality, "OLD GROWTH", "+20 maximum health and heal"},
-    {UpgradeId::Harvest, "MAGNET BLOOM", "+35% experience collection range"},
-    {UpgradeId::Orbit, "LEAF GUARD", "Add an orbiting razor leaf"},
-    {UpgradeId::Multishot, "FORKED BRANCH", "Fire one additional seed"},
-    {UpgradeId::Bloom, "EARTH PULSE", "Larger and stronger pulse attack"},
-    {UpgradeId::Renewal, "SPRING WATER", "Heal 35 HP and regenerate health"},
+    {UpgradeId::Might, "야생 가시", "무기 피해량 30% 증가"},
+    {UpgradeId::Haste, "재빠른 새싹", "공격 대기 시간 18% 감소"},
+    {UpgradeId::Stride, "바람 걸음", "이동 속도 15% 증가"},
+    {UpgradeId::Vitality, "고목의 생명", "최대 체력 20 증가, 체력 20 회복"},
+    {UpgradeId::Harvest, "자석 꽃", "경험치 수집 범위 35% 증가"},
+    {UpgradeId::Orbit, "잎새 수호", "회전하는 잎날 1개 추가"},
+    {UpgradeId::Multishot, "갈라진 가지", "씨앗 발사체 1개 추가"},
+    {UpgradeId::Bloom, "대지의 파동", "파동의 범위와 피해량 증가"},
+    {UpgradeId::Renewal, "샘물의 축복", "체력 35 회복, 지속 회복량 증가"},
 }};
 } // namespace
+
+std::span<const Upgrade> SurvivalGame::UpgradeCatalog() {
+    return Upgrades;
+}
 
 SurvivalGame::SurvivalGame(std::uint32_t seed, Rules rules)
     : seed_(seed), rules_(rules), random_(seed) {

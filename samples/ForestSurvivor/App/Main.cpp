@@ -25,14 +25,20 @@ int RunForestSurvivor(int argc, char** argv) {
             return argv[index];
         };
         if (argument == "--help" || argument == "-h") {
-            std::cout << "MOSSBOUND - Keeper of the Last Grove\n"
-                      << "WASD / arrows / left stick: move | Space / X: dash\n"
-                      << "Click PLAY to begin | 1/2/3 or mouse: choose upgrade\n"
-                      << "P / Esc / Start: pause | Use menu buttons to resume/retry/quit | F11: "
-                         "fullscreen\n"
-                      << "Options: --smoke-test --autoplay --frames N --seed N\n"
-                      << "         --showcase SECONDS --showcase-upgrade --capture FILE.bmp "
-                         "--assets PATH\n";
+            std::cout << "MOSSBOUND - 마지막 숲의 수호자\n"
+                      << "WASD / 방향키 / 왼쪽 스틱: 이동 | Space / X: 돌진\n"
+                      << "시작하기 버튼으로 게임 시작 | 1 / 2 / 3 또는 마우스: 강화 선택\n"
+                      << "P / Esc / Start: 일시정지 | 메뉴 버튼으로 계속하기·재시작·종료\n"
+                      << "F11: 전체 화면\n"
+                      << "실행 옵션:\n"
+                      << "  --smoke-test            초기화·실행 점검\n"
+                      << "  --autoplay              자동 플레이\n"
+                      << "  --frames N              실행할 프레임 수 제한\n"
+                      << "  --seed N                게임 난수 시드 지정\n"
+                      << "  --showcase SECONDS      지정한 시간의 게임 상태 미리보기\n"
+                      << "  --showcase-upgrade      강화 선택 화면 미리보기\n"
+                      << "  --capture FILE.bmp      화면을 BMP 파일로 저장\n"
+                      << "  --assets PATH           게임 리소스 폴더 지정\n";
             return 0;
         } else if (argument == "--smoke-test") {
             options.smokeTest = true;

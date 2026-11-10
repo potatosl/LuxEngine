@@ -17,6 +17,7 @@ public:
     ForestRenderer& operator=(const ForestRenderer&) = delete;
     void Initialize(LuxEngine::GpuDevice& device, const std::filesystem::path& assetRoot);
     void Shutdown();
+    bool TextLayoutFits() const;
     void Render(const SurvivalGame& game, float time, float aspect);
     // Pointer coordinates cover the entire window; Y points down.
     UiAction HitAction(float normalizedX, float normalizedY) const;

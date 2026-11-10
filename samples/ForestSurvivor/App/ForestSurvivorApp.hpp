@@ -28,6 +28,9 @@ public:
     UiAction ActionAt(float normalizedX, float normalizedY) const {
         return renderer_.HitAction(normalizedX, normalizedY);
     }
+    bool UiTextFits() const {
+        return renderer_.TextLayoutFits();
+    }
     void OnEvent(LuxEngine::Event& event) override;
 
 protected:

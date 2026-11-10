@@ -7,10 +7,11 @@ namespace le = LuxEngine;
 namespace {
 class InputBindings final : public LuxSamples::SampleApplication {
 public:
-    static constexpr std::string_view Help = "InputBindings: WASD/Arrows/D-pad move, Space/Mouse "
-                                             "left/Gamepad South fires, F rebinds Space/Enter.";
+    static constexpr std::string_view Help =
+        "입력 바인딩: WASD·방향키·십자키로 이동하고 Space·마우스 왼쪽·게임패드 "
+        "아래쪽 버튼으로 발사합니다. F로 Space와 Enter 바인딩을 전환합니다.";
     explicit InputBindings(LuxSamples::Options options)
-        : SampleApplication("INPUT BINDINGS", "SPACE / MOUSE LEFT / PAD A FIRE   F REBIND KEY",
+        : SampleApplication("입력 바인딩", "Space / 마우스 왼쪽 / 게임패드 A 발사 · F 키 변경",
                             std::move(options)) {}
 
 private:
@@ -52,7 +53,7 @@ private:
             le::Input::IsKeyPressed(alternate_ ? le::LuxKey::Enter : le::LuxKey::Space),
             le::Input::IsMouseButtonPressed(le::LuxMouseButton::Left),
             le::Input::IsGamepadButtonPressed(le::LuxGamepadButton::South)};
-        const char* labels[] = {"KEYBOARD", "MOUSE", "GAMEPAD"};
+        const char* labels[] = {"키보드", "마우스", "게임패드"};
         for (int index = 0; index < 3; ++index) {
             const float x = -6.0f + float(index) * 6;
             LuxSamples::Panel({x, 3}, {5.2f, 1.7f});
@@ -72,11 +73,11 @@ private:
                              elapsed * 4);
         }
         LuxSamples::Panel({0, -3.85f}, {14.5f, 2.2f});
-        LuxSamples::Text("MOVE WITH WASD / ARROWS / DPAD", {-6, -3.3f}, .038f);
-        LuxSamples::Text(std::string("KEY ") + (alternate_ ? "ENTER" : "SPACE") + "   PRESSES " +
-                             std::to_string(presses_),
+        LuxSamples::Text("WASD / 방향키 / 게임패드 십자키로 이동", {-6, -3.3f}, .038f);
+        LuxSamples::Text(std::string("발사 키 ") + (alternate_ ? "ENTER" : "SPACE") +
+                             "   입력 횟수 " + std::to_string(presses_),
                          {-6, -3.9f}, .045f);
-        LuxSamples::Text("REBIND KEEPS MOUSE AND GAMEPAD ACTIVE", {-6, -4.55f}, .032f);
+        LuxSamples::Text("키를 바꿔도 마우스와 게임패드 입력은 유지됩니다.", {-6, -4.55f}, .032f);
     }
 };
 } // namespace

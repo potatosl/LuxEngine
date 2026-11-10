@@ -1,5 +1,6 @@
 #include "Game/SurvivalGame.hpp"
 #include "Engine/EntryPoint.hpp"
+#include "Presentation/TextLayout.hpp"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -35,6 +36,31 @@ Vec2 BotMovement(const SurvivalGame& game) {
     Vec2 movement = target - game.GetPlayer().position;
     const float length = Length(movement);
     return length > .1f ? movement * (1 / length) : Vec2{};
+}
+void TestKoreanWrapping() {
+    const auto width = [](std::string_view text) {
+        size_t offset = 0;
+        float count = 0;
+        while (offset < text.size()) {
+            Check(LuxSamples::NextCodepoint(text, offset) != 0xFFFD,
+                  "wrapped Korean lines contain complete UTF-8 characters");
+            ++count;
+        }
+        return count;
+    };
+    const auto korean = WrapText("가나다라마바사힣", 3, 3, width);
+    Check(korean.complete && korean.lines.size() == 3 && korean.lines[0] == "가나다" &&
+              korean.lines[1] == "라마바",
+          "long Korean words wrap on codepoint boundaries");
+    Check(korean.lines[2] == "사힣", "the last Korean syllable is preserved");
+    const auto mixed = WrapText("WASD 이동 후 돌진", 7, 3, width);
+    Check(mixed.complete && mixed.lines.size() == 2 && mixed.lines[0] == "WASD 이동" &&
+              mixed.lines[1] == "후 돌진",
+          "mixed Korean and ASCII prefer word boundaries");
+    Check(!WrapText("가나다라", 1, 3, width).complete,
+          "layout reports truncated Korean text instead of silently dropping it");
+    Check(!WrapText("힣", .5f, 2, width).complete,
+          "a glyph wider than its container reports overflow without splitting its bytes");
 }
 void TestMovementAndTime() {
     Rules rules;
@@ -179,6 +205,7 @@ void TestEndStatesAndLimits() {
 } // namespace
 int RunForestSurvivorTests(int, char**) {
     try {
+        TestKoreanWrapping();
         TestMovementAndTime();
         TestCombatAndUpgrade();
         TestOpeningSurvival();

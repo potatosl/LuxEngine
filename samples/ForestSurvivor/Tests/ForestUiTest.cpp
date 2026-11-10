@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -21,7 +22,27 @@ void Frames(ForestSurvivorApp& app, int count = 3) {
         Check(result == LuxEngine::Application::FrameResult::Continue ||
                   result == LuxEngine::Application::FrameResult::Skipped,
               "UI scenario keeps rendering");
+        Check(app.UiTextFits(),
+              "all Korean labels fit the current viewport and wrapped containers");
     }
+}
+void Capture(ForestSurvivorApp& app, const std::string& name) {
+    const char* directory = SDL_getenv("LUX_FOREST_CAPTURE_DIR");
+    if (!directory)
+        return;
+    std::filesystem::create_directories(directory);
+    Check(app.GetGpuDevice().RequestFrameCapture(), "localized UI capture queues");
+    Frames(app, 2);
+    LuxEngine::GpuFrameCapture capture;
+    Check(app.GetGpuDevice().ReadFrameCapture(capture), "localized UI capture completes");
+    SDL_Surface* surface = SDL_CreateSurfaceFrom(
+        static_cast<int>(capture.width), static_cast<int>(capture.height), SDL_PIXELFORMAT_RGBA32,
+        capture.rgba.data(), static_cast<int>(capture.width * 4));
+    Check(surface != nullptr, "localized UI capture surface is created");
+    const bool saved =
+        SDL_SaveBMP(surface, (std::filesystem::path(directory) / (name + ".bmp")).string().c_str());
+    SDL_DestroySurface(surface);
+    Check(saved, "localized UI capture is saved");
 }
 void Motion(ForestSurvivorApp& app, float x, float y) {
     SDL_Event event{};
@@ -94,6 +115,12 @@ int TestMenuButtons() {
         return 77;
     Frames(app);
     Check(app.GetGame().GetPhase() == Phase::Title, "normal startup stays at the title");
+    for (const auto size : {LuxEngine::Vec2{960, 720}, LuxEngine::Vec2{1600, 900}}) {
+        Check(app.GetWindow().SetSize(static_cast<unsigned>(size.x), static_cast<unsigned>(size.y)),
+              "title resizes for Korean text layout checks");
+        Frames(app, 5);
+        Capture(app, "title-" + std::to_string(static_cast<int>(size.x)));
+    }
     for (const auto key : {SDLK_RETURN, SDLK_SPACE, SDLK_ESCAPE}) {
         Key(app, key, true);
         Frames(app, 1);
@@ -139,6 +166,7 @@ int TestMenuButtons() {
         Click(app, UiAction::Resume);
         Check(app.GetGame().GetPhase() == Phase::Playing,
               "resume hit target follows the resized viewport");
+        Capture(app, "playing-" + std::to_string(static_cast<int>(size.x)));
     }
     Click(app, UiAction::Pause);
     Click(app, UiAction::Restart);
@@ -179,6 +207,10 @@ int RunForestSurvivorUiTests(int, char**) {
         for (int index = 0; index < 3; ++index)
             Find(app, static_cast<UiAction>(static_cast<int>(UiAction::Choice0) + index));
         Frames(app, 3);
+        Check(app.GetWindow().SetSize(choice == 0 ? 960u : 1600u, choice == 0 ? 720u : 900u),
+              "Korean upgrade cards resize with the viewport");
+        Frames(app, 5);
+        Capture(app, "upgrade-" + std::to_string(choice == 0 ? 960 : 1600));
         Check(app.GetGame().Elapsed() == elapsed, "upgrade cards pause the actual run clock");
         Click(app, static_cast<UiAction>(static_cast<int>(UiAction::Choice0) + choice));
         Check(app.GetGame().GetPhase() == Phase::Playing,
