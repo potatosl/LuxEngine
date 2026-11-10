@@ -29,11 +29,6 @@ set_tests_properties(Engine_longrun PROPERTIES TIMEOUT 600 LABELS "gpu;long" SKI
     ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=off"
     WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
 
-add_test(NAME Engine_runtime COMMAND LuxEngineDemo --smoke-test)
-set_tests_properties(Engine_runtime PROPERTIES TIMEOUT 60 LABELS gpu
-    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineDemo>"
-    ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}")
-
 # Runtime: LuxPlayer argument parsing and view fitting, then a real LuxPlayer run.
 add_executable(LuxRuntimeTests RuntimeTest.cpp)
 target_link_libraries(LuxRuntimeTests PRIVATE LuxEngine::Runtime)

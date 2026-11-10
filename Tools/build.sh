@@ -19,4 +19,4 @@ cmake --build "$BUILD_DIR"
 
 echo ""
 echo "[SUCCESS] LuxEngine built successfully!"
-echo "Run demo with: $BUILD_DIR/bin/LuxEngineDemo"
+echo "Run samples: $BUILD_DIR/bin/SampleBasic2D, SamplePhysics2D, SampleInputBindings, SampleForestSurvivor"
