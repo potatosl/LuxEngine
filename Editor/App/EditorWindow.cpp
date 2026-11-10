@@ -865,6 +865,11 @@ void EditorWindow::OnNameChanged() {
     const std::string value = Utf8(name_->text());
     if (selected.GetComponent<LuxEngine::TagComponent>().tag == value)
         return;
+    if (value.size() > 256) {
+        Log(QStringLiteral("엔티티 이름은 UTF-8 기준 256바이트까지 입력할 수 있습니다."), true);
+        RefreshInspector();
+        return;
+    }
     RecordEdit(QStringLiteral("이름 변경"), [this, value] {
         document_.GetSelected().GetComponent<LuxEngine::TagComponent>().tag = value;
         document_.MarkDirty();
@@ -1934,8 +1939,10 @@ void EditorWindow::PasteEntity() {
     }
 
     RecordEdit(QStringLiteral("엔티티 붙여넣기"), [this, validated = std::move(validated)] {
-        LuxEngine::Entity entity =
-            document_.CreateEntity(Utf8(validated.name + QStringLiteral(" 복사본")));
+        QString name = validated.name + QStringLiteral(" 복사본");
+        if (name.toUtf8().size() > 256)
+            name = validated.name;
+        LuxEngine::Entity entity = document_.CreateEntity(Utf8(name));
         try {
             if (!validated.hasTag)
                 entity.RemoveComponent<LuxEngine::TagComponent>();

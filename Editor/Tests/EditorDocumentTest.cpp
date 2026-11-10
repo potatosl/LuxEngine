@@ -37,6 +37,28 @@ struct TempDirectory {
     }
 };
 
+void TestSceneWriteLimits() {
+    using namespace LuxEngine;
+    {
+        Scene scene;
+        for (unsigned i = 0; i < 100001; ++i)
+            scene.CreateEntity("Count");
+        std::string output = "preserved";
+        Check(!scene.SerializeToString(output) && output == "preserved",
+              "writer refuses entity counts the reader cannot load");
+    }
+    {
+        Scene scene;
+        TilemapComponent map;
+        Check(map.Resize(256, 256), "large scene tile fixture creates");
+        for (unsigned i = 0; i < 1024; ++i)
+            scene.CreateEntity("Map").AddComponent<TilemapComponent>(map);
+        std::string output = "preserved";
+        Check(!scene.SerializeToString(output) && output == "preserved",
+              "writer refuses scene bytes above the reader limit");
+    }
+}
+
 void TestDocument() {
     using namespace LuxEngine;
     using namespace LuxEditor;
@@ -869,6 +891,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         TestDocument();
+        TestSceneWriteLimits();
         Test3DEditorEntity();
         Test2DEditorComponents();
         TestProjectManagement();
