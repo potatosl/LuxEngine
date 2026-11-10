@@ -1,0 +1,14 @@
+DungGeunMo+Fixedsys 1.3 (2019-01-13)
+Author: Kil Hyung-jin (orioncactus)
+Original designs: Kim Jung-tae (DungGeunMo), Darien Gavin Valentine (Fixedsys Excelsior)
+Official source and license: https://cactus.tistory.com/193
+
+License: Public Domain (not SIL OFL; not a CC0-1.0 license claim)
+The original, unmodified font's name table also states "Public Domain".
+
+Author's license statement from the official distribution page:
+"원본과 동일한 퍼블릭 도메인으로 재배포, 수정, 영리 목적 사용 등 걱정 없이 자유롭게 쓰면 됩니다."
+
+This notice records the font-specific grant. The blog's general article footer
+license does not replace the font's explicit Public Domain grant above.
+The font file is preserved byte-for-byte from the official TTF ZIP.
