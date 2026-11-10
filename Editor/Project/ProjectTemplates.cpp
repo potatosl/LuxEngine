@@ -2,7 +2,7 @@
 
 #include <fstream>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 constexpr const char* GameCMake = R"LUX(cmake_minimum_required(VERSION 3.24)
 project(LuxGame LANGUAGES CXX)
@@ -218,4 +218,4 @@ bool CreateTemplateFiles(const std::filesystem::path& directory, ProjectTemplate
     return true;
 }
 
-} // namespace LuxEngine
+} // namespace LuxEditor

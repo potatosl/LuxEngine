@@ -39,6 +39,7 @@ struct TempDirectory {
 
 void TestDocument() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
 
     TempDirectory files;
     const std::string savedPath = (files.path / "scene.lux").string();
@@ -117,6 +118,7 @@ void TestDocument() {
 
 void Test3DEditorEntity() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     TempDirectory files;
     EditorDocument document;
     auto entity = document.CreateEntity("3D Mesh");
@@ -139,6 +141,7 @@ void Test3DEditorEntity() {
 
 void Test2DEditorComponents() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     TempDirectory files;
     EditorDocument document;
     auto entity = document.CreateEntity("Editable World");
@@ -208,6 +211,7 @@ void Test2DEditorComponents() {
 
 void TestProjectManagement() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     TempDirectory files;
     std::string error;
     const std::array templates{ProjectTemplate::Empty, ProjectTemplate::Platformer,
@@ -266,6 +270,7 @@ void TestProjectManagement() {
 
 void TestProjectOperations() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     TempDirectory files;
     std::string error;
     auto project = EditorProject::Create(files.path / "original", "Original",
@@ -423,6 +428,7 @@ void TestProjectOperations() {
 
 void TestUnicodeProjectPaths() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     TempDirectory files;
     std::string error;
     const auto directory = files.path / PathFromUtf8("한글 프로젝트");
@@ -455,6 +461,7 @@ void TestUnicodeProjectPaths() {
 
 void TestArchiveSecurityAndFuzzing() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     TempDirectory files;
     std::string error;
 
@@ -762,6 +769,7 @@ void TestArchiveSecurityAndFuzzing() {
 
 void TestArchiveSizeLimits() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     constexpr uint64_t limit = 256ull * 1024 * 1024;
     for (const uint64_t size : {limit + 1, limit - 1, limit}) {
         TempDirectory files;
@@ -814,6 +822,7 @@ void TestArchiveSizeLimits() {
 
 void TestEmptyProjectDirectories() {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     TempDirectory files;
     std::string error;
     auto original =

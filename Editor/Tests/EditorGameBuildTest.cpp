@@ -16,7 +16,7 @@
 #include <string>
 
 namespace fs = std::filesystem;
-using namespace LuxEngine;
+using namespace LuxEditor;
 
 namespace {
 

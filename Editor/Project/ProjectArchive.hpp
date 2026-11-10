@@ -5,7 +5,7 @@
 #include <optional>
 #include <string>
 
-namespace LuxEngine {
+namespace LuxEditor {
 
 bool ExportProject(const EditorProject& project, const std::filesystem::path& archive,
                    std::string& error);
@@ -20,4 +20,4 @@ bool CreateProjectBackup(const EditorProject& project, std::filesystem::path& ba
 bool RestoreProjectBackup(const EditorProject& project, const std::filesystem::path& backup,
                           std::string& error);
 
-} // namespace LuxEngine
+} // namespace LuxEditor

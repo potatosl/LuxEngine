@@ -21,7 +21,7 @@
 #include <vector>
 #include <zip.h>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 constexpr uint64_t MaxArchiveBytes = 1024ull * 1024ull * 1024ull;    // 1 GiB total extracted size
 constexpr uint64_t MaxSingleEntryBytes = 256ull * 1024ull * 1024ull; // 256 MiB per single file
@@ -721,4 +721,4 @@ bool RestoreProjectBackup(const EditorProject& project, const std::filesystem::p
     return true;
 }
 
-} // namespace LuxEngine
+} // namespace LuxEditor

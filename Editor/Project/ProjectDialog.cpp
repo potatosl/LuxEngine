@@ -21,7 +21,7 @@
 #include <cstdio>
 #include <sstream>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 QString Q(const std::string& value) {
     return QString::fromUtf8(value);
@@ -199,4 +199,4 @@ ShowProjectDestinationDialog(QWidget* parent, const char* title, const std::stri
                               QLineEdit::Normal, Q(SuggestedPath(suggested)), &accepted);
     return accepted ? std::optional(PathFromUtf8(Utf8(value))) : std::nullopt;
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

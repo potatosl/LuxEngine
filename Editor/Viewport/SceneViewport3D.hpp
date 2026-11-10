@@ -9,16 +9,20 @@
 #include <optional>
 
 namespace LuxEngine {
+struct TransformComponent;
+}
+
+namespace LuxEditor {
 class EditorDocument;
 class EngineSceneRenderer;
-struct TransformComponent;
 class SceneViewport3D final : public QWidget {
 public:
-    SceneViewport3D(QWidget* parent, EditorDocument& document,
-                    std::function<void(std::optional<uint32>)> onSelect,
-                    std::function<void(uint32, const TransformComponent&)> onTransform,
-                    std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
-                    std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
+    SceneViewport3D(
+        QWidget* parent, EditorDocument& document,
+        std::function<void(std::optional<LuxEngine::uint32>)> onSelect,
+        std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform,
+        std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
+        std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
     void RefreshScene() {
         update();
     }
@@ -34,22 +38,22 @@ private:
     void mouseMoveEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
     EditorDocument& document_;
-    std::function<void(std::optional<uint32>)> onSelect_;
-    std::function<void(uint32, const TransformComponent&)> onTransform_;
+    std::function<void(std::optional<LuxEngine::uint32>)> onSelect_;
+    std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform_;
     std::function<void()> onBeginEdit_;
     std::function<void()> onEndEdit_;
-    Vec3 focus_{0, 0, 0};
+    LuxEngine::Vec3 focus_{0, 0, 0};
     double yaw_ = .65, pitch_ = .48, distance_ = 22;
     QPointF lastMouse_{};
     QPointF dragStart_{};
-    Vec3 initialPosition_{};
-    Vec3 initialRotation_{};
-    Vec3 initialScale_{1, 1, 1};
-    uint32 dragId_ = 0;
+    LuxEngine::Vec3 initialPosition_{};
+    LuxEngine::Vec3 initialRotation_{};
+    LuxEngine::Vec3 initialScale_{1, 1, 1};
+    LuxEngine::uint32 dragId_ = 0;
     EditorTool tool_ = EditorTool::Select;
     bool orbiting_ = false, panning_ = false, dragging_ = false;
     std::shared_ptr<EngineSceneRenderer> engineRenderer_;
     bool engineFrame_ = false;
     QImage cachedFrame_;
 };
-} // namespace LuxEngine
+} // namespace LuxEditor

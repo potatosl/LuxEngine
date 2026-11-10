@@ -13,7 +13,7 @@
 #include <string_view>
 #include <system_error>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 bool WithinProject(const std::filesystem::path& relative) {
     if (relative.empty() || relative.is_absolute())
@@ -126,7 +126,7 @@ std::filesystem::path EditorProject::GetAutosaveFile(const std::filesystem::path
     return file_.parent_path() / ".lux" / "autosave" / relative;
 }
 
-bool EditorProject::SaveAutosave(const std::filesystem::path& sceneFile, Scene& scene,
+bool EditorProject::SaveAutosave(const std::filesystem::path& sceneFile, LuxEngine::Scene& scene,
                                  std::string& error) const {
     error.clear();
     const auto target = GetAutosaveFile(sceneFile);
@@ -221,4 +221,4 @@ size_t EditorProject::RescanResources(std::string& error) const {
     return count;
 }
 
-} // namespace LuxEngine
+} // namespace LuxEditor

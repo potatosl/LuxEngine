@@ -1,4 +1,4 @@
 #pragma once
-namespace LuxEngine {
+namespace LuxEditor {
 enum class EditorTool { Select, Move, Rotate, Scale, TileBrush, TileErase };
 }

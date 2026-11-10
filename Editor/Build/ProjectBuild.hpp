@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace LuxEngine {
+namespace LuxEditor {
 
 enum class BuildConfiguration { Debug, Release };
 
@@ -89,4 +89,4 @@ std::optional<PackageResult> CreateDistributionArchive(const std::filesystem::pa
                                                        const std::string& rootName,
                                                        std::string& error);
 
-} // namespace LuxEngine
+} // namespace LuxEditor

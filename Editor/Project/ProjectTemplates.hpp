@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <string>
 
-namespace LuxEngine {
+namespace LuxEditor {
 bool CreateTemplateFiles(const std::filesystem::path& directory, ProjectTemplate projectTemplate,
                          std::string& error);
-} // namespace LuxEngine
+} // namespace LuxEditor

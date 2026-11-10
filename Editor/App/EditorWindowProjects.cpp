@@ -16,7 +16,7 @@
 #include <QTimer>
 #include <QUndoStack>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 QString Q(const std::string& value) {
     return QString::fromUtf8(value);
@@ -330,4 +330,4 @@ void EditorWindow::RescanProjectResources() {
     RefreshProjectExplorer();
     Log(QStringLiteral("리소스 %1개를 재검색했습니다.").arg(count));
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

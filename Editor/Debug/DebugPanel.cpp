@@ -15,7 +15,7 @@
 #include <QVBoxLayout>
 #include <cmath>
 
-namespace LuxEngine {
+namespace LuxEditor {
 DebugPanel::DebugPanel(QWidget* parent, std::function<void(uint32_t)> onSelect)
     : QWidget(parent), onSelect_(std::move(onSelect)) {
     auto* layout = new QVBoxLayout(this);
@@ -103,7 +103,8 @@ void DebugPanel::FilterLogs() {
             (entry.error ? QStringLiteral("[오류] ") : QStringLiteral("[정보] ")) + entry.message);
     }
 }
-void DebugPanel::UpdateScene(Scene& scene, uint32_t selectedId, uint64_t frame, double frameMs) {
+void DebugPanel::UpdateScene(LuxEngine::Scene& scene, uint32_t selectedId, uint64_t frame,
+                             double frameMs) {
     metrics_->setText(QStringLiteral("프레임 %1  |  %2 ms  |  엔티티 %3  |  충돌 %4")
                           .arg(frame)
                           .arg(frameMs, 0, 'f', 2)
@@ -119,19 +120,21 @@ void DebugPanel::UpdateScene(Scene& scene, uint32_t selectedId, uint64_t frame, 
     };
     if (selectedId && scene.IsAlive(selectedId)) {
         add(QStringLiteral("선택 엔티티"), QString::number(selectedId), selectedId);
-        if (const auto* transform = scene.TryGetComponent<TransformComponent>(selectedId))
+        if (const auto* transform =
+                scene.TryGetComponent<LuxEngine::TransformComponent>(selectedId))
             add(QStringLiteral("위치"), QStringLiteral("%1, %2, %3")
                                             .arg(transform->position.x, 0, 'f', 2)
                                             .arg(transform->position.y, 0, 'f', 2)
                                             .arg(transform->position.z, 0, 'f', 2));
-        if (const auto* body = scene.TryGetComponent<Rigidbody2DComponent>(selectedId)) {
+        if (const auto* body = scene.TryGetComponent<LuxEngine::Rigidbody2DComponent>(selectedId)) {
             add(QStringLiteral("2D 속도"), QStringLiteral("%1, %2")
                                                .arg(body->velocity.x, 0, 'f', 2)
                                                .arg(body->velocity.y, 0, 'f', 2));
             add(QStringLiteral("접지"),
                 body->isGrounded ? QStringLiteral("예") : QStringLiteral("아니요"));
         }
-        if (const auto* animation = scene.TryGetComponent<AnimationComponent>(selectedId))
+        if (const auto* animation =
+                scene.TryGetComponent<LuxEngine::AnimationComponent>(selectedId))
             add(QStringLiteral("애니메이션 시간"), QString::number(animation->currentTime, 'f', 2));
     }
     for (const auto& event : scene.GetCollisionEvents2D())
@@ -144,4 +147,4 @@ void DebugPanel::UpdateScene(Scene& scene, uint32_t selectedId, uint64_t frame, 
             event.entityA);
     // 개발 중: 엔진 접촉 이벤트에 접점 좌표가 추가되면 뷰포트에도 접점을 표시합니다.
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

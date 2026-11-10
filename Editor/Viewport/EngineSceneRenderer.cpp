@@ -26,12 +26,12 @@
 #include <windows.h>
 #endif
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
-constexpr uint32 kMaxDeviceRecoveries = 3;
+constexpr LuxEngine::uint32 kMaxDeviceRecoveries = 3;
 constexpr int kMaxSwapchainAcquireRetries = 3;
 std::atomic<bool> s_ForceAllowed{false};
-std::atomic<int> s_DefaultValidation{static_cast<int>(GpuValidation::Auto)};
+std::atomic<int> s_DefaultValidation{static_cast<int>(LuxEngine::GpuValidation::Auto)};
 
 // Keeps SDL video subsystem, vulkan-1.dll loader, and (when validation is active) the Khronos
 // validation layer module resident across repeated viewport teardown/re-initialization cycles so
@@ -116,13 +116,13 @@ void DrainWindowEvents(SDL_Window* window, bool pump = false) {
 
 struct EngineSceneRenderer::State {
     bool sdlVideo = false;
-    Window window;
-    GpuDevice gpu;
-    Renderer2D::Context context2D;
-    Renderer3D::Context context3D;
-    uint32 width = 0;
-    uint32 height = 0;
-    GpuFrameCapture capture;
+    LuxEngine::Window window;
+    LuxEngine::GpuDevice gpu;
+    LuxEngine::Renderer2D::Context context2D;
+    LuxEngine::Renderer3D::Context context3D;
+    LuxEngine::uint32 width = 0;
+    LuxEngine::uint32 height = 0;
+    LuxEngine::GpuFrameCapture capture;
 
     ~State() {
         context2D.Shutdown();
@@ -161,11 +161,11 @@ bool EngineSceneRenderer::IsReady() const {
     return state_ && state_->gpu.IsReady();
 }
 
-GpuDevice* EngineSceneRenderer::GetGpuDevice() noexcept {
+LuxEngine::GpuDevice* EngineSceneRenderer::GetGpuDevice() noexcept {
     return state_ ? &state_->gpu : nullptr;
 }
 
-const GpuDevice* EngineSceneRenderer::GetGpuDevice() const noexcept {
+const LuxEngine::GpuDevice* EngineSceneRenderer::GetGpuDevice() const noexcept {
     return state_ ? &state_->gpu : nullptr;
 }
 
@@ -190,7 +190,8 @@ void EngineSceneRenderer::Reset() {
     error_.clear();
 }
 
-bool EngineSceneRenderer::InitializeState(uint32 initialWidth, uint32 initialHeight) {
+bool EngineSceneRenderer::InitializeState(LuxEngine::uint32 initialWidth,
+                                          LuxEngine::uint32 initialHeight) {
     GetProcessRetention().RetainLoaderAndVideo();
     auto state = std::make_unique<State>();
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
@@ -199,7 +200,7 @@ bool EngineSceneRenderer::InitializeState(uint32 initialWidth, uint32 initialHei
         return false;
     }
     state->sdlVideo = true;
-    WindowProps props;
+    LuxEngine::WindowProps props;
     props.title = "LuxEditor viewport";
     props.width = initialWidth > 0 ? initialWidth : 640;
     props.height = initialHeight > 0 ? initialHeight : 360;
@@ -213,10 +214,10 @@ bool EngineSceneRenderer::InitializeState(uint32 initialWidth, uint32 initialHei
         return false;
     }
     DrainWindowEvents(state->window.GetNativeHandle(), false);
-    GpuDeviceConfig config;
+    LuxEngine::GpuDeviceConfig config;
     config.vsync = false;
     config.framesInFlight = 1;
-    config.validation = static_cast<GpuValidation>(s_DefaultValidation.load());
+    config.validation = static_cast<LuxEngine::GpuValidation>(s_DefaultValidation.load());
     if (!state->gpu.Initialize(state->window, config)) {
         error_ = QStringLiteral("Vulkan 장치 초기화 실패: %1")
                      .arg(QString::fromStdString(state->gpu.GetLastError()));
@@ -249,8 +250,8 @@ bool EngineSceneRenderer::EnsureReady() {
                          .arg(QString::fromStdString(state_->gpu.GetLastError()));
             return false;
         }
-        const uint32 prevW = state_->width > 0 ? state_->width : 640;
-        const uint32 prevH = state_->height > 0 ? state_->height : 360;
+        const LuxEngine::uint32 prevW = state_->width > 0 ? state_->width : 640;
+        const LuxEngine::uint32 prevH = state_->height > 0 ? state_->height : 360;
         ++recoveries_;
         state_.reset();
         return InitializeState(prevW, prevH);
@@ -261,7 +262,7 @@ bool EngineSceneRenderer::EnsureReady() {
     return InitializeState(640, 360);
 }
 
-bool EngineSceneRenderer::BeginViewportFrame(uint32 width, uint32 height) {
+bool EngineSceneRenderer::BeginViewportFrame(LuxEngine::uint32 width, LuxEngine::uint32 height) {
     for (int recoveryAttempt = 0; recoveryAttempt < 2; ++recoveryAttempt) {
         if (!IsReady() && Allowed() && !attempted_ && !state_) {
             attempted_ = true;
@@ -285,14 +286,14 @@ bool EngineSceneRenderer::BeginViewportFrame(uint32 width, uint32 height) {
             error_ = QString::fromStdString(s.gpu.GetLastError());
             return false;
         }
-        GpuDevice::FrameStart start = GpuDevice::FrameStart::Skipped;
+        LuxEngine::GpuDevice::FrameStart start = LuxEngine::GpuDevice::FrameStart::Skipped;
         for (int retry = 0; retry < kMaxSwapchainAcquireRetries; ++retry) {
             start = s.gpu.BeginFrame();
-            if (start == GpuDevice::FrameStart::Ready || start == GpuDevice::FrameStart::Error ||
-                !s.gpu.IsReady())
+            if (start == LuxEngine::GpuDevice::FrameStart::Ready ||
+                start == LuxEngine::GpuDevice::FrameStart::Error || !s.gpu.IsReady())
                 break;
         }
-        if (start == GpuDevice::FrameStart::Ready)
+        if (start == LuxEngine::GpuDevice::FrameStart::Ready)
             return true;
         error_ = QStringLiteral("엔진 프레임을 시작하지 못했습니다: %1")
                      .arg(QString::fromStdString(s.gpu.GetLastError()));
@@ -327,14 +328,14 @@ bool EngineSceneRenderer::ReadbackToImage(QImage& output) {
     if (static_cast<size_t>(output.bytesPerLine()) == rowBytes) {
         std::memcpy(output.bits(), s.capture.rgba.data(), s.capture.rgba.size());
     } else {
-        for (uint32 y = 0; y < s.capture.height; ++y)
+        for (LuxEngine::uint32 y = 0; y < s.capture.height; ++y)
             std::memcpy(output.scanLine(static_cast<int>(y)), s.capture.rgba.data() + y * rowBytes,
                         rowBytes);
     }
     return true;
 }
 
-bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
+bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                                  const QRectF& worldBounds, QImage& output) {
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
@@ -349,24 +350,24 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
     } renderScope{*this};
     rendering_ = true;
 
-    const auto width = static_cast<uint32>(pixelWidth);
-    const auto height = static_cast<uint32>(pixelHeight);
+    const auto width = static_cast<LuxEngine::uint32>(pixelWidth);
+    const auto height = static_cast<LuxEngine::uint32>(pixelHeight);
     if (!BeginViewportFrame(width, height))
         return false;
 
     auto& s = *state_;
     s.gpu.Clear(30.0f / 255.0f, 34.0f / 255.0f, 42.0f / 255.0f, 1.0f);
-    const OrthographicCamera camera(
+    const LuxEngine::OrthographicCamera camera(
         static_cast<float>(worldBounds.left()), static_cast<float>(worldBounds.right()),
         static_cast<float>(worldBounds.bottom()), static_cast<float>(worldBounds.top()));
     s.context2D.Init(&s.gpu);
-    Renderer2D::ScopedContext scope2D(s.context2D);
+    LuxEngine::Renderer2D::ScopedContext scope2D(s.context2D);
     try {
-        Renderer2D::BeginScene(camera);
+        LuxEngine::Renderer2D::BeginScene(camera);
         scene.OnRender();
         if (postSceneHook_)
             postSceneHook_();
-        Renderer2D::EndScene();
+        LuxEngine::Renderer2D::EndScene();
     } catch (const std::exception& exception) {
         s.context2D.AbortScene();
         s.gpu.EndFrame();
@@ -385,8 +386,9 @@ bool EngineSceneRenderer::Render(Scene& scene, int pixelWidth, int pixelHeight,
     return ReadbackToImage(output);
 }
 
-bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight, const Vec3& focus,
-                                   double yaw, double pitch, double distance, QImage& output) {
+bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
+                                   const LuxEngine::Vec3& focus, double yaw, double pitch,
+                                   double distance, QImage& output) {
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
         return false;
@@ -400,8 +402,8 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
     } renderScope{*this};
     rendering_ = true;
 
-    const auto width = static_cast<uint32>(pixelWidth);
-    const auto height = static_cast<uint32>(pixelHeight);
+    const auto width = static_cast<LuxEngine::uint32>(pixelWidth);
+    const auto height = static_cast<LuxEngine::uint32>(pixelHeight);
     if (!BeginViewportFrame(width, height))
         return false;
 
@@ -410,19 +412,19 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
 
     const auto camera = MakeViewportCamera3D(QSizeF(width, height), focus, yaw, pitch, distance);
 
-    DirectionalLight sun;
-    sun.direction = Vec3(0.5f, -1.0f, 0.5f).Normalized();
+    LuxEngine::DirectionalLight sun;
+    sun.direction = LuxEngine::Vec3(0.5f, -1.0f, 0.5f).Normalized();
     sun.color = {1.0f, 0.98f, 0.95f};
     sun.intensity = 1.0f;
 
     s.context3D.Init(&s.gpu);
-    Renderer3D::ScopedContext scope3D(s.context3D);
+    LuxEngine::Renderer3D::ScopedContext scope3D(s.context3D);
     try {
-        Renderer3D::BeginScene(camera, sun);
-        for (Entity entity : scene.GetEntities()) {
-            if (!entity.HasComponent<TransformComponent>())
+        LuxEngine::Renderer3D::BeginScene(camera, sun);
+        for (LuxEngine::Entity entity : scene.GetEntities()) {
+            if (!entity.HasComponent<LuxEngine::TransformComponent>())
                 continue;
-            const auto& transform = entity.GetComponent<TransformComponent>();
+            const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
             if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
                 !std::isfinite(transform.position.z) || !std::isfinite(transform.rotation.x) ||
                 !std::isfinite(transform.rotation.y) || !std::isfinite(transform.rotation.z) ||
@@ -430,20 +432,22 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
                 !std::isfinite(transform.scale.z))
                 continue;
 
-            if (entity.HasComponent<MeshRendererComponent>()) {
-                const auto& meshComp = entity.GetComponent<MeshRendererComponent>();
-                Renderer3D::DrawMesh(transform.GetTransform(), meshComp.material);
-            } else if (entity.HasComponent<SpriteRendererComponent>()) {
-                const auto& sprite = entity.GetComponent<SpriteRendererComponent>();
-                Material3D mat;
+            if (entity.HasComponent<LuxEngine::MeshRendererComponent>()) {
+                const auto& meshComp = entity.GetComponent<LuxEngine::MeshRendererComponent>();
+                LuxEngine::Renderer3D::DrawMesh(transform.GetTransform(), meshComp.material);
+            } else if (entity.HasComponent<LuxEngine::SpriteRendererComponent>()) {
+                const auto& sprite = entity.GetComponent<LuxEngine::SpriteRendererComponent>();
+                LuxEngine::Material3D mat;
                 mat.albedoColor = sprite.color;
-                Renderer3D::DrawMesh(
-                    Mat4::Translate(transform.position) * Mat4::RotateZ(transform.rotation.z) *
-                        Mat4::Scale(Vec3{transform.scale.x, transform.scale.y, 0.02f}),
+                LuxEngine::Renderer3D::DrawMesh(
+                    LuxEngine::Mat4::Translate(transform.position) *
+                        LuxEngine::Mat4::RotateZ(transform.rotation.z) *
+                        LuxEngine::Mat4::Scale(
+                            LuxEngine::Vec3{transform.scale.x, transform.scale.y, 0.02f}),
                     mat);
             }
         }
-        Renderer3D::EndScene();
+        LuxEngine::Renderer3D::EndScene();
     } catch (const std::exception& exception) {
         s.context3D.AbortScene();
         s.gpu.EndFrame();
@@ -461,4 +465,4 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
     }
     return ReadbackToImage(output);
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

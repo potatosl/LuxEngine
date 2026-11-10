@@ -2,7 +2,7 @@
 #include <QColor>
 #include <QIcon>
 
-namespace LuxEngine {
+namespace LuxEditor {
 enum class EditorIcon {
     Select,
     Move,
@@ -29,4 +29,4 @@ enum class EditorIcon {
     Bug
 };
 QIcon MakeEditorIcon(EditorIcon icon, QColor color = QColor(214, 223, 231));
-} // namespace LuxEngine
+} // namespace LuxEditor

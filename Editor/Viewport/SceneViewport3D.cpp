@@ -12,35 +12,38 @@
 #include <limits>
 #include <vector>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
-Mat4 BoundsModel(Entity entity) {
-    const auto& transform = entity.GetComponent<TransformComponent>();
-    if (entity.HasComponent<MeshRendererComponent>())
+LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity) {
+    const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
+    if (entity.HasComponent<LuxEngine::MeshRendererComponent>())
         return transform.GetTransform();
-    if (entity.HasComponent<SpriteRendererComponent>())
-        return Mat4::Translate(transform.position) * Mat4::RotateZ(transform.rotation.z) *
-               Mat4::Scale({transform.scale.x, transform.scale.y, .02f});
-    if (entity.HasComponent<TilemapComponent>()) {
-        const auto& map = entity.GetComponent<TilemapComponent>();
+    if (entity.HasComponent<LuxEngine::SpriteRendererComponent>())
+        return LuxEngine::Mat4::Translate(transform.position) *
+               LuxEngine::Mat4::RotateZ(transform.rotation.z) *
+               LuxEngine::Mat4::Scale({transform.scale.x, transform.scale.y, .02f});
+    if (entity.HasComponent<LuxEngine::TilemapComponent>()) {
+        const auto& map = entity.GetComponent<LuxEngine::TilemapComponent>();
         const float width = map.width * map.tileSize, height = map.height * map.tileSize;
-        return Mat4::Translate(transform.position + Vec3{width * .5f, height * .5f, 0}) *
-               Mat4::Scale({width, height, .04f});
+        return LuxEngine::Mat4::Translate(transform.position +
+                                          LuxEngine::Vec3{width * .5f, height * .5f, 0}) *
+               LuxEngine::Mat4::Scale({width, height, .04f});
     }
     return transform.GetTransform();
 }
-Vec3 TransformCorner(const Mat4& model, Vec3 point) {
+LuxEngine::Vec3 TransformCorner(const LuxEngine::Mat4& model, LuxEngine::Vec3 point) {
     const auto& m = model.elements;
     return {m[0] * point.x + m[4] * point.y + m[8] * point.z + m[12],
             m[1] * point.x + m[5] * point.y + m[9] * point.z + m[13],
             m[2] * point.x + m[6] * point.y + m[10] * point.z + m[14]};
 }
 } // namespace
-SceneViewport3D::SceneViewport3D(QWidget* parent, EditorDocument& document,
-                                 std::function<void(std::optional<uint32>)> onSelect,
-                                 std::function<void(uint32, const TransformComponent&)> onTransform,
-                                 std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
-                                 std::shared_ptr<EngineSceneRenderer> renderer)
+SceneViewport3D::SceneViewport3D(
+    QWidget* parent, EditorDocument& document,
+    std::function<void(std::optional<LuxEngine::uint32>)> onSelect,
+    std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform,
+    std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
+    std::shared_ptr<EngineSceneRenderer> renderer)
     : QWidget(parent), document_(document), onSelect_(std::move(onSelect)),
       onTransform_(std::move(onTransform)), onBeginEdit_(std::move(onBeginEdit)),
       onEndEdit_(std::move(onEndEdit)), engineRenderer_(std::move(renderer)) {
@@ -48,8 +51,8 @@ SceneViewport3D::SceneViewport3D(QWidget* parent, EditorDocument& document,
     setMinimumSize(300, 200);
 }
 void SceneViewport3D::FocusSelection() {
-    Entity selected = document_.GetSelected();
-    if (selected && selected.HasComponent<TransformComponent>()) {
+    LuxEngine::Entity selected = document_.GetSelected();
+    if (selected && selected.HasComponent<LuxEngine::TransformComponent>()) {
         focus_ = TransformCorner(BoundsModel(selected), {});
         update();
     }
@@ -85,7 +88,9 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         painter.drawImage(rect(), cachedFrame_);
     }
     const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
-    const auto project = [&](Vec3 point) { return ProjectViewportPoint(camera, size(), point); };
+    const auto project = [&](LuxEngine::Vec3 point) {
+        return ProjectViewportPoint(camera, size(), point);
+    };
     const int gridAlpha = engineFrame_ ? 75 : 255;
     auto line = [gridAlpha](QColor color) {
         color.setAlpha(gridAlpha);
@@ -107,27 +112,27 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
     }
     const auto origin = project({0, 0, 0});
     for (const auto& [tip, color] :
-         std::array<std::pair<Vec3, QColor>, 3>{{{{2, 0, 0}, QColor(218, 97, 99)},
-                                                 {{0, 2, 0}, QColor(105, 190, 132)},
-                                                 {{0, 0, 2}, QColor(102, 151, 232)}}}) {
+         std::array<std::pair<LuxEngine::Vec3, QColor>, 3>{{{{2, 0, 0}, QColor(218, 97, 99)},
+                                                            {{0, 2, 0}, QColor(105, 190, 132)},
+                                                            {{0, 0, 2}, QColor(102, 151, 232)}}}) {
         auto end = project(tip);
         if (origin && end) {
             painter.setPen(QPen(color, 3));
             painter.drawLine(*origin, *end);
         }
     }
-    const Entity selected = document_.GetSelected();
+    const LuxEngine::Entity selected = document_.GetSelected();
     std::vector<QRectF> occupiedLabels;
-    for (Entity entity : document_.GetScene().GetEntities()) {
-        if (!entity.HasComponent<TransformComponent>())
+    for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
+        if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
-        const auto& t = entity.GetComponent<TransformComponent>();
+        const auto& t = entity.GetComponent<LuxEngine::TransformComponent>();
         if (!std::isfinite(t.position.x) || !std::isfinite(t.position.y) ||
             !std::isfinite(t.position.z) || !std::isfinite(t.scale.x) ||
             !std::isfinite(t.scale.y) || !std::isfinite(t.scale.z))
             continue;
-        const bool sprite = entity.HasComponent<SpriteRendererComponent>();
-        const bool mesh = entity.HasComponent<MeshRendererComponent>();
+        const bool sprite = entity.HasComponent<LuxEngine::SpriteRendererComponent>();
+        const bool mesh = entity.HasComponent<LuxEngine::MeshRendererComponent>();
         const bool active = selected && selected.GetId() == entity.GetId();
         QColor color = active   ? QColor(248, 197, 91)
                        : mesh   ? QColor(117, 183, 223)
@@ -135,8 +140,8 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
                                 : QColor(176, 187, 201);
         if (engineFrame_ && !active)
             color.setAlpha(120);
-        const Mat4 model = BoundsModel(entity);
-        const Vec3 boxCenter = TransformCorner(model, {});
+        const LuxEngine::Mat4 model = BoundsModel(entity);
+        const LuxEngine::Vec3 boxCenter = TransformCorner(model, {});
         std::array<std::optional<QPointF>, 8> corners;
         for (size_t i = 0; i < 8; ++i)
             corners[i] = project(TransformCorner(
@@ -159,9 +164,10 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         auto center = project(boxCenter);
         if (center) {
             painter.setPen(color);
-            const QString label = entity.HasComponent<TagComponent>()
-                                      ? QString::fromUtf8(entity.GetComponent<TagComponent>().tag)
-                                      : QStringLiteral("#%1").arg(entity.GetId());
+            const QString label =
+                entity.HasComponent<LuxEngine::TagComponent>()
+                    ? QString::fromUtf8(entity.GetComponent<LuxEngine::TagComponent>().tag)
+                    : QStringLiteral("#%1").arg(entity.GetId());
             const double textHeight = painter.fontMetrics().height();
             QRectF labelRect(center->x() + 9, center->y() - 10 - textHeight,
                              painter.fontMetrics().horizontalAdvance(label), textHeight);
@@ -200,19 +206,20 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
     }
     if (event->button() != Qt::LeftButton)
         return;
-    std::optional<uint32> nearest;
+    std::optional<LuxEngine::uint32> nearest;
     const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
     const auto ray = MakeViewportRay3D(camera, size(), event->position());
     if (!ray)
         return;
     double best = std::numeric_limits<double>::infinity();
-    for (Entity entity : document_.GetScene().GetEntities()) {
-        if (!entity.HasComponent<TransformComponent>())
+    for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
+        if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
         const auto distance = IntersectViewportBox(*ray, BoundsModel(entity));
         if (!distance || *distance >= best)
             continue;
-        const Vec3 surface = ray->origin + ray->direction * static_cast<float>(*distance);
+        const LuxEngine::Vec3 surface =
+            ray->origin + ray->direction * static_cast<float>(*distance);
         if (!ProjectViewportPoint(camera, size(), surface))
             continue;
         best = *distance;
@@ -220,8 +227,8 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
     }
     onSelect_(nearest);
     if (nearest && tool_ != EditorTool::Select) {
-        Entity selected = document_.GetSelected();
-        const auto& transform = selected.GetComponent<TransformComponent>();
+        LuxEngine::Entity selected = document_.GetSelected();
+        const auto& transform = selected.GetComponent<LuxEngine::TransformComponent>();
         dragId_ = *nearest;
         dragStart_ = event->position();
         initialPosition_ = transform.position;
@@ -253,10 +260,11 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
         focus_.y += static_cast<float>(delta.y() * scale * 1.6);
         update();
     } else if (dragging_ && (event->buttons() & Qt::LeftButton)) {
-        Entity entity = document_.GetSelected();
-        if (!entity || entity.GetId() != dragId_ || !entity.HasComponent<TransformComponent>())
+        LuxEngine::Entity entity = document_.GetSelected();
+        if (!entity || entity.GetId() != dragId_ ||
+            !entity.HasComponent<LuxEngine::TransformComponent>())
             return;
-        TransformComponent value = entity.GetComponent<TransformComponent>();
+        LuxEngine::TransformComponent value = entity.GetComponent<LuxEngine::TransformComponent>();
         const QPointF drag = event->position() - dragStart_;
         if (tool_ == EditorTool::Move) {
             const double scale = distance_ / std::max(1, height());
@@ -285,4 +293,4 @@ void SceneViewport3D::wheelEvent(QWheelEvent* event) {
     distance_ = std::clamp(distance_ * std::pow(.9, event->angleDelta().y() / 120.0), 1.0, 1000.0);
     update();
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

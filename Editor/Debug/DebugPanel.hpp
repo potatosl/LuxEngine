@@ -13,11 +13,14 @@ class QTreeWidget;
 
 namespace LuxEngine {
 class Scene;
+}
+
+namespace LuxEditor {
 class DebugPanel final : public QWidget {
 public:
     DebugPanel(QWidget* parent, std::function<void(uint32_t)> onSelect);
     void AddLog(const QString& message, bool error);
-    void UpdateScene(Scene& scene, uint32_t selectedId, uint64_t frame, double frameMs);
+    void UpdateScene(LuxEngine::Scene& scene, uint32_t selectedId, uint64_t frame, double frameMs);
 
 private:
     void FilterLogs();
@@ -33,4 +36,4 @@ private:
     QLabel* metrics_ = nullptr;
     std::function<void(uint32_t)> onSelect_;
 };
-} // namespace LuxEngine
+} // namespace LuxEditor
