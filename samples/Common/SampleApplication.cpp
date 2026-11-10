@@ -153,6 +153,8 @@ void SampleApplication::Capture() {
     output << "P6\n" << image.width << ' ' << image.height << "\n255\n";
     for (size_t index = 0; index < image.rgba.size(); index += 4)
         output.write(reinterpret_cast<const char*>(image.rgba.data() + index), 3);
+    // Final buffered writes can fail at close even when every preceding write succeeded.
+    output.close();
     if (!output)
         throw std::runtime_error("화면 캡처를 저장하지 못했습니다.");
     options_.capture.clear();

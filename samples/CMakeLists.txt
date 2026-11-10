@@ -42,6 +42,17 @@ if(LUX_BUILD_TESTS)
     add_test(NAME Samples_cc0_assets COMMAND ${CMAKE_COMMAND}
         "-DASSET_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/Assets" -P "${CMAKE_CURRENT_SOURCE_DIR}/Tests/VerifyAssets.cmake")
     set_tests_properties(Samples_cc0_assets PROPERTIES LABELS "headless;sample" TIMEOUT 30)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_executable(LuxSampleCaptureTests Tests/CaptureWriteTest.cpp)
+        target_link_libraries(LuxSampleCaptureTests PRIVATE LuxSampleSupport)
+        lux_set_target_warnings(LuxSampleCaptureTests)
+        lux_copy_runtime(LuxSampleCaptureTests)
+        add_dependencies(LuxSampleCaptureTests LuxSampleAssets)
+        add_test(NAME Samples_capture_write_failure COMMAND LuxSampleCaptureTests)
+        set_tests_properties(Samples_capture_write_failure PROPERTIES
+            LABELS "gpu;sample" TIMEOUT 60 SKIP_RETURN_CODE 77
+            ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")
+    endif()
     add_executable(LuxEntryPointTests Tests/EntryPointTest.cpp)
     target_link_libraries(LuxEntryPointTests PRIVATE LuxEngine::Engine)
     lux_set_target_warnings(LuxEntryPointTests)
