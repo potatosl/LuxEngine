@@ -35,10 +35,13 @@ class QProcess;
 class QProgressBar;
 
 namespace LuxEngine {
+struct TransformComponent;
+}
+
+namespace LuxEditor {
 class SceneViewport2D;
 class SceneViewport3D;
 class DebugPanel;
-struct TransformComponent;
 class EditorWindow final : public QMainWindow {
 public:
     explicit EditorWindow(QWidget* parent = nullptr);
@@ -93,9 +96,9 @@ private:
     void AddEntity();
     void AddMeshEntity();
     void AddTilemap();
-    void PaintTile(uint32 id, uint32 x, uint32 y, uint8_t tile);
+    void PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngine::uint32 y, uint8_t tile);
     void DeleteEntity();
-    void SelectEntity(std::optional<uint32> id);
+    void SelectEntity(std::optional<LuxEngine::uint32> id);
     void OnNameChanged();
     void OnTransformChanged();
     void OnSpriteChanged();
@@ -125,7 +128,7 @@ private:
     void HandleBuildOutput(const QByteArray& data);
     void ChooseEnginePackage();
     void PackageBuild();
-    void ApplyViewportTransform(uint32 id, const TransformComponent& value);
+    void ApplyViewportTransform(LuxEngine::uint32 id, const LuxEngine::TransformComponent& value);
     void BeginViewportEdit();
     void EndViewportEdit();
     void SetTool(EditorTool tool);
@@ -136,7 +139,7 @@ private:
     void PasteEntity();
     void RecordEdit(const QString& name, const std::function<void()>& edit);
     EditorSnapshot SnapshotScene();
-    void RestoreScene(const EditorSnapshot& snapshot, std::optional<uint32> selected);
+    void RestoreScene(const EditorSnapshot& snapshot, std::optional<LuxEngine::uint32> selected);
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -215,7 +218,7 @@ private:
     QAction* rescanAction_ = nullptr;
     QMenu* recentMenu_ = nullptr;
     std::vector<QAction*> shortcutActions_;
-    std::vector<uint32> hierarchyIds_;
+    std::vector<LuxEngine::uint32> hierarchyIds_;
     std::vector<std::filesystem::path> projectFilePaths_;
     bool refreshingHierarchy_ = false;
     bool refreshingInspector_ = false;
@@ -224,8 +227,8 @@ private:
     EditorSnapshot viewportEditBefore_;
     EditorSnapshot timelineBefore_;
     EditorSnapshot previewBefore_;
-    std::optional<uint32> viewportEditSelected_;
-    std::optional<uint32> previewSelected_;
+    std::optional<LuxEngine::uint32> viewportEditSelected_;
+    std::optional<LuxEngine::uint32> previewSelected_;
     uint64_t previewFrame_ = 0;
     bool previewActive_ = false;
     bool previewPaused_ = false;
@@ -244,4 +247,4 @@ private:
     QString playerScenePath_;
     QString lastLogMessage_;
 };
-} // namespace LuxEngine
+} // namespace LuxEditor

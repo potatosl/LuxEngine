@@ -14,7 +14,7 @@
 
 namespace {
 namespace fs = std::filesystem;
-using namespace LuxEngine;
+using namespace LuxEditor;
 
 void Check(bool condition, const char* message) {
     if (!condition)

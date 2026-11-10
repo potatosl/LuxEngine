@@ -20,7 +20,7 @@
 #include <windows.h>
 #endif
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 constexpr std::array<const char*, 5> TemplateNames = {"empty", "platformer", "top-down", "rpg",
                                                       "puzzle"};
@@ -162,16 +162,16 @@ bool WriteDependencies(const EditorProject& project) {
     return ReplaceFile(temporary, target);
 }
 
-void AddSprite(Scene& scene, const char* name, float x, float y, float width, float height,
-               Vec4 color) {
+void AddSprite(LuxEngine::Scene& scene, const char* name, float x, float y, float width,
+               float height, LuxEngine::Vec4 color) {
     auto entity = scene.CreateEntity(name);
-    auto& transform = entity.GetComponent<TransformComponent>();
+    auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
     transform.position = {x, y, 0};
     transform.scale = {width, height, 1};
-    entity.AddComponent<SpriteRendererComponent>().color = color;
+    entity.AddComponent<LuxEngine::SpriteRendererComponent>().color = color;
 }
 
-void PopulateTemplate(Scene& scene, ProjectTemplate value) {
+void PopulateTemplate(LuxEngine::Scene& scene, ProjectTemplate value) {
     switch (value) {
     case ProjectTemplate::Empty:
         return;
@@ -181,10 +181,10 @@ void PopulateTemplate(Scene& scene, ProjectTemplate value) {
         {
             auto entities = scene.GetEntities();
             auto floor = entities[0];
-            floor.AddComponent<BoxCollider2DComponent>();
+            floor.AddComponent<LuxEngine::BoxCollider2DComponent>();
             auto player = entities[1];
-            player.AddComponent<Rigidbody2DComponent>();
-            player.AddComponent<BoxCollider2DComponent>();
+            player.AddComponent<LuxEngine::Rigidbody2DComponent>();
+            player.AddComponent<LuxEngine::BoxCollider2DComponent>();
         }
         break;
     case ProjectTemplate::TopDown:
@@ -263,7 +263,7 @@ std::optional<EditorProject> EditorProject::Create(const std::filesystem::path& 
     project.settings_.name = name;
     project.engineVersion_ = CurrentEngineVersion();
     project.projectTemplate_ = projectTemplate;
-    Scene scene;
+    LuxEngine::Scene scene;
     PopulateTemplate(scene, projectTemplate);
     if (!scene.Serialize(PathUtf8(project.GetSceneFile()))) {
         error = "시작 장면을 저장할 수 없습니다.";
@@ -365,7 +365,7 @@ std::optional<EditorProject> EditorProject::Open(const std::filesystem::path& fi
         error = "시작 장면을 찾을 수 없습니다.";
         return std::nullopt;
     }
-    Scene validation;
+    LuxEngine::Scene validation;
     if (!validation.Deserialize(PathUtf8(project.GetSceneFile()))) {
         error = "시작 장면 파일을 읽을 수 없습니다.";
         return std::nullopt;
@@ -490,4 +490,4 @@ bool RecentProjects::Save() const {
     return ReplaceFile(temporary, storageFile_);
 }
 
-} // namespace LuxEngine
+} // namespace LuxEditor

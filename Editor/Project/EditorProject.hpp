@@ -7,6 +7,10 @@
 #include <vector>
 
 namespace LuxEngine {
+class Scene;
+}
+
+namespace LuxEditor {
 
 enum class ProjectTemplate { Empty, Platformer, TopDown, Rpg, Puzzle };
 
@@ -40,7 +44,7 @@ public:
     bool SetIcon(const std::filesystem::path& image, std::string& error);
     bool BumpVersion(int part, std::string& error);
     std::filesystem::path GetAutosaveFile(const std::filesystem::path& sceneFile) const;
-    bool SaveAutosave(const std::filesystem::path& sceneFile, class Scene& scene,
+    bool SaveAutosave(const std::filesystem::path& sceneFile, LuxEngine::Scene& scene,
                       std::string& error) const;
     bool HasNewerAutosave(const std::filesystem::path& sceneFile) const;
     bool ClearAutosave(const std::filesystem::path& sceneFile) const;
@@ -93,4 +97,4 @@ private:
     std::vector<std::filesystem::path> files_;
 };
 
-} // namespace LuxEngine
+} // namespace LuxEditor

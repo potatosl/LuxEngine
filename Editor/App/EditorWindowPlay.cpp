@@ -6,7 +6,7 @@
 #include <QFileInfo>
 #include <QProcess>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 QString PlayerExecutable() {
 #ifdef _WIN32
@@ -89,4 +89,4 @@ void EditorWindow::StopSceneWindow() {
     process->deleteLater();
     QFile::remove(playerScenePath_);
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

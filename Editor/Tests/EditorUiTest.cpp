@@ -50,8 +50,10 @@
 #define NOMINMAX
 #endif
 #include <malloc.h>
-#include <psapi.h>
 #include <windows.h>
+
+// psapi.h requires the Win32 types declared by windows.h; keep this include group separate.
+#include <psapi.h>
 #ifdef small
 #undef small
 #endif
@@ -196,7 +198,7 @@ void Check(bool condition, const char* message) {
 }
 
 void CheckWithGpuDiagnostics(bool condition, const char* phase, int iteration,
-                             const LuxEngine::EngineSceneRenderer* renderer, const char* message) {
+                             const LuxEditor::EngineSceneRenderer* renderer, const char* message) {
     if (condition)
         return;
     const auto cpu = QueryCpuMemory();
@@ -406,6 +408,7 @@ QJsonObject MakeValidClipboardEntityJson() {
 
 void VerifyFullClipboardEntityComponents(LuxEngine::Entity entity) {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     Check(entity.IsValid(), "pasted entity is valid");
     Check(entity.HasComponent<TagComponent>(), "pasted entity has TagComponent");
     Check(entity.GetComponent<TagComponent>().tag == "검증엔티티 복사본",
@@ -508,6 +511,7 @@ bool HasNonBackgroundPixel(const QImage& image, int bgR, int bgG, int bgB) {
 
 int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const StressConfig& cfg) {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     // Strictly disable GPU viewport in Editor_ui so it runs 100% headlessly without GPU dependency.
     EngineSceneRenderer::SetForceAllowed(false);
 
@@ -1058,6 +1062,7 @@ void PrintIsolationDelta(const char* name, int iters, const DetailedCpuMemorySam
 
 int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
     using namespace LuxEngine;
+    using namespace LuxEditor;
     const auto overallStart = std::chrono::steady_clock::now();
     std::cerr << "[Editor_gpu_lifecycle] probing Vulkan GPU availability (gpuIterations="
               << cfg.gpuIterations << ", viewportIterations=" << cfg.viewportIterations << ")\n";

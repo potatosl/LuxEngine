@@ -13,7 +13,7 @@
 #include <QSettings>
 #include <QStatusBar>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 constexpr size_t MaxStoredDiagnostics = 300;
 constexpr const char* GameExecutable = "LuxGame";
@@ -282,4 +282,4 @@ void EditorWindow::CancelBuild() {
         buildProgress_->hide();
     Log(QStringLiteral("빌드를 중지했습니다."), true);
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

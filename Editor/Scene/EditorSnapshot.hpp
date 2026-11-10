@@ -4,11 +4,11 @@
 #include <utility>
 #include <vector>
 
-namespace LuxEngine {
+namespace LuxEditor {
 // Editing cursors belong to undo history, not to the persisted game scene format.
 struct EditorSnapshot {
     QByteArray scene;
-    std::vector<std::pair<uint32, float>> animationTimes;
+    std::vector<std::pair<LuxEngine::uint32, float>> animationTimes;
 
     bool isEmpty() const {
         return scene.isEmpty();
@@ -19,4 +19,4 @@ struct EditorSnapshot {
     }
     bool operator==(const EditorSnapshot&) const = default;
 };
-} // namespace LuxEngine
+} // namespace LuxEditor

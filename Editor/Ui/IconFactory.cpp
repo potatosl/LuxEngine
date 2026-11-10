@@ -5,7 +5,7 @@
 #include <QPolygonF>
 #include <array>
 
-namespace LuxEngine {
+namespace LuxEditor {
 QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
     QPixmap pixels(24, 24);
     pixels.fill(Qt::transparent);
@@ -164,4 +164,4 @@ QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
     }
     return QIcon(pixels);
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

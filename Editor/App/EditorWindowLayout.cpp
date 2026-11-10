@@ -42,7 +42,7 @@
 #include <QVBoxLayout>
 #include <algorithm>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 QWidget* Panel(QWidget* parent, QVBoxLayout*& layout, int margin = 6) {
     auto* panel = new QWidget(parent);
@@ -79,15 +79,15 @@ void EditorWindow::BuildLayout() {
     setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
     setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
 
-    const auto select = [this](std::optional<uint32> id) { SelectEntity(id); };
-    const auto transform = [this](uint32 id, const TransformComponent& value) {
+    const auto select = [this](std::optional<LuxEngine::uint32> id) { SelectEntity(id); };
+    const auto transform = [this](LuxEngine::uint32 id,
+                                  const LuxEngine::TransformComponent& value) {
         ApplyViewportTransform(id, value);
     };
     const auto begin = [this] { BeginViewportEdit(); };
     const auto end = [this] { EndViewportEdit(); };
-    const auto paintTile = [this](uint32 id, uint32 x, uint32 y, uint8_t tile) {
-        PaintTile(id, x, y, tile);
-    };
+    const auto paintTile = [this](LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngine::uint32 y,
+                                  uint8_t tile) { PaintTile(id, x, y, tile); };
 
     auto* sceneFrame = new QWidget(this);
     auto* sceneLayout = new QVBoxLayout(sceneFrame);
@@ -183,9 +183,10 @@ void EditorWindow::BuildLayout() {
     connect(hierarchySearch_, &QLineEdit::textChanged, this, [this] { RefreshHierarchy(); });
     connect(hierarchy_, &QListWidget::currentRowChanged, this, [this](int row) {
         if (!refreshingHierarchy_)
-            SelectEntity(row < 0 || static_cast<size_t>(row) >= hierarchyIds_.size()
-                             ? std::nullopt
-                             : std::optional<uint32>(hierarchyIds_[static_cast<size_t>(row)]));
+            SelectEntity(
+                row < 0 || static_cast<size_t>(row) >= hierarchyIds_.size()
+                    ? std::nullopt
+                    : std::optional<LuxEngine::uint32>(hierarchyIds_[static_cast<size_t>(row)]));
     });
     connect(
         hierarchy_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& point) {
@@ -555,7 +556,7 @@ void EditorWindow::BuildLayout() {
     issuesOutput_ = new QPlainTextEdit(this);
     issuesOutput_->setReadOnly(true);
     issuesOutput_->setPlaceholderText(QStringLiteral("오류와 경고가 여기에 표시됩니다."));
-    debugPanel_ = new DebugPanel(this, [this](uint32 id) { SelectEntity(id); });
+    debugPanel_ = new DebugPanel(this, [this](LuxEngine::uint32 id) { SelectEntity(id); });
 
     const std::array<std::pair<QString, QWidget*>, 8> panels{
         {{QStringLiteral("Outliner"), hierarchyPanel},
@@ -787,4 +788,4 @@ void EditorWindow::ResetWorkspaceLayout() {
     docks_[4]->hide();
     statusBar()->showMessage(QStringLiteral("기본 작업 공간 배치를 복원했습니다."), 4000);
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

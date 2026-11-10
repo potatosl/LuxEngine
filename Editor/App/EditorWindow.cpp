@@ -59,7 +59,7 @@
 #include <functional>
 #include <numbers>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 QString Q(const std::string& value) {
     return QString::fromUtf8(value);
@@ -70,9 +70,9 @@ QString Q(const std::filesystem::path& value) {
 std::string Utf8(const QString& value) {
     return value.toUtf8().toStdString();
 }
-std::optional<uint32> SelectedId(EditorDocument& document) {
-    const Entity entity = document.GetSelected();
-    return entity ? std::optional<uint32>(entity.GetId()) : std::nullopt;
+std::optional<LuxEngine::uint32> SelectedId(EditorDocument& document) {
+    const LuxEngine::Entity entity = document.GetSelected();
+    return entity ? std::optional<LuxEngine::uint32>(entity.GetId()) : std::nullopt;
 }
 class SceneEditCommand final : public QUndoCommand {
 public:
@@ -643,30 +643,31 @@ void EditorWindow::RefreshHierarchy() {
     refreshingHierarchy_ = true;
     hierarchy_->clear();
     hierarchyIds_.clear();
-    Entity selected = document_.GetSelected();
+    LuxEngine::Entity selected = document_.GetSelected();
     size_t sprites = 0, meshes = 0;
     const auto entities = document_.GetScene().GetEntities();
-    for (Entity entity : entities) {
-        sprites += entity.HasComponent<SpriteRendererComponent>() ? 1 : 0;
-        meshes += entity.HasComponent<MeshRendererComponent>() ? 1 : 0;
+    for (LuxEngine::Entity entity : entities) {
+        sprites += entity.HasComponent<LuxEngine::SpriteRendererComponent>() ? 1 : 0;
+        meshes += entity.HasComponent<LuxEngine::MeshRendererComponent>() ? 1 : 0;
     }
     const std::array<size_t, 3> counts{entities.size(), sprites, meshes};
     for (size_t i = 0; i < counts.size(); ++i)
         groupTree_->topLevelItem(static_cast<int>(i))->setText(1, QString::number(counts[i]));
-    for (Entity entity : entities) {
-        if (groupFilter_ == 1 && !entity.HasComponent<SpriteRendererComponent>())
+    for (LuxEngine::Entity entity : entities) {
+        if (groupFilter_ == 1 && !entity.HasComponent<LuxEngine::SpriteRendererComponent>())
             continue;
-        if (groupFilter_ == 2 && !entity.HasComponent<MeshRendererComponent>())
+        if (groupFilter_ == 2 && !entity.HasComponent<LuxEngine::MeshRendererComponent>())
             continue;
-        const QString name = entity.HasComponent<TagComponent>()
-                                 ? Q(entity.GetComponent<TagComponent>().tag)
+        const QString name = entity.HasComponent<LuxEngine::TagComponent>()
+                                 ? Q(entity.GetComponent<LuxEngine::TagComponent>().tag)
                                  : QStringLiteral("Entity");
         if (!name.contains(hierarchySearch_->text(), Qt::CaseInsensitive))
             continue;
         hierarchyIds_.push_back(entity.GetId());
         auto* item = new QListWidgetItem(QStringLiteral("%1  %2").arg(entity.GetId()).arg(name));
-        item->setIcon(MakeEditorIcon(
-            entity.HasComponent<MeshRendererComponent>() ? EditorIcon::Mesh : EditorIcon::Sprite));
+        item->setIcon(MakeEditorIcon(entity.HasComponent<LuxEngine::MeshRendererComponent>()
+                                         ? EditorIcon::Mesh
+                                         : EditorIcon::Sprite));
         hierarchy_->addItem(item);
         if (selected && selected.GetId() == entity.GetId())
             hierarchy_->setCurrentRow(static_cast<int>(hierarchyIds_.size() - 1));
@@ -675,18 +676,18 @@ void EditorWindow::RefreshHierarchy() {
 }
 void EditorWindow::RefreshInspector() {
     refreshingInspector_ = true;
-    Entity selected = document_.GetSelected();
+    LuxEngine::Entity selected = document_.GetSelected();
     selectionLabel_->setText(selected ? QStringLiteral("엔티티 #%1").arg(selected.GetId())
                                       : QStringLiteral("선택된 엔티티 없음"));
     inspectorBody_->setEnabled(static_cast<bool>(selected) && !previewActive_);
     if (selected) {
-        name_->setEnabled(selected.HasComponent<TagComponent>());
-        name_->setText(selected.HasComponent<TagComponent>()
-                           ? Q(selected.GetComponent<TagComponent>().tag)
+        name_->setEnabled(selected.HasComponent<LuxEngine::TagComponent>());
+        name_->setText(selected.HasComponent<LuxEngine::TagComponent>()
+                           ? Q(selected.GetComponent<LuxEngine::TagComponent>().tag)
                            : QString());
-        const auto value = selected.HasComponent<TransformComponent>()
-                               ? selected.GetComponent<TransformComponent>()
-                               : TransformComponent{};
+        const auto value = selected.HasComponent<LuxEngine::TransformComponent>()
+                               ? selected.GetComponent<LuxEngine::TransformComponent>()
+                               : LuxEngine::TransformComponent{};
         const double degrees = 180.0 / std::numbers::pi;
         const std::array<std::array<double, 3>, 3> rows{
             {{{value.position.x, value.position.y, value.position.z}},
@@ -695,50 +696,55 @@ void EditorWindow::RefreshInspector() {
         for (size_t row = 0; row < 3; ++row)
             for (size_t col = 0; col < 3; ++col) {
                 transform_[row][col]->setValue(rows[row][col]);
-                transform_[row][col]->setEnabled(selected.HasComponent<TransformComponent>());
+                transform_[row][col]->setEnabled(
+                    selected.HasComponent<LuxEngine::TransformComponent>());
             }
-        const bool sprite = selected.HasComponent<SpriteRendererComponent>();
+        const bool sprite = selected.HasComponent<LuxEngine::SpriteRendererComponent>();
         spriteEnabled_->setChecked(sprite);
-        const Vec4 color =
-            sprite ? selected.GetComponent<SpriteRendererComponent>().color : Vec4{1, 1, 1, 1};
+        const LuxEngine::Vec4 color =
+            sprite ? selected.GetComponent<LuxEngine::SpriteRendererComponent>().color
+                   : LuxEngine::Vec4{1, 1, 1, 1};
         const std::array<float, 4> channels{color.x, color.y, color.z, color.w};
         for (size_t i = 0; i < 4; ++i) {
             color_[i]->setValue(std::clamp(static_cast<double>(channels[i]), 0.0, 1.0));
             color_[i]->setEnabled(sprite);
         }
-        const bool mesh = selected.HasComponent<MeshRendererComponent>();
+        const bool mesh = selected.HasComponent<LuxEngine::MeshRendererComponent>();
         meshEnabled_->setChecked(mesh);
-        const Material3D material =
-            mesh ? selected.GetComponent<MeshRendererComponent>().material : Material3D{};
+        const LuxEngine::Material3D material =
+            mesh ? selected.GetComponent<LuxEngine::MeshRendererComponent>().material
+                 : LuxEngine::Material3D{};
         metallic_->setValue(std::clamp(static_cast<double>(material.metallic), 0.0, 1.0));
         roughness_->setValue(std::clamp(static_cast<double>(material.roughness), 0.0, 1.0));
         metallic_->setEnabled(mesh);
         roughness_->setEnabled(mesh);
-        const bool tiled = selected.HasComponent<TilemapComponent>();
+        const bool tiled = selected.HasComponent<LuxEngine::TilemapComponent>();
         tilemapEnabled_->setChecked(tiled);
-        const TilemapComponent map =
-            tiled ? selected.GetComponent<TilemapComponent>() : TilemapComponent{};
+        const LuxEngine::TilemapComponent map =
+            tiled ? selected.GetComponent<LuxEngine::TilemapComponent>()
+                  : LuxEngine::TilemapComponent{};
         tilemapWidth_->setValue(static_cast<int>(map.width));
         tilemapHeight_->setValue(static_cast<int>(map.height));
         tilemapSize_->setValue(map.tileSize);
         tilemapWidth_->setEnabled(tiled);
         tilemapHeight_->setEnabled(tiled);
         tilemapSize_->setEnabled(tiled);
-        const bool hasBody = selected.HasComponent<Rigidbody2DComponent>();
+        const bool hasBody = selected.HasComponent<LuxEngine::Rigidbody2DComponent>();
         bodyEnabled_->setChecked(hasBody);
-        const Rigidbody2DComponent body =
-            hasBody ? selected.GetComponent<Rigidbody2DComponent>() : Rigidbody2DComponent{};
-        bodyType_->setCurrentIndex(body.type == BodyType::Static    ? 0
-                                   : body.type == BodyType::Dynamic ? 1
-                                                                    : 2);
+        const LuxEngine::Rigidbody2DComponent body =
+            hasBody ? selected.GetComponent<LuxEngine::Rigidbody2DComponent>()
+                    : LuxEngine::Rigidbody2DComponent{};
+        bodyType_->setCurrentIndex(body.type == LuxEngine::BodyType::Static    ? 0
+                                   : body.type == LuxEngine::BodyType::Dynamic ? 1
+                                                                               : 2);
         gravityScale_->setValue(body.gravityScale);
         bodyType_->setEnabled(hasBody);
         gravityScale_->setEnabled(hasBody);
-        const bool hasCollider = selected.HasComponent<BoxCollider2DComponent>();
+        const bool hasCollider = selected.HasComponent<LuxEngine::BoxCollider2DComponent>();
         colliderEnabled_->setChecked(hasCollider);
-        const BoxCollider2DComponent collider =
-            hasCollider ? selected.GetComponent<BoxCollider2DComponent>()
-                        : BoxCollider2DComponent{};
+        const LuxEngine::BoxCollider2DComponent collider =
+            hasCollider ? selected.GetComponent<LuxEngine::BoxCollider2DComponent>()
+                        : LuxEngine::BoxCollider2DComponent{};
         colliderSize_[0]->setValue(collider.size.x);
         colliderSize_[1]->setValue(collider.size.y);
         colliderOffset_[0]->setValue(collider.offset.x);
@@ -749,12 +755,13 @@ void EditorWindow::RefreshInspector() {
         for (auto* field : colliderOffset_)
             field->setEnabled(hasCollider);
         triggerEnabled_->setEnabled(hasCollider);
-        const bool animated = selected.HasComponent<AnimationComponent>();
-        const bool canAnimate = selected.HasComponent<TransformComponent>();
+        const bool animated = selected.HasComponent<LuxEngine::AnimationComponent>();
+        const bool canAnimate = selected.HasComponent<LuxEngine::TransformComponent>();
         animationEnabled_->setChecked(animated);
         animationEnabled_->setEnabled(canAnimate);
-        const AnimationComponent animation =
-            animated ? selected.GetComponent<AnimationComponent>() : AnimationComponent{};
+        const LuxEngine::AnimationComponent animation =
+            animated ? selected.GetComponent<LuxEngine::AnimationComponent>()
+                     : LuxEngine::AnimationComponent{};
         animationLoop_->setChecked(animation.clip.loop);
         animationDuration_->setValue(animation.clip.duration);
         animationTimeline_->setValue(
@@ -792,7 +799,7 @@ void EditorWindow::UpdateChrome() {
         if (action)
             action->setEnabled(project_.has_value());
 }
-void EditorWindow::SelectEntity(std::optional<uint32> id) {
+void EditorWindow::SelectEntity(std::optional<LuxEngine::uint32> id) {
     document_.Select(id);
     RefreshHierarchy();
     RefreshInspector();
@@ -804,9 +811,9 @@ void EditorWindow::AddEntity() {
     if (previewActive_)
         return;
     RecordEdit(QStringLiteral("2D 엔티티 추가"), [this] {
-        Entity entity = document_.CreateEntity(
+        LuxEngine::Entity entity = document_.CreateEntity(
             "Entity " + std::to_string(document_.GetScene().GetEntityCount() + 1));
-        entity.AddComponent<SpriteRendererComponent>();
+        entity.AddComponent<LuxEngine::SpriteRendererComponent>();
     });
     RefreshAll();
 }
@@ -814,9 +821,9 @@ void EditorWindow::AddMeshEntity() {
     if (previewActive_)
         return;
     RecordEdit(QStringLiteral("3D 메시 엔티티 추가"), [this] {
-        Entity entity = document_.CreateEntity(
+        LuxEngine::Entity entity = document_.CreateEntity(
             "3D Entity " + std::to_string(document_.GetScene().GetEntityCount() + 1));
-        entity.AddComponent<MeshRendererComponent>();
+        entity.AddComponent<LuxEngine::MeshRendererComponent>();
     });
     viewportTabs_->setCurrentIndex(0);
     RefreshAll();
@@ -825,18 +832,19 @@ void EditorWindow::AddTilemap() {
     if (previewActive_)
         return;
     RecordEdit(QStringLiteral("타일맵 추가"), [this] {
-        Entity entity = document_.CreateEntity(
+        LuxEngine::Entity entity = document_.CreateEntity(
             "Tilemap " + std::to_string(document_.GetScene().GetEntityCount() + 1));
-        entity.AddComponent<TilemapComponent>().Resize(8, 8);
+        entity.AddComponent<LuxEngine::TilemapComponent>().Resize(8, 8);
     });
     viewportTabs_->setCurrentIndex(1);
     SetTool(EditorTool::TileBrush);
     RefreshAll();
 }
-void EditorWindow::PaintTile(uint32 id, uint32 x, uint32 y, uint8_t tile) {
+void EditorWindow::PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngine::uint32 y,
+                             uint8_t tile) {
     if (previewActive_)
         return;
-    auto* map = document_.GetScene().TryGetComponent<TilemapComponent>(id);
+    auto* map = document_.GetScene().TryGetComponent<LuxEngine::TilemapComponent>(id);
     if (!map || map->Get(x, y) == tile || !map->Set(x, y, tile))
         return;
     document_.MarkDirty();
@@ -851,14 +859,14 @@ void EditorWindow::DeleteEntity() {
 void EditorWindow::OnNameChanged() {
     if (refreshingInspector_)
         return;
-    Entity selected = document_.GetSelected();
-    if (!selected || !selected.HasComponent<TagComponent>())
+    LuxEngine::Entity selected = document_.GetSelected();
+    if (!selected || !selected.HasComponent<LuxEngine::TagComponent>())
         return;
     const std::string value = Utf8(name_->text());
-    if (selected.GetComponent<TagComponent>().tag == value)
+    if (selected.GetComponent<LuxEngine::TagComponent>().tag == value)
         return;
     RecordEdit(QStringLiteral("이름 변경"), [this, value] {
-        document_.GetSelected().GetComponent<TagComponent>().tag = value;
+        document_.GetSelected().GetComponent<LuxEngine::TagComponent>().tag = value;
         document_.MarkDirty();
     });
     RefreshHierarchy();
@@ -868,16 +876,16 @@ void EditorWindow::OnNameChanged() {
 }
 void EditorWindow::OnTransformChanged() {
     if (refreshingInspector_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<TransformComponent>())
+        !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
         return;
     RecordEdit(QStringLiteral("변환 변경"), [this] {
-        auto& value = document_.GetSelected().GetComponent<TransformComponent>();
+        auto& value = document_.GetSelected().GetComponent<LuxEngine::TransformComponent>();
         value.position = {static_cast<float>(transform_[0][0]->value()),
                           static_cast<float>(transform_[0][1]->value()),
                           static_cast<float>(transform_[0][2]->value())};
-        value.rotation = {ToRadians(static_cast<float>(transform_[1][0]->value())),
-                          ToRadians(static_cast<float>(transform_[1][1]->value())),
-                          ToRadians(static_cast<float>(transform_[1][2]->value()))};
+        value.rotation = {LuxEngine::ToRadians(static_cast<float>(transform_[1][0]->value())),
+                          LuxEngine::ToRadians(static_cast<float>(transform_[1][1]->value())),
+                          LuxEngine::ToRadians(static_cast<float>(transform_[1][2]->value()))};
         value.scale = {static_cast<float>(transform_[2][0]->value()),
                        static_cast<float>(transform_[2][1]->value()),
                        static_cast<float>(transform_[2][2]->value())};
@@ -891,11 +899,13 @@ void EditorWindow::OnSpriteChanged() {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
     RecordEdit(QStringLiteral("스프라이트 변경"), [this] {
-        Entity selected = document_.GetSelected();
-        if (spriteEnabled_->isChecked() && !selected.HasComponent<SpriteRendererComponent>())
-            selected.AddComponent<SpriteRendererComponent>();
-        else if (!spriteEnabled_->isChecked() && selected.HasComponent<SpriteRendererComponent>())
-            selected.RemoveComponent<SpriteRendererComponent>();
+        LuxEngine::Entity selected = document_.GetSelected();
+        if (spriteEnabled_->isChecked() &&
+            !selected.HasComponent<LuxEngine::SpriteRendererComponent>())
+            selected.AddComponent<LuxEngine::SpriteRendererComponent>();
+        else if (!spriteEnabled_->isChecked() &&
+                 selected.HasComponent<LuxEngine::SpriteRendererComponent>())
+            selected.RemoveComponent<LuxEngine::SpriteRendererComponent>();
         document_.MarkDirty();
     });
     RefreshInspector();
@@ -904,10 +914,10 @@ void EditorWindow::OnSpriteChanged() {
 }
 void EditorWindow::OnColorChanged() {
     if (refreshingInspector_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<SpriteRendererComponent>())
+        !document_.GetSelected().HasComponent<LuxEngine::SpriteRendererComponent>())
         return;
     RecordEdit(QStringLiteral("색상 변경"), [this] {
-        document_.GetSelected().GetComponent<SpriteRendererComponent>().color = {
+        document_.GetSelected().GetComponent<LuxEngine::SpriteRendererComponent>().color = {
             static_cast<float>(color_[0]->value()), static_cast<float>(color_[1]->value()),
             static_cast<float>(color_[2]->value()), static_cast<float>(color_[3]->value())};
         document_.MarkDirty();
@@ -919,13 +929,14 @@ void EditorWindow::OnMeshChanged() {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
     RecordEdit(QStringLiteral("메시 변경"), [this] {
-        Entity selected = document_.GetSelected();
-        if (meshEnabled_->isChecked() && !selected.HasComponent<MeshRendererComponent>())
-            selected.AddComponent<MeshRendererComponent>();
-        else if (!meshEnabled_->isChecked() && selected.HasComponent<MeshRendererComponent>())
-            selected.RemoveComponent<MeshRendererComponent>();
-        if (selected.HasComponent<MeshRendererComponent>()) {
-            auto& material = selected.GetComponent<MeshRendererComponent>().material;
+        LuxEngine::Entity selected = document_.GetSelected();
+        if (meshEnabled_->isChecked() && !selected.HasComponent<LuxEngine::MeshRendererComponent>())
+            selected.AddComponent<LuxEngine::MeshRendererComponent>();
+        else if (!meshEnabled_->isChecked() &&
+                 selected.HasComponent<LuxEngine::MeshRendererComponent>())
+            selected.RemoveComponent<LuxEngine::MeshRendererComponent>();
+        if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
+            auto& material = selected.GetComponent<LuxEngine::MeshRendererComponent>().material;
             material.metallic = static_cast<float>(metallic_->value());
             material.roughness = static_cast<float>(roughness_->value());
         }
@@ -939,15 +950,16 @@ void EditorWindow::OnTilemapChanged() {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
     RecordEdit(QStringLiteral("타일맵 변경"), [this] {
-        Entity entity = document_.GetSelected();
-        if (tilemapEnabled_->isChecked() && !entity.HasComponent<TilemapComponent>())
-            entity.AddComponent<TilemapComponent>();
-        else if (!tilemapEnabled_->isChecked() && entity.HasComponent<TilemapComponent>())
-            entity.RemoveComponent<TilemapComponent>();
-        if (entity.HasComponent<TilemapComponent>()) {
-            auto& map = entity.GetComponent<TilemapComponent>();
-            map.Resize(static_cast<uint32>(tilemapWidth_->value()),
-                       static_cast<uint32>(tilemapHeight_->value()));
+        LuxEngine::Entity entity = document_.GetSelected();
+        if (tilemapEnabled_->isChecked() && !entity.HasComponent<LuxEngine::TilemapComponent>())
+            entity.AddComponent<LuxEngine::TilemapComponent>();
+        else if (!tilemapEnabled_->isChecked() &&
+                 entity.HasComponent<LuxEngine::TilemapComponent>())
+            entity.RemoveComponent<LuxEngine::TilemapComponent>();
+        if (entity.HasComponent<LuxEngine::TilemapComponent>()) {
+            auto& map = entity.GetComponent<LuxEngine::TilemapComponent>();
+            map.Resize(static_cast<LuxEngine::uint32>(tilemapWidth_->value()),
+                       static_cast<LuxEngine::uint32>(tilemapHeight_->value()));
             map.tileSize = static_cast<float>(tilemapSize_->value());
         }
         document_.MarkDirty();
@@ -961,24 +973,27 @@ void EditorWindow::OnPhysicsChanged() {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected())
         return;
     RecordEdit(QStringLiteral("2D 물리 변경"), [this] {
-        Entity entity = document_.GetSelected();
-        if (bodyEnabled_->isChecked() && !entity.HasComponent<Rigidbody2DComponent>())
-            entity.AddComponent<Rigidbody2DComponent>();
-        else if (!bodyEnabled_->isChecked() && entity.HasComponent<Rigidbody2DComponent>())
-            entity.RemoveComponent<Rigidbody2DComponent>();
-        if (entity.HasComponent<Rigidbody2DComponent>()) {
-            auto& body = entity.GetComponent<Rigidbody2DComponent>();
-            body.type = bodyType_->currentIndex() == 0   ? BodyType::Static
-                        : bodyType_->currentIndex() == 1 ? BodyType::Dynamic
-                                                         : BodyType::Kinematic;
+        LuxEngine::Entity entity = document_.GetSelected();
+        if (bodyEnabled_->isChecked() && !entity.HasComponent<LuxEngine::Rigidbody2DComponent>())
+            entity.AddComponent<LuxEngine::Rigidbody2DComponent>();
+        else if (!bodyEnabled_->isChecked() &&
+                 entity.HasComponent<LuxEngine::Rigidbody2DComponent>())
+            entity.RemoveComponent<LuxEngine::Rigidbody2DComponent>();
+        if (entity.HasComponent<LuxEngine::Rigidbody2DComponent>()) {
+            auto& body = entity.GetComponent<LuxEngine::Rigidbody2DComponent>();
+            body.type = bodyType_->currentIndex() == 0   ? LuxEngine::BodyType::Static
+                        : bodyType_->currentIndex() == 1 ? LuxEngine::BodyType::Dynamic
+                                                         : LuxEngine::BodyType::Kinematic;
             body.gravityScale = static_cast<float>(gravityScale_->value());
         }
-        if (colliderEnabled_->isChecked() && !entity.HasComponent<BoxCollider2DComponent>())
-            entity.AddComponent<BoxCollider2DComponent>();
-        else if (!colliderEnabled_->isChecked() && entity.HasComponent<BoxCollider2DComponent>())
-            entity.RemoveComponent<BoxCollider2DComponent>();
-        if (entity.HasComponent<BoxCollider2DComponent>()) {
-            auto& collider = entity.GetComponent<BoxCollider2DComponent>();
+        if (colliderEnabled_->isChecked() &&
+            !entity.HasComponent<LuxEngine::BoxCollider2DComponent>())
+            entity.AddComponent<LuxEngine::BoxCollider2DComponent>();
+        else if (!colliderEnabled_->isChecked() &&
+                 entity.HasComponent<LuxEngine::BoxCollider2DComponent>())
+            entity.RemoveComponent<LuxEngine::BoxCollider2DComponent>();
+        if (entity.HasComponent<LuxEngine::BoxCollider2DComponent>()) {
+            auto& collider = entity.GetComponent<LuxEngine::BoxCollider2DComponent>();
             collider.size = {static_cast<float>(colliderSize_[0]->value()),
                              static_cast<float>(colliderSize_[1]->value())};
             collider.offset = {static_cast<float>(colliderOffset_[0]->value()),
@@ -994,20 +1009,23 @@ void EditorWindow::OnPhysicsChanged() {
 }
 void EditorWindow::OnAnimationChanged() {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<TransformComponent>())
+        !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
         return;
     RecordEdit(QStringLiteral("애니메이션 변경"), [this] {
-        Entity entity = document_.GetSelected();
-        if (animationEnabled_->isChecked() && !entity.HasComponent<AnimationComponent>()) {
-            auto& animation = entity.AddComponent<AnimationComponent>();
+        LuxEngine::Entity entity = document_.GetSelected();
+        if (animationEnabled_->isChecked() &&
+            !entity.HasComponent<LuxEngine::AnimationComponent>()) {
+            auto& animation = entity.AddComponent<LuxEngine::AnimationComponent>();
             animation.clip.name = "Transform";
-            animation.clip.AddKeyframe({0, entity.GetComponent<TransformComponent>().position,
-                                        entity.GetComponent<TransformComponent>().rotation,
-                                        entity.GetComponent<TransformComponent>().scale});
-        } else if (!animationEnabled_->isChecked() && entity.HasComponent<AnimationComponent>())
-            entity.RemoveComponent<AnimationComponent>();
-        if (entity.HasComponent<AnimationComponent>()) {
-            auto& clip = entity.GetComponent<AnimationComponent>().clip;
+            animation.clip.AddKeyframe(
+                {0, entity.GetComponent<LuxEngine::TransformComponent>().position,
+                 entity.GetComponent<LuxEngine::TransformComponent>().rotation,
+                 entity.GetComponent<LuxEngine::TransformComponent>().scale});
+        } else if (!animationEnabled_->isChecked() &&
+                   entity.HasComponent<LuxEngine::AnimationComponent>())
+            entity.RemoveComponent<LuxEngine::AnimationComponent>();
+        if (entity.HasComponent<LuxEngine::AnimationComponent>()) {
+            auto& clip = entity.GetComponent<LuxEngine::AnimationComponent>().clip;
             clip.loop = animationLoop_->isChecked();
             clip.duration = static_cast<float>(animationDuration_->value());
             if (!clip.keyframes.empty())
@@ -1020,13 +1038,13 @@ void EditorWindow::OnAnimationChanged() {
 }
 void EditorWindow::AddKeyframe() {
     if (previewActive_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<TransformComponent>() ||
-        !document_.GetSelected().HasComponent<AnimationComponent>())
+        !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>() ||
+        !document_.GetSelected().HasComponent<LuxEngine::AnimationComponent>())
         return;
     RecordEdit(QStringLiteral("애니메이션 키 추가"), [this] {
-        Entity entity = document_.GetSelected();
-        auto& animation = entity.GetComponent<AnimationComponent>();
-        const auto& transform = entity.GetComponent<TransformComponent>();
+        LuxEngine::Entity entity = document_.GetSelected();
+        auto& animation = entity.GetComponent<LuxEngine::AnimationComponent>();
+        const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
         const float time = animation.clip.duration * animationTimeline_->value() / 1000.0f;
         animation.clip.AddKeyframe({time, transform.position, transform.rotation, transform.scale});
         document_.MarkDirty();
@@ -1036,13 +1054,14 @@ void EditorWindow::AddKeyframe() {
 }
 void EditorWindow::RemoveKeyframe() {
     if (previewActive_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<AnimationComponent>())
+        !document_.GetSelected().HasComponent<LuxEngine::AnimationComponent>())
         return;
     const int row = keyframeList_->currentRow();
     if (row < 0)
         return;
     RecordEdit(QStringLiteral("애니메이션 키 삭제"), [this, row] {
-        auto& keys = document_.GetSelected().GetComponent<AnimationComponent>().clip.keyframes;
+        auto& keys =
+            document_.GetSelected().GetComponent<LuxEngine::AnimationComponent>().clip.keyframes;
         if (static_cast<size_t>(row) < keys.size())
             keys.erase(keys.begin() + row);
         document_.MarkDirty();
@@ -1052,13 +1071,13 @@ void EditorWindow::RemoveKeyframe() {
 }
 void EditorWindow::ScrubAnimation(int value) {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<TransformComponent>() ||
-        !document_.GetSelected().HasComponent<AnimationComponent>())
+        !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>() ||
+        !document_.GetSelected().HasComponent<LuxEngine::AnimationComponent>())
         return;
-    auto& animation = document_.GetSelected().GetComponent<AnimationComponent>();
+    auto& animation = document_.GetSelected().GetComponent<LuxEngine::AnimationComponent>();
     animation.currentTime = animation.clip.duration * value / 1000.0f;
     if (!animation.clip.keyframes.empty())
-        document_.GetSelected().GetComponent<TransformComponent>() =
+        document_.GetSelected().GetComponent<LuxEngine::TransformComponent>() =
             animation.clip.Sample(animation.currentTime);
     document_.MarkDirty();
     canvas_->RefreshScene();
@@ -1215,13 +1234,15 @@ void EditorWindow::BeginViewportEdit() {
     viewportEditBefore_ = SnapshotScene();
     viewportEditSelected_ = SelectedId(document_);
 }
-void EditorWindow::ApplyViewportTransform(uint32 id, const TransformComponent& value) {
+void EditorWindow::ApplyViewportTransform(LuxEngine::uint32 id,
+                                          const LuxEngine::TransformComponent& value) {
     if (previewActive_)
         return;
-    Entity selected = document_.GetSelected();
-    if (!selected || selected.GetId() != id || !selected.HasComponent<TransformComponent>())
+    LuxEngine::Entity selected = document_.GetSelected();
+    if (!selected || selected.GetId() != id ||
+        !selected.HasComponent<LuxEngine::TransformComponent>())
         return;
-    selected.GetComponent<TransformComponent>() = value;
+    selected.GetComponent<LuxEngine::TransformComponent>() = value;
     document_.MarkDirty();
     RefreshInspector();
     canvas_->RefreshScene();
@@ -1251,13 +1272,14 @@ EditorSnapshot EditorWindow::SnapshotScene() {
         return {};
     EditorSnapshot snapshot;
     snapshot.scene = QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
-    for (Entity entity : document_.GetScene().GetEntities())
-        if (entity.HasComponent<AnimationComponent>())
+    for (LuxEngine::Entity entity : document_.GetScene().GetEntities())
+        if (entity.HasComponent<LuxEngine::AnimationComponent>())
             snapshot.animationTimes.emplace_back(
-                entity.GetId(), entity.GetComponent<AnimationComponent>().currentTime);
+                entity.GetId(), entity.GetComponent<LuxEngine::AnimationComponent>().currentTime);
     return snapshot;
 }
-void EditorWindow::RestoreScene(const EditorSnapshot& snapshot, std::optional<uint32> selected) {
+void EditorWindow::RestoreScene(const EditorSnapshot& snapshot,
+                                std::optional<LuxEngine::uint32> selected) {
     if (snapshot.isEmpty())
         return;
     const auto& bytes = snapshot.scene;
@@ -1266,7 +1288,8 @@ void EditorWindow::RestoreScene(const EditorSnapshot& snapshot, std::optional<ui
     const bool restored = document_.ReplaceSceneFromData(serialized, selected);
     if (restored) {
         for (const auto& [id, time] : snapshot.animationTimes)
-            if (auto* animation = document_.GetScene().TryGetComponent<AnimationComponent>(id))
+            if (auto* animation =
+                    document_.GetScene().TryGetComponent<LuxEngine::AnimationComponent>(id))
                 animation->currentTime = time;
         RefreshAll();
     }
@@ -1321,35 +1344,37 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
             [this, after, next] { RestoreScene(after, next); }));
 }
 void EditorWindow::CopyEntity() {
-    Entity selected = document_.GetSelected();
+    LuxEngine::Entity selected = document_.GetSelected();
     if (!selected)
         return;
     QJsonObject object;
     object.insert(QStringLiteral("version"), 2);
-    object.insert(QStringLiteral("hasTag"), selected.HasComponent<TagComponent>());
-    object.insert(QStringLiteral("hasTransform"), selected.HasComponent<TransformComponent>());
-    if (selected.HasComponent<TagComponent>())
-        object.insert(QStringLiteral("name"), Q(selected.GetComponent<TagComponent>().tag));
-    if (selected.HasComponent<TransformComponent>()) {
-        const auto& t = selected.GetComponent<TransformComponent>();
+    object.insert(QStringLiteral("hasTag"), selected.HasComponent<LuxEngine::TagComponent>());
+    object.insert(QStringLiteral("hasTransform"),
+                  selected.HasComponent<LuxEngine::TransformComponent>());
+    if (selected.HasComponent<LuxEngine::TagComponent>())
+        object.insert(QStringLiteral("name"),
+                      Q(selected.GetComponent<LuxEngine::TagComponent>().tag));
+    if (selected.HasComponent<LuxEngine::TransformComponent>()) {
+        const auto& t = selected.GetComponent<LuxEngine::TransformComponent>();
         object.insert(QStringLiteral("position"),
                       QJsonArray{t.position.x, t.position.y, t.position.z});
         object.insert(QStringLiteral("rotation"),
                       QJsonArray{t.rotation.x, t.rotation.y, t.rotation.z});
         object.insert(QStringLiteral("scale"), QJsonArray{t.scale.x, t.scale.y, t.scale.z});
     }
-    if (selected.HasComponent<SpriteRendererComponent>()) {
-        const auto& c = selected.GetComponent<SpriteRendererComponent>().color;
+    if (selected.HasComponent<LuxEngine::SpriteRendererComponent>()) {
+        const auto& c = selected.GetComponent<LuxEngine::SpriteRendererComponent>().color;
         object.insert(QStringLiteral("sprite"), QJsonArray{c.x, c.y, c.z, c.w});
     }
-    if (selected.HasComponent<MeshRendererComponent>()) {
-        const auto& m = selected.GetComponent<MeshRendererComponent>().material;
+    if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
+        const auto& m = selected.GetComponent<LuxEngine::MeshRendererComponent>().material;
         const auto& c = m.albedoColor;
         object.insert(QStringLiteral("mesh"),
                       QJsonArray{m.metallic, m.roughness, c.x, c.y, c.z, c.w});
     }
-    if (selected.HasComponent<CameraComponent>()) {
-        const auto& cam = selected.GetComponent<CameraComponent>();
+    if (selected.HasComponent<LuxEngine::CameraComponent>()) {
+        const auto& cam = selected.GetComponent<LuxEngine::CameraComponent>();
         QJsonObject camObj;
         camObj.insert(QStringLiteral("primary"), cam.isPrimary);
         camObj.insert(QStringLiteral("perspective"), cam.isPerspective);
@@ -1357,8 +1382,8 @@ void EditorWindow::CopyEntity() {
         camObj.insert(QStringLiteral("orthoSize"), cam.orthoSize);
         object.insert(QStringLiteral("camera"), camObj);
     }
-    if (selected.HasComponent<TilemapComponent>()) {
-        const auto& map = selected.GetComponent<TilemapComponent>();
+    if (selected.HasComponent<LuxEngine::TilemapComponent>()) {
+        const auto& map = selected.GetComponent<LuxEngine::TilemapComponent>();
         QJsonObject mapObj;
         mapObj.insert(QStringLiteral("width"), static_cast<int>(map.width));
         mapObj.insert(QStringLiteral("height"), static_cast<int>(map.height));
@@ -1369,8 +1394,8 @@ void EditorWindow::CopyEntity() {
         mapObj.insert(QStringLiteral("tiles"), tilesArr);
         object.insert(QStringLiteral("tilemap"), mapObj);
     }
-    if (selected.HasComponent<Rigidbody2DComponent>()) {
-        const auto& rb = selected.GetComponent<Rigidbody2DComponent>();
+    if (selected.HasComponent<LuxEngine::Rigidbody2DComponent>()) {
+        const auto& rb = selected.GetComponent<LuxEngine::Rigidbody2DComponent>();
         QJsonObject rbObj;
         rbObj.insert(QStringLiteral("type"), static_cast<int>(rb.type));
         rbObj.insert(QStringLiteral("velocity"), QJsonArray{rb.velocity.x, rb.velocity.y});
@@ -1378,16 +1403,16 @@ void EditorWindow::CopyEntity() {
         rbObj.insert(QStringLiteral("gravityScale"), rb.gravityScale);
         object.insert(QStringLiteral("rigidbody2d"), rbObj);
     }
-    if (selected.HasComponent<BoxCollider2DComponent>()) {
-        const auto& col = selected.GetComponent<BoxCollider2DComponent>();
+    if (selected.HasComponent<LuxEngine::BoxCollider2DComponent>()) {
+        const auto& col = selected.GetComponent<LuxEngine::BoxCollider2DComponent>();
         QJsonObject colObj;
         colObj.insert(QStringLiteral("size"), QJsonArray{col.size.x, col.size.y});
         colObj.insert(QStringLiteral("offset"), QJsonArray{col.offset.x, col.offset.y});
         colObj.insert(QStringLiteral("trigger"), col.isTrigger);
         object.insert(QStringLiteral("collider2d"), colObj);
     }
-    if (selected.HasComponent<Rigidbody3DComponent>()) {
-        const auto& rb = selected.GetComponent<Rigidbody3DComponent>();
+    if (selected.HasComponent<LuxEngine::Rigidbody3DComponent>()) {
+        const auto& rb = selected.GetComponent<LuxEngine::Rigidbody3DComponent>();
         QJsonObject rbObj;
         rbObj.insert(QStringLiteral("type"), static_cast<int>(rb.type));
         rbObj.insert(QStringLiteral("velocity"),
@@ -1396,8 +1421,8 @@ void EditorWindow::CopyEntity() {
         rbObj.insert(QStringLiteral("gravityScale"), rb.gravityScale);
         object.insert(QStringLiteral("rigidbody3d"), rbObj);
     }
-    if (selected.HasComponent<BoxCollider3DComponent>()) {
-        const auto& col = selected.GetComponent<BoxCollider3DComponent>();
+    if (selected.HasComponent<LuxEngine::BoxCollider3DComponent>()) {
+        const auto& col = selected.GetComponent<LuxEngine::BoxCollider3DComponent>();
         QJsonObject colObj;
         colObj.insert(QStringLiteral("size"), QJsonArray{col.size.x, col.size.y, col.size.z});
         colObj.insert(QStringLiteral("offset"),
@@ -1405,8 +1430,8 @@ void EditorWindow::CopyEntity() {
         colObj.insert(QStringLiteral("trigger"), col.isTrigger);
         object.insert(QStringLiteral("collider3d"), colObj);
     }
-    if (selected.HasComponent<AnimationComponent>()) {
-        const auto& anim = selected.GetComponent<AnimationComponent>();
+    if (selected.HasComponent<LuxEngine::AnimationComponent>()) {
+        const auto& anim = selected.GetComponent<LuxEngine::AnimationComponent>();
         QJsonObject animObj;
         animObj.insert(QStringLiteral("name"), Q(anim.clip.name));
         animObj.insert(QStringLiteral("duration"), anim.clip.duration);
@@ -1502,7 +1527,7 @@ bool ParseExactInt(const QJsonValue& val, int& out, int minVal, int maxVal) {
     return true;
 }
 
-bool ParseVec2(const QJsonValue& val, Vec2& out, float minVal = -kMaxClipboardCoord,
+bool ParseVec2(const QJsonValue& val, LuxEngine::Vec2& out, float minVal = -kMaxClipboardCoord,
                float maxVal = kMaxClipboardCoord) {
     if (!val.isArray())
         return false;
@@ -1513,7 +1538,7 @@ bool ParseVec2(const QJsonValue& val, Vec2& out, float minVal = -kMaxClipboardCo
            ParseFiniteFloat(arr[1], out.y, minVal, maxVal);
 }
 
-bool ParseVec3(const QJsonValue& val, Vec3& out, float minVal = -kMaxClipboardCoord,
+bool ParseVec3(const QJsonValue& val, LuxEngine::Vec3& out, float minVal = -kMaxClipboardCoord,
                float maxVal = kMaxClipboardCoord) {
     if (!val.isArray())
         return false;
@@ -1525,7 +1550,7 @@ bool ParseVec3(const QJsonValue& val, Vec3& out, float minVal = -kMaxClipboardCo
            ParseFiniteFloat(arr[2], out.z, minVal, maxVal);
 }
 
-bool ParseVec4(const QJsonValue& val, Vec4& out, float minVal = -kMaxClipboardCoord,
+bool ParseVec4(const QJsonValue& val, LuxEngine::Vec4& out, float minVal = -kMaxClipboardCoord,
                float maxVal = kMaxClipboardCoord) {
     if (!val.isArray())
         return false;
@@ -1542,16 +1567,16 @@ struct ValidatedClipboardEntity {
     bool hasTag = true;
     bool hasTransform = true;
     QString name;
-    TransformComponent transform;
-    std::optional<SpriteRendererComponent> sprite;
-    std::optional<MeshRendererComponent> mesh;
-    std::optional<CameraComponent> camera;
-    std::optional<TilemapComponent> tilemap;
-    std::optional<Rigidbody2DComponent> rigidbody2d;
-    std::optional<BoxCollider2DComponent> collider2d;
-    std::optional<Rigidbody3DComponent> rigidbody3d;
-    std::optional<BoxCollider3DComponent> collider3d;
-    std::optional<AnimationComponent> animation;
+    LuxEngine::TransformComponent transform;
+    std::optional<LuxEngine::SpriteRendererComponent> sprite;
+    std::optional<LuxEngine::MeshRendererComponent> mesh;
+    std::optional<LuxEngine::CameraComponent> camera;
+    std::optional<LuxEngine::TilemapComponent> tilemap;
+    std::optional<LuxEngine::Rigidbody2DComponent> rigidbody2d;
+    std::optional<LuxEngine::BoxCollider2DComponent> collider2d;
+    std::optional<LuxEngine::Rigidbody3DComponent> rigidbody3d;
+    std::optional<LuxEngine::BoxCollider3DComponent> collider3d;
+    std::optional<LuxEngine::AnimationComponent> animation;
 };
 
 bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& parsed,
@@ -1628,7 +1653,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         }
     }
     if (object.contains(QStringLiteral("sprite"))) {
-        SpriteRendererComponent comp;
+        LuxEngine::SpriteRendererComponent comp;
         if (!ParseVec4(object.value(QStringLiteral("sprite")), comp.color, 0.0f, 100.0f)) {
             errorMsg = QStringLiteral("스프라이트 색상 데이터가 유효하지 않습니다.");
             return false;
@@ -1647,7 +1672,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             errorMsg = QStringLiteral("메시 배열 길이가 올바르지 않습니다.");
             return false;
         }
-        MeshRendererComponent comp;
+        LuxEngine::MeshRendererComponent comp;
         if (!ParseFiniteFloat(meshArr[0], comp.material.metallic, 0.0f, 1.0f) ||
             !ParseFiniteFloat(meshArr[1], comp.material.roughness, 0.0f, 1.0f)) {
             errorMsg = QStringLiteral("메시 재질 수치가 허용 범위(0~1)를 벗어났습니다.");
@@ -1674,7 +1699,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         const auto camObj = camVal.toObject();
         const QJsonValue primVal = camObj.value(QStringLiteral("primary"));
         const QJsonValue perspVal = camObj.value(QStringLiteral("perspective"));
-        CameraComponent comp;
+        LuxEngine::CameraComponent comp;
         if (!primVal.isBool() || !perspVal.isBool() ||
             !ParseFiniteFloat(camObj.value(QStringLiteral("fov")), comp.fov, 0.0f, 180.0f) ||
             comp.fov <= 0.0f || comp.fov >= 180.0f ||
@@ -1716,8 +1741,8 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             errorMsg = QStringLiteral("타일맵 셀 개수가 가로x세로 크기와 일치하지 않습니다.");
             return false;
         }
-        TilemapComponent comp;
-        if (!comp.Resize(static_cast<uint32>(w), static_cast<uint32>(h))) {
+        LuxEngine::TilemapComponent comp;
+        if (!comp.Resize(static_cast<LuxEngine::uint32>(w), static_cast<LuxEngine::uint32>(h))) {
             errorMsg = QStringLiteral("타일맵 할당에 실패했습니다.");
             return false;
         }
@@ -1741,7 +1766,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         }
         const auto rbObj = rbVal.toObject();
         int type = -1;
-        Rigidbody2DComponent comp;
+        LuxEngine::Rigidbody2DComponent comp;
         if (!ParseExactInt(rbObj.value(QStringLiteral("type")), type, 0, 2) ||
             !ParseVec2(rbObj.value(QStringLiteral("velocity")), comp.velocity) ||
             !ParseFiniteFloat(rbObj.value(QStringLiteral("mass")), comp.mass, 0.0f,
@@ -1752,7 +1777,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             errorMsg = QStringLiteral("2D 강체 속성(질량, 속도, 중력 배율)이 유효하지 않습니다.");
             return false;
         }
-        comp.type = static_cast<BodyType>(type);
+        comp.type = static_cast<LuxEngine::BodyType>(type);
         parsed.rigidbody2d = comp;
     }
 
@@ -1764,7 +1789,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         }
         const auto colObj = colVal.toObject();
         const QJsonValue trigVal = colObj.value(QStringLiteral("trigger"));
-        BoxCollider2DComponent comp;
+        LuxEngine::BoxCollider2DComponent comp;
         if (!trigVal.isBool() ||
             !ParseVec2(colObj.value(QStringLiteral("size")), comp.size, 0.0f, kMaxClipboardCoord) ||
             comp.size.x <= 0.0f || comp.size.y <= 0.0f ||
@@ -1784,7 +1809,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         }
         const auto rbObj = rbVal.toObject();
         int type = -1;
-        Rigidbody3DComponent comp;
+        LuxEngine::Rigidbody3DComponent comp;
         if (!ParseExactInt(rbObj.value(QStringLiteral("type")), type, 0, 2) ||
             !ParseVec3(rbObj.value(QStringLiteral("velocity")), comp.velocity) ||
             !ParseFiniteFloat(rbObj.value(QStringLiteral("mass")), comp.mass, 0.0f,
@@ -1795,7 +1820,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             errorMsg = QStringLiteral("3D 강체 속성(질량, 속도, 중력 배율)이 유효하지 않습니다.");
             return false;
         }
-        comp.type = static_cast<BodyType>(type);
+        comp.type = static_cast<LuxEngine::BodyType>(type);
         parsed.rigidbody3d = comp;
     }
 
@@ -1807,7 +1832,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         }
         const auto colObj = colVal.toObject();
         const QJsonValue trigVal = colObj.value(QStringLiteral("trigger"));
-        BoxCollider3DComponent comp;
+        LuxEngine::BoxCollider3DComponent comp;
         if (!trigVal.isBool() ||
             !ParseVec3(colObj.value(QStringLiteral("size")), comp.size, 0.0f, kMaxClipboardCoord) ||
             comp.size.x <= 0.0f || comp.size.y <= 0.0f || comp.size.z <= 0.0f ||
@@ -1830,7 +1855,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         const QJsonValue loopVal = animObj.value(QStringLiteral("loop"));
         const QJsonValue playingVal = animObj.value(QStringLiteral("playing"));
         const QJsonValue keysVal = animObj.value(QStringLiteral("keyframes"));
-        AnimationComponent comp;
+        LuxEngine::AnimationComponent comp;
         if (!clipNameVal.isString() || !loopVal.isBool() || !playingVal.isBool() ||
             !keysVal.isArray() ||
             !ParseFiniteFloat(animObj.value(QStringLiteral("duration")), comp.clip.duration, 0.0f,
@@ -1860,7 +1885,7 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
                 return false;
             }
             const auto kObj = kv.toObject();
-            Keyframe key;
+            LuxEngine::Keyframe key;
             if (!ParseFiniteFloat(kObj.value(QStringLiteral("time")), key.time, 0.0f,
                                   kMaxClipboardDuration) ||
                 key.time < 0.0f ||
@@ -1909,32 +1934,33 @@ void EditorWindow::PasteEntity() {
     }
 
     RecordEdit(QStringLiteral("엔티티 붙여넣기"), [this, validated = std::move(validated)] {
-        Entity entity = document_.CreateEntity(Utf8(validated.name + QStringLiteral(" 복사본")));
+        LuxEngine::Entity entity =
+            document_.CreateEntity(Utf8(validated.name + QStringLiteral(" 복사본")));
         try {
             if (!validated.hasTag)
-                entity.RemoveComponent<TagComponent>();
+                entity.RemoveComponent<LuxEngine::TagComponent>();
             if (validated.hasTransform)
-                entity.GetComponent<TransformComponent>() = validated.transform;
+                entity.GetComponent<LuxEngine::TransformComponent>() = validated.transform;
             else
-                entity.RemoveComponent<TransformComponent>();
+                entity.RemoveComponent<LuxEngine::TransformComponent>();
             if (validated.sprite)
-                entity.AddComponent<SpriteRendererComponent>(*validated.sprite);
+                entity.AddComponent<LuxEngine::SpriteRendererComponent>(*validated.sprite);
             if (validated.mesh)
-                entity.AddComponent<MeshRendererComponent>(*validated.mesh);
+                entity.AddComponent<LuxEngine::MeshRendererComponent>(*validated.mesh);
             if (validated.camera)
-                entity.AddComponent<CameraComponent>(*validated.camera);
+                entity.AddComponent<LuxEngine::CameraComponent>(*validated.camera);
             if (validated.tilemap)
-                entity.AddComponent<TilemapComponent>(*validated.tilemap);
+                entity.AddComponent<LuxEngine::TilemapComponent>(*validated.tilemap);
             if (validated.rigidbody2d)
-                entity.AddComponent<Rigidbody2DComponent>(*validated.rigidbody2d);
+                entity.AddComponent<LuxEngine::Rigidbody2DComponent>(*validated.rigidbody2d);
             if (validated.collider2d)
-                entity.AddComponent<BoxCollider2DComponent>(*validated.collider2d);
+                entity.AddComponent<LuxEngine::BoxCollider2DComponent>(*validated.collider2d);
             if (validated.rigidbody3d)
-                entity.AddComponent<Rigidbody3DComponent>(*validated.rigidbody3d);
+                entity.AddComponent<LuxEngine::Rigidbody3DComponent>(*validated.rigidbody3d);
             if (validated.collider3d)
-                entity.AddComponent<BoxCollider3DComponent>(*validated.collider3d);
+                entity.AddComponent<LuxEngine::BoxCollider3DComponent>(*validated.collider3d);
             if (validated.animation)
-                entity.AddComponent<AnimationComponent>(*validated.animation);
+                entity.AddComponent<LuxEngine::AnimationComponent>(*validated.animation);
 
             std::string verifySerialized;
             if (!document_.GetScene().SerializeToString(verifySerialized)) {
@@ -1949,4 +1975,4 @@ void EditorWindow::PasteEntity() {
     });
     RefreshAll();
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

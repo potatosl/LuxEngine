@@ -10,17 +10,22 @@
 #include <optional>
 
 namespace LuxEngine {
+struct TransformComponent;
+}
+
+namespace LuxEditor {
 class EditorDocument;
 class EngineSceneRenderer;
-struct TransformComponent;
 class SceneViewport2D final : public QWidget {
 public:
-    SceneViewport2D(QWidget* parent, EditorDocument& document,
-                    std::function<void(std::optional<uint32>)> onSelect,
-                    std::function<void(uint32, const TransformComponent&)> onTransform,
-                    std::function<void(uint32, uint32, uint32, uint8_t)> onPaintTile,
-                    std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
-                    std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
+    SceneViewport2D(
+        QWidget* parent, EditorDocument& document,
+        std::function<void(std::optional<LuxEngine::uint32>)> onSelect,
+        std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform,
+        std::function<void(LuxEngine::uint32, LuxEngine::uint32, LuxEngine::uint32, uint8_t)>
+            onPaintTile,
+        std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
+        std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
     ~SceneViewport2D() override;
     void RefreshScene() {
         update();
@@ -52,9 +57,10 @@ private:
     void mouseMoveEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
     EditorDocument& document_;
-    std::function<void(std::optional<uint32>)> onSelect_;
-    std::function<void(uint32, const TransformComponent&)> onTransform_;
-    std::function<void(uint32, uint32, uint32, uint8_t)> onPaintTile_;
+    std::function<void(std::optional<LuxEngine::uint32>)> onSelect_;
+    std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform_;
+    std::function<void(LuxEngine::uint32, LuxEngine::uint32, LuxEngine::uint32, uint8_t)>
+        onPaintTile_;
     std::function<void()> onBeginEdit_;
     std::function<void()> onEndEdit_;
     double pixelsPerUnit_ = 72.0;
@@ -68,7 +74,7 @@ private:
     bool tilePainting_ = false;
     bool snapToGrid_ = true;
     bool debugColliders_ = false;
-    uint32 dragId_ = 0;
+    LuxEngine::uint32 dragId_ = 0;
     EditorTool tool_ = EditorTool::Select;
     uint8_t tileId_ = 1;
     void PaintAt(QPointF point);
@@ -77,4 +83,4 @@ private:
     bool engineFrame_ = false;
     QImage cachedFrame_;
 };
-} // namespace LuxEngine
+} // namespace LuxEditor

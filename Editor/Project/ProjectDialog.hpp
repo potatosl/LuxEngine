@@ -7,7 +7,7 @@
 
 class QWidget;
 
-namespace LuxEngine {
+namespace LuxEditor {
 
 struct ProjectCreationRequest {
     std::filesystem::path directory;
@@ -27,4 +27,4 @@ std::optional<ProjectSettingsRequest> ShowProjectSettingsDialog(QWidget* parent,
 std::optional<std::filesystem::path>
 ShowProjectDestinationDialog(QWidget* parent, const char* title, const std::string& suggested);
 
-} // namespace LuxEngine
+} // namespace LuxEditor

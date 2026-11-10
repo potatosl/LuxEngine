@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace LuxEngine {
+namespace LuxEditor {
 
 inline std::string PathUtf8(const std::filesystem::path& path) {
     const auto bytes = path.u8string();
@@ -21,4 +21,4 @@ inline std::filesystem::path PathFromUtf8(std::string_view text) {
         std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
 }
 
-} // namespace LuxEngine
+} // namespace LuxEditor

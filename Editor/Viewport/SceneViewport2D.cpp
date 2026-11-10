@@ -10,7 +10,7 @@
 #include <cmath>
 #include <numbers>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace {
 constexpr QColor Background(30, 34, 42);
 constexpr QColor Selection(255, 205, 92);
@@ -30,18 +30,20 @@ QColor TileColor(uint8_t tile) {
         return Qt::transparent;
     }
 }
-QString Name(Entity entity) {
-    return entity.HasComponent<TagComponent>()
-               ? QString::fromUtf8(entity.GetComponent<TagComponent>().tag)
+QString Name(LuxEngine::Entity entity) {
+    return entity.HasComponent<LuxEngine::TagComponent>()
+               ? QString::fromUtf8(entity.GetComponent<LuxEngine::TagComponent>().tag)
                : QStringLiteral("엔티티 #%1").arg(entity.GetId());
 }
 } // namespace
-SceneViewport2D::SceneViewport2D(QWidget* parent, EditorDocument& document,
-                                 std::function<void(std::optional<uint32>)> onSelect,
-                                 std::function<void(uint32, const TransformComponent&)> onTransform,
-                                 std::function<void(uint32, uint32, uint32, uint8_t)> onPaintTile,
-                                 std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
-                                 std::shared_ptr<EngineSceneRenderer> renderer)
+SceneViewport2D::SceneViewport2D(
+    QWidget* parent, EditorDocument& document,
+    std::function<void(std::optional<LuxEngine::uint32>)> onSelect,
+    std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform,
+    std::function<void(LuxEngine::uint32, LuxEngine::uint32, LuxEngine::uint32, uint8_t)>
+        onPaintTile,
+    std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
+    std::shared_ptr<EngineSceneRenderer> renderer)
     : QWidget(parent), document_(document), onSelect_(std::move(onSelect)),
       onTransform_(std::move(onTransform)), onPaintTile_(std::move(onPaintTile)),
       onBeginEdit_(std::move(onBeginEdit)), onEndEdit_(std::move(onEndEdit)),
@@ -66,9 +68,9 @@ void SceneViewport2D::GetView(double& centerX, double& centerY, double& halfHeig
     halfHeight = std::max(1.0, height() * 0.5) / pixelsPerUnit_;
 }
 void SceneViewport2D::FocusSelection() {
-    Entity selected = document_.GetSelected();
-    if (selected && selected.HasComponent<TransformComponent>()) {
-        auto position = selected.GetComponent<TransformComponent>().position;
+    LuxEngine::Entity selected = document_.GetSelected();
+    if (selected && selected.HasComponent<LuxEngine::TransformComponent>()) {
+        auto position = selected.GetComponent<LuxEngine::TransformComponent>().position;
         pan_ = {-position.x * pixelsPerUnit_, position.y * pixelsPerUnit_};
         update();
     }
@@ -137,17 +139,18 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
     }
     DrawGrid(painter, engineFrame_ ? 70 : 255);
     const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
-    const Entity selected = document_.GetSelected();
-    for (Entity entity : entities) {
-        if (!entity.HasComponent<TilemapComponent>() || !entity.HasComponent<TransformComponent>())
+    const LuxEngine::Entity selected = document_.GetSelected();
+    for (LuxEngine::Entity entity : entities) {
+        if (!entity.HasComponent<LuxEngine::TilemapComponent>() ||
+            !entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
-        const auto& map = entity.GetComponent<TilemapComponent>();
-        const auto& position = entity.GetComponent<TransformComponent>().position;
+        const auto& map = entity.GetComponent<LuxEngine::TilemapComponent>();
+        const auto& position = entity.GetComponent<LuxEngine::TransformComponent>().position;
         if (!std::isfinite(map.tileSize) || map.tileSize <= 0)
             continue;
         const double size = map.tileSize * pixelsPerUnit_;
-        for (uint32 y = 0; y < map.height; ++y)
-            for (uint32 x = 0; x < map.width; ++x) {
+        for (LuxEngine::uint32 y = 0; y < map.height; ++y)
+            for (LuxEngine::uint32 x = 0; x < map.width; ++x) {
                 const uint8_t tile = map.Get(x, y);
                 if (tile == 0)
                     continue;
@@ -167,12 +170,12 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
             painter.drawRect(QRectF(top, QSizeF(map.width * size, map.height * size)));
         }
     }
-    for (Entity entity : entities) {
-        if (!entity.HasComponent<TransformComponent>() ||
-            !entity.HasComponent<SpriteRendererComponent>())
+    for (LuxEngine::Entity entity : entities) {
+        if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
+            !entity.HasComponent<LuxEngine::SpriteRendererComponent>())
             continue;
-        const auto transform = entity.GetComponent<TransformComponent>();
-        const auto color = entity.GetComponent<SpriteRendererComponent>().color;
+        const auto transform = entity.GetComponent<LuxEngine::TransformComponent>();
+        const auto color = entity.GetComponent<LuxEngine::SpriteRendererComponent>().color;
         if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
             !std::isfinite(transform.scale.x) || !std::isfinite(transform.scale.y) ||
             !std::isfinite(transform.rotation.z))
@@ -198,12 +201,12 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         painter.drawText(polygon.boundingRect().topLeft() - QPointF(0, 6), Name(entity));
     }
     if (debugColliders_) {
-        for (Entity entity : entities) {
-            if (!entity.HasComponent<TransformComponent>() ||
-                !entity.HasComponent<BoxCollider2DComponent>())
+        for (LuxEngine::Entity entity : entities) {
+            if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
+                !entity.HasComponent<LuxEngine::BoxCollider2DComponent>())
                 continue;
-            const auto& transform = entity.GetComponent<TransformComponent>();
-            const auto& collider = entity.GetComponent<BoxCollider2DComponent>();
+            const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
+            const auto& collider = entity.GetComponent<LuxEngine::BoxCollider2DComponent>();
             const double offsetX = collider.offset.x * transform.scale.x;
             const double offsetY = collider.offset.y * transform.scale.y;
             const double cosine = std::cos(transform.rotation.z);
@@ -248,13 +251,14 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
     setFocus();
     if (tool_ == EditorTool::TileBrush || tool_ == EditorTool::TileErase) {
         const QPointF world = ScreenToWorld(event->position());
-        Entity mapEntity = document_.GetSelected();
-        if (!mapEntity || !mapEntity.HasComponent<TilemapComponent>()) {
-            for (Entity candidate : document_.GetScene().GetEntities()) {
-                if (!candidate.HasComponent<TilemapComponent>())
+        LuxEngine::Entity mapEntity = document_.GetSelected();
+        if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>()) {
+            for (LuxEngine::Entity candidate : document_.GetScene().GetEntities()) {
+                if (!candidate.HasComponent<LuxEngine::TilemapComponent>())
                     continue;
-                const auto& map = candidate.GetComponent<TilemapComponent>();
-                const auto& position = candidate.GetComponent<TransformComponent>().position;
+                const auto& map = candidate.GetComponent<LuxEngine::TilemapComponent>();
+                const auto& position =
+                    candidate.GetComponent<LuxEngine::TransformComponent>().position;
                 if (world.x() >= position.x && world.y() >= position.y &&
                     world.x() < position.x + map.width * map.tileSize &&
                     world.y() < position.y + map.height * map.tileSize) {
@@ -269,17 +273,17 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
         return;
     }
     const QPointF world = ScreenToWorld(event->position());
-    std::optional<uint32> hit;
+    std::optional<LuxEngine::uint32> hit;
     const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
     // Reverse the actual painter passes: sprites are in front of the tilemap pass.
     for (const bool sprites : {true, false}) {
         for (auto it = entities.rbegin(); it != entities.rend(); ++it) {
-            Entity entity = *it;
-            if (!entity.HasComponent<TransformComponent>())
+            LuxEngine::Entity entity = *it;
+            if (!entity.HasComponent<LuxEngine::TransformComponent>())
                 continue;
-            const auto& t = entity.GetComponent<TransformComponent>();
-            if (!sprites && entity.HasComponent<TilemapComponent>()) {
-                const auto& map = entity.GetComponent<TilemapComponent>();
+            const auto& t = entity.GetComponent<LuxEngine::TransformComponent>();
+            if (!sprites && entity.HasComponent<LuxEngine::TilemapComponent>()) {
+                const auto& map = entity.GetComponent<LuxEngine::TilemapComponent>();
                 if (world.x() >= t.position.x && world.y() >= t.position.y &&
                     world.x() < t.position.x + map.width * map.tileSize &&
                     world.y() < t.position.y + map.height * map.tileSize) {
@@ -287,7 +291,7 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
                     break;
                 }
             }
-            if (!sprites || !entity.HasComponent<SpriteRendererComponent>())
+            if (!sprites || !entity.HasComponent<LuxEngine::SpriteRendererComponent>())
                 continue;
             const double dx = world.x() - t.position.x, dy = world.y() - t.position.y;
             const double c = std::cos(t.rotation.z), s = std::sin(t.rotation.z);
@@ -302,8 +306,8 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
     }
     onSelect_(hit);
     if (hit && tool_ != EditorTool::Select) {
-        Entity selected = document_.GetSelected();
-        const auto& transform = selected.GetComponent<TransformComponent>();
+        LuxEngine::Entity selected = document_.GetSelected();
+        const auto& transform = selected.GetComponent<LuxEngine::TransformComponent>();
         dragStartWorld_ = world;
         dragInitial_ = {transform.position.x, transform.position.y, transform.position.z,
                         transform.rotation.x, transform.rotation.y, transform.rotation.z,
@@ -333,10 +337,11 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
         PaintAt(event->position());
     } else if (dragging_ && (event->buttons() & Qt::LeftButton)) {
         const QPointF world = ScreenToWorld(event->position());
-        Entity entity = document_.GetSelected();
-        if (!entity || entity.GetId() != dragId_ || !entity.HasComponent<TransformComponent>())
+        LuxEngine::Entity entity = document_.GetSelected();
+        if (!entity || entity.GetId() != dragId_ ||
+            !entity.HasComponent<LuxEngine::TransformComponent>())
             return;
-        TransformComponent value = entity.GetComponent<TransformComponent>();
+        LuxEngine::TransformComponent value = entity.GetComponent<LuxEngine::TransformComponent>();
         if (tool_ == EditorTool::Move) {
             double x = dragInitial_[0] + world.x() - dragStartWorld_.x();
             double y = dragInitial_[1] + world.y() - dragStartWorld_.y();
@@ -371,13 +376,13 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
 }
 void SceneViewport2D::PaintAt(QPointF point) {
     const QPointF world = ScreenToWorld(point);
-    Entity mapEntity = document_.GetSelected();
-    if (!mapEntity || !mapEntity.HasComponent<TilemapComponent>()) {
-        for (Entity candidate : document_.GetScene().GetEntities()) {
-            if (!candidate.HasComponent<TilemapComponent>())
+    LuxEngine::Entity mapEntity = document_.GetSelected();
+    if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>()) {
+        for (LuxEngine::Entity candidate : document_.GetScene().GetEntities()) {
+            if (!candidate.HasComponent<LuxEngine::TilemapComponent>())
                 continue;
-            const auto& map = candidate.GetComponent<TilemapComponent>();
-            const auto& position = candidate.GetComponent<TransformComponent>().position;
+            const auto& map = candidate.GetComponent<LuxEngine::TilemapComponent>();
+            const auto& position = candidate.GetComponent<LuxEngine::TransformComponent>().position;
             if (world.x() >= position.x && world.y() >= position.y &&
                 world.x() < position.x + map.width * map.tileSize &&
                 world.y() < position.y + map.height * map.tileSize) {
@@ -387,14 +392,15 @@ void SceneViewport2D::PaintAt(QPointF point) {
             }
         }
     }
-    if (!mapEntity || !mapEntity.HasComponent<TilemapComponent>())
+    if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>())
         return;
-    const auto& map = mapEntity.GetComponent<TilemapComponent>();
-    const auto& position = mapEntity.GetComponent<TransformComponent>().position;
+    const auto& map = mapEntity.GetComponent<LuxEngine::TilemapComponent>();
+    const auto& position = mapEntity.GetComponent<LuxEngine::TransformComponent>().position;
     const int x = static_cast<int>(std::floor((world.x() - position.x) / map.tileSize));
     const int y = static_cast<int>(std::floor((world.y() - position.y) / map.tileSize));
     if (x >= 0 && y >= 0 && x < static_cast<int>(map.width) && y < static_cast<int>(map.height))
-        onPaintTile_(mapEntity.GetId(), static_cast<uint32>(x), static_cast<uint32>(y),
+        onPaintTile_(mapEntity.GetId(), static_cast<LuxEngine::uint32>(x),
+                     static_cast<LuxEngine::uint32>(y),
                      tool_ == EditorTool::TileErase ? 0 : tileId_);
 }
 void SceneViewport2D::wheelEvent(QWheelEvent* event) {
@@ -405,4 +411,4 @@ void SceneViewport2D::wheelEvent(QWheelEvent* event) {
             event->position().y() - height() * .5 + world.y() * pixelsPerUnit_};
     update();
 }
-} // namespace LuxEngine
+} // namespace LuxEditor

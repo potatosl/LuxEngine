@@ -26,6 +26,7 @@
 
 namespace {
 using namespace LuxEngine;
+using namespace LuxEditor;
 struct GpuUnavailable : std::runtime_error {
     using std::runtime_error::runtime_error;
 };

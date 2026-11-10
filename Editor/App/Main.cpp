@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
         }
         if (arg == "--smoke-test") {
             qputenv("LUX_EDITOR_SOFTWARE_VIEWPORT", "1");
-            LuxEngine::EngineSceneRenderer::SetForceAllowed(false);
+            LuxEditor::EngineSceneRenderer::SetForceAllowed(false);
             QTemporaryDir tempSettings;
             if (tempSettings.isValid()) {
                 QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
             QCoreApplication::setOrganizationName(QStringLiteral("LuxEngine"));
             QCoreApplication::setApplicationName(QStringLiteral("LuxEditor"));
             {
-                LuxEngine::EditorWindow window;
+                LuxEditor::EditorWindow window;
                 window.show();
                 app.processEvents();
                 window.GetDocument().SetDirty(false);
@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
     QCoreApplication::setApplicationName(QStringLiteral("LuxEditor"));
     QCoreApplication::setApplicationVersion(QStringLiteral(LUX_EDITOR_ENGINE_VERSION));
 
-    LuxEngine::EditorWindow window;
+    LuxEditor::EditorWindow window;
     window.show();
     return app.exec();
 }

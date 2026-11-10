@@ -10,6 +10,9 @@
 namespace LuxEngine {
 class Scene;
 class GpuDevice;
+} // namespace LuxEngine
+
+namespace LuxEditor {
 
 // Renders a Scene with the engine's Vulkan Renderer2D and Renderer3D into images the Qt viewport
 // can show. The engine needs an SDL window for its swapchain, so a hidden window is used and every
@@ -29,17 +32,18 @@ public:
     void Shutdown();
     void Reset();
     // worldBounds: left, top (larger y), right, bottom in world units.
-    bool Render(Scene& scene, int pixelWidth, int pixelHeight, const QRectF& worldBounds,
+    bool Render(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight, const QRectF& worldBounds,
                 QImage& output);
     // 3D perspective rendering with native Vulkan Renderer3D.
-    bool Render3D(Scene& scene, int pixelWidth, int pixelHeight, const Vec3& focus, double yaw,
-                  double pitch, double distance, QImage& output);
+    bool Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
+                  const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
+                  QImage& output);
     const QString& LastError() const {
         return error_;
     }
-    GpuDevice* GetGpuDevice() noexcept;
-    const GpuDevice* GetGpuDevice() const noexcept;
-    uint32 GetRecoveryCount() const noexcept {
+    LuxEngine::GpuDevice* GetGpuDevice() noexcept;
+    const LuxEngine::GpuDevice* GetGpuDevice() const noexcept;
+    LuxEngine::uint32 GetRecoveryCount() const noexcept {
         return recoveries_;
     }
     // Disabled for offscreen/minimal Qt platforms unless SetForceAllowed(true) or
@@ -52,8 +56,9 @@ public:
     }
 
 private:
-    bool InitializeState(uint32 initialWidth = 640, uint32 initialHeight = 360);
-    bool BeginViewportFrame(uint32 width, uint32 height);
+    bool InitializeState(LuxEngine::uint32 initialWidth = 640,
+                         LuxEngine::uint32 initialHeight = 360);
+    bool BeginViewportFrame(LuxEngine::uint32 width, LuxEngine::uint32 height);
     bool ReadbackToImage(QImage& output);
 
     struct State;
@@ -61,8 +66,8 @@ private:
     bool attempted_ = false;
     bool rendering_ = false;
     bool pendingShutdown_ = false;
-    uint32 recoveries_ = 0;
+    LuxEngine::uint32 recoveries_ = 0;
     QString error_;
     std::function<void()> postSceneHook_;
 };
-} // namespace LuxEngine
+} // namespace LuxEditor

@@ -10,7 +10,7 @@
 #include <utility>
 #include <zip.h>
 
-namespace LuxEngine {
+namespace LuxEditor {
 namespace fs = std::filesystem;
 
 namespace {
@@ -496,4 +496,4 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
     return PackageResult{archive, static_cast<uint64_t>(files.size()), total};
 }
 
-} // namespace LuxEngine
+} // namespace LuxEditor
