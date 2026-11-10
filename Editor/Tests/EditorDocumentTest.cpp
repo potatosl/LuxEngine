@@ -766,6 +766,44 @@ void TestArchiveSizeLimits() {
     }
 }
 
+void TestEmptyProjectDirectories() {
+    using namespace LuxEngine;
+    TempDirectory files;
+    std::string error;
+    auto original = EditorProject::Create(files.path / "original", "Empty",
+                                          ProjectTemplate::Empty, error);
+    Check(original.has_value(), "empty project creates");
+    std::filesystem::create_directories(files.path / "original/Assets/Empty/Nested");
+    const auto archive = files.path / "empty.luxpack";
+    Check(ExportProject(*original, archive, error), "empty project exports");
+    auto imported = ImportProject(archive, files.path / "imported", error);
+    auto cloned = CloneProject(*original, files.path / "cloned", "Clone", error);
+    Check(imported && cloned, "empty project imports and clones");
+    QImage image(2, 2, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    const auto icon = files.path / "icon.png";
+    Check(image.save(QString::fromUtf8(PathUtf8(icon))), "icon fixture saves");
+    for (EditorProject* project : {&*imported, &*cloned}) {
+        const auto root = project->GetFile().parent_path();
+        Check(std::filesystem::is_directory(root / "Assets/Empty/Nested"),
+              "export preserves nested empty directories");
+        Check(project->SetIcon(icon, error) &&
+                  std::filesystem::is_regular_file(root / project->GetIcon()),
+              "imported and cloned empty projects accept an icon");
+        std::filesystem::remove_all(root / "Assets");
+        Check(project->SetIcon(icon, error) &&
+                  std::filesystem::is_regular_file(root / project->GetIcon()),
+              "icon storage recreates a missing Assets directory");
+    }
+    std::filesystem::remove_all(files.path / "original/Assets");
+    Check(ExportProject(*original, files.path / "legacy.luxpack", error),
+          "package without an Assets directory exports");
+    auto legacy = ImportProject(files.path / "legacy.luxpack", files.path / "legacy", error);
+    Check(legacy && std::filesystem::is_directory(files.path / "legacy/Assets") &&
+              legacy->SetIcon(icon, error),
+          "import repairs the basic layout of older packages without empty directory entries");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -782,6 +820,7 @@ int main(int argc, char** argv) {
         TestProjectOperations();
         TestUnicodeProjectPaths();
         TestArchiveSecurityAndFuzzing();
+        TestEmptyProjectDirectories();
         std::cout << "Editor document checks passed\n";
         return 0;
     } catch (const std::exception& error) {

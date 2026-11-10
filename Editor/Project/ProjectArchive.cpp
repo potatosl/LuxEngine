@@ -449,6 +449,15 @@ bool StageArchive(const std::filesystem::path& archive, const std::filesystem::p
         std::filesystem::remove_all(staging, ec);
         return false;
     }
+    // Older packages omitted empty directories. Restore the standard project layout too.
+    for (const auto* directory : {"Assets", "Scenes"}) {
+        std::filesystem::create_directories(staging / directory, ec);
+        if (ec) {
+            error = "프로젝트 기본 폴더를 만들 수 없습니다: " + std::string(directory);
+            std::filesystem::remove_all(staging, ec);
+            return false;
+        }
+    }
     return true;
 }
 } // namespace
@@ -488,11 +497,23 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
             error = "심볼릭 링크 또는 접점(Junction)이 있는 프로젝트는 보안상 내보낼 수 없습니다.";
             break;
         }
-        if (!iterator->is_regular_file(ec))
+        const bool directory = iterator->is_directory(ec);
+        if (!directory && !iterator->is_regular_file(ec))
             continue;
-        const uint64_t size = iterator->file_size(ec);
         if (ec || ++entries > MaxEntries || !SafeArchivePath(relative)) {
             error = "프로젝트 파일 수 또는 크기가 제한을 넘었습니다.";
+            break;
+        }
+        if (directory) {
+            if (zip_dir_add(zip, GenericPathUtf8(relative).c_str(), ZIP_FL_ENC_UTF_8) < 0) {
+                error = "프로젝트 폴더를 압축하지 못했습니다: " + GenericPathUtf8(relative);
+                break;
+            }
+            continue;
+        }
+        const uint64_t size = iterator->file_size(ec);
+        if (ec) {
+            error = "프로젝트 파일 크기를 읽지 못했습니다.";
             break;
         }
         if (!FitsArchiveSizeLimits(size, total)) {
