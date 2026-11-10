@@ -2386,20 +2386,63 @@ void VulkanSystems() {
         std::cout << "note: Wayland has no programmatic unminimize; native minimize/restore "
                      "check not run (zero-extent frame skipping is tested separately)\n";
     } else {
-        SDL_MinimizeWindow(graphics.window.GetNativeHandle());
-        SDL_SyncWindow(graphics.window.GetNativeHandle());
-        graphics.window.PollEvents();
+        auto* native = graphics.window.GetNativeHandle();
+        Check(SDL_MinimizeWindow(native), "native minimize request accepted");
+        const bool minimizeSynchronized = SDL_SyncWindow(native);
+        const auto minimizedDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        do {
+            graphics.window.PollEvents();
+            if (graphics.window.IsMinimized())
+                break;
+            SDL_Delay(5);
+        } while (std::chrono::steady_clock::now() < minimizedDeadline);
         if (graphics.window.IsMinimized()) {
             Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped,
                   "minimized window skips frames");
-            SDL_RestoreWindow(graphics.window.GetNativeHandle());
-            SDL_SyncWindow(graphics.window.GetNativeHandle());
         } else {
             std::cout << "note: display server ignored minimize; minimized-frame check not run\n";
         }
+        // Native window state changes can include compositor animations. Restore even if the
+        // initial minimize acknowledgement was late, then observe state rather than assuming
+        // SDL's request or a 20x5ms frame retry budget proves that restoration has completed.
+        Check(SDL_RestoreWindow(native), "native restore request accepted");
+        Check(SDL_ShowWindow(native), "restored verification window is shown");
+        Check(SDL_RaiseWindow(native), "restored verification window activation requested");
+        const bool restoreSynchronized = SDL_SyncWindow(native);
+        const auto restoredDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        bool restored = false;
+        do {
+            graphics.window.PollEvents();
+            uint32 restoredWidth = 0, restoredHeight = 0;
+            restored = !graphics.window.IsMinimized() &&
+                       graphics.window.GetFramebufferSize(restoredWidth, restoredHeight) &&
+                       restoredWidth > 0 && restoredHeight > 0;
+            if (!restored)
+                SDL_Delay(5);
+        } while (!restored && std::chrono::steady_clock::now() < restoredDeadline);
+        if (!restored) {
+            std::cerr << "native restore timeout: minimizeSync=" << minimizeSynchronized
+                      << " restoreSync=" << restoreSynchronized
+                      << " flags=" << SDL_GetWindowFlags(native)
+                      << " gpuStatus=" << ToString(gpu.GetStatus())
+                      << " gpuError=" << gpu.GetLastError() << '\n';
+        }
+        Check(restored, "native restore completes with a drawable framebuffer");
     }
-    Check(graphics.Begin(20) && gpu.EndFrame(),
-          "rendering remains available after window-state checks");
+    const bool frameBegan = graphics.Begin(20);
+    const bool renderedAfterRestore = frameBegan && gpu.EndFrame();
+    if (!renderedAfterRestore) {
+        uint32 restoredWidth = 0, restoredHeight = 0;
+        graphics.window.GetFramebufferSize(restoredWidth, restoredHeight);
+        std::cerr << "post-restore render failure: began=" << frameBegan
+                  << " minimized=" << graphics.window.IsMinimized()
+                  << " framebuffer=" << restoredWidth << 'x' << restoredHeight
+                  << " flags=" << SDL_GetWindowFlags(graphics.window.GetNativeHandle())
+                  << " skipped=" << gpu.GetCounters().framesSkipped
+                  << " gpuStatus=" << ToString(gpu.GetStatus())
+                  << " gpuError=" << gpu.GetLastError() << '\n';
+    }
+    Check(renderedAfterRestore, "rendering remains available after window-state checks");
 
     for (int frame = 0; frame < 6; ++frame)
         Check(graphics.Begin() && gpu.EndFrame(), "timestamp frames");
