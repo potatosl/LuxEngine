@@ -170,12 +170,32 @@ void PhysicsWorld2D::Remove(uint32 id) {
     impl_->Remove(id);
 }
 
+std::unordered_map<uint32, TransformComponent>
+PhysicsWorld2D::GetWorldPoses(const Scene& scene) const {
+    std::unordered_map<uint32, TransformComponent> poses;
+    poses.reserve(impl_->bodies.size());
+    for (const auto& [id, state] : impl_->bodies) {
+        if (!scene.HasComponent<TransformComponent>(id))
+            continue;
+        auto world = scene.GetWorldTransform(id);
+        world.rotation.z = state.body->GetAngle();
+        const auto center = state.body->GetPosition();
+        const auto position =
+            EntityPosition({center.x, center.y}, state.geometry, world.rotation.z);
+        world.position.x = position.x;
+        world.position.y = position.y;
+        poses.emplace(id, world);
+    }
+    return poses;
+}
+
 void PhysicsWorld2D::Step(Scene& scene, double dt, std::vector<Collision2DEvent>& events) {
     events.clear();
     if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.25)
         return;
 
-    const Vec2 gravity = PhysicsEngine::GetGravity2D();
+    const Vec2 gravity = scene.GetSettings().overrideGravity ? scene.GetSettings().gravity
+                                                             : PhysicsEngine::GetGravity2D();
     if (!Bounded(gravity, kMaxCoordinate))
         return;
     const b2Vec2 previousGravity = impl_->world.GetGravity();
@@ -194,7 +214,7 @@ void PhysicsWorld2D::Step(Scene& scene, double dt, std::vector<Collision2DEvent>
             entity.HasComponent<Rigidbody3DComponent>() &&
             entity.HasComponent<BoxCollider3DComponent>())
             continue;
-        auto& transform = entity.GetComponent<TransformComponent>();
+        const auto transform = scene.GetWorldTransform(id);
         const auto& collider = entity.GetComponent<BoxCollider2DComponent>();
         auto* rb = entity.HasComponent<Rigidbody2DComponent>()
                        ? &entity.GetComponent<Rigidbody2DComponent>()
@@ -270,16 +290,34 @@ void PhysicsWorld2D::Step(Scene& scene, double dt, std::vector<Collision2DEvent>
     }
     impl_->contacts.events = nullptr;
 
-    for (auto& [id, state] : impl_->bodies) {
-        if (!scene.HasComponent<TransformComponent>(id))
+    std::unordered_map<uint32, TransformComponent> worldTransforms;
+    worldTransforms.reserve(impl_->bodies.size());
+    for (const auto& [id, state] : impl_->bodies)
+        if (scene.HasComponent<TransformComponent>(id))
+            worldTransforms.emplace(id, scene.GetWorldTransform(id));
+    // A child is converted back to local coordinates only after its parent's new world pose is
+    // applied. Unordered-map iteration would otherwise apply parent motion twice to some bodies.
+    for (const auto& entity : scene.GetEntitiesInHierarchyOrder()) {
+        const auto id = entity.GetId();
+        const auto found = impl_->bodies.find(id);
+        if (found == impl_->bodies.end() || !worldTransforms.contains(id))
             continue;
-        auto& transform = scene.GetComponent<TransformComponent>(id);
+        auto& state = found->second;
+        auto transform = worldTransforms.at(id);
         const b2Vec2 center = state.body->GetPosition();
         transform.rotation.z = state.body->GetAngle();
         state.position = EntityPosition({center.x, center.y}, state.geometry, transform.rotation.z);
         transform.position.x = state.position.x;
         transform.position.y = state.position.y;
         state.angle = transform.rotation.z;
+        // Box2D integrates in world space. Converting back avoids double-applying a parent's
+        // translation/rotation on the next frame and keeps static children attached to groups.
+        if (!scene.SetWorldTransform(id, transform)) {
+            state.body->SetLinearVelocity({0, 0});
+            if (scene.HasComponent<Rigidbody2DComponent>(id))
+                scene.GetComponent<Rigidbody2DComponent>(id).velocity = {};
+            continue;
+        }
         if (scene.HasComponent<Rigidbody2DComponent>(id)) {
             auto& rb = scene.GetComponent<Rigidbody2DComponent>(id);
             const b2Vec2 velocity = state.body->GetLinearVelocity();

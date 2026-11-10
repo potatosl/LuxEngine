@@ -108,21 +108,26 @@ void PhysicsEngine::Step2D(Vec3& position, Rigidbody2DComponent& rb,
 
 void PhysicsEngine::Step3D(Vec3& position, Rigidbody3DComponent& rb,
                            const BoxCollider3DComponent& collider, double dt) {
+    Step3D(position, rb, collider, dt, s_PhysicsStorage.gravity3D);
+}
+
+void PhysicsEngine::Step3D(Vec3& position, Rigidbody3DComponent& rb,
+                           const BoxCollider3DComponent& collider, double dt, const Vec3& gravity) {
     if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.25 || rb.type == BodyType::Static)
         return;
-    if (!Finite(position) || !Bounded(rb.velocity, kMaxCoordinate) ||
-        !std::isfinite(rb.gravityScale) || std::abs(rb.gravityScale) > kMaxGravityScale ||
-        !Bounded(collider.size, kMaxCoordinate) || collider.size.x <= 0.0f ||
-        collider.size.y <= 0.0f || collider.size.z <= 0.0f ||
+    if (!Bounded(gravity, kMaxCoordinate) || !Finite(position) ||
+        !Bounded(rb.velocity, kMaxCoordinate) || !std::isfinite(rb.gravityScale) ||
+        std::abs(rb.gravityScale) > kMaxGravityScale || !Bounded(collider.size, kMaxCoordinate) ||
+        collider.size.x <= 0.0f || collider.size.y <= 0.0f || collider.size.z <= 0.0f ||
         !Bounded(collider.offset, kMaxCoordinate))
         return;
 
     const float fdt = static_cast<float>(dt);
     Vec3 nextVelocity = rb.velocity;
     if (rb.type == BodyType::Dynamic) {
-        nextVelocity.x += s_PhysicsStorage.gravity3D.x * rb.gravityScale * fdt;
-        nextVelocity.y += s_PhysicsStorage.gravity3D.y * rb.gravityScale * fdt;
-        nextVelocity.z += s_PhysicsStorage.gravity3D.z * rb.gravityScale * fdt;
+        nextVelocity.x += gravity.x * rb.gravityScale * fdt;
+        nextVelocity.y += gravity.y * rb.gravityScale * fdt;
+        nextVelocity.z += gravity.z * rb.gravityScale * fdt;
     }
     if (!Bounded(nextVelocity, kMaxCoordinate))
         return;

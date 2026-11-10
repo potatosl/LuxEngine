@@ -2,6 +2,7 @@
 #include "Project/PathEncoding.hpp"
 #include "Project/ProjectArchive.hpp"
 #include "Project/ProjectDialog.hpp"
+#include "Scene/SceneDependencies.hpp"
 #include "Viewport/SceneViewport2D.hpp"
 #include <QApplication>
 #include <QFileDialog>
@@ -15,6 +16,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QUndoStack>
+#include <algorithm>
 
 namespace LuxEditor {
 namespace {
@@ -39,13 +41,19 @@ void EditorWindow::NewProject() {
         ShowError(QStringLiteral("프로젝트 생성 실패"), Q(error));
         return;
     }
+    const auto previousTab = document_.GetActiveTabId();
+    const auto newTab = document_.NewTab();
     if (!document_.Open(PathUtf8(created->GetSceneFile()))) {
+        document_.CloseTab(newTab, true);
+        document_.ActivateTab(previousTab);
         ShowError(QStringLiteral("프로젝트 열기 실패"),
                   QStringLiteral("생성한 시작 장면을 열 수 없습니다."));
         return;
     }
+    ResetSceneWorkspace();
     project_ = std::move(created);
-    undo_->clear();
+    sceneProjects_[document_.GetActiveTabId()] = project_;
+    RememberSceneBaseline();
     ApplyProjectPreferences();
     recentProjects_.Add(project_->GetFile());
     UpdateRecentMenu();
@@ -77,22 +85,25 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file,
             validation.Deserialize(PathUtf8(opened->GetAutosaveFile(preferredScene))))
             sceneFile = preferredScene;
     }
-    const auto result = LoadSceneDocument(sceneFile, &*opened);
-    if (result == SceneOpenResult::Cancelled)
-        return;
-    if (result == SceneOpenResult::Failed) {
-        ShowError(QStringLiteral("프로젝트 열기 실패"),
-                  QStringLiteral("시작 장면을 열 수 없습니다."));
+    EditorDocument candidate;
+    const auto result = LoadSceneDocument(sceneFile, &*opened, &candidate);
+    if (result == SceneOpenResult::Cancelled || result == SceneOpenResult::Failed) {
+        if (result == SceneOpenResult::Failed)
+            ShowError(QStringLiteral("프로젝트 열기 실패"),
+                      QStringLiteral("시작 씬을 열 수 없습니다."));
         return;
     }
+    document_ = std::move(candidate);
+    ResetSceneWorkspace();
     project_ = std::move(opened);
-    undo_->clear();
+    sceneProjects_[document_.GetActiveTabId()] = project_;
     ApplyProjectPreferences();
     if (result == SceneOpenResult::Recovered) {
         undo_->resetClean();
         document_.MarkDirty();
     } else
         RecoverAutosaveIfNeeded();
+    RememberSceneBaseline(!document_.IsDirty());
     recentProjects_.Add(project_->GetFile());
     UpdateRecentMenu();
     RefreshAll();
@@ -114,11 +125,24 @@ void EditorWindow::EditProjectSettings() {
         ShowError(QStringLiteral("프로젝트 설정 저장 실패"), Q(error));
         return;
     }
+    for (auto& [id, context] : sceneProjects_)
+        if (context && context->GetFile() == project_->GetFile())
+            context = project_;
+    for (auto& pending : pendingSceneLoads_)
+        if (pending.project && pending.project->GetFile() == project_->GetFile())
+            pending.project = project_;
     ApplyProjectPreferences();
     RefreshAll();
 }
 void EditorWindow::ApplyProjectPreferences() {
     autosaveTimer_.stop();
+    uint32_t interval = project_ ? project_->GetSettings().autosaveSeconds : 0;
+    for (const auto& [id, context] : sceneProjects_)
+        if (context && context->GetSettings().autosaveSeconds > 0)
+            interval = interval == 0 ? context->GetSettings().autosaveSeconds
+                                     : std::min(interval, context->GetSettings().autosaveSeconds);
+    if (interval > 0)
+        autosaveTimer_.start(static_cast<int>(interval * 1000));
     const bool snap = project_ ? project_->GetSettings().snapToGrid : true;
     if (snapAction_)
         snapAction_->setChecked(snap);
@@ -127,19 +151,20 @@ void EditorWindow::ApplyProjectPreferences() {
         setWindowIcon(QIcon());
         return;
     }
-    const auto seconds = project_->GetSettings().autosaveSeconds;
-    if (seconds > 0)
-        autosaveTimer_.start(static_cast<int>(seconds * 1000));
     if (!project_->GetIcon().empty())
         setWindowIcon(QIcon(Q(project_->GetFile().parent_path() / project_->GetIcon())));
     else
         setWindowIcon(QIcon());
 }
-EditorWindow::SceneOpenResult
-EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
-                                const EditorProject* recoveryProject) {
-    if (document_.Open(PathUtf8(file)))
+EditorWindow::SceneOpenResult EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
+                                                              const EditorProject* recoveryProject,
+                                                              EditorDocument* destination) {
+    auto& target = destination ? *destination : document_;
+    if (target.Open(PathUtf8(file))) {
+        if (!target.GetLoadWarning().empty())
+            Log(Q(target.GetLoadWarning()), true);
         return SceneOpenResult::Opened;
+    }
     if (!recoveryProject)
         return SceneOpenResult::Failed;
     const auto autosave = recoveryProject->GetAutosaveFile(file);
@@ -152,30 +177,41 @@ EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
         QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
     if (answer != QMessageBox::Yes)
         return SceneOpenResult::Cancelled;
-    return document_.Recover(PathUtf8(file), PathUtf8(autosave)) ? SceneOpenResult::Recovered
-                                                                 : SceneOpenResult::Failed;
+    return target.Recover(PathUtf8(file), PathUtf8(autosave)) ? SceneOpenResult::Recovered
+                                                              : SceneOpenResult::Failed;
 }
 
 bool EditorWindow::OpenProjectScene(const std::filesystem::path& file) {
-    if (!ConfirmDiscardChanges())
-        return false;
+    if (const auto existing = document_.FindTabByPath(PathUtf8(file)))
+        return SwitchSceneDocument(existing);
+    StopPreview();
+    EndTimelineEdit();
+    EndViewportEdit();
+    const auto previousTab = document_.GetActiveTabId();
+    sceneProjects_[previousTab] = project_;
     const bool owned = project_ && project_->ContainsScene(file);
-    const auto result = LoadSceneDocument(file, owned ? &*project_ : nullptr);
-    if (result == SceneOpenResult::Cancelled)
-        return false;
-    if (result == SceneOpenResult::Failed) {
-        ShowError(QStringLiteral("장면 열기 실패"), QStringLiteral("장면 파일을 열 수 없습니다."));
+    const auto context = owned ? project_ : std::nullopt;
+    const bool placeholder = document_.ListTabs().size() == 1 && document_.GetPath().empty() &&
+                             !document_.IsDirty() && document_.GetScene().GetEntityCount() == 0 &&
+                             undo_->count() == 0;
+    const auto nextTab = placeholder ? previousTab : document_.NewTab();
+    const auto result = LoadSceneDocument(file, context ? &*context : nullptr);
+    if (result == SceneOpenResult::Cancelled || result == SceneOpenResult::Failed) {
+        if (!placeholder)
+            document_.CloseTab(nextTab, true);
+        document_.ActivateTab(previousTab);
+        if (result == SceneOpenResult::Failed)
+            ShowError(QStringLiteral("씬 열기 실패"), Q(document_.GetLastError()));
         return false;
     }
-    if (project_ && !owned)
-        project_.reset();
-    undo_->clear();
+    project_ = context;
+    sceneProjects_[nextTab] = context;
     ApplyProjectPreferences();
-    if (result == SceneOpenResult::Recovered) {
+    if (result == SceneOpenResult::Recovered)
         undo_->resetClean();
-        document_.MarkDirty();
-    } else
+    else
         RecoverAutosaveIfNeeded();
+    RememberSceneBaseline(!document_.IsDirty());
     RefreshAll();
     return true;
 }
@@ -198,25 +234,44 @@ void EditorWindow::RecoverAutosaveIfNeeded() {
 void EditorWindow::AutoSaveScene() {
     if (previewActive_)
         return;
-    if (!project_ || !document_.IsDirty() || document_.GetPath().empty())
-        return;
-    std::string error;
-    if (project_->SaveAutosave(PathFromUtf8(document_.GetPath()), document_.GetScene(), error))
-        Log(QStringLiteral("장면 자동 저장본을 만들었습니다."));
-    else
-        Log(Q(error), true);
+    for (const auto& tab : document_.ListTabs()) {
+        if (!tab.dirty || tab.path.empty())
+            continue;
+        const auto found = sceneProjects_.find(tab.id);
+        const auto context =
+            found == sceneProjects_.end() ? std::optional<EditorProject>{} : found->second;
+        auto* scene = document_.GetScene(tab.id);
+        if (!context || !scene || !context->ContainsScene(PathFromUtf8(tab.path)))
+            continue;
+        const auto seconds = context->GetSettings().autosaveSeconds;
+        const auto now = std::chrono::steady_clock::now();
+        const auto foundTime = autosavedAt_.find(tab.id);
+        const auto previous = foundTime == autosavedAt_.end() ? openedAt_ : foundTime->second;
+        if (seconds == 0 || now - previous < std::chrono::seconds(seconds))
+            continue;
+        std::string error;
+        if (!context->SaveAutosave(PathFromUtf8(tab.path), *scene, error))
+            Log(Q(error), true);
+        else
+            autosavedAt_[tab.id] = now;
+    }
 }
 bool EditorWindow::ConfirmDiscardChanges() {
     StopPreview();
-    if (!document_.IsDirty())
+    EndTimelineEdit();
+    EndViewportEdit();
+    const auto tabs = document_.ListTabs();
+    const auto count =
+        std::count_if(tabs.begin(), tabs.end(), [](const auto& tab) { return tab.dirty; });
+    if (count == 0)
         return true;
     const auto answer = QMessageBox::question(
         this, QStringLiteral("LuxEditor"),
-        QStringLiteral("저장하지 않은 변경 사항이 있습니다. 저장하시겠습니까?"),
-        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+        QStringLiteral("저장하지 않은 씬 %1개의 변경 사항을 저장하시겠습니까?").arg(count),
+        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
     if (answer == QMessageBox::Cancel)
         return false;
-    return answer != QMessageBox::Yes || SaveScene(false);
+    return answer != QMessageBox::Yes || SaveAllScenes();
 }
 bool EditorWindow::SaveScene(bool choosePath) {
     StopPreview();
@@ -234,9 +289,7 @@ bool EditorWindow::SaveScene(bool choosePath) {
     } else
         saved = document_.Save();
     if (!saved) {
-        ShowError(
-            QStringLiteral("저장 실패"),
-            QStringLiteral("장면을 저장하지 못했습니다. 파일 경로와 쓰기 권한을 확인해 주세요."));
+        ShowError(QStringLiteral("저장 실패"), Q(document_.GetLastError()));
         return false;
     }
     RefreshProjectExplorer();
@@ -246,12 +299,17 @@ bool EditorWindow::SaveScene(bool choosePath) {
         project_->ClearAutosave(PathFromUtf8(document_.GetPath()));
     }
     undo_->setClean();
+    RememberSceneBaseline();
+    if (project_ && !project_->ContainsScene(PathFromUtf8(document_.GetPath())))
+        project_.reset();
+    sceneProjects_[document_.GetActiveTabId()] = project_;
+    RefreshSceneTabs();
     UpdateChrome();
     Log(QStringLiteral("장면을 저장했습니다."));
     return true;
 }
 void EditorWindow::CloneCurrentProject() {
-    if (!project_ || (document_.IsDirty() && !SaveScene(false)))
+    if (!project_ || !SaveAllScenes(true) || !project_)
         return;
     bool accepted = false;
     const QString name = QInputDialog::getText(
@@ -295,8 +353,13 @@ void EditorWindow::ImportProjectDialog() {
     OpenProjectFile(imported->GetFile());
 }
 void EditorWindow::ExportCurrentProject() {
-    if (!project_ || (document_.IsDirty() && !SaveScene(false)))
+    if (!project_ || !SaveAllScenes(true) || !project_)
         return;
+    std::string validationError;
+    if (!ValidateProjectScenes(*project_, validationError)) {
+        ShowError(QStringLiteral("씬 의존성 오류"), Q(validationError));
+        return;
+    }
     QString file = QFileDialog::getSaveFileName(this, QStringLiteral("프로젝트 내보내기"),
                                                 Q(project_->GetName()) + QStringLiteral(".luxpack"),
                                                 QStringLiteral("Lux 프로젝트 패키지 (*.luxpack)"));
@@ -316,7 +379,7 @@ void EditorWindow::ExportCurrentProject() {
     Log(QStringLiteral("프로젝트 패키지를 내보냈습니다."));
 }
 void EditorWindow::BackupCurrentProject() {
-    if (!project_ || (document_.IsDirty() && !SaveScene(false)))
+    if (!project_ || !SaveAllScenes(true) || !project_)
         return;
     std::filesystem::path backup;
     std::string error;
@@ -336,7 +399,7 @@ void EditorWindow::RestoreCurrentProject() {
     const QString file =
         QFileDialog::getOpenFileName(this, QStringLiteral("프로젝트 백업 복구"), Q(directory),
                                      QStringLiteral("Lux 백업 (*.luxbackup)"));
-    if (file.isEmpty() || !ConfirmDiscardChanges())
+    if (file.isEmpty() || !ConfirmDiscardChanges() || !project_)
         return;
     if (QMessageBox::question(this, QStringLiteral("프로젝트 백업 복구"),
                               QStringLiteral("현재 프로젝트를 선택한 백업으로 복구하시겠습니까? "
@@ -354,13 +417,17 @@ void EditorWindow::RestoreCurrentProject() {
         return;
     }
     auto restored = EditorProject::Open(projectFile, error);
-    if (!restored || !document_.Open(PathUtf8(restored->GetSceneFile()))) {
+    EditorDocument candidate;
+    if (!restored || !candidate.Open(PathUtf8(restored->GetSceneFile()))) {
         ShowError(QStringLiteral("프로젝트 백업 복구 실패"),
-                  error.empty() ? QStringLiteral("복구한 프로젝트를 열 수 없습니다.") : Q(error));
+                  error.empty() ? Q(candidate.GetLastError()) : Q(error));
         return;
     }
+    document_ = std::move(candidate);
+    ResetSceneWorkspace();
     project_ = std::move(restored);
-    undo_->clear();
+    sceneProjects_[document_.GetActiveTabId()] = project_;
+    RememberSceneBaseline();
     ApplyProjectPreferences();
     RefreshAll();
     Log(QStringLiteral("프로젝트를 백업에서 복구했습니다."));

@@ -29,6 +29,7 @@
 #include "Engine/Physics/PhysicsEngine.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/Scene.hpp"
+#include "Engine/Scene/SceneManager.hpp"
 
 // Application
 #include "Engine/Application.hpp"

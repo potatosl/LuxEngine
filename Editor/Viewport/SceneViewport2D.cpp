@@ -2,8 +2,10 @@
 #include "Engine/ECS/ECS.hpp"
 #include "EngineSceneRenderer.hpp"
 #include "Scene/EditorDocument.hpp"
+#include <QFocusEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QTransform>
 #include <QWheelEvent>
 #include <algorithm>
 #include <array>
@@ -12,7 +14,39 @@
 
 namespace LuxEditor {
 namespace {
-constexpr QColor Background(30, 34, 42);
+QTransform World(LuxEngine::Entity entity) {
+    const auto matrix = entity.GetScene()->GetWorldMatrix(entity.GetId());
+    const auto* m = matrix.elements;
+    return QTransform(m[0], m[1], m[4], m[5], m[12], m[13]);
+}
+bool LocalPoint(LuxEngine::Entity entity, QPointF world, QPointF& local) {
+    bool valid = false;
+    const auto inverse = World(entity).inverted(&valid);
+    if (!valid)
+        return false;
+    local = inverse.map(world);
+    return std::isfinite(local.x()) && std::isfinite(local.y());
+}
+bool InsideMap(LuxEngine::Entity entity, QPointF world, QPointF* cell = nullptr) {
+    const auto* map = entity.TryGetComponent<LuxEngine::TilemapComponent>();
+    QPointF local;
+    if (!map || !entity.HasComponent<LuxEngine::TransformComponent>() ||
+        !std::isfinite(map->tileSize) || map->tileSize <= 0 || !LocalPoint(entity, world, local))
+        return false;
+    const QPointF candidate(std::floor(local.x() / map->tileSize),
+                            std::floor(local.y() / map->tileSize));
+    if (!(candidate.x() >= 0 && candidate.y() >= 0 && candidate.x() < map->width &&
+          candidate.y() < map->height))
+        return false;
+    if (cell)
+        *cell = candidate;
+    return true;
+}
+QColor Exposed(QColor color, float exposure) {
+    return QColor::fromRgbF(std::clamp(color.redF() * exposure, 0.0f, 1.0f),
+                            std::clamp(color.greenF() * exposure, 0.0f, 1.0f),
+                            std::clamp(color.blueF() * exposure, 0.0f, 1.0f), color.alphaF());
+}
 constexpr QColor Selection(255, 205, 92);
 QColor TileColor(uint8_t tile) {
     switch (tile) {
@@ -53,6 +87,17 @@ SceneViewport2D::SceneViewport2D(
     setMinimumSize(300, 200);
 }
 SceneViewport2D::~SceneViewport2D() = default;
+void SceneViewport2D::CancelInteraction() {
+    panning_ = dragging_ = tilePainting_ = false;
+    dragId_ = 0;
+}
+void SceneViewport2D::focusOutEvent(QFocusEvent* event) {
+    const bool editing = dragging_ || tilePainting_;
+    CancelInteraction();
+    if (editing)
+        onEndEdit_();
+    QWidget::focusOutEvent(event);
+}
 QPointF SceneViewport2D::WorldToScreen(double x, double y) const {
     return {width() * 0.5 + pan_.x() + x * pixelsPerUnit_,
             height() * 0.5 + pan_.y() - y * pixelsPerUnit_};
@@ -70,7 +115,7 @@ void SceneViewport2D::GetView(double& centerX, double& centerY, double& halfHeig
 void SceneViewport2D::FocusSelection() {
     LuxEngine::Entity selected = document_.GetSelected();
     if (selected && selected.HasComponent<LuxEngine::TransformComponent>()) {
-        auto position = selected.GetComponent<LuxEngine::TransformComponent>().position;
+        auto position = selected.GetScene()->GetWorldTransform(selected.GetId()).position;
         pan_ = {-position.x * pixelsPerUnit_, position.y * pixelsPerUnit_};
         update();
     }
@@ -131,7 +176,19 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
     if (!painter.isActive())
         return;
 
-    painter.fillRect(rect(), Background);
+    const auto& settings = document_.GetScene().GetSettings();
+    painter.fillRect(rect(), QColor::fromRgbF(settings.clearColor.x, settings.clearColor.y,
+                                              settings.clearColor.z, settings.clearColor.w));
+    const auto polygon = [this](LuxEngine::Entity entity, QRectF bounds) {
+        QPolygonF shape;
+        const auto matrix = World(entity);
+        for (auto point :
+             {bounds.topLeft(), bounds.topRight(), bounds.bottomRight(), bounds.bottomLeft()}) {
+            const auto world = matrix.map(point);
+            shape << WorldToScreen(world.x(), world.y());
+        }
+        return shape;
+    };
     painter.setRenderHint(QPainter::Antialiasing);
 
     if (engineFrame_ && !cachedFrame_.isNull()) {
@@ -145,100 +202,68 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
             !entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
         const auto& map = entity.GetComponent<LuxEngine::TilemapComponent>();
-        const auto& position = entity.GetComponent<LuxEngine::TransformComponent>().position;
         if (!std::isfinite(map.tileSize) || map.tileSize <= 0)
             continue;
-        const double size = map.tileSize * pixelsPerUnit_;
         for (LuxEngine::uint32 y = 0; y < map.height; ++y)
             for (LuxEngine::uint32 x = 0; x < map.width; ++x) {
-                const uint8_t tile = map.Get(x, y);
-                if (tile == 0)
+                const auto tile = map.Get(x, y);
+                if (!tile)
                     continue;
-                const QPointF top = WorldToScreen(position.x + x * map.tileSize,
-                                                  position.y + (y + 1) * map.tileSize);
-                if (top.x() + size < 0 || top.x() > width() || top.y() + size < 0 ||
-                    top.y() > height())
+                const auto shape = polygon(
+                    entity, {x * map.tileSize, y * map.tileSize, map.tileSize, map.tileSize});
+                if (!shape.boundingRect().intersects(rect()))
                     continue;
                 painter.setPen(QPen(QColor(20, 24, 26, engineFrame_ ? 70 : 130), 1));
-                painter.setBrush(engineFrame_ ? QBrush(Qt::NoBrush) : QBrush(TileColor(tile)));
-                painter.drawRect(QRectF(top, QSizeF(size, size)));
+                painter.setBrush(engineFrame_
+                                     ? QBrush(Qt::NoBrush)
+                                     : QBrush(Exposed(TileColor(tile), settings.exposure)));
+                painter.drawPolygon(shape);
             }
         if (selected && selected.GetId() == entity.GetId()) {
-            const QPointF top = WorldToScreen(position.x, position.y + map.height * map.tileSize);
             painter.setPen(QPen(Selection, 2, Qt::DashLine));
             painter.setBrush(Qt::NoBrush);
-            painter.drawRect(QRectF(top, QSizeF(map.width * size, map.height * size)));
+            painter.drawPolygon(
+                polygon(entity, {0, 0, map.width * map.tileSize, map.height * map.tileSize}));
         }
     }
     for (LuxEngine::Entity entity : entities) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
             !entity.HasComponent<LuxEngine::SpriteRendererComponent>())
             continue;
-        const auto transform = entity.GetComponent<LuxEngine::TransformComponent>();
+        const auto matrix = entity.GetScene()->GetWorldMatrix(entity.GetId());
         const auto color = entity.GetComponent<LuxEngine::SpriteRendererComponent>().color;
-        if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
-            !std::isfinite(transform.scale.x) || !std::isfinite(transform.scale.y) ||
-            !std::isfinite(transform.rotation.z))
+        if (std::any_of(std::begin(matrix.elements), std::end(matrix.elements),
+                        [](float value) { return !std::isfinite(value); }))
             continue;
-        QPolygonF polygon;
-        const double cosine = std::cos(transform.rotation.z), sine = std::sin(transform.rotation.z);
-        for (const QPointF local :
-             {QPointF(-.5, -.5), QPointF(.5, -.5), QPointF(.5, .5), QPointF(-.5, .5)}) {
-            const double x = local.x() * transform.scale.x, y = local.y() * transform.scale.y;
-            polygon << WorldToScreen(transform.position.x + x * cosine - y * sine,
-                                     transform.position.y + x * sine + y * cosine);
-        }
+        const QPolygonF shape = polygon(entity, {-.5, -.5, 1, 1});
         const bool active = selected && selected.GetId() == entity.GetId();
         painter.setPen(QPen(active ? Selection : QColor(178, 189, 204), active ? 3 : 1));
         if (engineFrame_)
             painter.setBrush(Qt::NoBrush);
         else
-            painter.setBrush(
-                QColor::fromRgbF(std::clamp(color.x, 0.0f, 1.0f), std::clamp(color.y, 0.0f, 1.0f),
-                                 std::clamp(color.z, 0.0f, 1.0f), std::clamp(color.w, 0.0f, 1.0f)));
-        painter.drawPolygon(polygon);
+            painter.setBrush(QColor::fromRgbF(std::clamp(color.x * settings.exposure, 0.0f, 1.0f),
+                                              std::clamp(color.y * settings.exposure, 0.0f, 1.0f),
+                                              std::clamp(color.z * settings.exposure, 0.0f, 1.0f),
+                                              std::clamp(color.w, 0.0f, 1.0f)));
+        painter.drawPolygon(shape);
         painter.setPen(active ? Selection : QColor(215, 222, 231));
-        painter.drawText(polygon.boundingRect().topLeft() - QPointF(0, 6), Name(entity));
+        if (active)
+            painter.drawText(shape.boundingRect().topLeft() - QPointF(0, 6), Name(entity));
     }
     if (debugColliders_) {
         for (LuxEngine::Entity entity : entities) {
             if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
                 !entity.HasComponent<LuxEngine::BoxCollider2DComponent>())
                 continue;
-            const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
             const auto& collider = entity.GetComponent<LuxEngine::BoxCollider2DComponent>();
-            const double offsetX = collider.offset.x * transform.scale.x;
-            const double offsetY = collider.offset.y * transform.scale.y;
-            const double cosine = std::cos(transform.rotation.z);
-            const double sine = std::sin(transform.rotation.z);
-            const QPointF center =
-                WorldToScreen(transform.position.x + offsetX * cosine - offsetY * sine,
-                              transform.position.y + offsetX * sine + offsetY * cosine);
-            const QSizeF size(std::abs(collider.size.x * transform.scale.x * pixelsPerUnit_),
-                              std::abs(collider.size.y * transform.scale.y * pixelsPerUnit_));
-            painter.save();
-            painter.translate(center);
-            painter.rotate(-transform.rotation.z * 180.0 / std::numbers::pi);
             painter.setPen(QPen(collider.isTrigger ? QColor(255, 179, 92) : QColor(73, 220, 230), 2,
                                 Qt::DashLine));
             painter.setBrush(Qt::NoBrush);
-            painter.drawRect(
-                QRectF(-size.width() * .5, -size.height() * .5, size.width(), size.height()));
-            painter.restore();
+            painter.drawPolygon(polygon(entity, {collider.offset.x - collider.size.x * .5,
+                                                 collider.offset.y - collider.size.y * .5,
+                                                 collider.size.x, collider.size.y}));
         }
     }
-    painter.setPen(QColor(219, 226, 235));
-    painter.drawText(
-        12, 22,
-        QStringLiteral("2D 장면  |  %1 px/단위  |  %2")
-            .arg(pixelsPerUnit_, 0, 'f', 0)
-            .arg(engineFrame_ ? QStringLiteral("엔진 Vulkan") : QStringLiteral("소프트웨어")));
-    painter.setPen(QColor(166, 178, 194));
-    const QString help = snapToGrid_ ? QStringLiteral("휠 확대 · 가운데 드래그 이동 · 스냅 켜짐")
-                                     : QStringLiteral("휠 확대 · 가운데 드래그 이동 · 스냅 꺼짐");
-    painter.drawText(
-        12, height() - 14,
-        painter.fontMetrics().elidedText(help, Qt::ElideRight, std::max(0, width() - 24)));
 }
 void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
     lastMouse_ = event->position();
@@ -250,29 +275,6 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
         return;
     setFocus();
     if (tool_ == EditorTool::TileBrush || tool_ == EditorTool::TileErase) {
-        const QPointF world = ScreenToWorld(event->position());
-        LuxEngine::Entity mapEntity = document_.GetSelected();
-        if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>() ||
-            !mapEntity.HasComponent<LuxEngine::TransformComponent>()) {
-            for (LuxEngine::Entity candidate : document_.GetScene().GetEntities()) {
-                if (!candidate.HasComponent<LuxEngine::TilemapComponent>() ||
-                    !candidate.HasComponent<LuxEngine::TransformComponent>())
-                    continue;
-                const auto& map = candidate.GetComponent<LuxEngine::TilemapComponent>();
-                const auto& position =
-                    candidate.GetComponent<LuxEngine::TransformComponent>().position;
-                if (world.x() >= position.x && world.y() >= position.y &&
-                    world.x() < position.x + map.width * map.tileSize &&
-                    world.y() < position.y + map.height * map.tileSize) {
-                    onSelect_(candidate.GetId());
-                    break;
-                }
-            }
-        }
-        mapEntity = document_.GetSelected();
-        if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>() ||
-            !mapEntity.HasComponent<LuxEngine::TransformComponent>())
-            return;
         tilePainting_ = true;
         onBeginEdit_();
         PaintAt(event->position());
@@ -287,22 +289,15 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
             LuxEngine::Entity entity = *it;
             if (!entity.HasComponent<LuxEngine::TransformComponent>())
                 continue;
-            const auto& t = entity.GetComponent<LuxEngine::TransformComponent>();
-            if (!sprites && entity.HasComponent<LuxEngine::TilemapComponent>()) {
-                const auto& map = entity.GetComponent<LuxEngine::TilemapComponent>();
-                if (world.x() >= t.position.x && world.y() >= t.position.y &&
-                    world.x() < t.position.x + map.width * map.tileSize &&
-                    world.y() < t.position.y + map.height * map.tileSize) {
-                    hit = entity.GetId();
-                    break;
-                }
+            if (!sprites && InsideMap(entity, world)) {
+                hit = entity.GetId();
+                break;
             }
             if (!sprites || !entity.HasComponent<LuxEngine::SpriteRendererComponent>())
                 continue;
-            const double dx = world.x() - t.position.x, dy = world.y() - t.position.y;
-            const double c = std::cos(t.rotation.z), s = std::sin(t.rotation.z);
-            if (std::abs(dx * c + dy * s) <= std::abs(t.scale.x) * .5 &&
-                std::abs(-dx * s + dy * c) <= std::abs(t.scale.y) * .5) {
+            QPointF local;
+            if (LocalPoint(entity, world, local) && std::abs(local.x()) <= .5 &&
+                std::abs(local.y()) <= .5) {
                 hit = entity.GetId();
                 break;
             }
@@ -310,10 +305,30 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
         if (hit)
             break;
     }
+    const auto selectedGroup = document_.GetSelected();
+    if (selectedGroup && selectedGroup.HasComponent<LuxEngine::HierarchyComponent>() &&
+        selectedGroup.GetComponent<LuxEngine::HierarchyComponent>().group) {
+        if (hit) {
+            auto ancestor = *hit;
+            while (ancestor && ancestor != selectedGroup.GetId())
+                ancestor = document_.GetScene().GetParent(ancestor);
+            if (ancestor == selectedGroup.GetId())
+                hit = ancestor;
+        } else {
+            const auto origin = World(selectedGroup).map(QPointF());
+            if (std::hypot(origin.x() - world.x(), origin.y() - world.y()) * pixelsPerUnit_ <= 12)
+                hit = selectedGroup.GetId();
+        }
+    }
     onSelect_(hit);
     if (hit && tool_ != EditorTool::Select) {
         LuxEngine::Entity selected = document_.GetSelected();
-        const auto& transform = selected.GetComponent<LuxEngine::TransformComponent>();
+        LuxEngine::TransformComponent transform;
+        try {
+            transform = selected.GetScene()->GetWorldTransform(selected.GetId());
+        } catch (const std::logic_error&) {
+            return;
+        }
         dragStartWorld_ = world;
         dragInitial_ = {transform.position.x, transform.position.y, transform.position.z,
                         transform.rotation.x, transform.rotation.y, transform.rotation.z,
@@ -347,7 +362,14 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
         if (!entity || entity.GetId() != dragId_ ||
             !entity.HasComponent<LuxEngine::TransformComponent>())
             return;
-        LuxEngine::TransformComponent value = entity.GetComponent<LuxEngine::TransformComponent>();
+        LuxEngine::TransformComponent value;
+        try {
+            value = entity.GetScene()->GetWorldTransform(entity.GetId());
+        } catch (const std::logic_error&) {
+            CancelInteraction();
+            onEndEdit_();
+            return;
+        }
         if (tool_ == EditorTool::Move) {
             double x = dragInitial_[0] + world.x() - dragStartWorld_.x();
             double y = dragInitial_[1] + world.y() - dragStartWorld_.y();
@@ -381,39 +403,23 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
     lastMouse_ = event->position();
 }
 void SceneViewport2D::PaintAt(QPointF point) {
-    const QPointF world = ScreenToWorld(point);
-    LuxEngine::Entity mapEntity = document_.GetSelected();
-    if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>() ||
-        !mapEntity.HasComponent<LuxEngine::TransformComponent>()) {
-        for (LuxEngine::Entity candidate : document_.GetScene().GetEntities()) {
-            if (!candidate.HasComponent<LuxEngine::TilemapComponent>() ||
-                !candidate.HasComponent<LuxEngine::TransformComponent>())
-                continue;
-            const auto& map = candidate.GetComponent<LuxEngine::TilemapComponent>();
-            const auto& position = candidate.GetComponent<LuxEngine::TransformComponent>().position;
-            if (world.x() >= position.x && world.y() >= position.y &&
-                world.x() < position.x + map.width * map.tileSize &&
-                world.y() < position.y + map.height * map.tileSize) {
-                mapEntity = candidate;
-                onSelect_(candidate.GetId());
+    const auto world = ScreenToWorld(point);
+    auto entity = document_.GetSelected();
+    QPointF cell;
+    if (!entity || !InsideMap(entity, world, &cell)) {
+        const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
+        entity = {};
+        for (auto it = entities.rbegin(); it != entities.rend(); ++it)
+            if (InsideMap(*it, world, &cell)) {
+                entity = *it;
+                onSelect_(entity.GetId());
                 break;
             }
-        }
     }
-    if (!mapEntity || !mapEntity.HasComponent<LuxEngine::TilemapComponent>() ||
-        !mapEntity.HasComponent<LuxEngine::TransformComponent>())
-        return;
-    const auto& map = mapEntity.GetComponent<LuxEngine::TilemapComponent>();
-    const auto& position = mapEntity.GetComponent<LuxEngine::TransformComponent>().position;
-    if (!std::isfinite(map.tileSize) || map.tileSize <= 0)
-        return;
-    const double cellX = std::floor((world.x() - position.x) / map.tileSize);
-    const double cellY = std::floor((world.y() - position.y) / map.tileSize);
-    if (!(cellX >= 0 && cellY >= 0 && cellX < map.width && cellY < map.height))
-        return;
-    onPaintTile_(mapEntity.GetId(), static_cast<LuxEngine::uint32>(cellX),
-                 static_cast<LuxEngine::uint32>(cellY),
-                 tool_ == EditorTool::TileErase ? 0 : tileId_);
+    if (entity)
+        onPaintTile_(entity.GetId(), static_cast<LuxEngine::uint32>(cell.x()),
+                     static_cast<LuxEngine::uint32>(cell.y()),
+                     tool_ == EditorTool::TileErase ? 0 : tileId_);
 }
 void SceneViewport2D::wheelEvent(QWheelEvent* event) {
     const QPointF world = ScreenToWorld(event->position());

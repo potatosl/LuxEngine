@@ -4,6 +4,7 @@
 #include "Project/PathEncoding.hpp"
 #include "Project/ProjectArchive.hpp"
 #include "Project/ProjectDialog.hpp"
+#include "Scene/SceneHistory.hpp"
 #include "Ui/IconFactory.hpp"
 #include "Viewport/SceneViewport2D.hpp"
 #include "Viewport/SceneViewport3D.hpp"
@@ -49,6 +50,7 @@
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <QUrl>
@@ -58,6 +60,8 @@
 #include <chrono>
 #include <functional>
 #include <numbers>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace LuxEditor {
 namespace {
@@ -74,24 +78,6 @@ std::optional<LuxEngine::uint32> SelectedId(EditorDocument& document) {
     const LuxEngine::Entity entity = document.GetSelected();
     return entity ? std::optional<LuxEngine::uint32>(entity.GetId()) : std::nullopt;
 }
-class SceneEditCommand final : public QUndoCommand {
-public:
-    SceneEditCommand(QString name, std::function<void()> undo, std::function<void()> redo)
-        : QUndoCommand(std::move(name)), undo_(std::move(undo)), redo_(std::move(redo)) {}
-    void undo() override {
-        undo_();
-    }
-    void redo() override {
-        if (first_)
-            first_ = false;
-        else
-            redo_();
-    }
-
-private:
-    std::function<void()> undo_, redo_;
-    bool first_ = true;
-};
 } // namespace
 EditorWindow::EditorWindow(QWidget* parent)
     : QMainWindow(parent),
@@ -99,6 +85,7 @@ EditorWindow::EditorWindow(QWidget* parent)
           PathFromUtf8(Utf8(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))) /
           "recent-projects.txt"),
       undo_(new QUndoStack(this)) {
+    undo_->setUndoLimit(128);
     setWindowTitle(QStringLiteral("LuxEditor"));
     setMinimumSize(960, 600);
     resize(1360, 860);
@@ -107,13 +94,12 @@ EditorWindow::EditorWindow(QWidget* parent)
     connect(&autosaveTimer_, &QTimer::timeout, this, [this] { AutoSaveScene(); });
     previewTimer_.setInterval(16);
     connect(&previewTimer_, &QTimer::timeout, this, [this] { TickPreview(); });
-    connect(undo_, &QUndoStack::indexChanged, this, [this] {
-        if (undo_->isClean())
-            document_.SetDirty(false);
-        else
-            document_.MarkDirty();
-        UpdateChrome();
-    });
+    connect(undo_, &QUndoStack::indexChanged, this, [this] { UpdateChrome(); });
+    sceneLoadTimer_.setInterval(25);
+    connect(&sceneLoadTimer_, &QTimer::timeout, this, [this] { PollSceneLoads(); });
+    sceneStreamingTimer_.setInterval(100);
+    connect(&sceneStreamingTimer_, &QTimer::timeout, this, [this] { TickSceneStreaming(); });
+    sceneStreamingTimer_.start();
     BuildLayout();
     BuildMenus();
     const QSettings settings;
@@ -127,11 +113,75 @@ EditorWindow::EditorWindow(QWidget* parent)
         if (!scene.empty() && std::filesystem::is_regular_file(PathFromUtf8(scene)))
             document_.Open(scene);
     }
+    const auto active = document_.GetActiveTabId();
+    const auto activeProject = project_;
+    struct Recovery {
+        EditorDocument::TabId tab = 0;
+        std::string path;
+        std::filesystem::path autosave;
+        EditorProject context;
+    };
+    std::vector<Recovery> recoveries;
+    const auto savedDocuments = settings.value(QStringLiteral("openSceneDocuments")).toByteArray();
+    if (savedDocuments.size() <= 1024 * 1024) {
+        const auto records = QJsonDocument::fromJson(savedDocuments).array();
+        for (qsizetype index = 0; index < std::min<qsizetype>(records.size(), 128); ++index) {
+            const auto record = records[index].toObject();
+            const auto path = Utf8(record.value(QStringLiteral("path")).toString());
+            if (path.empty() || document_.FindTabByPath(path))
+                continue;
+            std::optional<EditorProject> context;
+            const auto projectPath = Utf8(record.value(QStringLiteral("project")).toString());
+            std::string message;
+            if (!projectPath.empty())
+                context = EditorProject::OpenForRecovery(PathFromUtf8(projectPath), message);
+            if (context && !context->ContainsScene(PathFromUtf8(path)))
+                context.reset();
+            const auto id = document_.OpenTab(path);
+            if (id) {
+                sceneProjects_[id] = context;
+                cleanScenes_[id] = SnapshotScene(id);
+            }
+            if (context && (!id || context->HasNewerAutosave(PathFromUtf8(path)))) {
+                const auto autosave = context->GetAutosaveFile(PathFromUtf8(path));
+                LuxEngine::Scene validation;
+                if (!autosave.empty() && validation.Deserialize(PathUtf8(autosave)))
+                    recoveries.push_back({id, path, autosave, *context});
+            }
+        }
+    }
+    if (!recoveries.empty() &&
+        QMessageBox::question(
+            this, QStringLiteral("씬 자동 저장 복구"),
+            QStringLiteral("자동 저장된 씬 %1개를 복구하시겠습니까?").arg(recoveries.size()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) == QMessageBox::Yes) {
+        for (const auto& recovery : recoveries) {
+            const auto id = recovery.tab ? recovery.tab : document_.NewTab();
+            document_.ActivateTab(id);
+            if (document_.Recover(recovery.path, PathUtf8(recovery.autosave))) {
+                sceneProjects_[id] = recovery.context;
+                RememberSceneBaseline(false);
+                undo_->resetClean();
+            } else if (!recovery.tab)
+                document_.CloseTab(id, true);
+        }
+    }
+    document_.ActivateTab(active);
+    project_ = activeProject;
+    RememberSceneBaseline(!document_.IsDirty());
+    sceneProjects_[document_.GetActiveTabId()] = project_;
+    ApplyProjectPreferences();
     RefreshAll();
 }
 EditorWindow::~EditorWindow() {
     autosaveTimer_.stop();
     previewTimer_.stop();
+    sceneLoadTimer_.stop();
+    sceneStreamingTimer_.stop();
+    StopPreview();
+    StopSceneWindow();
+    CancelBuild();
+    pendingSceneLoads_.clear();
     undo_->clear();
     delete takeCentralWidget();
     for (QDockWidget* dock : docks_) {
@@ -172,13 +222,8 @@ void EditorWindow::BuildMenus() {
     rescanAction_ = add(file, QStringLiteral("리소스 재검색"), QStringLiteral("rescanResources"),
                         {}, [this] { RescanProjectResources(); });
     file->addSeparator();
-    add(file, QStringLiteral("새 장면"), QStringLiteral("newScene"), QKeySequence::New, [this] {
-        if (!ConfirmDiscardChanges())
-            return;
-        document_.NewScene();
-        undo_->clear();
-        RefreshAll();
-    });
+    add(file, QStringLiteral("새 씬"), QStringLiteral("newScene"), QKeySequence::New,
+        [this] { NewSceneDocument(); });
     add(file, QStringLiteral("장면 열기..."), QStringLiteral("openScene"), QKeySequence::Open,
         [this] {
             const QString file =
@@ -194,6 +239,7 @@ void EditorWindow::BuildMenus() {
     file->addSeparator();
     add(file, QStringLiteral("끝내기"), QStringLiteral("quit"), QKeySequence::Quit,
         [this] { close(); });
+    BuildSceneMenus();
     QMenu* edit = menuBar()->addMenu(QStringLiteral("편집"));
     undoAction_ = undo_->createUndoAction(this, QStringLiteral("실행 취소"));
     undoAction_->setShortcut(QKeySequence::Undo);
@@ -493,9 +539,9 @@ void EditorWindow::ImportEditorSettings() {
 }
 void EditorWindow::Log(const QString& message, bool error) {
     lastLogMessage_ = message;
-    consoleOutput_->appendPlainText(message);
-    debugPanel_->AddLog(message, error);
     if (error) {
+        consoleOutput_->appendPlainText(message);
+        debugPanel_->AddLog(message, true);
         issuesOutput_->appendPlainText(message);
         docks_[4]->show();
         docks_[4]->raise();
@@ -574,6 +620,7 @@ void EditorWindow::dropEvent(QDropEvent* event) {
     event->acceptProposedAction();
 }
 void EditorWindow::RefreshAll() {
+    RefreshSceneTabs();
     RefreshHierarchy();
     RefreshProjectExplorer();
     RefreshInspector();
@@ -583,12 +630,15 @@ void EditorWindow::RefreshAll() {
     UpdateChrome();
 }
 void EditorWindow::RefreshProjectExplorer() {
+    const auto row = projectFiles_->currentRow();
+    const auto selectedPath = row >= 0 && static_cast<size_t>(row) < projectFilePaths_.size()
+                                  ? projectFilePaths_[static_cast<size_t>(row)]
+                                  : std::filesystem::path{};
     projectFiles_->clear();
     projectFilePaths_.clear();
+    assetPreview_->clear();
+    assetDetails_->clear();
     if (!project_) {
-        assetPreview_->setPixmap(QPixmap());
-        assetPreview_->setText(QStringLiteral("프로젝트를 열어 주세요."));
-        assetDetails_->clear();
         return;
     }
     const auto root = project_->GetFile().parent_path();
@@ -628,39 +678,74 @@ void EditorWindow::RefreshProjectExplorer() {
             }
         }
     }
+    if (!selectedPath.empty()) {
+        const auto found =
+            std::find(projectFilePaths_.begin(), projectFilePaths_.end(), selectedPath);
+        if (found != projectFilePaths_.end())
+            projectFiles_->setCurrentRow(
+                static_cast<int>(std::distance(projectFilePaths_.begin(), found)));
+    }
 }
 void EditorWindow::RefreshHierarchy() {
     refreshingHierarchy_ = true;
+    const QSignalBlocker block(hierarchy_);
+    std::unordered_set<LuxEngine::uint32> expanded;
+    for (QTreeWidgetItemIterator it(hierarchy_); *it; ++it)
+        if ((*it)->isExpanded())
+            expanded.insert((*it)->data(0, Qt::UserRole).toUInt());
+    const bool initial = hierarchy_->topLevelItemCount() == 0;
     hierarchy_->clear();
-    hierarchyIds_.clear();
-    LuxEngine::Entity selected = document_.GetSelected();
+    const auto selected = document_.GetSelected();
+    auto& scene = document_.GetScene();
+    const auto entities = scene.GetEntities();
+    std::unordered_set<LuxEngine::uint32> visible;
     size_t sprites = 0, meshes = 0;
-    const auto entities = document_.GetScene().GetEntities();
-    for (LuxEngine::Entity entity : entities) {
-        sprites += entity.HasComponent<LuxEngine::SpriteRendererComponent>() ? 1 : 0;
-        meshes += entity.HasComponent<LuxEngine::MeshRendererComponent>() ? 1 : 0;
-    }
-    const std::array<size_t, 3> counts{entities.size(), sprites, meshes};
-    for (size_t i = 0; i < counts.size(); ++i)
-        groupTree_->topLevelItem(static_cast<int>(i))->setText(1, QString::number(counts[i]));
-    for (LuxEngine::Entity entity : entities) {
-        if (groupFilter_ == 1 && !entity.HasComponent<LuxEngine::SpriteRendererComponent>())
-            continue;
-        if (groupFilter_ == 2 && !entity.HasComponent<LuxEngine::MeshRendererComponent>())
-            continue;
+    for (const auto& entity : entities) {
+        sprites += entity.HasComponent<LuxEngine::SpriteRendererComponent>();
+        meshes += entity.HasComponent<LuxEngine::MeshRendererComponent>();
         const QString name = entity.HasComponent<LuxEngine::TagComponent>()
                                  ? Q(entity.GetComponent<LuxEngine::TagComponent>().tag)
-                                 : QStringLiteral("Entity");
-        if (!name.contains(hierarchySearch_->text(), Qt::CaseInsensitive))
+                                 : QStringLiteral("#%1").arg(entity.GetId());
+        if ((groupFilter_ != 1 || entity.HasComponent<LuxEngine::SpriteRendererComponent>()) &&
+            (groupFilter_ != 2 || entity.HasComponent<LuxEngine::MeshRendererComponent>()) &&
+            name.contains(hierarchySearch_->text(), Qt::CaseInsensitive)) {
+            auto current = entity.GetId();
+            while (current && scene.IsAlive(current) && visible.insert(current).second)
+                current = scene.GetParent(current);
+        }
+    }
+    const std::array<size_t, 3> counts{entities.size(), sprites, meshes};
+    for (size_t index = 0; index < counts.size(); ++index)
+        groupTree_->topLevelItem(static_cast<int>(index))
+            ->setText(1, QString::number(counts[index]));
+    std::unordered_map<LuxEngine::uint32, QTreeWidgetItem*> items;
+    for (const auto& entity : entities) {
+        if (!visible.contains(entity.GetId()))
             continue;
-        hierarchyIds_.push_back(entity.GetId());
-        auto* item = new QListWidgetItem(QStringLiteral("%1  %2").arg(entity.GetId()).arg(name));
-        item->setIcon(MakeEditorIcon(entity.HasComponent<LuxEngine::MeshRendererComponent>()
-                                         ? EditorIcon::Mesh
-                                         : EditorIcon::Sprite));
-        hierarchy_->addItem(item);
+        auto* item = new QTreeWidgetItem;
+        item->setData(0, Qt::UserRole, entity.GetId());
+        item->setText(0, entity.HasComponent<LuxEngine::TagComponent>()
+                             ? Q(entity.GetComponent<LuxEngine::TagComponent>().tag)
+                             : QStringLiteral("#%1").arg(entity.GetId()));
+        item->setToolTip(0, QStringLiteral("#%1").arg(entity.GetId()));
+        item->setIcon(0, MakeEditorIcon(entity.HasComponent<LuxEngine::MeshRendererComponent>()
+                                            ? EditorIcon::Mesh
+                                            : EditorIcon::Sprite));
+        items.emplace(entity.GetId(), item);
+    }
+    for (const auto& entity : entities) {
+        const auto found = items.find(entity.GetId());
+        if (found == items.end())
+            continue;
+        const auto parent = items.find(scene.GetParent(entity.GetId()));
+        if (parent != items.end() && parent->second != found->second)
+            parent->second->addChild(found->second);
+        else
+            hierarchy_->addTopLevelItem(found->second);
+        found->second->setExpanded(initial || expanded.contains(entity.GetId()) ||
+                                   !hierarchySearch_->text().isEmpty());
         if (selected && selected.GetId() == entity.GetId())
-            hierarchy_->setCurrentRow(static_cast<int>(hierarchyIds_.size() - 1));
+            hierarchy_->setCurrentItem(found->second);
     }
     refreshingHierarchy_ = false;
 }
@@ -670,6 +755,21 @@ void EditorWindow::RefreshInspector() {
     selectionLabel_->setText(selected ? QStringLiteral("엔티티 #%1").arg(selected.GetId())
                                       : QStringLiteral("선택된 엔티티 없음"));
     inspectorBody_->setEnabled(static_cast<bool>(selected) && !previewActive_);
+    const auto* reference =
+        selected ? selected.TryGetComponent<LuxEngine::SceneReferenceComponent>() : nullptr;
+    sceneReferencePanel_->setVisible(reference != nullptr);
+    if (reference) {
+        sceneReferencePath_->setText(Q(reference->path));
+        sceneReferencePath_->setToolTip(Q(reference->path));
+        const auto mode = reference->mode == LuxEngine::SceneReferenceMode::Inherited
+                              ? QStringLiteral("상속")
+                          : reference->mode == LuxEngine::SceneReferenceMode::Additive
+                              ? QStringLiteral("Additive")
+                              : QStringLiteral("중첩");
+        sceneReferenceState_->setText(
+            mode + QStringLiteral(" · ") +
+            (reference->loaded ? QStringLiteral("로드됨") : QStringLiteral("언로드됨")));
+    }
     if (selected) {
         name_->setEnabled(selected.HasComponent<LuxEngine::TagComponent>());
         name_->setText(selected.HasComponent<LuxEngine::TagComponent>()
@@ -777,6 +877,7 @@ void EditorWindow::UpdateChrome() {
         project_ ? Q(project_->GetName()) + QStringLiteral(" — ") : QString();
     setWindowTitle(QStringLiteral("LuxEditor — ") + projectName + name +
                    (document_.IsDirty() ? QStringLiteral(" *") : QString()));
+    RefreshSceneTabs();
     projectLabel_->setText(project_ ? Q(project_->GetName()) : QStringLiteral("프로젝트 없음"));
     statusBar()->showMessage(QStringLiteral("%1엔티티 %2개  |  %3")
                                  .arg(projectName)
@@ -789,9 +890,10 @@ void EditorWindow::UpdateChrome() {
         if (action)
             action->setEnabled(project_.has_value());
 }
-void EditorWindow::SelectEntity(std::optional<LuxEngine::uint32> id) {
+void EditorWindow::SelectEntity(std::optional<LuxEngine::uint32> id, bool syncHierarchy) {
     document_.Select(id);
-    RefreshHierarchy();
+    if (syncHierarchy)
+        RefreshHierarchy();
     RefreshInspector();
     canvas_->RefreshScene();
     canvas3D_->RefreshScene();
@@ -843,7 +945,20 @@ void EditorWindow::PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngin
     UpdateChrome();
 }
 void EditorWindow::DeleteEntity() {
-    RecordEdit(QStringLiteral("엔티티 삭제"), [this] { document_.DeleteSelected(); });
+    const auto selected = document_.GetSelected();
+    if (!selected)
+        return;
+    std::vector<LuxEngine::uint32> ids;
+    for (auto* item : hierarchy_->selectedItems())
+        ids.push_back(item->data(0, Qt::UserRole).toUInt());
+    if (std::find(ids.begin(), ids.end(), selected.GetId()) == ids.end())
+        ids = {selected.GetId()};
+    RecordEdit(QStringLiteral("엔티티 삭제"), [this, ids] {
+        auto& scene = document_.GetScene();
+        for (const auto id : ids)
+            scene.DestroyEntity({id, &scene});
+        document_.Select(std::nullopt);
+    });
     RefreshAll();
 }
 void EditorWindow::OnNameChanged() {
@@ -1101,14 +1216,19 @@ void EditorWindow::ScrubAnimation(int value) {
     UpdateChrome();
 }
 void EditorWindow::EndTimelineEdit() {
+    if (timelineBefore_.isEmpty())
+        return;
     const auto after = SnapshotScene();
     if (!timelineBefore_.isEmpty() && !after.isEmpty() && timelineBefore_ != after) {
         const auto before = timelineBefore_;
         const auto id = SelectedId(document_);
-        undo_->push(new SceneEditCommand(
+        const auto tab = document_.GetActiveTabId();
+        PushSceneCommand(new SceneEditCommand(
             QStringLiteral("애니메이션 시간 이동"),
-            [this, before, id] { RestoreScene(before, id); },
-            [this, after, id] { RestoreScene(after, id); }));
+            [this, tab, before, id] { RestoreSceneAt(tab, before, id); },
+            [this, tab, after, id] { RestoreSceneAt(tab, after, id); }, {tab},
+            SceneHistoryBytes(before) + SceneHistoryBytes(after)));
+        UpdateSceneDirty(tab, after);
     }
     timelineBefore_.clear();
 }
@@ -1222,6 +1342,11 @@ void EditorWindow::TickPreview() {
     overviewCanvas_->RefreshScene();
 }
 void EditorWindow::SetTool(EditorTool tool) {
+    EndViewportEdit();
+    EndTimelineEdit();
+    canvas_->CancelInteraction();
+    overviewCanvas_->CancelInteraction();
+    canvas3D_->CancelInteraction();
     tool_ = tool;
     if (tool == EditorTool::TileBrush || tool == EditorTool::TileErase)
         viewportTabs_->setCurrentIndex(1);
@@ -1232,21 +1357,15 @@ void EditorWindow::SetTool(EditorTool tool) {
     canvas_->SetTool(tool);
     canvas3D_->SetTool(tool);
     const std::array<QString, 6> descriptions{
-        QStringLiteral("선택 도구\n객체를 클릭해 속성을 편집합니다."),
-        QStringLiteral("이동 도구\n선택한 객체를 드래그해 배치합니다."),
-        QStringLiteral("회전 도구\n선택한 객체를 드래그해 회전합니다."),
-        QStringLiteral("크기 도구\n선택한 객체를 드래그해 크기를 바꿉니다."),
-        QStringLiteral("타일 붓\n2D 화면에서 타일을 칠합니다."),
-        QStringLiteral("타일 지우개\n2D 화면에서 타일을 지웁니다.")};
+        QStringLiteral("선택"), QStringLiteral("이동"),    QStringLiteral("회전"),
+        QStringLiteral("크기"), QStringLiteral("타일 붓"), QStringLiteral("타일 지우개")};
     toolHint_->setText(descriptions[static_cast<size_t>(tool)]);
     tilePalette_->setEnabled(tool == EditorTool::TileBrush);
-    const char* names[] = {"선택", "이동", "회전", "크기", "타일 붓", "타일 지우개"};
-    statusBar()->showMessage(QStringLiteral("%1 도구를 선택했습니다.")
-                                 .arg(QString::fromUtf8(names[static_cast<int>(tool)])),
-                             3000);
 }
 void EditorWindow::BeginViewportEdit() {
     viewportEditBefore_ = SnapshotScene();
+    if (!document_.IsDirty() && !viewportEditBefore_.isEmpty())
+        cleanScenes_[document_.GetActiveTabId()] = viewportEditBefore_;
     viewportEditSelected_ = SelectedId(document_);
 }
 void EditorWindow::ApplyViewportTransform(LuxEngine::uint32 id,
@@ -1257,7 +1376,8 @@ void EditorWindow::ApplyViewportTransform(LuxEngine::uint32 id,
     if (!selected || selected.GetId() != id ||
         !selected.HasComponent<LuxEngine::TransformComponent>())
         return;
-    selected.GetComponent<LuxEngine::TransformComponent>() = value;
+    if (!document_.GetScene().SetWorldTransform(id, value))
+        return;
     document_.MarkDirty();
     RefreshInspector();
     canvas_->RefreshScene();
@@ -1266,6 +1386,8 @@ void EditorWindow::ApplyViewportTransform(LuxEngine::uint32 id,
     UpdateChrome();
 }
 void EditorWindow::EndViewportEdit() {
+    if (viewportEditBefore_.isEmpty())
+        return;
     const auto after = SnapshotScene();
     const auto next = SelectedId(document_);
     if (!viewportEditBefore_.isEmpty() && !after.isEmpty() && viewportEditBefore_ != after) {
@@ -1274,9 +1396,12 @@ void EditorWindow::EndViewportEdit() {
             QString::fromUtf8(names[static_cast<int>(tool_)]) + QStringLiteral(" 도구");
         const auto before = viewportEditBefore_;
         const auto previous = viewportEditSelected_;
-        undo_->push(new SceneEditCommand(
-            title, [this, before, previous] { RestoreScene(before, previous); },
-            [this, after, next] { RestoreScene(after, next); }));
+        const auto tab = document_.GetActiveTabId();
+        PushSceneCommand(new SceneEditCommand(
+            title, [this, tab, before, previous] { RestoreSceneAt(tab, before, previous); },
+            [this, tab, after, next] { RestoreSceneAt(tab, after, next); }, {tab},
+            SceneHistoryBytes(before) + SceneHistoryBytes(after)));
+        UpdateSceneDirty(tab, after);
     }
     viewportEditBefore_.clear();
     viewportEditSelected_.reset();
@@ -1319,7 +1444,10 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
         edit();
         return;
     }
+    const auto tabId = document_.GetActiveTabId();
     const auto before = SnapshotScene();
+    if (!document_.IsDirty() && !before.isEmpty())
+        cleanScenes_[document_.GetActiveTabId()] = before;
     if (before.isEmpty()) {
         Log(QStringLiteral("편집 기록 실패 (%1): 편집 전 장면 스냅샷을 생성하지 못했습니다.")
                 .arg(name),
@@ -1329,14 +1457,16 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     const auto previous = SelectedId(document_);
     try {
         edit();
+        if (document_.GetActiveTabId() != tabId)
+            throw std::runtime_error("편집 도중 다른 씬으로 전환되었습니다.");
     } catch (const std::exception& error) {
-        RestoreScene(before, previous);
+        RestoreSceneAt(tabId, before, previous);
         Log(QStringLiteral("편집 실패 (%1): %2 — 이전 장면 상태로 복원했습니다.")
                 .arg(name, QString::fromUtf8(error.what())),
             true);
         return;
     } catch (...) {
-        RestoreScene(before, previous);
+        RestoreSceneAt(tabId, before, previous);
         Log(QStringLiteral(
                 "편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
                 .arg(name),
@@ -1345,7 +1475,7 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     }
     const auto after = SnapshotScene();
     if (after.isEmpty()) {
-        RestoreScene(before, previous);
+        RestoreSceneAt(tabId, before, previous);
         Log(QStringLiteral(
                 "편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
                 .arg(name),
@@ -1353,15 +1483,44 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
         return;
     }
     const auto next = SelectedId(document_);
-    if (before != after)
-        undo_->push(new SceneEditCommand(
-            name, [this, before, previous] { RestoreScene(before, previous); },
-            [this, after, next] { RestoreScene(after, next); }));
+    if (before != after) {
+        const auto tab = document_.GetActiveTabId();
+        PushSceneCommand(new SceneEditCommand(
+            name, [this, tab, before, previous] { RestoreSceneAt(tab, before, previous); },
+            [this, tab, after, next] { RestoreSceneAt(tab, after, next); }, {tab},
+            SceneHistoryBytes(before) + SceneHistoryBytes(after)));
+    }
+    UpdateSceneDirty(document_.GetActiveTabId(), after);
+    UpdateChrome();
 }
 void EditorWindow::CopyEntity() {
     LuxEngine::Entity selected = document_.GetSelected();
     if (!selected)
         return;
+    if (document_.GetScene().GetParent(selected.GetId()) ||
+        !document_.GetScene().GetChildren(selected.GetId()).empty() ||
+        selected.HasComponent<LuxEngine::SceneReferenceComponent>() ||
+        (selected.HasComponent<LuxEngine::HierarchyComponent>() &&
+         selected.GetComponent<LuxEngine::HierarchyComponent>().group)) {
+        LuxEngine::Scene subtree;
+        const auto ids = subtree.ImportEntities(document_.GetScene(), {selected.GetId()});
+        std::string serialized;
+        if (!ids.contains(selected.GetId()) || !subtree.SerializeToString(serialized)) {
+            Log(QStringLiteral("계층을 복사하지 못했습니다."), true);
+            return;
+        }
+        const auto payload =
+            QByteArray::number(static_cast<qulonglong>(ids.at(selected.GetId()))) + '\n' +
+            QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+        if (payload.size() > 64 * 1024 * 1024) {
+            Log(QStringLiteral("복사할 계층이 허용 크기를 넘었습니다."), true);
+            return;
+        }
+        auto* mime = new QMimeData;
+        mime->setData(QStringLiteral("application/x-lux-scene-subtree"), payload);
+        QApplication::clipboard()->setMimeData(mime);
+        return;
+    }
     QJsonObject object;
     object.insert(QStringLiteral("version"), 2);
     object.insert(QStringLiteral("hasTag"), selected.HasComponent<LuxEngine::TagComponent>());
@@ -1922,29 +2081,61 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
 
 void EditorWindow::PasteEntity() {
     const auto* mime = QApplication::clipboard()->mimeData();
+    if (mime && mime->hasFormat(QStringLiteral("application/x-lux-scene-subtree"))) {
+        const auto payload = mime->data(QStringLiteral("application/x-lux-scene-subtree"));
+        const auto newline = payload.indexOf('\n');
+        bool valid = false;
+        const auto root = payload.left(newline).toUInt(&valid);
+        auto subtree = std::make_shared<LuxEngine::Scene>();
+        if (payload.size() > 64 * 1024 * 1024 || newline <= 0 || newline > 10 || !valid ||
+            root == 0 ||
+            !subtree->DeserializeFromString(
+                std::string(payload.constData() + newline + 1,
+                            static_cast<size_t>(payload.size() - newline - 1))) ||
+            !subtree->IsAlive(root)) {
+            Log(QStringLiteral("붙여넣을 계층 데이터가 유효하지 않습니다."), true);
+            return;
+        }
+        RecordEdit(QStringLiteral("계층 붙여넣기"), [this, subtree, root] {
+            const auto ids = document_.GetScene().ImportEntities(*subtree, {root});
+            if (!ids.contains(root))
+                throw std::runtime_error("계층을 붙여넣지 못했습니다.");
+            const auto id = ids.at(root);
+            if (auto* tag = document_.GetScene().TryGetComponent<LuxEngine::TagComponent>(id)) {
+                const auto name = tag->tag + " 복사본";
+                if (name.size() <= 256)
+                    tag->tag = name;
+            }
+            document_.Select(id);
+        });
+        RefreshAll();
+        return;
+    }
     if (!mime || !mime->hasFormat(QStringLiteral("application/x-lux-entity")))
         return;
     const QByteArray rawBytes = mime->data(QStringLiteral("application/x-lux-entity"));
     if (rawBytes.isEmpty() || rawBytes.size() > kMaxClipboardJsonBytes) {
         Log(QStringLiteral(
-            "붙여넣기 실패: 클립보드 데이터가 비어 있거나 허용 크기(1MB)를 초과했습니다."));
+                "붙여넣기 실패: 클립보드 데이터가 비어 있거나 허용 크기(1MB)를 초과했습니다."),
+            true);
         return;
     }
     if (!IsStrictValidUtf8(rawBytes)) {
         Log(QStringLiteral(
-            "붙여넣기 실패: 클립보드 데이터에 잘못된 UTF-8 인코딩이 포함되어 있습니다."));
+                "붙여넣기 실패: 클립보드 데이터에 잘못된 UTF-8 인코딩이 포함되어 있습니다."),
+            true);
         return;
     }
     QJsonParseError parse;
     const auto doc = QJsonDocument::fromJson(rawBytes, &parse);
     if (parse.error != QJsonParseError::NoError || !doc.isObject()) {
-        Log(QStringLiteral("붙여넣기 실패: 클립보드 JSON 구문이 손상되었습니다."));
+        Log(QStringLiteral("붙여넣기 실패: 클립보드 JSON 구문이 손상되었습니다."), true);
         return;
     }
     ValidatedClipboardEntity validated;
     QString validationError;
     if (!ValidateClipboardJson(doc.object(), validated, validationError)) {
-        Log(QStringLiteral("붙여넣기 실패: %1").arg(validationError));
+        Log(QStringLiteral("붙여넣기 실패: %1").arg(validationError), true);
         return;
     }
 

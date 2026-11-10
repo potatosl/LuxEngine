@@ -5,6 +5,7 @@
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace LuxEngine {
@@ -22,6 +23,32 @@ struct TransformComponent {
         return Mat4::Translate(position) * Mat4::RotateZ(rotation.z) * Mat4::RotateY(rotation.y) *
                Mat4::RotateX(rotation.x) * Mat4::Scale(scale);
     }
+};
+
+struct HierarchyComponent {
+    uint32 parent = 0;
+    bool group = false;
+};
+
+enum class SceneReferenceMode { Nested, Inherited, Additive };
+
+// The reference root owns its imported descendants. The baseline records the source at the
+// previous refresh so the scene manager can retain authored overrides when the source changes.
+struct SceneReferenceComponent {
+    std::string path;
+    SceneReferenceMode mode = SceneReferenceMode::Nested;
+    std::string baseline;
+    std::string suspended;
+    std::vector<std::pair<uint32, uint32>> entityMap;
+    Vec2 streamCenter{};
+    float streamLoadRadius = 0;
+    float streamUnloadRadius = 0;
+    bool loaded = true;
+};
+
+struct InstanceSourceComponent {
+    uint32 instanceRoot = 0;
+    uint32 sourceEntity = 0;
 };
 
 struct SpriteRendererComponent {

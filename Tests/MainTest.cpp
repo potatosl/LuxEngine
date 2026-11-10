@@ -1535,6 +1535,98 @@ struct Graphics {
         ++checks;
     }
 };
+void PresentCompletion() {
+    GpuDeviceConfig config;
+    config.validation = GpuValidation::Synchronization;
+    config.framesInFlight = 3;
+    Graphics graphics(config, 160, 120);
+    auto& gpu = graphics.gpu;
+    const bool supported = gpu.GetInfo().presentFences;
+    const auto capture = [&] {
+        graphics.Capture([&] { Check(gpu.Clear(.2f, .4f, .6f, 1), "clear"); });
+        graphics.ValidationClean("present-completion capture");
+    };
+    for (int frame = 0; frame < 8; ++frame)
+        capture();
+    Check(gpu.WaitIdle(), "explicit idle waits for pending presentation resources");
+    if (supported) {
+        Check(gpu.GetCounters().presentFencesSubmitted == 8 &&
+                  gpu.GetCounters().presentFencesWaited == 8,
+              "every queued present is independently observed complete across frame-slot reuse");
+        for (int index = 0; index < 4; ++index) {
+            Check(graphics.window.SetSize(180 + index * 20, 140 + index * 10), "resize");
+            gpu.NotifyResize();
+            capture();
+        }
+        Check(gpu.WaitIdle() &&
+                  gpu.GetCounters().presentFencesSubmitted == gpu.GetCounters().presentFencesWaited,
+              "swapchain recreation drains all old presentation payloads");
+    } else {
+        Check(gpu.GetCounters().presentFencesSubmitted == 0 &&
+                  gpu.GetCounters().presentFencesWaited == 0,
+              "unsupported devices retain the legacy path without unsubmitted fences");
+    }
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    if (supported) {
+        const auto before = gpu.GetCounters();
+        Check(graphics.Begin() && gpu.Clear(.3f, .2f, .1f, 1), "queued out-of-date frame begins");
+        Vk::InjectFault(Vk::Fault::PresentOutOfDate);
+        Check(gpu.EndFrame(), "queued out-of-date present completes the graphics submission");
+        Vk::ClearFaults();
+        Check(gpu.GetCounters().presentFencesSubmitted == before.presentFencesSubmitted + 1,
+              "a real enqueue retains its fence even when the WSI result is out-of-date");
+        graphics.ValidationClean("queued out-of-date present");
+        capture();
+        Check(gpu.GetCounters().presentFencesWaited >= before.presentFencesSubmitted + 1,
+              "out-of-date recreation observes the old fence before destroying its swapchain");
+
+        const auto queuedBeforeFailure = gpu.GetCounters().presentFencesSubmitted;
+        Check(graphics.Begin() && gpu.Clear(0, 0, 0, 1), "unqueued present failure begins");
+        Vk::InjectFault(Vk::Fault::PresentOutOfHostMemory);
+        Check(!gpu.EndFrame() && !gpu.IsReady() && gpu.GetLastFailure() == GpuStatus::OutOfMemory &&
+                  gpu.GetCounters().presentFencesSubmitted == queuedBeforeFailure,
+              "a skipped OOM present never owns an unsignaled fence and retires the device");
+        Vk::ClearFaults();
+        graphics.ValidationClean("unqueued present allocation failure before shutdown");
+        gpu.Shutdown();
+        Check(gpu.Initialize(graphics.window, config),
+              "shutdown after an unqueued OOM never waits on its unsubmitted fence");
+        capture();
+        Check(graphics.Begin() && gpu.Clear(0, 0, 0, 1), "lost-device frame begins");
+        Vk::InjectFault(Vk::Fault::DeviceLost);
+        Check(!gpu.EndFrame() && gpu.GetStatus() == GpuStatus::DeviceLost,
+              "device loss before present does not create a pending presentation fence");
+        Vk::ClearFaults();
+        graphics.ValidationClean("lost device before shutdown");
+        gpu.Shutdown();
+        Check(gpu.Initialize(graphics.window, config), "lost-device present cleanup permits reuse");
+        capture();
+
+        graphics.ValidationClean("supported present path before partial initialization");
+        gpu.Shutdown();
+        Vk::InjectFault(Vk::Fault::PresentFenceAllocation, 1, 1);
+        Check(!gpu.Initialize(graphics.window, config),
+              "partial present-fence allocation failure is reported");
+        graphics.ValidationClean("partial present-fence initialization cleanup");
+        Vk::ClearFaults();
+        Check(gpu.Initialize(graphics.window, config),
+              "partial initialization releases already-created unsignaled fences safely");
+        capture();
+    }
+    graphics.ValidationClean("present-completion phases before unsupported reinitialization");
+    gpu.Shutdown();
+    Vk::InjectFault(Vk::Fault::PresentFencesUnsupported);
+    Check(gpu.Initialize(graphics.window, config) && !gpu.GetInfo().presentFences,
+          "unsupported-feature fallback omits the feature chain and all present fences");
+    Vk::ClearFaults();
+    capture();
+    Check(gpu.WaitIdle() && gpu.GetCounters().presentFencesSubmitted == 0 &&
+              gpu.GetCounters().presentFencesWaited == 0,
+          "the legacy fallback presents and shuts down without waiting on nonexistent fences");
+#endif
+    graphics.ValidationClean("present-completion lifetime and failure boundaries");
+}
+
 // A renderer/window may be closed while another continues presenting. Exercise both matching
 // and mixed validation configurations, failed initialization, and reuse after a peer shuts down.
 void MultiDeviceLifetime() {
@@ -2294,20 +2386,63 @@ void VulkanSystems() {
         std::cout << "note: Wayland has no programmatic unminimize; native minimize/restore "
                      "check not run (zero-extent frame skipping is tested separately)\n";
     } else {
-        SDL_MinimizeWindow(graphics.window.GetNativeHandle());
-        SDL_SyncWindow(graphics.window.GetNativeHandle());
-        graphics.window.PollEvents();
+        auto* native = graphics.window.GetNativeHandle();
+        Check(SDL_MinimizeWindow(native), "native minimize request accepted");
+        const bool minimizeSynchronized = SDL_SyncWindow(native);
+        const auto minimizedDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        do {
+            graphics.window.PollEvents();
+            if (graphics.window.IsMinimized())
+                break;
+            SDL_Delay(5);
+        } while (std::chrono::steady_clock::now() < minimizedDeadline);
         if (graphics.window.IsMinimized()) {
             Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped,
                   "minimized window skips frames");
-            SDL_RestoreWindow(graphics.window.GetNativeHandle());
-            SDL_SyncWindow(graphics.window.GetNativeHandle());
         } else {
             std::cout << "note: display server ignored minimize; minimized-frame check not run\n";
         }
+        // Native window state changes can include compositor animations. Restore even if the
+        // initial minimize acknowledgement was late, then observe state rather than assuming
+        // SDL's request or a 20x5ms frame retry budget proves that restoration has completed.
+        Check(SDL_RestoreWindow(native), "native restore request accepted");
+        Check(SDL_ShowWindow(native), "restored verification window is shown");
+        Check(SDL_RaiseWindow(native), "restored verification window activation requested");
+        const bool restoreSynchronized = SDL_SyncWindow(native);
+        const auto restoredDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        bool restored = false;
+        do {
+            graphics.window.PollEvents();
+            uint32 restoredWidth = 0, restoredHeight = 0;
+            restored = !graphics.window.IsMinimized() &&
+                       graphics.window.GetFramebufferSize(restoredWidth, restoredHeight) &&
+                       restoredWidth > 0 && restoredHeight > 0;
+            if (!restored)
+                SDL_Delay(5);
+        } while (!restored && std::chrono::steady_clock::now() < restoredDeadline);
+        if (!restored) {
+            std::cerr << "native restore timeout: minimizeSync=" << minimizeSynchronized
+                      << " restoreSync=" << restoreSynchronized
+                      << " flags=" << SDL_GetWindowFlags(native)
+                      << " gpuStatus=" << ToString(gpu.GetStatus())
+                      << " gpuError=" << gpu.GetLastError() << '\n';
+        }
+        Check(restored, "native restore completes with a drawable framebuffer");
     }
-    Check(graphics.Begin(20) && gpu.EndFrame(),
-          "rendering remains available after window-state checks");
+    const bool frameBegan = graphics.Begin(20);
+    const bool renderedAfterRestore = frameBegan && gpu.EndFrame();
+    if (!renderedAfterRestore) {
+        uint32 restoredWidth = 0, restoredHeight = 0;
+        graphics.window.GetFramebufferSize(restoredWidth, restoredHeight);
+        std::cerr << "post-restore render failure: began=" << frameBegan
+                  << " minimized=" << graphics.window.IsMinimized()
+                  << " framebuffer=" << restoredWidth << 'x' << restoredHeight
+                  << " flags=" << SDL_GetWindowFlags(graphics.window.GetNativeHandle())
+                  << " skipped=" << gpu.GetCounters().framesSkipped
+                  << " gpuStatus=" << ToString(gpu.GetStatus())
+                  << " gpuError=" << gpu.GetLastError() << '\n';
+    }
+    Check(renderedAfterRestore, "rendering remains available after window-state checks");
 
     for (int frame = 0; frame < 6; ++frame)
         Check(graphics.Begin() && gpu.EndFrame(), "timestamp frames");
@@ -3075,6 +3210,8 @@ int main(int argc, char** argv) {
             Lifecycle();
         else if (suite == "multidevice")
             MultiDeviceLifetime();
+        else if (suite == "present_completion")
+            PresentCompletion();
         else if (suite == "vulkan")
             VulkanSystems();
         else if (suite == "failures")

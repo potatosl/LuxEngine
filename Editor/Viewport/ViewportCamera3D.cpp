@@ -1,6 +1,7 @@
 #include "ViewportCamera3D.hpp"
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 
 namespace LuxEditor {
@@ -56,15 +57,34 @@ std::optional<ViewportRay3D> MakeViewportRay3D(const LuxEngine::PerspectiveCamer
 }
 std::optional<double> IntersectViewportBox(const ViewportRay3D& ray, const LuxEngine::Mat4& model) {
     const auto& m = model.elements;
-    const LuxEngine::Vec3 relative = ray.origin - LuxEngine::Vec3{m[12], m[13], m[14]};
+    if (std::any_of(std::begin(m), std::end(m),
+                    [](float value) { return !std::isfinite(value); }) ||
+        std::abs(m[3]) > 1e-6f || std::abs(m[7]) > 1e-6f || std::abs(m[11]) > 1e-6f ||
+        std::abs(m[15] - 1) > 1e-6f)
+        return std::nullopt;
+    const double a = m[0], b = m[4], c = m[8], d = m[1], e = m[5], f = m[9], g = m[2], h = m[6],
+                 i = m[10];
+    const double determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    const double volume = std::hypot(a, d, g) * std::hypot(b, e, h) * std::hypot(c, f, i);
+    if (!std::isfinite(determinant) || volume == 0 || std::abs(determinant) <= volume * 1e-12)
+        return std::nullopt;
+    const double inverse[3][3] = {{(e * i - f * h) / determinant, (c * h - b * i) / determinant,
+                                   (b * f - c * e) / determinant},
+                                  {(f * g - d * i) / determinant, (a * i - c * g) / determinant,
+                                   (c * d - a * f) / determinant},
+                                  {(d * h - e * g) / determinant, (b * g - a * h) / determinant,
+                                   (a * e - b * d) / determinant}};
+    const double relative[3] = {static_cast<double>(ray.origin.x) - m[12],
+                                static_cast<double>(ray.origin.y) - m[13],
+                                static_cast<double>(ray.origin.z) - m[14]};
     double entry = 0, exit = std::numeric_limits<double>::infinity();
     for (int axis = 0; axis < 3; ++axis) {
-        const LuxEngine::Vec3 basis{m[axis * 4], m[axis * 4 + 1], m[axis * 4 + 2]};
-        const double squaredLength = basis.Dot(basis);
-        if (!std::isfinite(squaredLength) || squaredLength < 1e-12)
-            return std::nullopt;
-        const double origin = basis.Dot(relative) / squaredLength;
-        const double direction = basis.Dot(ray.direction) / squaredLength;
+        // Transform both parts of the ray by the inverse linear matrix. Projecting onto each
+        // basis independently only works for orthogonal columns and misses sheared children.
+        const auto& row = inverse[axis];
+        const double origin = row[0] * relative[0] + row[1] * relative[1] + row[2] * relative[2];
+        const double direction =
+            row[0] * ray.direction.x + row[1] * ray.direction.y + row[2] * ray.direction.z;
         if (!std::isfinite(origin) || !std::isfinite(direction))
             return std::nullopt;
         if (std::abs(direction) < 1e-12) {
@@ -80,6 +100,6 @@ std::optional<double> IntersectViewportBox(const ViewportRay3D& ray, const LuxEn
         if (entry > exit)
             return std::nullopt;
     }
-    return entry > 0 ? entry : exit;
+    return std::isfinite(exit) ? std::optional<double>(entry > 0 ? entry : exit) : std::nullopt;
 }
 } // namespace LuxEditor

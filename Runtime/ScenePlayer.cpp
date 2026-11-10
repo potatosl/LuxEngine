@@ -24,10 +24,67 @@ bool ParseNumber(const std::string& text, uint32& value) {
 bool IsPlayerTag(const std::string& tag) {
     return tag == "플레이어" || tag == "주인공" || tag == "Player";
 }
+bool Finite(Vec3 value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+Vec3 Unit(Vec3 value, Vec3 fallback) {
+    const double length = std::hypot(static_cast<double>(value.x), static_cast<double>(value.y),
+                                     static_cast<double>(value.z));
+    if (!std::isfinite(length) || length < 1e-12)
+        return fallback;
+    return {static_cast<float>(value.x / length), static_cast<float>(value.y / length),
+            static_cast<float>(value.z / length)};
+}
+Vec3 CameraUp(Vec3 forward, Vec3 preferred) {
+    preferred = Unit(preferred, {0, 1, 0});
+    auto right = forward.Cross(preferred);
+    if (right.Dot(right) < 1e-10f) {
+        preferred = std::abs(forward.y) < .95f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+        right = forward.Cross(preferred);
+    }
+    return Unit(Unit(right, {1, 0, 0}).Cross(forward), {0, 1, 0});
+}
 } // namespace
+
+ScenePlayerCameraView ResolveScenePlayerCamera(Scene& scene, const ScenePlayerView& fallback) {
+    ScenePlayerCameraView result;
+    result.position = {fallback.centerX, fallback.centerY + 3,
+                       std::max(5.0f, fallback.halfHeight * 2)};
+    result.target = {fallback.centerX, fallback.centerY, 0};
+    if (!Finite(result.position) || !Finite(result.target))
+        result = {};
+    for (const auto id : scene.GetComponentEntityIds<CameraComponent>()) {
+        const auto& camera = scene.GetComponent<CameraComponent>(id);
+        if (!camera.isPrimary || !camera.isPerspective || !std::isfinite(camera.fov) ||
+            camera.fov <= 0 || camera.fov >= 180 || !scene.HasComponent<TransformComponent>(id))
+            continue;
+        const float tangent = std::tan(ToRadians(camera.fov) * .5f);
+        if (!std::isfinite(tangent) || tangent <= 0 || !std::isfinite(1.0f / tangent))
+            continue;
+        const auto matrix = scene.GetWorldMatrix(id);
+        const auto* m = matrix.elements;
+        const Vec3 position{m[12], m[13], m[14]};
+        if (!Finite(position))
+            continue;
+        const Vec3 forward = Unit({-m[8], -m[9], -m[10]}, {0, 0, -1});
+        const Vec3 up = CameraUp(forward, {m[4], m[5], m[6]});
+        // At very large coordinates, adding a unit direction can round back to the eye itself.
+        const float distance =
+            std::max({1.0f, std::abs(position.x) * .00001f, std::abs(position.y) * .00001f,
+                      std::abs(position.z) * .00001f});
+        const Vec3 target = position + forward * distance;
+        const float separation = (target - position).Dot(target - position);
+        if (!Finite(target) || !std::isfinite(separation) || separation <= 0)
+            continue;
+        result = {position, target, up, camera.fov};
+        break;
+    }
+    return result;
+}
 
 std::optional<ScenePlayerOptions> ParseScenePlayerArguments(const std::vector<std::string>& args,
                                                             std::string& error) {
+    error.clear();
     ScenePlayerOptions options;
     for (size_t i = 0; i < args.size(); ++i) {
         const std::string& arg = args[i];
@@ -94,18 +151,27 @@ ScenePlayerView FitSceneView(Scene& scene) {
     for (Entity entity : scene.GetEntities()) {
         if (!entity.HasComponent<TransformComponent>())
             continue;
-        const auto& t = entity.GetComponent<TransformComponent>();
-        float x0 = t.position.x - std::abs(t.scale.x) * 0.5f;
-        float x1 = t.position.x + std::abs(t.scale.x) * 0.5f;
-        float y0 = t.position.y - std::abs(t.scale.y) * 0.5f;
-        float y1 = t.position.y + std::abs(t.scale.y) * 0.5f;
+        const auto matrix = scene.GetWorldMatrix(entity.GetId());
+        float localX0 = -.5f, localX1 = .5f, localY0 = -.5f, localY1 = .5f;
         if (entity.HasComponent<TilemapComponent>()) {
             const auto& map = entity.GetComponent<TilemapComponent>();
-            x0 = t.position.x;
-            y0 = t.position.y;
-            x1 = t.position.x + map.width * map.tileSize;
-            y1 = t.position.y + map.height * map.tileSize;
+            localX0 = localY0 = 0;
+            localX1 = map.width * map.tileSize;
+            localY1 = map.height * map.tileSize;
         }
+        float x0 = std::numeric_limits<float>::max(), y0 = x0;
+        float x1 = std::numeric_limits<float>::lowest(), y1 = x1;
+        for (const float x : {localX0, localX1})
+            for (const float y : {localY0, localY1})
+                for (const float z : {-.5f, .5f}) {
+                    const auto* m = matrix.elements;
+                    const float worldX = m[0] * x + m[4] * y + m[8] * z + m[12];
+                    const float worldY = m[1] * x + m[5] * y + m[9] * z + m[13];
+                    x0 = std::min(x0, worldX);
+                    x1 = std::max(x1, worldX);
+                    y0 = std::min(y0, worldY);
+                    y1 = std::max(y1, worldY);
+                }
         if (!std::isfinite(x0) || !std::isfinite(x1) || !std::isfinite(y0) || !std::isfinite(y1))
             continue;
         minX = std::min(minX, x0);
@@ -129,20 +195,27 @@ ScenePlayer::ScenePlayer(ScenePlayerOptions options)
       options_(std::move(options)) {}
 
 bool ScenePlayer::LoadScene() {
-    // Deserialize only replaces the scene when the whole file parses, so a bad reload keeps
-    // the running scene. It also invalidates old entity handles.
-    if (!scene_.Deserialize(options_.scenePath)) {
-        Log::Error("Cannot load scene: " + options_.scenePath);
+    auto loaded = sceneManager_.Load(std::filesystem::path(std::u8string(
+        reinterpret_cast<const char8_t*>(options_.scenePath.data()), options_.scenePath.size())));
+    if (!loaded) {
+        Log::Error("씬을 불러올 수 없습니다: " + loaded.error);
         return false;
     }
+    scene_ = std::move(loaded.scene);
+    streamingAccumulator_ = 0;
+    lastStreamingError_.clear();
+    FindPlayer();
+    return true;
+}
+
+void ScenePlayer::FindPlayer() {
     player_ = {};
-    for (Entity entity : scene_.GetEntities())
+    for (Entity entity : scene_->GetEntities())
         if (entity.HasComponent<TagComponent>() &&
             IsPlayerTag(entity.GetComponent<TagComponent>().tag)) {
             player_ = entity;
             break;
         }
-    return true;
 }
 
 void ScenePlayer::OnInit() {
@@ -154,7 +227,7 @@ void ScenePlayer::OnInit() {
         return;
     }
     loaded_ = true;
-    view_ = options_.view ? *options_.view : FitSceneView(scene_);
+    view_ = options_.view ? *options_.view : FitSceneView(*scene_);
     Input::BindAction("Left", LuxKey::A);
     Input::BindAction("Left", LuxKey::Left);
     Input::BindAction("Right", LuxKey::D);
@@ -169,7 +242,6 @@ void ScenePlayer::OnInit() {
     if (options_.fullscreen)
         GetWindow().SetFullscreen(true);
     UpdateCamera();
-    Log::Info("Playing scene " + options_.scenePath);
 }
 
 void ScenePlayer::UpdateCamera() {
@@ -181,25 +253,11 @@ void ScenePlayer::UpdateCamera() {
     camera_.SetProjection(view_.centerX - halfWidth, view_.centerX + halfWidth,
                           view_.centerY - view_.halfHeight, view_.centerY + view_.halfHeight);
 
-    float fovDegrees = 60.0f;
-    Vec3 camPos{view_.centerX, view_.centerY + 3.0f, std::max(5.0f, view_.halfHeight * 2.0f)};
-    Vec3 camTarget{view_.centerX, view_.centerY, 0.0f};
-    for (Entity entity : scene_.GetEntities()) {
-        if (entity.HasComponent<CameraComponent>() && entity.HasComponent<TransformComponent>()) {
-            const auto& cam = entity.GetComponent<CameraComponent>();
-            const auto& tr = entity.GetComponent<TransformComponent>();
-            if (cam.isPrimary && cam.isPerspective && std::isfinite(cam.fov) && cam.fov > 0.0f &&
-                cam.fov < 180.0f) {
-                fovDegrees = cam.fov;
-                camPos = tr.position;
-                break;
-            }
-        }
-    }
-    camera3D_.SetPerspective(ToRadians(fovDegrees), aspect, 0.1f, 1000.0f);
-    camera3D_.SetPosition(camPos);
-    camera3D_.SetTarget(camTarget);
-    camera3D_.SetUp({0.0f, 1.0f, 0.0f});
+    const auto primary = ResolveScenePlayerCamera(*scene_, view_);
+    camera3D_.SetPerspective(ToRadians(primary.fovDegrees), aspect, 0.1f, 1000.0f);
+    camera3D_.SetPosition(primary.position);
+    camera3D_.SetTarget(primary.target);
+    camera3D_.SetUp(primary.up);
 }
 
 void ScenePlayer::OnUpdate(double dt) {
@@ -208,7 +266,7 @@ void ScenePlayer::OnUpdate(double dt) {
         return;
     }
     if (Input::WasActionPressed("Reload") && LoadScene())
-        Log::Info("Scene reloaded");
+        view_ = options_.view ? *options_.view : FitSceneView(*scene_);
     if (player_ && player_.HasComponent<TransformComponent>()) {
         const float horizontal = (Input::IsActionDown("Right") ? 1.0f : 0.0f) -
                                  (Input::IsActionDown("Left") ? 1.0f : 0.0f);
@@ -220,23 +278,43 @@ void ScenePlayer::OnUpdate(double dt) {
             if (body.isGrounded && Input::WasActionPressed("Jump"))
                 body.velocity.y = 7.0f;
         } else {
-            auto& transform = player_.GetComponent<TransformComponent>();
+            auto transform = scene_->GetWorldTransform(player_.GetId());
             const float length = std::sqrt(horizontal * horizontal + vertical * vertical);
             if (length > 0.0f) {
                 transform.position.x += horizontal / length * 4.0f * static_cast<float>(dt);
                 transform.position.y += vertical / length * 4.0f * static_cast<float>(dt);
+                scene_->SetWorldTransform(player_.GetId(), transform);
             }
         }
     }
-    scene_.OnUpdate(dt);
+    streamingAccumulator_ += dt;
+    if (streamingAccumulator_ >= .1) {
+        streamingAccumulator_ = 0;
+        const auto observer = player_ && player_.HasComponent<TransformComponent>()
+                                  ? scene_->GetWorldTransform(player_.GetId()).position
+                                  : Vec3{view_.centerX, view_.centerY, 0};
+        std::string error;
+        bool changed = false;
+        if (!sceneManager_.UpdateStreaming(*scene_, {observer.x, observer.y}, error, &changed)) {
+            if (error != lastStreamingError_)
+                Log::Error(error);
+            lastStreamingError_ = std::move(error);
+        } else if (changed)
+            lastStreamingError_.clear();
+        if (changed)
+            FindPlayer();
+    }
+    scene_->OnUpdate(dt);
     if (options_.maxFrames != 0 && ++frames_ >= options_.maxFrames)
         Close();
 }
 
 void ScenePlayer::OnRender(float) {
     UpdateCamera();
+    const auto clear = scene_->GetSettings().clearColor;
+    GetGpuDevice().Clear(clear.x, clear.y, clear.z, clear.w);
     bool has3DMeshes = false;
-    for (Entity entity : scene_.GetEntities()) {
+    for (Entity entity : scene_->GetEntities()) {
         if (entity.HasComponent<MeshRendererComponent>()) {
             has3DMeshes = true;
             break;
@@ -248,19 +326,16 @@ void ScenePlayer::OnRender(float) {
         sun.color = {1.0f, 0.98f, 0.95f};
         sun.intensity = 1.0f;
         Renderer3D::BeginScene(camera3D_, sun);
-        scene_.OnRender3D();
+        scene_->OnRender3D();
         Renderer3D::EndScene();
     }
     Renderer2D::BeginScene(camera_);
-    scene_.OnRender();
+    scene_->OnRender();
     Renderer2D::EndScene();
 }
 
 void ScenePlayer::OnShutdown() {
     Input::ClearBindings();
-    PhysicsEngine::Shutdown();
-    Renderer3D::Shutdown();
-    Renderer2D::Shutdown();
 }
 
 } // namespace LuxEngine

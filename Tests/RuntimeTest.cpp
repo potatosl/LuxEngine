@@ -4,7 +4,10 @@
 #include "Engine/Physics/PhysicsEngine.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Runtime/ScenePlayer.hpp"
+#include <SDL3/SDL_timer.h>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -56,6 +59,8 @@ void Parse() {
         Check(!ParseScenePlayerArguments(args, error) && !error.empty(),
               "invalid arguments rejected");
     }
+    Check(ParseScenePlayerArguments({"scene.lux"}, error).has_value() && error.empty(),
+          "successful parsing clears an earlier error");
 }
 
 void Fit() {
@@ -77,6 +82,57 @@ void Fit() {
     map.AddComponent<LuxEngine::TilemapComponent>();
     view = LuxEngine::FitSceneView(scene);
     Check(view.centerY < 0 && view.halfHeight > 25, "tilemap extends view");
+    LuxEngine::Scene rotated;
+    auto sprite = rotated.CreateEntity("rotated");
+    auto& transform = sprite.GetComponent<LuxEngine::TransformComponent>();
+    transform.scale = {4, 2, 1};
+    transform.rotation.z = LuxEngine::ToRadians(90);
+    view = LuxEngine::FitSceneView(rotated);
+    Check(view.halfHeight >= 2.19f, "rotated bounds fit the visible frame");
+    LuxEngine::Scene parented;
+    auto parent = parented.CreateEntity("parent");
+    parent.GetComponent<LuxEngine::TransformComponent>().position = {20, 10, 0};
+    auto child = parented.CreateEntity("child");
+    child.GetComponent<LuxEngine::TransformComponent>().position = {4, 2, 0};
+    Check(parented.SetParent(child.GetId(), parent.GetId(), false), "fit hierarchy initializes");
+    view = LuxEngine::FitSceneView(parented);
+    Check(Near(view.centerX, 22) && Near(view.centerY, 11),
+          "view uses world transforms for parented scene objects");
+    LuxEngine::Scene cameraScene;
+    auto camera = cameraScene.CreateEntity("primary camera");
+    auto& cameraComponent = camera.AddComponent<LuxEngine::CameraComponent>();
+    cameraComponent.isPerspective = true;
+    cameraComponent.fov = 70;
+    auto cameraView = LuxEngine::ResolveScenePlayerCamera(cameraScene, {});
+    Check(Near(cameraView.position.x, 0) && Near(cameraView.position.z, 0) &&
+              Near(cameraView.target.z, -1) && Near(cameraView.up.y, 1) &&
+              Near(cameraView.fovDegrees, 70),
+          "an origin camera looks forward rather than degenerating into eye == target");
+    auto cameraParent = cameraScene.CreateEntity("camera parent");
+    auto& parentTransform = cameraParent.GetComponent<LuxEngine::TransformComponent>();
+    parentTransform.position = {10, 2, 0};
+    parentTransform.rotation.y = LuxEngine::ToRadians(90);
+    parentTransform.scale = {-2, 3, -4};
+    camera.GetComponent<LuxEngine::TransformComponent>().position.z = 5;
+    Check(cameraScene.SetParent(camera.GetId(), cameraParent.GetId(), false),
+          "parented camera hierarchy configures");
+    cameraView = LuxEngine::ResolveScenePlayerCamera(cameraScene, {});
+    Check(Near(cameraView.position.x, -10) && Near(cameraView.position.y, 2) &&
+              cameraView.target.x > cameraView.position.x + .99f && Near(cameraView.up.y, 1),
+          "primary camera uses world -Z/+Y axes under a rotated, negatively scaled parent");
+    camera.GetComponent<LuxEngine::TransformComponent>().rotation.z = LuxEngine::ToRadians(90);
+    cameraView = LuxEngine::ResolveScenePlayerCamera(cameraScene, {});
+    Check(cameraView.up.z < -.99f, "camera roll changes its actual view up axis");
+    parentTransform.scale = {0, 0, 0};
+    cameraView = LuxEngine::ResolveScenePlayerCamera(cameraScene, {});
+    const auto finite = [](LuxEngine::Vec3 value) {
+        return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+    };
+    const auto forward = cameraView.target - cameraView.position;
+    Check(finite(cameraView.position) && finite(cameraView.target) && finite(cameraView.up) &&
+              forward.Dot(forward) > .9f &&
+              forward.Cross(cameraView.up).Dot(forward.Cross(cameraView.up)) > .9f,
+          "collapsed camera axes receive a finite, non-parallel view basis");
 }
 
 // Writes a small platformer scene for the LuxPlayer smoke test.
@@ -108,6 +164,90 @@ void WriteScene(const std::string& path) {
     LuxEngine::Scene loaded;
     Check(loaded.Deserialize(path) && loaded.GetEntityCount() == 4, "smoke scene reloads");
 }
+
+int SceneManagementGpu() {
+    namespace fs = std::filesystem;
+    struct Files {
+        fs::path root = fs::temp_directory_path() / fs::path(u8"lux-runtime-씬") /
+                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        Files() {
+            fs::create_directories(root);
+        }
+        ~Files() {
+            std::error_code error;
+            fs::remove_all(root, error);
+        }
+    } files;
+    const auto text = [](const fs::path& path) {
+        const auto bytes = path.u8string();
+        return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    };
+    LuxEngine::Scene source;
+    auto sprite = source.CreateEntity("스트리밍 스프라이트");
+    sprite.GetComponent<LuxEngine::TransformComponent>().scale = {2, 2, 1};
+    sprite.AddComponent<LuxEngine::SpriteRendererComponent>().color = {.2f, .8f, .3f, 1};
+    auto settings = source.GetSettings();
+    settings.clearColor = {.04f, .08f, .16f, 1};
+    settings.exposure = .5f;
+    Check(source.SetSettings(settings), "runtime source settings are valid");
+    const auto base = files.root / "base.lux", composed = files.root / "composed.lux";
+    Check(source.Serialize(text(base)), "runtime source file serializes");
+    LuxEngine::SceneManager manager;
+    LuxEngine::Scene target;
+    std::string error;
+    const auto root =
+        manager.AddSceneInstance(target, base, LuxEngine::SceneReferenceMode::Inherited, error);
+    Check(root != 0, "runtime inherited scene composes");
+    Check(manager.ConfigureStreaming(target, root, {0, 0}, 5, 8, error) &&
+              manager.UnloadInstance(target, root, error),
+          "runtime source starts as an unloaded streaming region");
+    Check(LuxEngine::SceneManager::Save(target, composed, {}, error),
+          "runtime composed file saves with portable paths");
+    Check(manager.Load(composed).scene != nullptr,
+          "runtime composed fixture is valid before GPU startup");
+    LuxEngine::ScenePlayerOptions options;
+    options.scenePath = text(composed);
+    options.width = 320;
+    options.height = 240;
+    options.view = LuxEngine::ScenePlayerView{0, 0, 4.5f};
+    LuxEngine::ScenePlayer player(options);
+    if (!player.Initialize()) {
+        std::cout << "SKIP: scene player GPU/window backend is unavailable\n";
+        return 77;
+    }
+    Check(player.LoadedScene(), "runtime player opens composed scenes");
+    const auto frame = [&] {
+        SDL_Delay(18);
+        const auto result = player.RunFrame();
+        Check(result == LuxEngine::Application::FrameResult::Continue ||
+                  result == LuxEngine::Application::FrameResult::Skipped,
+              "runtime composed scene keeps rendering");
+    };
+    bool sawSprite = false;
+    const auto deadline = SDL_GetTicks() + 5000;
+    LuxEngine::GpuFrameCapture image;
+    do {
+        frame();
+        Check(player.GetGpuDevice().RequestFrameCapture(), "runtime frame capture queues");
+        frame();
+        Check(player.GetGpuDevice().ReadFrameCapture(image), "runtime frame capture completes");
+        Check(image.width > 2 && image.height > 2 &&
+                  image.rgba.size() == static_cast<size_t>(image.width) * image.height * 4,
+              "runtime frame capture contains a complete image");
+        const auto middle =
+            (static_cast<size_t>(image.height / 2) * image.width + image.width / 2) * 4;
+        sawSprite = image.rgba[middle + 1] > image.rgba[middle] + 20 &&
+                    image.rgba[middle + 1] > image.rgba[middle + 2] + 20;
+    } while (!sawSprite && SDL_GetTicks() < deadline);
+    Check(sawSprite, "runtime player streams inherited scene entities into the actual GPU frame");
+    const size_t edge = (static_cast<size_t>(image.width) + 1) * 4;
+    Check(image.rgba[edge + 2] > image.rgba[edge + 1] + 10 &&
+              image.rgba[edge + 1] > image.rgba[edge] + 3,
+          "scene-specific environment color reaches the actual runtime framebuffer");
+    player.Close();
+    player.RunFrame();
+    return 0;
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -119,6 +259,8 @@ int main(int argc, char** argv) {
             Fit();
         else if (suite == "write-scene" && argc > 2)
             WriteScene(argv[2]);
+        else if (suite == "scene-management-gpu")
+            return SceneManagementGpu();
         else
             throw std::runtime_error("Unknown suite");
         std::cout << suite << ": " << checks << " checks passed\n";

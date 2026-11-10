@@ -81,6 +81,7 @@ add_library(LuxEditorUi STATIC
     App/EditorWindow.cpp
     App/EditorWindowLayout.cpp
     App/EditorWindowProjects.cpp
+    App/EditorWindowScenes.cpp
     App/EditorWindowPlay.cpp
     App/EditorWindowBuild.cpp
     Debug/DebugPanel.cpp
@@ -90,6 +91,10 @@ add_library(LuxEditorUi STATIC
     Project/ProjectSettings.cpp
     Project/ProjectTemplates.cpp
     Scene/EditorDocument.cpp
+    Scene/SceneAuthoringIO.cpp
+    Scene/SceneHierarchy.cpp
+    Scene/SceneSettingsDialog.cpp
+    Scene/SceneDependencies.cpp
     Ui/IconFactory.cpp
     Viewport/EngineSceneRenderer.cpp
     Viewport/SceneViewport2D.cpp
@@ -137,8 +142,44 @@ if(MSVC)
 endif()
 
 if(LUX_BUILD_TESTS)
+    add_executable(LuxEditorSceneDependencyTests Tests/EditorSceneDependencyTest.cpp)
+    target_link_libraries(LuxEditorSceneDependencyTests PRIVATE LuxEditorUi)
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxEditorSceneDependencyTests)
+    endif()
+    lux_editor_copy_runtime(LuxEditorSceneDependencyTests)
+    lux_editor_copy_qt_plugins(LuxEditorSceneDependencyTests)
+    add_test(NAME Editor_scene_dependencies COMMAND LuxEditorSceneDependencyTests)
+    set_tests_properties(Editor_scene_dependencies PROPERTIES LABELS "headless;editor;scene" TIMEOUT 90)
+    add_executable(LuxEditorSceneUiTests Tests/EditorSceneUiTest.cpp)
+    target_link_libraries(LuxEditorSceneUiTests PRIVATE LuxEditorUi)
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxEditorSceneUiTests)
+    endif()
+    lux_editor_copy_runtime(LuxEditorSceneUiTests)
+    lux_editor_copy_qt_plugins(LuxEditorSceneUiTests)
+    add_test(NAME Editor_scene_ui COMMAND LuxEditorSceneUiTests)
+    set_tests_properties(Editor_scene_ui PROPERTIES LABELS "headless;editor;scene" TIMEOUT 120
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1")
+    add_executable(LuxEditorSceneDocumentTests
+        Tests/EditorSceneDocumentTest.cpp
+        Scene/EditorDocument.cpp
+        Scene/SceneAuthoringIO.cpp
+        Project/EditorProject.cpp
+        Project/ProjectSettings.cpp
+        Project/ProjectTemplates.cpp)
+    target_include_directories(LuxEditorSceneDocumentTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(LuxEditorSceneDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
+    target_link_libraries(LuxEditorSceneDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui)
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxEditorSceneDocumentTests)
+    endif()
+    lux_editor_copy_runtime(LuxEditorSceneDocumentTests)
+    add_test(NAME Editor_scene_documents COMMAND LuxEditorSceneDocumentTests)
+    set_tests_properties(Editor_scene_documents PROPERTIES LABELS "headless;editor;scene" TIMEOUT 90)
     add_executable(LuxEditorDocumentTests
         Scene/EditorDocument.cpp
+        Scene/SceneAuthoringIO.cpp
         Project/EditorProject.cpp
         Project/ProjectArchive.cpp
         Project/ProjectSettings.cpp
@@ -193,7 +234,9 @@ if(LUX_BUILD_TESTS)
     add_test(NAME Editor_recovery_history COMMAND LuxEditorStateTests recovery-history)
     add_test(NAME Editor_broken_scene_recovery COMMAND LuxEditorStateTests broken-scene-recovery)
     add_test(NAME Editor_session_scene COMMAND LuxEditorStateTests session-scene)
-    set_tests_properties(Editor_scene_context Editor_recovery_history Editor_broken_scene_recovery Editor_session_scene PROPERTIES
+    add_test(NAME Editor_project_reopen COMMAND LuxEditorStateTests project-reopen)
+    add_test(NAME Editor_project_restore COMMAND LuxEditorStateTests project-restore)
+    set_tests_properties(Editor_scene_context Editor_recovery_history Editor_broken_scene_recovery Editor_session_scene Editor_project_reopen Editor_project_restore PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1"
         TIMEOUT 60 LABELS "headless;editor")
     add_executable(LuxEditorRegressionTests Tests/EditorRegressionTest.cpp)

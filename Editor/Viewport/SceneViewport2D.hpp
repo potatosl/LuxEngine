@@ -31,6 +31,7 @@ public:
         update();
     }
     void FocusSelection();
+    void CancelInteraction();
     // Visible area in world units: centre and half height.
     void GetView(double& centerX, double& centerY, double& halfHeight) const;
     void SetSnapToGrid(bool enabled) {
@@ -56,6 +57,7 @@ private:
     void mouseReleaseEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
+    void focusOutEvent(QFocusEvent*) override;
     EditorDocument& document_;
     std::function<void(std::optional<LuxEngine::uint32>)> onSelect_;
     std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform_;

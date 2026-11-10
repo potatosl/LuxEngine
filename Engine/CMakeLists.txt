@@ -14,6 +14,7 @@ set(LUXENGINE_HEADERS
     Renderer/Renderer3D/Renderer3D.hpp
     Scene/Scene.hpp
     Scene/Entity.hpp
+    Scene/SceneManager.hpp
     ECS/ECS.hpp
     Physics/PhysicsEngine.hpp
     Audio/AudioEngine.hpp
@@ -44,6 +45,8 @@ set(LUXENGINE_SOURCES
     Renderer/Renderer2D/Renderer2D.cpp
     Renderer/Renderer3D/Renderer3D.cpp
     Scene/Scene.cpp
+    Scene/SceneHierarchy.cpp
+    Scene/SceneManager.cpp
     Physics/PhysicsEngine.cpp
     Physics/PhysicsWorld2D.h
     Physics/PhysicsWorld2D.cpp
@@ -76,9 +79,11 @@ target_include_directories(LuxEngine PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
+find_package(Threads REQUIRED)
 target_link_libraries(LuxEngine PUBLIC
     SDL3::SDL3
     box2d::box2d
+    Threads::Threads
     PRIVATE
     Vulkan::Vulkan
 )

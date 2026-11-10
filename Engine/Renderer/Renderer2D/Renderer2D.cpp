@@ -205,6 +205,33 @@ void Renderer2D::Context::DrawQuad(const Vec3& p, const Vec2& size, const Vec4& 
         impl_->Quad(p, size, 0, {}, 0, color);
 }
 
+void Renderer2D::Context::DrawQuad(const Mat4& transform, const Vec4& color) {
+    if (!impl_ || !impl_->active)
+        return;
+    for (const auto value : transform.elements)
+        if (!std::isfinite(value))
+            return;
+    if (!std::isfinite(color.x) || !std::isfinite(color.y) || !std::isfinite(color.z) ||
+        !std::isfinite(color.w))
+        return;
+    constexpr std::array<Vec2, 6> points{
+        {{-.5f, -.5f}, {.5f, -.5f}, {.5f, .5f}, {.5f, .5f}, {-.5f, .5f}, {-.5f, -.5f}}};
+    std::array<Vec3, 6> positions;
+    const auto* m = transform.elements;
+    for (size_t index = 0; index < points.size(); ++index) {
+        const auto point = points[index];
+        positions[index] = {m[0] * point.x + m[4] * point.y + m[12],
+                            m[1] * point.x + m[5] * point.y + m[13], 0};
+        if (!std::isfinite(positions[index].x) || !std::isfinite(positions[index].y))
+            return;
+    }
+    // 2D Z ordering is applied by Scene before batching; flatten Z as DrawRotatedQuad does.
+    impl_->Quad({}, {1, 1}, 0, {}, 0, color);
+    auto& vertices = impl_->batches[impl_->usedBatches - 1].vertices;
+    for (size_t index = 0; index < positions.size(); ++index)
+        vertices[vertices.size() - positions.size() + index].position = positions[index];
+}
+
 void Renderer2D::Context::DrawRotatedQuad(const Vec2& p, const Vec2& size, float angle,
                                           const Vec4& color) {
     if (impl_)
@@ -297,6 +324,15 @@ void Renderer2D::DrawQuad(const Vec3& p, const Vec2& size, const Vec4& color) {
     }
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
     DefaultContext2D().DrawQuad(p, size, color);
+}
+
+void Renderer2D::DrawQuad(const Mat4& transform, const Vec4& color) {
+    if (t_ActiveContext2D) {
+        t_ActiveContext2D->DrawQuad(transform, color);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
+    DefaultContext2D().DrawQuad(transform, color);
 }
 
 void Renderer2D::DrawRotatedQuad(const Vec2& p, const Vec2& size, float angle, const Vec4& color) {

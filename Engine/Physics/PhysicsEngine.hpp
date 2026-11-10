@@ -57,6 +57,8 @@ public:
                        const BoxCollider2DComponent& collider, double dt);
     static void Step3D(Vec3& position, Rigidbody3DComponent& rb,
                        const BoxCollider3DComponent& collider, double dt);
+    static void Step3D(Vec3& position, Rigidbody3DComponent& rb,
+                       const BoxCollider3DComponent& collider, double dt, const Vec3& gravity);
 };
 
 } // namespace LuxEngine

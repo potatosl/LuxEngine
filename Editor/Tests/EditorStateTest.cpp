@@ -331,6 +331,125 @@ void TestSessionScene(QApplication& app) {
               restored.GetDocument().GetScene().GetEntityCount() == 1,
           "last edited scene recovery preserves project context and the unsaved baseline");
 }
+
+void TestReopenCurrentProject(QApplication& app) {
+    ProjectFixture fixture;
+    LuxEngine::Scene initial;
+    initial.CreateEntity("Initially opened start");
+    Check(initial.Serialize(PathUtf8(fixture.project.GetSceneFile())),
+          "initial project start scene saves");
+    auto window = fixture.Open(app);
+    auto& document = window->GetDocument();
+    const auto startTab = document.GetActiveTabId();
+    Check(window->OpenSceneDocument(fixture.secondary), "secondary project scene opens");
+    window->ExecuteRecordedEdit("Inactive unsaved edit",
+                                [&] { document.CreateEntity("Discarded secondary edit"); });
+    const auto secondaryTab = document.GetActiveTabId();
+    Check(window->SwitchSceneDocument(startTab, false) && document.IsDirty(secondaryTab),
+          "project reopen starts with an open start scene and inactive dirty scene");
+    LuxEngine::Scene updated;
+    updated.CreateEntity("Latest start from disk");
+    Check(updated.Serialize(PathUtf8(fixture.project.GetSceneFile())),
+          "another collaborator updates the project start scene on disk");
+    int discardPrompts = 0, errors = 0;
+    QTimer answer;
+    QObject::connect(&answer, &QTimer::timeout, &app, [&] {
+        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+            dialog->selectFile(Q(fixture.project.GetFile()));
+            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+        } else if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            if (auto* no = message->button(QMessageBox::No)) {
+                ++discardPrompts;
+                no->click();
+            } else {
+                ++errors;
+                message->accept();
+            }
+        }
+    });
+    answer.start(5);
+    auto* action = window->findChild<QAction*>("openProject");
+    Check(action && action->isEnabled(), "project open action is available");
+    action->trigger();
+    answer.stop();
+    const auto entities = document.GetScene().GetEntities();
+    Check(discardPrompts == 1 && errors == 0 && document.ListTabs().size() == 1 &&
+              PathFromUtf8(document.GetPath()) == fixture.project.GetSceneFile() &&
+              !document.IsDirty() && entities.size() == 1 &&
+              entities.front().GetComponent<LuxEngine::TagComponent>().tag ==
+                  "Latest start from disk",
+          "reopening the current project replaces its old open start scene without a tab conflict");
+    auto* history = window->findChild<QUndoStack*>();
+    Check(history && history->count() == 0 &&
+              window->findChild<QAction*>("projectSettings")->isEnabled(),
+          "successful project reopen clears old scene history and retains project ownership");
+}
+
+void TestRestoreOpenedProject(QApplication& app) {
+    ProjectFixture fixture;
+    LuxEngine::Scene original;
+    original.CreateEntity("Start from backup");
+    Check(original.Serialize(PathUtf8(fixture.project.GetSceneFile())),
+          "project backup starts with authored content");
+    std::string error;
+    fs::path backup;
+    Check(CreateProjectBackup(fixture.project, backup, error), error.c_str());
+    auto window = fixture.Open(app);
+    auto& document = window->GetDocument();
+    const auto startTab = document.GetActiveTabId();
+    window->ExecuteRecordedEdit("Work after backup",
+                                [&] { document.CreateEntity("Start edit after backup"); });
+    window->findChild<QAction*>("saveScene")->trigger();
+    Check(!document.IsDirty() && document.GetScene().GetEntityCount() == 2,
+          "post-backup start content is saved and still open");
+    Check(window->OpenSceneDocument(fixture.secondary), "secondary project scene opens");
+    window->ExecuteRecordedEdit("Inactive work after backup",
+                                [&] { document.CreateEntity("Unsaved secondary edit"); });
+    const auto secondaryTab = document.GetActiveTabId();
+    Check(window->SwitchSceneDocument(startTab, false) && document.IsDirty(secondaryTab),
+          "backup restore starts with the old start scene open and inactive unsaved work");
+    int discardPrompts = 0, restorePrompts = 0, errors = 0;
+    QTimer answer;
+    QObject::connect(&answer, &QTimer::timeout, &app, [&] {
+        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+            dialog->selectFile(Q(backup));
+            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+        } else if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            if (message->text().contains(QStringLiteral("저장하지 않은"))) {
+                ++discardPrompts;
+                message->button(QMessageBox::No)->click();
+            } else if (auto* yes = message->button(QMessageBox::Yes)) {
+                ++restorePrompts;
+                yes->click();
+            } else {
+                ++errors;
+                message->accept();
+            }
+        }
+    });
+    answer.start(5);
+    auto* action = window->findChild<QAction*>("restoreProject");
+    Check(action && action->isEnabled(), "project restore action is available");
+    action->trigger();
+    answer.stop();
+    const auto entities = document.GetScene().GetEntities();
+    LuxEngine::Scene disk, secondary;
+    Check(discardPrompts == 1 && restorePrompts == 1 && errors == 0 &&
+              document.ListTabs().size() == 1 && !document.IsDirty() && entities.size() == 1 &&
+              entities.front().GetComponent<LuxEngine::TagComponent>().tag == "Start from backup" &&
+              PathFromUtf8(document.GetPath()) == fixture.project.GetSceneFile() &&
+              disk.Deserialize(PathUtf8(fixture.project.GetSceneFile())) &&
+              disk.GetEntityCount() == 1 && secondary.Deserialize(PathUtf8(fixture.secondary)) &&
+              secondary.GetEntityCount() == 1,
+          "restoring a backup updates both the live start scene and disk after confirmed discard");
+    auto* history = window->findChild<QUndoStack*>();
+    Check(history && history->count() == 0 &&
+              window->findChild<QAction*>("projectSettings")->isEnabled(),
+          "backup restore clears old tabs and history while retaining project ownership");
+    window->findChild<QAction*>("saveScene")->trigger();
+    Check(disk.Deserialize(PathUtf8(fixture.project.GetSceneFile())) && disk.GetEntityCount() == 1,
+          "saving after restore cannot overwrite the backup with stale pre-restore content");
+}
 } // namespace
 int main(int argc, char** argv) {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
@@ -352,6 +471,10 @@ int main(int argc, char** argv) {
             TestBrokenSceneRecovery(app);
         else if (mode == "session-scene")
             TestSessionScene(app);
+        else if (mode == "project-reopen")
+            TestReopenCurrentProject(app);
+        else if (mode == "project-restore")
+            TestRestoreOpenedProject(app);
         else
             throw std::runtime_error("Unknown editor state test mode");
         std::cout << "Editor state checks passed: " << mode << '\n';

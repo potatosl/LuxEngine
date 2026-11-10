@@ -45,6 +45,7 @@ public:
                                                         std::string& error);
     bool Rename(const std::string& name, std::string& error);
     bool UpdateSettings(const ProjectSettings& settings, std::string& error);
+    bool SetStartScene(const std::filesystem::path& sceneFile, std::string& error);
     bool SetIcon(const std::filesystem::path& image, std::string& error);
     bool BumpVersion(int part, std::string& error);
     std::filesystem::path GetAutosaveFile(const std::filesystem::path& sceneFile) const;

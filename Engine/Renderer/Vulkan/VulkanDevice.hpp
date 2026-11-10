@@ -122,6 +122,8 @@ struct FrameData {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkSemaphore imageAvailable = VK_NULL_HANDLE;
+    VkFence presentFence = VK_NULL_HANDLE;
+    bool presentPending = false;
     VkQueryPool queries = VK_NULL_HANDLE;
     bool queriesWritten = false;
     uint64 serial = 0;
@@ -195,6 +197,7 @@ struct DeviceState {
     uint32 apiVersion = VK_API_VERSION_1_1;
     bool portabilityEnumeration = false;
     bool portabilitySubset = false;
+    bool surfaceMaintenance1 = false;
     float timestampPeriod = 0.0f;
     Ref<InstanceValidation> instanceValidation = CreateRef<InstanceValidation>();
     uint32 validationErrorsAtInitialization = 0;
@@ -295,6 +298,8 @@ struct DeviceState {
     void DestroySync();
     uint64 PollCompleted();
     bool WaitForSerial(uint64 serial);
+    bool WaitForPresent(FrameData& frame, uint64 timeout, bool reset = true);
+    bool WaitForPresents(uint64 timeout, bool reset = true);
     VkResult Submit(VkCommandBuffer cmd, VkSemaphore wait, VkPipelineStageFlags waitStage,
                     VkSemaphore signal, uint64& serial);
     void Retire(const Retired& resource);

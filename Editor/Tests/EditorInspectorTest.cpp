@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <QSpinBox>
 #include <QTemporaryDir>
+#include <QTreeWidget>
 #include <QUndoStack>
 #include <array>
 #include <iostream>
@@ -72,9 +73,9 @@ void TestFields(QApplication& app, const QString& directory) {
     EditorWindow window;
     window.show();
     app.processEvents();
-    auto* outliner = window.findChild<QListWidget*>(QStringLiteral("sceneOutliner"));
-    Check(outliner && outliner->count() == 1, "inspector fixture opens");
-    outliner->setCurrentRow(0);
+    auto* outliner = window.findChild<QTreeWidget*>(QStringLiteral("sceneOutliner"));
+    Check(outliner && outliner->topLevelItemCount() == 1, "inspector fixture opens");
+    outliner->setCurrentItem(outliner->topLevelItem(0));
     auto selected = [&] { return window.GetDocument().GetSelected(); };
     auto* undo = window.findChild<QUndoStack*>();
     Check(undo != nullptr, "undo stack exists");
