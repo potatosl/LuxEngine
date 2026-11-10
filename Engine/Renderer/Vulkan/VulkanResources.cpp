@@ -374,7 +374,9 @@ bool DeviceState::UploadBuffer(BufferRecord& record, const void* data, VkDeviceS
 }
 
 bool DeviceState::CreateTextureResource(uint32 width, uint32 height, const void* pixels,
-                                        TextureRecord& record) {
+                                        TextureRecord& record, TextureFilter filter) {
+    if (filter != TextureFilter::Linear && filter != TextureFilter::Nearest)
+        return Fail(GpuStatus::Error, "Texture filter is invalid");
     if (width == 0 || height == 0 || width > info.maxTextureSize || height > info.maxTextureSize)
         return Fail(GpuStatus::Error, "Texture size is zero or exceeds maxImageDimension2D");
     const VkDeviceSize bytes = static_cast<VkDeviceSize>(width) * height * 4;
@@ -420,7 +422,7 @@ bool DeviceState::CreateTextureResource(uint32 width, uint32 height, const void*
         Fail(result, "Texture image view");
         return destroyPartial();
     }
-    if (!AllocateTextureSet(record.view, record.pool, record.set)) {
+    if (!AllocateTextureSet(record.view, record.pool, record.set, filter)) {
         record.set = VK_NULL_HANDLE;
         return destroyPartial();
     }
@@ -730,6 +732,8 @@ void DeviceState::Shutdown() {
         DestroyPipelines();
         if (sampler)
             vkDestroySampler(device, sampler, nullptr);
+        if (nearestSampler)
+            vkDestroySampler(device, nearestSampler, nullptr);
         if (setLayout)
             vkDestroyDescriptorSetLayout(device, setLayout, nullptr);
         if (pipelineLayout)
@@ -738,7 +742,7 @@ void DeviceState::Shutdown() {
             vkDestroyPipelineCache(device, pipelineCache, nullptr);
         for (VkDescriptorPool pool : descriptorPools)
             vkDestroyDescriptorPool(device, pool, nullptr);
-        sampler = VK_NULL_HANDLE;
+        sampler = nearestSampler = VK_NULL_HANDLE;
         setLayout = VK_NULL_HANDLE;
         pipelineLayout = VK_NULL_HANDLE;
         pipelineCache = VK_NULL_HANDLE;

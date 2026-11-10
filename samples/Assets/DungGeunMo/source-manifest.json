@@ -1,0 +1,23 @@
+{
+  "name": "DungGeunMo",
+  "version": "1.3 (2019-01-13)",
+  "author": "Kil Hyung-jin (orioncactus)",
+  "source": "https://cactus.tistory.com/193",
+  "license": "LicenseRef-Public-Domain",
+  "archive_sha256": "e937a8334da98f6918658626c23b9379bfbdb7e47be0dc829534377ad76fc937",
+  "category": "font",
+  "validation_policy": "Official font-specific Public Domain grant; embedded font name-table Public Domain grant; ZIP CRC and closed original-byte SHA-256 roster; all 11172 Hangul syllables present",
+  "validation_result": "passed (manual; game-dev CLI unavailable)",
+  "files": [
+    {
+      "path": "DungGeunMo.ttf",
+      "bytes": 7354268,
+      "sha256": "3f184d949149f2e7e6a853593e25161fb1d3b6d3708ebf79ce78600788fdea30"
+    },
+    {
+      "path": "License.txt",
+      "bytes": 783,
+      "sha256": "236b00473c9ca7443bb3128c5f7b585fa836b5d9290fdb2215c42b7631cfa3f4"
+    }
+  ]
+}

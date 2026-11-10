@@ -30,12 +30,13 @@ GpuTexture& GpuTexture::operator=(GpuTexture&& other) noexcept {
     return *this;
 }
 
-bool GpuTexture::Initialize(GpuDevice* device, uint32 width, uint32 height, const void* pixelData) {
+bool GpuTexture::Initialize(GpuDevice* device, uint32 width, uint32 height, const void* pixelData,
+                            TextureFilter filter) {
     Release();
     if (!device || !device->IsReady())
         return false;
     Vk::TextureRecord record;
-    if (!device->state_->CreateTextureResource(width, height, pixelData, record))
+    if (!device->state_->CreateTextureResource(width, height, pixelData, record, filter))
         return false;
     handle_ = device->state_->textures.Insert(record);
     owner_ = device->state_;

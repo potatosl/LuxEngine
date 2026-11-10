@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <utility>
 
 namespace LuxEngine::Vk {
 namespace {
@@ -123,19 +124,23 @@ bool DeviceState::CreateRenderPass(VkFormat colorFormat) {
 }
 
 bool DeviceState::CreatePipelines() {
-    if (!sampler) {
+    for (const auto [filter, target] :
+         {std::pair{VK_FILTER_LINEAR, &sampler}, std::pair{VK_FILTER_NEAREST, &nearestSampler}}) {
+        if (*target)
+            continue;
         VkSamplerCreateInfo samplerInfo{};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.magFilter = filter;
+        samplerInfo.minFilter = filter;
+        samplerInfo.mipmapMode = filter == VK_FILTER_NEAREST ? VK_SAMPLER_MIPMAP_MODE_NEAREST
+                                                             : VK_SAMPLER_MIPMAP_MODE_LINEAR;
         samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.maxLod = 0.0f;
-        if (const VkResult result = vkCreateSampler(device, &samplerInfo, nullptr, &sampler);
+        if (const VkResult result = vkCreateSampler(device, &samplerInfo, nullptr, target);
             result != VK_SUCCESS) {
-            sampler = VK_NULL_HANDLE;
+            *target = VK_NULL_HANDLE;
             return Fail(result, "vkCreateSampler");
         }
     }
@@ -149,7 +154,6 @@ bool DeviceState::CreatePipelines() {
         bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         bindings[1].descriptorCount = 1;
         bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        bindings[1].pImmutableSamplers = &sampler;
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.bindingCount = 2;
@@ -328,8 +332,8 @@ void DeviceState::DestroyPipelines() {
     renderPassFormat = VK_FORMAT_UNDEFINED;
 }
 
-bool DeviceState::AllocateTextureSet(VkImageView view, VkDescriptorPool& pool,
-                                     VkDescriptorSet& set) {
+bool DeviceState::AllocateTextureSet(VkImageView view, VkDescriptorPool& pool, VkDescriptorSet& set,
+                                     TextureFilter filter) {
     VkDescriptorSetAllocateInfo allocate{};
     allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocate.descriptorSetCount = 1;
@@ -366,14 +370,20 @@ bool DeviceState::AllocateTextureSet(VkImageView view, VkDescriptorPool& pool,
     }
     pool = allocate.descriptorPool;
     VkDescriptorImageInfo image{VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = 0;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    write.pImageInfo = &image;
-    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    VkDescriptorImageInfo sampling{};
+    sampling.sampler = filter == TextureFilter::Nearest ? nearestSampler : sampler;
+    VkWriteDescriptorSet writes[2]{};
+    for (uint32 binding = 0; binding < 2; ++binding) {
+        writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[binding].dstSet = set;
+        writes[binding].dstBinding = binding;
+        writes[binding].descriptorCount = 1;
+    }
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writes[0].pImageInfo = &image;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    writes[1].pImageInfo = &sampling;
+    vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
     return true;
 }
 

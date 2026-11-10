@@ -65,7 +65,7 @@ endif()
 # -------------------------------------------------------------
 add_subdirectory(Engine)
 add_subdirectory(Runtime)
-add_subdirectory(Sandbox)
+add_subdirectory(samples)
 if(LUX_BUILD_EDITOR)
     add_subdirectory(Editor)
 endif()
