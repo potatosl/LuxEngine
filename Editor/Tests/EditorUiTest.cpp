@@ -50,8 +50,10 @@
 #define NOMINMAX
 #endif
 #include <malloc.h>
-#include <psapi.h>
 #include <windows.h>
+
+// psapi.h requires the Win32 types declared by windows.h; keep this include group separate.
+#include <psapi.h>
 #ifdef small
 #undef small
 #endif
