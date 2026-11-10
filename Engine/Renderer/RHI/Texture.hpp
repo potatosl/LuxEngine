@@ -10,6 +10,9 @@ namespace Vk {
 struct DeviceState;
 }
 
+// Linear is the default for smooth artwork; Nearest preserves pixel-art texel edges.
+enum class TextureFilter { Linear, Nearest };
+
 class LUX_API GpuTexture {
 public:
     GpuTexture() = default;
@@ -20,9 +23,10 @@ public:
     GpuTexture(GpuTexture&& other) noexcept;
     GpuTexture& operator=(GpuTexture&& other) noexcept;
 
-    bool Initialize(GpuDevice* device, uint32 width, uint32 height,
-                    const void* pixelData = nullptr);
-    bool Initialize(std::nullptr_t, uint32, uint32, const void* = nullptr) {
+    bool Initialize(GpuDevice* device, uint32 width, uint32 height, const void* pixelData = nullptr,
+                    TextureFilter filter = TextureFilter::Linear);
+    bool Initialize(std::nullptr_t, uint32, uint32, const void* = nullptr,
+                    TextureFilter = TextureFilter::Linear) {
         Release();
         return false;
     }
