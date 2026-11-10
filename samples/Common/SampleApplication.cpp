@@ -118,7 +118,7 @@ void SampleApplication::OnRender(float elapsed) {
     Draw(elapsed);
     Panel({0, 5.35f}, {halfWidth_ * 2, 1.3f});
     Text(title_, {-halfWidth_ + .4f, 5.75f}, .055f);
-    Text(instructions_, {-halfWidth_ + .4f, 5.05f}, .025f);
+    Text(instructions_, {-halfWidth_ + .4f, 5.05f}, .04f);
     Panel({0, -5.6f}, {halfWidth_ * 2, .75f});
     Text("P PAUSE   R RESET   ESC EXIT", {-halfWidth_ + .4f, -5.5f}, .035f);
     if (paused_) {
