@@ -108,6 +108,8 @@ private:
     void PushSceneCommand(SceneEditCommand* command);
     void AnimateSceneTransition(const QPixmap& previous);
     void BuildLayout();
+    void BuildAnimationPanel();
+    void StopAnimationPlayback();
     void ApplyTheme();
     void RestoreWorkspaceLayout();
     void SaveWorkspaceLayout();
@@ -160,6 +162,7 @@ private:
     void AddKeyframe();
     void RemoveKeyframe();
     void ScrubAnimation(int value);
+    void SeekAnimationTime(double time);
     void EndTimelineEdit();
     void StartPreview();
     void StopPreview();
@@ -258,6 +261,13 @@ private:
     QCheckBox* triggerEnabled_ = nullptr;
     std::array<QDoubleSpinBox*, 2> colliderSize_{};
     std::array<QDoubleSpinBox*, 2> colliderOffset_{};
+    QDockWidget* animationDock_ = nullptr;
+    QWidget* animationPanel_ = nullptr;
+    QLabel* animationTarget_ = nullptr;
+    QLineEdit* animationName_ = nullptr;
+    QDoubleSpinBox* animationTime_ = nullptr;
+    QSpinBox* animationFps_ = nullptr;
+    QTimer animationTimer_;
     QCheckBox* animationEnabled_ = nullptr;
     QCheckBox* animationLoop_ = nullptr;
     QDoubleSpinBox* animationDuration_ = nullptr;

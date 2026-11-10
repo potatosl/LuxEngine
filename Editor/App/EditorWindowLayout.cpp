@@ -487,52 +487,6 @@ void EditorWindow::BuildLayout() {
         connect(field, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
                 [this, field] { OnPhysicsChanged(field); });
 
-    // 개발 중: 스프라이트 시트·본 애니메이션은 엔진 구현 후 타임라인에 연결합니다.
-    auto* animationGroup = new QGroupBox(QStringLiteral("TRANSFORM ANIMATION"), inspectorBody_);
-    auto* animationLayout = new QVBoxLayout(animationGroup);
-    animationEnabled_ = new QCheckBox(QStringLiteral("애니메이션 사용"), animationGroup);
-    animationEnabled_->setObjectName(QStringLiteral("editorAnimation"));
-    animationLoop_ = new QCheckBox(QStringLiteral("반복 재생"), animationGroup);
-    animationDuration_ = Number(animationGroup, .01, 3600, 1, .1);
-    auto* durationRow = new QFormLayout;
-    durationRow->addRow(QStringLiteral("길이 (초)"), animationDuration_);
-    animationTimeline_ = new QSlider(Qt::Horizontal, animationGroup);
-    animationTimeline_->setObjectName(QStringLiteral("animationTimeline"));
-    animationTimeline_->setRange(0, 1000);
-    animationTimeline_->setToolTip(QStringLiteral("시간을 이동해 변환 애니메이션을 확인합니다."));
-    keyframeList_ = new QListWidget(animationGroup);
-    keyframeList_->setMaximumHeight(90);
-    auto* keyButtons = new QHBoxLayout;
-    auto* addKey = new QPushButton(QStringLiteral("현재 변환 키 추가"), animationGroup);
-    auto* removeKey = new QPushButton(QStringLiteral("선택 키 삭제"), animationGroup);
-    keyButtons->addWidget(addKey);
-    keyButtons->addWidget(removeKey);
-    animationLayout->addWidget(animationEnabled_);
-    animationLayout->addWidget(animationLoop_);
-    animationLayout->addLayout(durationRow);
-    animationLayout->addWidget(animationTimeline_);
-    animationLayout->addWidget(keyframeList_);
-    animationLayout->addLayout(keyButtons);
-    body->addWidget(animationGroup);
-    connect(animationEnabled_, &QCheckBox::toggled, this,
-            [this] { OnAnimationChanged(animationEnabled_); });
-    connect(animationLoop_, &QCheckBox::toggled, this,
-            [this] { OnAnimationChanged(animationLoop_); });
-    connect(animationDuration_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this] { OnAnimationChanged(animationDuration_); });
-    connect(addKey, &QPushButton::clicked, this, [this] { AddKeyframe(); });
-    connect(removeKey, &QPushButton::clicked, this, [this] { RemoveKeyframe(); });
-    connect(animationTimeline_, &QSlider::sliderPressed, this,
-            [this] { timelineBefore_ = SnapshotScene(); });
-    connect(animationTimeline_, &QSlider::actionTriggered, this, [this] {
-        if (animationTimeline_->isSliderDown() || previewActive_)
-            return;
-        timelineBefore_ = SnapshotScene();
-        QTimer::singleShot(0, this, [this] { EndTimelineEdit(); });
-    });
-    connect(animationTimeline_, &QSlider::valueChanged, this,
-            [this](int value) { ScrubAnimation(value); });
-    connect(animationTimeline_, &QSlider::sliderReleased, this, [this] { EndTimelineEdit(); });
     connect(name_, &QLineEdit::editingFinished, this, [this] { OnNameChanged(); });
     inspectorLayout->addWidget(inspectorBody_);
     inspectorLayout->addStretch();
@@ -649,6 +603,7 @@ void EditorWindow::BuildLayout() {
     resizeDocks({docks_[5], docks_[0]}, {215, 320}, Qt::Horizontal);
     resizeDocks({docks_[6], docks_[1]}, {440, 480}, Qt::Horizontal);
     resizeDocks({docks_[6]}, {235}, Qt::Vertical);
+    BuildAnimationPanel();
 
     auto* toolbar = addToolBar(QStringLiteral("편집 도구"));
     toolbar->setObjectName(QStringLiteral("lux-main-toolbar"));

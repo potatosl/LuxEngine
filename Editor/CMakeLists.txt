@@ -79,6 +79,7 @@ endfunction()
 add_library(LuxEditorUi STATIC
     Build/ProjectBuild.cpp
     App/EditorWindow.cpp
+    Animation/AnimationWorkspace.cpp
     App/EditorWindowLayout.cpp
     App/EditorWindowProjects.cpp
     App/EditorWindowScenes.cpp
