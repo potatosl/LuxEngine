@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "packages": [
+    {
+      "name": "TinyTown",
+      "source": "https://kenney.nl/assets/tiny-town",
+      "license": "CC0-1.0",
+      "files": 138,
+      "manifest_sha256": "a11896f02bbce60b2d95bfc1bcce37c5e4e6942e82e880201bb01e0621fbf75d",
+      "version": "1.1"
+    },
+    {
+      "name": "TinyDungeon",
+      "source": "https://kenney.nl/assets/tiny-dungeon",
+      "license": "CC0-1.0",
+      "files": 138,
+      "manifest_sha256": "6a7e1a0ce1afd6f1a63f671969088bbe6ff3e480b83e5500d93213793ebc0fc6",
+      "version": "1.0"
+    },
+    {
+      "name": "PixelAdventureUI",
+      "source": "https://kenney.nl/assets/ui-pack-pixel-adventure",
+      "license": "CC0-1.0",
+      "files": 517,
+      "manifest_sha256": "7ac7d294eaeab5b0aa56dcddc68f67c0ae4980ecf844e5e6a5485883ca23f359",
+      "version": "2.0"
+    },
+    {
+      "name": "KenneyFonts",
+      "source": "https://kenney.nl/assets/kenney-fonts",
+      "license": "CC0-1.0",
+      "files": 3,
+      "manifest_sha256": "7245b1f37dbbf1f946eb189125d561a6bea3d1889ccf2e70f9985e13d5135071",
+      "version": "1.0"
+    },
+    {
+      "name": "InterfaceSounds",
+      "version": "1.0",
+      "source": "https://kenney.nl/assets/interface-sounds",
+      "license": "CC0-1.0",
+      "files": 9,
+      "manifest_sha256": "5fdaa86ed576cd8af27dbd6504efcc8f1e8b1155378b13b19edebc0d9b3fd8f0"
+    }
+  ],
+  "admission": "User requested existing CC0 assets for samples; official licenses and source archive SHA-256/CRC verified manually."
+}
