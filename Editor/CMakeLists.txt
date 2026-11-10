@@ -189,7 +189,8 @@ if(LUX_BUILD_TESTS)
     lux_editor_copy_runtime(LuxEditorRegressionTests)
     lux_editor_copy_qt_plugins(LuxEditorRegressionTests)
     add_test(NAME Editor_timeline COMMAND LuxEditorRegressionTests timeline)
-    set_tests_properties(Editor_timeline PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    add_test(NAME Editor_sparse_copy COMMAND LuxEditorRegressionTests sparse-copy)
+    set_tests_properties(Editor_timeline Editor_sparse_copy PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 60 LABELS "headless;editor")
     set_tests_properties(Editor_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300 LABELS "headless;editor")
     add_test(NAME Editor_ui_1000 COMMAND LuxEditorUiTests ui --iterations=1000)

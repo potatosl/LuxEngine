@@ -1,8 +1,13 @@
 #include "App/EditorWindow.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Viewport/EngineSceneRenderer.hpp"
+#include <QAction>
 #include <QApplication>
+#include <QClipboard>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QListWidget>
+#include <QMimeData>
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
@@ -80,6 +85,70 @@ void TestTimeline(QApplication& app) {
         window->close();
     }
 }
+void TestSparseCopy(QApplication& app) {
+    for (const auto [hasTag, hasTransform] :
+         {std::pair{false, true}, std::pair{true, false}, std::pair{false, false}}) {
+        QTemporaryDir files;
+        Scene scene;
+        auto source = scene.CreateEntity("Sparse");
+        source.AddComponent<SpriteRendererComponent>().color = {.2f, .3f, .4f, 1};
+        if (!hasTag)
+            source.RemoveComponent<TagComponent>();
+        if (!hasTransform)
+            source.RemoveComponent<TransformComponent>();
+        auto window = OpenScene(app, scene, files);
+        auto* copy = window->findChild<QAction*>(QStringLiteral("copyEntity"));
+        auto* paste = window->findChild<QAction*>(QStringLiteral("pasteEntity"));
+        auto* undo = window->findChild<QUndoStack*>();
+        Check(copy && paste && undo, "clipboard actions are available");
+        copy->trigger();
+        paste->trigger();
+        auto checkPasted = [&] {
+            auto entity = window->GetDocument().GetSelected();
+            Check(window->GetDocument().GetScene().GetEntityCount() == 2 && entity,
+                  "sparse entity pastes without an escaped exception");
+            Check(entity.HasComponent<TagComponent>() == hasTag &&
+                      entity.HasComponent<TransformComponent>() == hasTransform &&
+                      entity.HasComponent<SpriteRendererComponent>() &&
+                      entity.GetComponent<SpriteRendererComponent>().color.y == .3f,
+                  "copy/paste preserves present and absent components");
+        };
+        checkPasted();
+        undo->undo();
+        Check(window->GetDocument().GetScene().GetEntityCount() == 1, "sparse paste can be undone");
+        undo->redo();
+        checkPasted();
+        const auto copied = QJsonDocument::fromJson(QApplication::clipboard()->mimeData()->data(
+                                                        QStringLiteral("application/x-lux-entity")))
+                                .object();
+        Check(copied.value(QStringLiteral("hasTag")).toBool() == hasTag &&
+                  copied.value(QStringLiteral("hasTransform")).toBool() == hasTransform,
+              "clipboard records component presence explicitly");
+        for (int invalidCase = 0; invalidCase < 5; ++invalidCase) {
+            auto invalid = copied;
+            if (invalidCase == 0)
+                invalid.insert(QStringLiteral("version"), 3);
+            if (invalidCase == 1)
+                invalid.insert(QStringLiteral("hasTag"), QStringLiteral("false"));
+            if (invalidCase == 2)
+                invalid.remove(QStringLiteral("version"));
+            if (invalidCase == 3)
+                invalid.insert(QStringLiteral("hasTag"), !hasTag);
+            if (invalidCase == 4)
+                invalid.insert(QStringLiteral("hasTransform"), !hasTransform);
+            auto* mime = new QMimeData;
+            mime->setData(QStringLiteral("application/x-lux-entity"),
+                          QJsonDocument(invalid).toJson());
+            QApplication::clipboard()->setMimeData(mime);
+            const int index = undo->index();
+            paste->trigger();
+            Check(undo->index() == index && window->GetDocument().GetScene().GetEntityCount() == 2,
+                  "invalid presence metadata is rejected without changing the document");
+        }
+        window->GetDocument().SetDirty(false);
+        window->close();
+    }
+}
 } // namespace
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -96,6 +165,8 @@ int main(int argc, char** argv) {
         const std::string suite = argv[1];
         if (suite == "timeline")
             TestTimeline(app);
+        else if (suite == "sparse-copy")
+            TestSparseCopy(app);
         else
             throw std::runtime_error("unknown regression suite");
         std::cout << suite << " regression checks passed\n";
