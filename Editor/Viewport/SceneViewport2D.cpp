@@ -175,7 +175,8 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
             !entity.HasComponent<LuxEngine::SpriteRendererComponent>())
             continue;
         const auto transform = entity.GetComponent<LuxEngine::TransformComponent>();
-        const auto color = entity.GetComponent<LuxEngine::SpriteRendererComponent>().color;
+        const auto& sprite = entity.GetComponent<LuxEngine::SpriteRendererComponent>();
+        const auto color = sprite.color;
         if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
             !std::isfinite(transform.scale.x) || !std::isfinite(transform.scale.y) ||
             !std::isfinite(transform.rotation.z))
@@ -192,10 +193,24 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         painter.setPen(QPen(active ? Selection : QColor(178, 189, 204), active ? 3 : 1));
         if (engineFrame_)
             painter.setBrush(Qt::NoBrush);
-        else
-            painter.setBrush(
-                QColor::fromRgbF(std::clamp(color.x, 0.0f, 1.0f), std::clamp(color.y, 0.0f, 1.0f),
-                                 std::clamp(color.z, 0.0f, 1.0f), std::clamp(color.w, 0.0f, 1.0f)));
+        else {
+            const QImage image = spriteImages_.Get(document_.GetScene(), sprite);
+            if (!image.isNull()) {
+                painter.save();
+                painter.setRenderHint(QPainter::SmoothPixmapTransform);
+                painter.translate(WorldToScreen(transform.position.x, transform.position.y));
+                painter.rotate(-transform.rotation.z * 180.0 / std::numbers::pi);
+                painter.scale(transform.scale.x * pixelsPerUnit_,
+                              transform.scale.y * pixelsPerUnit_);
+                painter.drawImage(QRectF(-.5, -.5, 1, 1), image);
+                painter.restore();
+                painter.setBrush(Qt::NoBrush);
+            } else {
+                painter.setBrush(QColor::fromRgbF(
+                    std::clamp(color.x, 0.0f, 1.0f), std::clamp(color.y, 0.0f, 1.0f),
+                    std::clamp(color.z, 0.0f, 1.0f), std::clamp(color.w, 0.0f, 1.0f)));
+            }
+        }
         painter.drawPolygon(polygon);
         painter.setPen(active ? Selection : QColor(215, 222, 231));
         painter.drawText(polygon.boundingRect().topLeft() - QPointF(0, 6), Name(entity));

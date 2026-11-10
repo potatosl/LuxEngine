@@ -38,6 +38,9 @@ void EditorWindow::RunSceneInWindow() {
     }
     QStringList arguments{playerScenePath_, QStringLiteral("--title"),
                           QStringLiteral("LuxEngine - %1").arg(windowTitle())};
+    if (!document_.GetScene().GetAssetRoot().empty())
+        arguments << QStringLiteral("--asset-root")
+                  << QString::fromUtf8(document_.GetScene().GetAssetRoot());
     if (canvas_) {
         double centerX = 0, centerY = 0, halfHeight = 0;
         canvas_->GetView(centerX, centerY, halfHeight);

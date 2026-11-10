@@ -216,6 +216,7 @@ struct DeviceState {
     VkPipelineCache pipelineCache = VK_NULL_HANDLE;
     VkPipeline pipeline2D = VK_NULL_HANDLE;
     VkPipeline pipeline3D = VK_NULL_HANDLE;
+    VkPipeline pipelineSprite3D = VK_NULL_HANDLE;
     VkPipeline pipelineMesh = VK_NULL_HANDLE;
     VkDescriptorSetLayout frameSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool framePool = VK_NULL_HANDLE;

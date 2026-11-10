@@ -19,7 +19,7 @@ int RunPlayer(int argc, char* argv[]) {
         }
         if (arg == "--help" || arg == "-h") {
             std::printf("usage: LuxPlayer <scene.lux> [--title T] [--size W H] "
-                        "[--fullscreen] [--view X Y HALF_HEIGHT] [--frames N]\n");
+                        "[--fullscreen] [--view X Y HALF_HEIGHT] [--frames N] [--asset-root DIR]\n");
             return 0;
         }
     }
@@ -29,7 +29,7 @@ int RunPlayer(int argc, char* argv[]) {
     if (!options) {
         std::fprintf(stderr,
                      "LuxPlayer: %s\nusage: LuxPlayer <scene.lux> [--title T] [--size W H] "
-                     "[--fullscreen] [--view X Y HALF_HEIGHT] [--frames N]\n",
+                     "[--fullscreen] [--view X Y HALF_HEIGHT] [--frames N] [--asset-root DIR]\n",
                      error.c_str());
         return 2;
     }

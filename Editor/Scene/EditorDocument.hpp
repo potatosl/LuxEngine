@@ -34,6 +34,9 @@ public:
     const std::string& GetPath() const noexcept {
         return path_;
     }
+    const std::string& GetLastError() const noexcept {
+        return lastError_;
+    }
 
     void Select(std::optional<LuxEngine::uint32> id);
     LuxEngine::Entity GetSelected() const;
@@ -51,6 +54,7 @@ private:
     std::unique_ptr<LuxEngine::Scene> scene_;
     std::optional<LuxEngine::uint32> selectedId_;
     std::string path_;
+    std::string lastError_;
     bool dirty_ = false;
 };
 

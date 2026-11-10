@@ -78,8 +78,10 @@ public:
         void Shutdown();
         void DetachDevice(const GpuDevice* device);
         bool IsDeviceValid() const;
+        GpuDevice* GetDevice() const;
 
         void BeginScene(const OrthographicCamera& camera);
+        void BeginScene(const Mat4& viewProjection, bool depthTest = false);
         void EndScene();
         void AbortScene();
 
@@ -89,6 +91,18 @@ public:
                              const Vec4& color);
         void DrawSprite(const Vec2& position, const Vec2& size, GpuTexture* texture,
                         const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        void DrawRotatedSprite(const Vec2& position, const Vec2& size, float rotationRadians,
+                               GpuTexture* texture,
+                               const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        void DrawRotatedSprite(const Vec3& position, const Vec2& size, float rotationRadians,
+                               GpuTexture* texture,
+                               const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        void DrawRotatedSprite(const Vec2& position, const Vec2& size, float rotationRadians,
+                               const Ref<GpuTexture>& texture,
+                               const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        void DrawRotatedSprite(const Vec3& position, const Vec2& size, float rotationRadians,
+                               const Ref<GpuTexture>& texture,
+                               const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
         void ResetStats();
         Statistics GetStats() const;
@@ -113,8 +127,10 @@ public:
     static void Init(GpuDevice* device = nullptr);
     static void Shutdown();
     static void DetachDevice(const GpuDevice* device);
+    static GpuDevice* GetDevice();
 
     static void BeginScene(const OrthographicCamera& camera);
+    static void BeginScene(const Mat4& viewProjection, bool depthTest = false);
     static void EndScene();
 
     static void DrawQuad(const Vec2& position, const Vec2& size, const Vec4& color);
@@ -123,6 +139,18 @@ public:
                                 const Vec4& color);
     static void DrawSprite(const Vec2& position, const Vec2& size, GpuTexture* texture,
                            const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    static void DrawRotatedSprite(const Vec2& position, const Vec2& size, float rotationRadians,
+                                  GpuTexture* texture,
+                                  const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    static void DrawRotatedSprite(const Vec3& position, const Vec2& size, float rotationRadians,
+                                  GpuTexture* texture,
+                                  const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    static void DrawRotatedSprite(const Vec2& position, const Vec2& size, float rotationRadians,
+                                  const Ref<GpuTexture>& texture,
+                                  const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    static void DrawRotatedSprite(const Vec3& position, const Vec2& size, float rotationRadians,
+                                  const Ref<GpuTexture>& texture,
+                                  const Vec4& tint = Vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
     static void ResetStats();
     static Statistics GetStats();

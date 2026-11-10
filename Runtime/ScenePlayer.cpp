@@ -38,7 +38,15 @@ std::optional<ScenePlayerOptions> ParseScenePlayerArguments(const std::vector<st
             }
             return true;
         };
-        if (arg == "--title") {
+        if (arg == "--asset-root") {
+            if (!need(1))
+                return std::nullopt;
+            options.assetRoot = args[++i];
+            if (options.assetRoot.empty()) {
+                error = "--asset-root expects a non-empty directory";
+                return std::nullopt;
+            }
+        } else if (arg == "--title") {
             if (!need(1))
                 return std::nullopt;
             options.title = args[++i];
@@ -135,6 +143,8 @@ bool ScenePlayer::LoadScene() {
         Log::Error("Cannot load scene: " + options_.scenePath);
         return false;
     }
+    if (!options_.assetRoot.empty())
+        scene_.SetAssetRoot(options_.assetRoot);
     player_ = {};
     for (Entity entity : scene_.GetEntities())
         if (entity.HasComponent<TagComponent>() &&
@@ -252,7 +262,7 @@ void ScenePlayer::OnRender(float) {
         Renderer3D::EndScene();
     }
     Renderer2D::BeginScene(camera_);
-    scene_.OnRender();
+    scene_.OnRender(&GetGpuDevice());
     Renderer2D::EndScene();
 }
 

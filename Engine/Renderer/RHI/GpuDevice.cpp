@@ -385,7 +385,7 @@ bool GpuDevice::DrawTriangles(std::span<const RenderVertex> vertices, const Mat4
 
 bool GpuDevice::DrawTexturedTriangles(std::span<const RenderVertex> vertices,
                                       const Mat4& viewProjection, uint64 textureHandle,
-                                      bool depth) {
+                                      bool depth, bool blend) {
     if (!state_ || !state_->frameActive || vertices.empty() || vertices.size() % 3 != 0 ||
         vertices.size() > std::numeric_limits<uint32>::max())
         return false;
@@ -404,7 +404,7 @@ bool GpuDevice::DrawTexturedTriangles(std::span<const RenderVertex> vertices,
     if (!s.renderPassActive)
         s.BeginRenderPass();
     VkCommandBuffer cmd = frame.cmd;
-    VkPipeline pipeline = depth ? s.pipeline3D : s.pipeline2D;
+    VkPipeline pipeline = depth ? (blend ? s.pipelineSprite3D : s.pipeline3D) : s.pipeline2D;
     if (pipeline != s.boundPipeline) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         s.boundPipeline = pipeline;

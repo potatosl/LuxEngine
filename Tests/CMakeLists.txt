@@ -61,6 +61,32 @@ add_test(NAME Engine_fuzz_seeds COMMAND LuxFuzzScene)
 set_tests_properties(Engine_fuzz_seeds PROPERTIES TIMEOUT 30 LABELS headless
     WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxFuzzScene>")
 
+add_executable(LuxSceneTextureTests SceneTextureTest.cpp)
+target_link_libraries(LuxSceneTextureTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxSceneTextureTests)
+lux_copy_runtime(LuxSceneTextureTests)
+add_test(NAME Engine_scene_texture COMMAND LuxSceneTextureTests)
+set_tests_properties(Engine_scene_texture PROPERTIES TIMEOUT 30 LABELS headless)
+add_test(NAME Runtime_texture_scene COMMAND LuxSceneTextureTests --write-fixture
+    "${CMAKE_CURRENT_BINARY_DIR}/TextureProject")
+set_tests_properties(Runtime_texture_scene PROPERTIES FIXTURES_SETUP lux_texture_scene
+    TIMEOUT 30 LABELS headless)
+add_test(NAME Runtime_player_texture COMMAND LuxPlayer
+    "${CMAKE_CURRENT_BINARY_DIR}/TextureProject/Scenes/Texture.lux"
+    --asset-root "${CMAKE_CURRENT_BINARY_DIR}/TextureProject" --frames 3)
+set_tests_properties(Runtime_player_texture PROPERTIES FIXTURES_REQUIRED lux_texture_scene
+    TIMEOUT 60 LABELS gpu ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}"
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxPlayer>")
+
+add_executable(LuxSpriteTextureRenderTests SpriteTextureRenderTest.cpp)
+target_link_libraries(LuxSpriteTextureRenderTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxSpriteTextureRenderTests)
+lux_copy_runtime(LuxSpriteTextureRenderTests)
+add_test(NAME Engine_sprite_texture COMMAND LuxSpriteTextureRenderTests)
+set_tests_properties(Engine_sprite_texture PROPERTIES TIMEOUT 60 LABELS gpu SKIP_RETURN_CODE 77
+    ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}"
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxSpriteTextureRenderTests>")
+
 option(LUX_BUILD_FUZZERS "Build coverage-guided fuzzers using libFuzzer and sanitizers" OFF)
 if(LUX_BUILD_FUZZERS)
     add_executable(LuxFuzzSceneEngine FuzzScene.cpp FuzzStubs.cpp)

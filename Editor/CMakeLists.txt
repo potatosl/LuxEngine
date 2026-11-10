@@ -94,6 +94,7 @@ add_library(LuxEditorUi STATIC
     Viewport/EngineSceneRenderer.cpp
     Viewport/SceneViewport2D.cpp
     Viewport/SceneViewport3D.cpp
+    Viewport/SpriteImageCache.cpp
     Viewport/ViewportCamera3D.cpp
 )
 target_include_directories(LuxEditorUi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -137,6 +138,24 @@ if(MSVC)
 endif()
 
 if(LUX_BUILD_TESTS)
+    add_executable(LuxEditorTextureTests Tests/EditorTextureTest.cpp)
+    target_link_libraries(LuxEditorTextureTests PRIVATE LuxEditorUi)
+    if(MSVC)
+        target_compile_options(LuxEditorTextureTests PRIVATE /utf-8)
+    endif()
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxEditorTextureTests)
+    endif()
+    lux_editor_copy_runtime(LuxEditorTextureTests)
+    lux_editor_copy_qt_plugins(LuxEditorTextureTests)
+    add_test(NAME Editor_texture COMMAND LuxEditorTextureTests)
+    set_tests_properties(Editor_texture PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1"
+        TIMEOUT 60 LABELS "headless;editor")
+    add_test(NAME Editor_texture_gpu COMMAND LuxEditorTextureTests gpu)
+    set_tests_properties(Editor_texture_gpu PROPERTIES SKIP_RETURN_CODE 77
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_VULKAN_VALIDATION=sync"
+        TIMEOUT 120 LABELS "gpu;editor")
     add_executable(LuxEditorDocumentTests
         Scene/EditorDocument.cpp
         Project/EditorProject.cpp

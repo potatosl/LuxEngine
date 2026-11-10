@@ -10,6 +10,7 @@ namespace LuxEngine {
 namespace {
 struct Batch {
     std::weak_ptr<Vk::DeviceState> owner;
+    Ref<GpuTexture> retainedTexture;
     uint64 texture = 0;
     std::vector<RenderVertex> vertices;
 };
@@ -35,6 +36,7 @@ struct Renderer2D::Context::Impl {
     size_t usedBatches = 0;
     Renderer2D::Statistics stats;
     bool active = false;
+    bool depthTest = false;
 
     std::shared_ptr<Vk::DeviceState> LockValidState() {
         if (!device)
@@ -63,6 +65,7 @@ struct Renderer2D::Context::Impl {
             if (usedBatches == batches.size())
                 batches.emplace_back();
             auto& batch = batches[usedBatches++];
+            batch.retainedTexture.reset();
             batch.owner = owner;
             batch.texture = texture;
             batch.vertices.clear();
@@ -117,8 +120,10 @@ void Renderer2D::Context::Init(GpuDevice* gpu) {
     const std::weak_ptr<Vk::DeviceState> nextOwner =
         gpu ? std::weak_ptr<Vk::DeviceState>(gpu->state_) : std::weak_ptr<Vk::DeviceState>{};
     if (impl_->device == gpu && SameOwner(impl_->deviceOwner, nextOwner) && !impl_->active) {
-        for (size_t i = 0; i < impl_->usedBatches; ++i)
+        for (size_t i = 0; i < impl_->usedBatches; ++i) {
             impl_->batches[i].owner.reset();
+            impl_->batches[i].retainedTexture.reset();
+        }
         impl_->usedBatches = 0;
         impl_->stats = {};
         return;
@@ -156,12 +161,21 @@ bool Renderer2D::Context::IsDeviceValid() const {
     return locked && locked->Usable();
 }
 
+GpuDevice* Renderer2D::Context::GetDevice() const {
+    return IsDeviceValid() ? impl_->device : nullptr;
+}
+
 void Renderer2D::Context::BeginScene(const OrthographicCamera& camera) {
+    BeginScene(camera.GetViewProjectionMatrix());
+}
+
+void Renderer2D::Context::BeginScene(const Mat4& viewProjection, bool depthTest) {
     if (!impl_)
         impl_ = std::make_unique<Impl>();
     if (impl_->active)
         throw std::logic_error("2D scene already active");
-    impl_->viewProjection = camera.GetViewProjectionMatrix();
+    impl_->viewProjection = viewProjection;
+    impl_->depthTest = depthTest;
     impl_->usedBatches = 0;
     impl_->stats = {};
     impl_->active = true;
@@ -179,9 +193,10 @@ void Renderer2D::Context::EndScene() {
             !batch.texture || (activeDevice && batch.owner.lock() == lockedState);
         if (activeDevice && sameDevice &&
             activeDevice->DrawTexturedTriangles(batch.vertices, impl_->viewProjection,
-                                                batch.texture, false))
+                                                batch.texture, impl_->depthTest, true))
             ++impl_->stats.drawCalls;
         batch.owner.reset();
+        batch.retainedTexture.reset();
     }
     impl_->usedBatches = 0;
 }
@@ -190,8 +205,10 @@ void Renderer2D::Context::AbortScene() {
     if (!impl_)
         return;
     impl_->active = false;
-    for (size_t i = 0; i < impl_->usedBatches; ++i)
+    for (size_t i = 0; i < impl_->usedBatches; ++i) {
         impl_->batches[i].owner.reset();
+        impl_->batches[i].retainedTexture.reset();
+    }
     impl_->usedBatches = 0;
 }
 
@@ -213,9 +230,34 @@ void Renderer2D::Context::DrawRotatedQuad(const Vec2& p, const Vec2& size, float
 
 void Renderer2D::Context::DrawSprite(const Vec2& p, const Vec2& size, GpuTexture* texture,
                                      const Vec4& tint) {
+    DrawRotatedSprite(p, size, 0.0f, texture, tint);
+}
+
+void Renderer2D::Context::DrawRotatedSprite(const Vec2& p, const Vec2& size, float angle,
+                                           GpuTexture* texture, const Vec4& tint) {
+    DrawRotatedSprite(Vec3{p.x, p.y, 0.0f}, size, angle, texture, tint);
+}
+
+void Renderer2D::Context::DrawRotatedSprite(const Vec3& p, const Vec2& size, float angle,
+                                           GpuTexture* texture, const Vec4& tint) {
     if (!impl_ || !texture || !texture->IsValid())
         return;
-    impl_->Quad({p.x, p.y, 0}, size, 0, texture->owner_, texture->handle_, tint);
+    impl_->Quad(p, size, angle, texture->owner_, texture->handle_, tint);
+}
+
+void Renderer2D::Context::DrawRotatedSprite(const Vec2& p, const Vec2& size, float angle,
+                                           const Ref<GpuTexture>& texture, const Vec4& tint) {
+    DrawRotatedSprite(Vec3{p.x, p.y, 0.0f}, size, angle, texture, tint);
+}
+
+void Renderer2D::Context::DrawRotatedSprite(const Vec3& p, const Vec2& size, float angle,
+                                           const Ref<GpuTexture>& texture, const Vec4& tint) {
+    if (!impl_)
+        return;
+    const auto quads = impl_->stats.quadCount;
+    DrawRotatedSprite(p, size, angle, texture.get(), tint);
+    if (impl_->stats.quadCount != quads)
+        impl_->batches[impl_->usedBatches - 1].retainedTexture = texture;
 }
 
 void Renderer2D::Context::ResetStats() {
@@ -263,6 +305,13 @@ void Renderer2D::DetachDevice(const GpuDevice* gpu) {
     DefaultContext2D().DetachDevice(gpu);
 }
 
+GpuDevice* Renderer2D::GetDevice() {
+    if (t_ActiveContext2D)
+        return t_ActiveContext2D->GetDevice();
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
+    return DefaultContext2D().GetDevice();
+}
+
 void Renderer2D::BeginScene(const OrthographicCamera& camera) {
     if (t_ActiveContext2D) {
         t_ActiveContext2D->BeginScene(camera);
@@ -270,6 +319,15 @@ void Renderer2D::BeginScene(const OrthographicCamera& camera) {
     }
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
     DefaultContext2D().BeginScene(camera);
+}
+
+void Renderer2D::BeginScene(const Mat4& viewProjection, bool depthTest) {
+    if (t_ActiveContext2D) {
+        t_ActiveContext2D->BeginScene(viewProjection, depthTest);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
+    DefaultContext2D().BeginScene(viewProjection, depthTest);
 }
 
 void Renderer2D::EndScene() {
@@ -316,6 +374,36 @@ void Renderer2D::DrawSprite(const Vec2& p, const Vec2& size, GpuTexture* texture
     }
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
     DefaultContext2D().DrawSprite(p, size, texture, tint);
+}
+
+void Renderer2D::DrawRotatedSprite(const Vec2& p, const Vec2& size, float angle,
+                                   GpuTexture* texture, const Vec4& tint) {
+    DrawRotatedSprite(Vec3{p.x, p.y, 0.0f}, size, angle, texture, tint);
+}
+
+void Renderer2D::DrawRotatedSprite(const Vec3& p, const Vec2& size, float angle,
+                                   GpuTexture* texture, const Vec4& tint) {
+    if (t_ActiveContext2D) {
+        t_ActiveContext2D->DrawRotatedSprite(p, size, angle, texture, tint);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
+    DefaultContext2D().DrawRotatedSprite(p, size, angle, texture, tint);
+}
+
+void Renderer2D::DrawRotatedSprite(const Vec2& p, const Vec2& size, float angle,
+                                   const Ref<GpuTexture>& texture, const Vec4& tint) {
+    DrawRotatedSprite(Vec3{p.x, p.y, 0.0f}, size, angle, texture, tint);
+}
+
+void Renderer2D::DrawRotatedSprite(const Vec3& p, const Vec2& size, float angle,
+                                   const Ref<GpuTexture>& texture, const Vec4& tint) {
+    if (t_ActiveContext2D) {
+        t_ActiveContext2D->DrawRotatedSprite(p, size, angle, texture, tint);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
+    DefaultContext2D().DrawRotatedSprite(p, size, angle, texture, tint);
 }
 
 void Renderer2D::ResetStats() {

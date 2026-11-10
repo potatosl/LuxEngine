@@ -45,6 +45,7 @@ void EditorWindow::NewProject() {
         return;
     }
     project_ = std::move(created);
+    document_.GetScene().SetAssetRoot(PathUtf8(project_->GetFile().parent_path()));
     undo_->clear();
     ApplyProjectPreferences();
     recentProjects_.Add(project_->GetFile());
@@ -86,6 +87,7 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file,
         return;
     }
     project_ = std::move(opened);
+    document_.GetScene().SetAssetRoot(PathUtf8(project_->GetFile().parent_path()));
     undo_->clear();
     ApplyProjectPreferences();
     if (result == SceneOpenResult::Recovered) {
@@ -221,6 +223,7 @@ bool EditorWindow::ConfirmDiscardChanges() {
 bool EditorWindow::SaveScene(bool choosePath) {
     StopPreview();
     const auto previous = document_.GetPath();
+    const auto previousAssetRoot = document_.GetScene().GetAssetRoot();
     bool saved = false;
     if (choosePath || previous.empty()) {
         QString file =
@@ -236,16 +239,28 @@ bool EditorWindow::SaveScene(bool choosePath) {
     if (!saved) {
         ShowError(
             QStringLiteral("저장 실패"),
-            QStringLiteral("장면을 저장하지 못했습니다. 파일 경로와 쓰기 권한을 확인해 주세요."));
+            document_.GetLastError().empty()
+                ? QStringLiteral("장면을 저장하지 못했습니다. 파일 경로와 쓰기 권한을 확인해 주세요.")
+                : Q(document_.GetLastError()));
         return false;
     }
-    RefreshProjectExplorer();
     if (project_) {
         if (!previous.empty())
             project_->ClearAutosave(PathFromUtf8(previous));
         project_->ClearAutosave(PathFromUtf8(document_.GetPath()));
+        if (!project_->ContainsScene(PathFromUtf8(document_.GetPath()))) {
+            project_.reset();
+            ApplyProjectPreferences();
+        }
     }
+    std::error_code error;
+    if (!previousAssetRoot.empty() &&
+        previousAssetRoot != document_.GetScene().GetAssetRoot() &&
+        !std::filesystem::equivalent(PathFromUtf8(previousAssetRoot),
+                                     PathFromUtf8(document_.GetScene().GetAssetRoot()), error))
+        undo_->clear();
     undo_->setClean();
+    RefreshProjectExplorer();
     UpdateChrome();
     Log(QStringLiteral("장면을 저장했습니다."));
     return true;
@@ -360,6 +375,7 @@ void EditorWindow::RestoreCurrentProject() {
         return;
     }
     project_ = std::move(restored);
+    document_.GetScene().SetAssetRoot(PathUtf8(project_->GetFile().parent_path()));
     undo_->clear();
     ApplyProjectPreferences();
     RefreshAll();

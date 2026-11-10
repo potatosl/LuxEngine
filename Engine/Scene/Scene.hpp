@@ -3,6 +3,8 @@
 #include "Engine/Core/Core.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Engine/Physics/PhysicsEngine.hpp"
+#include <chrono>
+#include <filesystem>
 #include <iosfwd>
 #include <stdexcept>
 #include <type_traits>
@@ -13,7 +15,12 @@
 
 namespace LuxEngine {
 class Entity;
+class GpuDevice;
+class GpuTexture;
 class PhysicsWorld2D;
+namespace Vk {
+struct DeviceState;
+}
 class LUX_API Scene {
 public:
     Scene();
@@ -28,7 +35,8 @@ public:
     Entity CreateEntity(const std::string& name = "Entity");
     void DestroyEntity(Entity entity);
     void OnUpdate(double dt);
-    void OnRender();
+    void OnRender(GpuDevice* device = nullptr);
+    Ref<GpuTexture> LoadSpriteTexture(const std::string& reference, GpuDevice* device);
     void OnRender3D();
     // BeginContact events from the most recent 2D physics step, including sensors.
     const std::vector<Collision2DEvent>& GetCollisionEvents2D() const {
@@ -50,6 +58,12 @@ public:
     bool Deserialize(const std::string& filepath);
     bool SerializeToString(std::string& out);
     bool DeserializeFromString(const std::string& data);
+    void SetAssetRoot(const std::string& root);
+    static std::string InferAssetRootForScene(const std::string& sceneFile);
+    const std::string& GetAssetRoot() const {
+        return assetRoot_;
+    }
+    std::string ResolveAssetPath(const std::string& relativePath) const;
     uint32 GetEntityCount() const {
         return static_cast<uint32>(entities_.size());
     }
@@ -110,6 +124,15 @@ public:
     }
 
 private:
+    struct SpriteTextureFailure {
+        std::weak_ptr<Vk::DeviceState> deviceOwner;
+        std::filesystem::file_time_type writeTime{};
+        std::uintmax_t fileSize = 0;
+        bool exists = false;
+        std::chrono::steady_clock::time_point retryAfter{};
+    };
+    std::unordered_map<std::string, SpriteTextureFailure> spriteTextureFailures_;
+    std::vector<Ref<GpuTexture>> spriteFrameTextures_;
     struct PoolBase {
         virtual ~PoolBase() = default;
         virtual void Erase(uint32 id) = 0;
@@ -137,6 +160,7 @@ private:
     bool DeserializeStream(std::istream& in);
     void RemovePhysicsBody2D(uint32 id);
     uint32 nextEntityId_ = 1;
+    std::string assetRoot_;
     std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
     std::unordered_set<uint32> entities_;
     std::unordered_map<std::type_index, std::unique_ptr<PoolBase>> pools_;

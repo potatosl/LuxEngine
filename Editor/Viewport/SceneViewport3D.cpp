@@ -122,6 +122,49 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         }
     }
     const LuxEngine::Entity selected = document_.GetSelected();
+    if (!engineFrame_) {
+        auto sprites = document_.GetScene().GetEntitiesIn2DLayerOrder();
+        std::stable_sort(sprites.begin(), sprites.end(), [&](auto a, auto b) {
+            const auto depth = [&](auto entity) {
+                const auto* transform =
+                    document_.GetScene().TryGetComponent<LuxEngine::TransformComponent>(
+                        entity.GetId());
+                return transform ? TransformCorner(camera.GetViewMatrix(), transform->position).z
+                                 : 0.0f;
+            };
+            return depth(a) < depth(b);
+        });
+        for (auto entity : sprites) {
+            if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
+                !entity.HasComponent<LuxEngine::SpriteRendererComponent>() ||
+                entity.HasComponent<LuxEngine::MeshRendererComponent>())
+                continue;
+            const QImage image = spriteImages_.Get(
+                document_.GetScene(), entity.GetComponent<LuxEngine::SpriteRendererComponent>());
+            if (image.isNull())
+                continue;
+            const auto model = BoundsModel(entity);
+            QPolygonF target;
+            for (const LuxEngine::Vec3 local :
+                 {LuxEngine::Vec3{-.5f, .5f, 0}, LuxEngine::Vec3{.5f, .5f, 0},
+                  LuxEngine::Vec3{.5f, -.5f, 0}, LuxEngine::Vec3{-.5f, -.5f, 0}}) {
+                const auto point = project(TransformCorner(model, local));
+                if (!point)
+                    break;
+                target << *point;
+            }
+            const QPolygonF source{QPointF(0, 0), QPointF(image.width(), 0),
+                                    QPointF(image.width(), image.height()), QPointF(0, image.height())};
+            QTransform projection;
+            if (target.size() == 4 && QTransform::quadToQuad(source, target, projection)) {
+                painter.save();
+                painter.setRenderHint(QPainter::SmoothPixmapTransform);
+                painter.setWorldTransform(projection, true);
+                painter.drawImage(QPointF(0, 0), image);
+                painter.restore();
+            }
+        }
+    }
     std::vector<QRectF> occupiedLabels;
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())

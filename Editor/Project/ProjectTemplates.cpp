@@ -25,6 +25,11 @@ endif()
 add_custom_command(TARGET LuxGame POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/Scenes" "$<TARGET_FILE_DIR:LuxGame>/Scenes")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Assets")
+    add_custom_command(TARGET LuxGame POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/Assets" "$<TARGET_FILE_DIR:LuxGame>/Assets")
+endif()
 if(WIN32)
     get_target_property(_engine_type LuxEngine::Engine TYPE)
     if(_engine_type STREQUAL "SHARED_LIBRARY")
@@ -79,6 +84,9 @@ protected:
         const std::string scenePath(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         if (!scene_.Deserialize(scenePath))
             throw std::runtime_error("시작 장면을 열 수 없습니다.");
+        const auto assetRoot = basePath.u8string();
+        scene_.SetAssetRoot(std::string(reinterpret_cast<const char*>(assetRoot.data()),
+                                        assetRoot.size()));
         le::Input::BindAction("Left", le::LuxKey::A);
         le::Input::BindAction("Left", le::LuxKey::Left);
         le::Input::BindAction("Right", le::LuxKey::D);
@@ -162,7 +170,7 @@ protected:
     void OnRender(float) override {
         le::Renderer2D::BeginScene(camera_);
         // Scene::OnRender draws tilemaps and sprites, so maps painted in the editor appear in game.
-        scene_.OnRender();
+        scene_.OnRender(&GetGpuDevice());
         le::Renderer2D::EndScene();
     }
 

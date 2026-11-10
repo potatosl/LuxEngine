@@ -24,6 +24,13 @@ namespace {
 std::mutex s_AssetMutex;
 std::unordered_map<std::string, size_t> s_TextureSizes;
 std::unordered_map<std::string, size_t> s_MeshSizes;
+struct TextureFileState {
+    std::filesystem::file_time_type modified{};
+    std::uintmax_t size = 0;
+    bool valid = false;
+    bool operator==(const TextureFileState&) const = default;
+};
+std::unordered_map<std::string, TextureFileState> s_TextureFiles;
 
 constexpr uint64 MaxTextureFileSizeBytes =
     64ull * 1024ull * 1024ull;            // 64 MiB max compressed texture file
@@ -44,6 +51,19 @@ std::string Key(const std::string& path) {
     auto result = std::filesystem::weakly_canonical(Path(path), error);
     const auto utf8 = result.generic_u8string();
     return error ? path : std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+}
+TextureFileState ReadTextureFileState(const std::string& filepath) {
+    TextureFileState state;
+    const auto file = Path(filepath);
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(file, error))
+        return state;
+    state.size = std::filesystem::file_size(file, error);
+    if (error)
+        return state;
+    state.modified = std::filesystem::last_write_time(file, error);
+    state.valid = !error;
+    return state;
 }
 stbi_uc* DecodeTexture(const std::string& filepath, int& width, int& height) {
     std::error_code ec;
@@ -152,6 +172,7 @@ void AssetManager::EvictUnusedUnderBudget(size_t incomingBytes) {
             s_CacheMemoryBudget)) {
         // Only evict if no outside references exist (use_count == 1)
         if (it->second.use_count() <= 1) {
+            s_TextureFiles.erase(it->first);
             auto sizeIt = s_TextureSizes.find(it->first);
             if (sizeIt != s_TextureSizes.end()) {
                 s_TextureCacheMemoryBytes -= sizeIt->second;
@@ -174,9 +195,22 @@ Ref<GpuTexture> AssetManager::LoadTexture(const std::string& filepath, GpuDevice
     if (!device || !device->IsReady())
         return {};
     const auto key = Key(filepath);
+    const auto fileState = ReadTextureFileState(filepath);
     {
         std::lock_guard<std::mutex> lock(s_AssetMutex);
         auto it = s_TextureCache.find(key);
+        const auto stamp = s_TextureFiles.find(key);
+        if (it != s_TextureCache.end() &&
+            (!fileState.valid || stamp == s_TextureFiles.end() || stamp->second != fileState)) {
+            s_TextureCache.erase(it);
+            s_TextureFiles.erase(key);
+            const auto size = s_TextureSizes.find(key);
+            if (size != s_TextureSizes.end()) {
+                s_TextureCacheMemoryBytes -= size->second;
+                s_TextureSizes.erase(size);
+            }
+            it = s_TextureCache.end();
+        }
         if (it != s_TextureCache.end() && it->second && it->second->IsValid() &&
             it->second->BelongsTo(*device))
             return it->second;
@@ -203,6 +237,7 @@ Ref<GpuTexture> AssetManager::LoadTexture(const std::string& filepath, GpuDevice
             s_TextureCacheMemoryBytes -= prevIt->second;
 
         s_TextureCache[key] = texture;
+        s_TextureFiles[key] = fileState;
         s_TextureSizes[key] = textureBytes;
         s_TextureCacheMemoryBytes += textureBytes;
     }
@@ -283,6 +318,7 @@ void AssetManager::UnloadTexture(const std::string& filepath) {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     const auto key = Key(filepath);
     s_TextureCache.erase(key);
+    s_TextureFiles.erase(key);
     auto it = s_TextureSizes.find(key);
     if (it != s_TextureSizes.end()) {
         s_TextureCacheMemoryBytes -= it->second;
@@ -399,6 +435,7 @@ void AssetManager::Clear() {
     s_TextureCache.clear();
     s_MeshCache.clear();
     s_TextureSizes.clear();
+    s_TextureFiles.clear();
     s_MeshSizes.clear();
     s_TextureCacheMemoryBytes = 0;
     s_MeshCacheMemoryBytes = 0;

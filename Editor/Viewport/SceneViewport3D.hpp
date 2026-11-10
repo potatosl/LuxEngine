@@ -1,5 +1,6 @@
 #pragma once
 #include "EditorTool.hpp"
+#include "SpriteImageCache.hpp"
 #include "Engine/Core/Math.hpp"
 #include <QImage>
 #include <QPointF>
@@ -55,5 +56,6 @@ private:
     std::shared_ptr<EngineSceneRenderer> engineRenderer_;
     bool engineFrame_ = false;
     QImage cachedFrame_;
+    SpriteImageCache spriteImages_;
 };
 } // namespace LuxEditor

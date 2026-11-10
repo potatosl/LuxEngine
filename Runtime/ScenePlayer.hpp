@@ -27,6 +27,7 @@ struct ScenePlayerOptions {
     std::optional<ScenePlayerView> view;
     // Stops after this many frames when non-zero (smoke tests).
     uint32 maxFrames = 0;
+    std::string assetRoot;
 };
 
 // Parses: <scene> [--title T] [--size W H] [--fullscreen] [--view X Y HALF_HEIGHT] [--frames N]

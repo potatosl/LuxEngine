@@ -364,7 +364,7 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
     LuxEngine::Renderer2D::ScopedContext scope2D(s.context2D);
     try {
         LuxEngine::Renderer2D::BeginScene(camera);
-        scene.OnRender();
+        scene.OnRender(&s.gpu);
         if (postSceneHook_)
             postSceneHook_();
         LuxEngine::Renderer2D::EndScene();
@@ -418,7 +418,15 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
     sun.intensity = 1.0f;
 
     s.context3D.Init(&s.gpu);
+    s.context2D.Init(&s.gpu);
     LuxEngine::Renderer3D::ScopedContext scope3D(s.context3D);
+    LuxEngine::Renderer2D::ScopedContext scope2D(s.context2D);
+    struct TexturedSprite {
+        LuxEngine::TransformComponent transform;
+        LuxEngine::Vec4 color;
+        LuxEngine::Ref<LuxEngine::GpuTexture> texture;
+    };
+    std::vector<TexturedSprite> texturedSprites;
     try {
         LuxEngine::Renderer3D::BeginScene(camera, sun);
         for (LuxEngine::Entity entity : scene.GetEntities()) {
@@ -437,24 +445,45 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
                 LuxEngine::Renderer3D::DrawMesh(transform.GetTransform(), meshComp.material);
             } else if (entity.HasComponent<LuxEngine::SpriteRendererComponent>()) {
                 const auto& sprite = entity.GetComponent<LuxEngine::SpriteRendererComponent>();
-                LuxEngine::Material3D mat;
-                mat.albedoColor = sprite.color;
+                auto texture = scene.LoadSpriteTexture(sprite.texturePath, &s.gpu);
+                if (texture && texture->IsValid()) {
+                    texturedSprites.push_back({transform, sprite.color, std::move(texture)});
+                    continue;
+                }
+                LuxEngine::Material3D material;
+                material.albedoColor = sprite.color;
                 LuxEngine::Renderer3D::DrawMesh(
                     LuxEngine::Mat4::Translate(transform.position) *
                         LuxEngine::Mat4::RotateZ(transform.rotation.z) *
                         LuxEngine::Mat4::Scale(
                             LuxEngine::Vec3{transform.scale.x, transform.scale.y, 0.02f}),
-                    mat);
+                    material);
             }
         }
         LuxEngine::Renderer3D::EndScene();
+        if (!texturedSprites.empty()) {
+            const auto forward = (camera.GetTarget() - camera.GetPosition()).Normalized();
+            std::stable_sort(texturedSprites.begin(), texturedSprites.end(),
+                             [&](const auto& a, const auto& b) {
+                                 return (a.transform.position - camera.GetPosition()).Dot(forward) >
+                                        (b.transform.position - camera.GetPosition()).Dot(forward);
+                             });
+            LuxEngine::Renderer2D::BeginScene(camera.GetViewProjectionMatrix(), true);
+            for (const auto& sprite : texturedSprites)
+                LuxEngine::Renderer2D::DrawRotatedSprite(
+                    sprite.transform.position, {sprite.transform.scale.x, sprite.transform.scale.y},
+                    sprite.transform.rotation.z, sprite.texture.get(), sprite.color);
+            LuxEngine::Renderer2D::EndScene();
+        }
     } catch (const std::exception& exception) {
         s.context3D.AbortScene();
+        s.context2D.AbortScene();
         s.gpu.EndFrame();
         error_ = QStringLiteral("엔진 3D 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
         return false;
     } catch (...) {
         s.context3D.AbortScene();
+        s.context2D.AbortScene();
         s.gpu.EndFrame();
         error_ = QStringLiteral("엔진 3D 렌더링 중 알 수 없는 예외가 발생했습니다.");
         return false;

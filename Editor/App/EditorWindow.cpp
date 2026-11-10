@@ -1379,8 +1379,14 @@ void EditorWindow::CopyEntity() {
         object.insert(QStringLiteral("scale"), QJsonArray{t.scale.x, t.scale.y, t.scale.z});
     }
     if (selected.HasComponent<LuxEngine::SpriteRendererComponent>()) {
-        const auto& c = selected.GetComponent<LuxEngine::SpriteRendererComponent>().color;
+        const auto& sprite = selected.GetComponent<LuxEngine::SpriteRendererComponent>();
+        const auto& c = sprite.color;
         object.insert(QStringLiteral("sprite"), QJsonArray{c.x, c.y, c.z, c.w});
+        if (!sprite.texturePath.empty()) {
+            object.insert(QStringLiteral("spriteTexturePath"), Q(sprite.texturePath));
+            object.insert(QStringLiteral("spriteAssetRoot"),
+                          Q(document_.GetScene().GetAssetRoot()));
+        }
     }
     if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
         const auto& m = selected.GetComponent<LuxEngine::MeshRendererComponent>().material;
@@ -1595,7 +1601,7 @@ struct ValidatedClipboardEntity {
 };
 
 bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& parsed,
-                           QString& errorMsg) {
+                           const LuxEngine::Scene& scene, QString& errorMsg) {
     for (auto it = object.begin(); it != object.end(); ++it) {
         const QString& key = it.key();
         if (key != QStringLiteral("name") && key != QStringLiteral("position") &&
@@ -1605,7 +1611,9 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             key != QStringLiteral("rigidbody2d") && key != QStringLiteral("collider2d") &&
             key != QStringLiteral("rigidbody3d") && key != QStringLiteral("collider3d") &&
             key != QStringLiteral("animation") && key != QStringLiteral("version") &&
-            key != QStringLiteral("hasTag") && key != QStringLiteral("hasTransform")) {
+            key != QStringLiteral("hasTag") && key != QStringLiteral("hasTransform") &&
+            key != QStringLiteral("spriteTexturePath") &&
+            key != QStringLiteral("spriteAssetRoot")) {
             errorMsg = QStringLiteral("알 수 없는 클립보드 필드가 포함되어 있습니다: %1").arg(key);
             return false;
         }
@@ -1674,6 +1682,35 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             return false;
         }
         parsed.sprite = comp;
+    }
+    if (object.contains(QStringLiteral("spriteTexturePath"))) {
+        const auto path = object.value(QStringLiteral("spriteTexturePath"));
+        if (!parsed.sprite || !path.isString() || path.toString().toUtf8().size() > 4096) {
+            errorMsg = QStringLiteral("스프라이트 텍스처 경로 형식이 올바르지 않습니다.");
+            return false;
+        }
+        parsed.sprite->texturePath = Utf8(path.toString());
+        if (!parsed.sprite->texturePath.empty() &&
+            scene.ResolveAssetPath(parsed.sprite->texturePath).empty()) {
+            errorMsg = QStringLiteral("스프라이트 텍스처 경로가 프로젝트 범위를 벗어났거나 유효하지 않습니다.");
+            return false;
+        }
+    }
+    if (object.contains(QStringLiteral("spriteAssetRoot"))) {
+        const auto root = object.value(QStringLiteral("spriteAssetRoot"));
+        if (!parsed.sprite || !object.contains(QStringLiteral("spriteTexturePath")) ||
+            !root.isString() || root.toString().toUtf8().size() > 4096) {
+            errorMsg = QStringLiteral("스프라이트 텍스처의 원본 프로젝트 정보가 올바르지 않습니다.");
+            return false;
+        }
+        const std::string sourceRoot = Utf8(root.toString());
+        std::error_code error;
+        if (!parsed.sprite->texturePath.empty() && sourceRoot != scene.GetAssetRoot() &&
+            !std::filesystem::equivalent(PathFromUtf8(sourceRoot),
+                                         PathFromUtf8(scene.GetAssetRoot()), error)) {
+            errorMsg = QStringLiteral("다른 에셋 루트의 텍스처는 바로 붙여넣을 수 없습니다. 같은 프로젝트 안에서 복사해 주세요.");
+            return false;
+        }
     }
 
     if (object.contains(QStringLiteral("mesh"))) {
@@ -1943,7 +1980,7 @@ void EditorWindow::PasteEntity() {
     }
     ValidatedClipboardEntity validated;
     QString validationError;
-    if (!ValidateClipboardJson(doc.object(), validated, validationError)) {
+    if (!ValidateClipboardJson(doc.object(), validated, document_.GetScene(), validationError)) {
         Log(QStringLiteral("붙여넣기 실패: %1").arg(validationError));
         return;
     }

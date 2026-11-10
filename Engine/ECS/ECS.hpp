@@ -26,6 +26,7 @@ struct TransformComponent {
 
 struct SpriteRendererComponent {
     Vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
+    std::string texturePath;
 };
 
 struct TilemapComponent {

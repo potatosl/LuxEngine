@@ -40,6 +40,8 @@ void Parse() {
     Check(options && options->view && Near(options->view->centerX, 1.5f) &&
               Near(options->view->centerY, -2.0f) && Near(options->view->halfHeight, 3.0f),
           "view option");
+    options = ParseScenePlayerArguments({"temporary.lux", "--asset-root", "project root/한글"}, error);
+    Check(options && options->assetRoot == "project root/한글", "asset root accepts UTF-8 and spaces");
     const std::vector<Args> invalid = {
         {},
         {"--title", "x"},
@@ -50,6 +52,8 @@ void Parse() {
         {"a.lux", "--view", "0", "0", "nan"},
         {"a.lux", "--frames", "-1"},
         {"a.lux", "--unknown"},
+        {"a.lux", "--asset-root"},
+        {"a.lux", "--asset-root", ""},
     };
     for (const auto& args : invalid) {
         error.clear();

@@ -2,10 +2,13 @@
 #include "Project/EditorProject.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Project/ProjectArchive.hpp"
+#include "Project/ProjectFileOperations.hpp"
 
 #include <QImage>
 #include <QString>
 #include <chrono>
+#include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -13,7 +16,17 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <zip.h>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -32,6 +45,10 @@ struct TempDirectory {
         std::filesystem::create_directories(path);
     }
     ~TempDirectory() {
+        if (std::getenv("LUX_EDITOR_KEEP_FAILED_TEST_FILES") && std::uncaught_exceptions() > 0) {
+            std::cerr << "Failed fixture preserved: " << LuxEditor::PathUtf8(path) << '\n';
+            return;
+        }
         std::error_code error;
         std::filesystem::remove_all(path, error);
     }
@@ -243,7 +260,7 @@ void TestProjectManagement() {
         const auto directory = files.path / ("project-" + std::to_string(index));
         const std::string name = "Project " + std::to_string(index);
         auto created = EditorProject::Create(directory, name, templates[index], error);
-        Check(created.has_value(), "project template creates successfully");
+        Check(created.has_value(), ("project template creates successfully: " + error).c_str());
         Check(std::filesystem::is_directory(directory / "Assets") &&
                   std::filesystem::is_regular_file(created->GetSceneFile()),
               "project has assets and start scene");
@@ -894,7 +911,8 @@ void TestBackupRetentionAfterRestore() {
         Check(project->UpdateSettings(settings, error), "retention limit saves");
         std::filesystem::path initial;
         Check(CreateProjectBackup(*project, initial, error), "initial backup exists");
-        Check(RestoreProjectBackup(*project, initial, error), "backup restores with safety copy");
+        const bool restoredBackup = RestoreProjectBackup(*project, initial, error);
+        Check(restoredBackup, ("backup restores with safety copy: " + error).c_str());
         for (int iteration = 0; iteration < 3; ++iteration) {
             std::filesystem::path newest;
             Check(CreateProjectBackup(*project, newest, error) && std::filesystem::exists(newest),
@@ -907,15 +925,64 @@ void TestBackupRetentionAfterRestore() {
                 newest,
                 files.path / (std::to_string(limit) + "-restored-" + std::to_string(iteration)),
                 error);
-            Check(restored.has_value(), "retained backup remains readable");
+            Check(restored.has_value(), ("retained backup remains readable: " + error).c_str());
         }
     }
+}
+
+void TestProjectRenameSharingLock() {
+#ifdef _WIN32
+    TempDirectory files;
+    const auto source = files.path / "source";
+    const auto destination = files.path / "destination";
+    std::filesystem::create_directory(source);
+    const auto child = source / "data.txt";
+    std::ofstream(child) << "preserved";
+    HANDLE locked = CreateFileW(child.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Check(locked != INVALID_HANDLE_VALUE, "sharing-lock fixture opens");
+    std::error_code error;
+    std::filesystem::rename(source, destination, error);
+    const bool denied = error.value() == 5 || error.value() == 32 || error.value() == 33;
+    if (!denied) {
+        CloseHandle(locked);
+        Check(false, "open child without delete sharing blocks a Windows directory rename");
+    }
+    {
+        std::jthread release([locked] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(80));
+            CloseHandle(locked);
+        });
+        LuxEditor::RenameProjectPath(source, destination, error);
+    }
+    Check(!error && std::filesystem::is_regular_file(destination / "data.txt"),
+          "project rename recovers after a real temporary Windows sharing lock");
+    locked = CreateFileW((destination / "data.txt").c_str(), GENERIC_READ,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL, nullptr);
+    Check(locked != INVALID_HANDLE_VALUE, "persistent sharing-lock fixture opens");
+    LuxEditor::RenameProjectPath(destination, source, error);
+    CloseHandle(locked);
+    Check(error && std::filesystem::is_regular_file(destination / "data.txt") &&
+              !std::filesystem::exists(source),
+          "project rename fails safely when the sharing lock remains held");
+#endif
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "rename-lock") {
+            TestProjectRenameSharingLock();
+            std::cout << "Project rename sharing-lock checks passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "backup-retention") {
+            TestBackupRetentionAfterRestore();
+            std::cout << "Backup retention checks passed\n";
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "archive-limits") {
             TestArchiveSizeLimits();
             std::cout << "Archive size-limit checks passed\n";
@@ -928,6 +995,7 @@ int main(int argc, char** argv) {
         TestProjectManagement();
         TestProjectOperations();
         TestBackupRetentionAfterRestore();
+        TestProjectRenameSharingLock();
         TestUnicodeProjectPaths();
         TestArchiveSecurityAndFuzzing();
         TestEmptyProjectDirectories();

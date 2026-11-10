@@ -1,4 +1,5 @@
 #include "Engine/Scene/Scene.hpp"
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Physics/PhysicsEngine.hpp"
 #include "Engine/Physics/PhysicsWorld2D.h"
@@ -141,9 +142,58 @@ bool Finite(const Vec4& v) {
     return Finite(v.x) && Finite(v.y) && Finite(v.z) && Finite(v.w);
 }
 } // namespace
-void Scene::OnRender() {
+Ref<GpuTexture> Scene::LoadSpriteTexture(const std::string& reference, GpuDevice* device) {
+    if (!device || !device->IsReady() || reference.empty())
+        return {};
+    const auto path = ResolveAssetPath(reference);
+    if (path.empty())
+        return {};
+    const auto failureKey = path + '\n' +
+                            std::to_string(reinterpret_cast<std::uintptr_t>(device->state_.get()));
+    const auto now = std::chrono::steady_clock::now();
+    auto fileState = [&] {
+        SpriteTextureFailure value;
+        value.deviceOwner = device->state_;
+        const std::filesystem::path file(
+            std::u8string(reinterpret_cast<const char8_t*>(path.data()), path.size()));
+        std::error_code error;
+        value.exists = std::filesystem::is_regular_file(file, error);
+        if (value.exists) {
+            value.fileSize = std::filesystem::file_size(file, error);
+            if (!error)
+                value.writeTime = std::filesystem::last_write_time(file, error);
+        }
+        value.retryAfter = now + std::chrono::seconds(5);
+        return value;
+    };
+    const auto previous = spriteTextureFailures_.find(failureKey);
+    SpriteTextureFailure current;
+    if (previous != spriteTextureFailures_.end()) {
+        current = fileState();
+        if (previous->second.deviceOwner.lock() == device->state_ &&
+            current.exists == previous->second.exists &&
+            current.fileSize == previous->second.fileSize &&
+            current.writeTime == previous->second.writeTime &&
+            now < previous->second.retryAfter)
+            return {};
+    }
+    auto texture = AssetManager::LoadTexture(path, device);
+    if (!texture) {
+        spriteTextureFailures_[failureKey] = previous == spriteTextureFailures_.end()
+                                                 ? fileState()
+                                                 : current;
+        Log::Error("Sprite texture could not be loaded; using its color: " + path);
+        return {};
+    }
+    spriteTextureFailures_.erase(failureKey);
+    return texture;
+}
+void Scene::OnRender(GpuDevice* device) {
     // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직 연결되지 않았습니다.
     const auto entities = GetEntitiesIn2DLayerOrder();
+    spriteFrameTextures_.clear();
+    if (!device)
+        device = Renderer2D::GetDevice();
     for (const bool tilemaps : {true, false}) {
         for (Entity entity : entities) {
             if (!entity.HasComponent<TransformComponent>())
@@ -171,10 +221,19 @@ void Scene::OnRender() {
             }
             if (!tilemaps && entity.HasComponent<SpriteRendererComponent>()) {
                 const auto& sprite = entity.GetComponent<SpriteRendererComponent>();
-                if (Finite(sprite.color))
+                if (!Finite(sprite.color))
+                    continue;
+                if (auto texture = LoadSpriteTexture(sprite.texturePath, device)) {
+                    Renderer2D::DrawRotatedSprite(
+                        Vec2{transform.position.x, transform.position.y},
+                        {transform.scale.x, transform.scale.y}, transform.rotation.z,
+                        texture, sprite.color);
+                    spriteFrameTextures_.push_back(std::move(texture));
+                } else {
                     Renderer2D::DrawRotatedQuad({transform.position.x, transform.position.y},
                                                 {transform.scale.x, transform.scale.y},
                                                 transform.rotation.z, sprite.color);
+                }
             }
         }
     }
@@ -563,7 +622,84 @@ bool IsValidUtf8(std::string_view str) {
     }
     return true;
 }
+bool ValidSceneFilePath(const std::string& text) {
+    return !text.empty() && IsValidUtf8(text) && text.find('\0') == std::string::npos;
+}
+
+bool ValidTexturePath(const std::string& text) {
+    if (text.empty())
+        return true;
+    if (text.size() > 4096 || !IsValidUtf8(text) ||
+        text.find_first_of("\\:") != std::string::npos ||
+        std::any_of(text.begin(), text.end(), [](unsigned char c) { return c < 32 || c == 127; }))
+        return false;
+    const auto path = Utf8Path(text);
+    if (path.is_absolute() || path.has_root_directory() || path.has_root_name() ||
+        !path.has_filename())
+        return false;
+    for (const auto& part : path)
+        if (part.empty() || part == "." || part == "..")
+            return false;
+    return true;
+}
 } // namespace
+
+std::string Scene::InferAssetRootForScene(const std::string& sceneFile) {
+    if (!ValidSceneFilePath(sceneFile))
+        return {};
+    std::error_code ec;
+    const auto absolute = std::filesystem::absolute(Utf8Path(sceneFile), ec).lexically_normal();
+    if (ec)
+        return {};
+    const auto parent = absolute.parent_path();
+    for (auto candidate = parent; !candidate.empty();) {
+        if (std::filesystem::is_regular_file(candidate / "project.luxproj", ec))
+            return PathToUtf8(candidate);
+        const auto next = candidate.parent_path();
+        if (next == candidate)
+            break;
+        candidate = next;
+    }
+    return PathToUtf8(parent);
+}
+
+void Scene::SetAssetRoot(const std::string& root) {
+    if (root.empty()) {
+        assetRoot_.clear();
+        spriteTextureFailures_.clear();
+        spriteFrameTextures_.clear();
+        return;
+    }
+    if (!IsValidUtf8(root) ||
+        std::any_of(root.begin(), root.end(), [](unsigned char c) { return c < 32 || c == 127; }))
+        throw std::invalid_argument("Invalid asset root");
+    std::error_code ec;
+    const auto absolute = std::filesystem::absolute(Utf8Path(root), ec).lexically_normal();
+    if (ec)
+        throw std::invalid_argument("Invalid asset root");
+    assetRoot_ = PathToUtf8(absolute);
+    spriteTextureFailures_.clear();
+    spriteFrameTextures_.clear();
+}
+
+std::string Scene::ResolveAssetPath(const std::string& relativePath) const {
+    if (assetRoot_.empty() || relativePath.empty() || !ValidTexturePath(relativePath))
+        return {};
+    std::error_code ec;
+    const auto root = std::filesystem::weakly_canonical(Utf8Path(assetRoot_), ec);
+    if (ec)
+        return {};
+    const auto resolved = std::filesystem::weakly_canonical(root / Utf8Path(relativePath), ec);
+    if (ec)
+        return {};
+    const auto relative = resolved.lexically_relative(root);
+    if (relative.empty() || relative.is_absolute() || relative.has_root_name())
+        return {};
+    for (const auto& part : relative)
+        if (part == "..")
+            return {};
+    return PathToUtf8(resolved);
+}
 
 bool Scene::SerializeToString(std::string& output) {
     if (entities_.size() > MaxSceneEntities)
@@ -592,7 +728,7 @@ bool Scene::SerializeToString(std::string& output) {
                 return false;
         }
         if (const auto* sprite = TryGetComponent<SpriteRendererComponent>(id)) {
-            if (!Finite(sprite->color))
+            if (!Finite(sprite->color) || !ValidTexturePath(sprite->texturePath))
                 return false;
         }
         if (const auto* mesh = TryGetComponent<MeshRendererComponent>(id)) {
@@ -647,7 +783,7 @@ bool Scene::SerializeToString(std::string& output) {
         }
     }
     std::ostringstream out;
-    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 2 "
+    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 3 "
         << entities_.size() << '\n';
     std::vector<uint32> ids(entities_.begin(), entities_.end());
     std::sort(ids.begin(), ids.end());
@@ -663,7 +799,7 @@ bool Scene::SerializeToString(std::string& output) {
         save.operator()<TagComponent>([&](const auto& c) { out << std::quoted(c.tag); });
         save.operator()<TransformComponent>(
             [&](const auto& c) { out << c.position << c.rotation << c.scale; });
-        save.operator()<SpriteRendererComponent>([&](const auto& c) { out << c.color; });
+        save.operator()<SpriteRendererComponent>([&](const auto& c) { out << c.color << std::quoted(c.texturePath); });
         save.operator()<MeshRendererComponent>([&](const auto& c) {
             out << c.material.albedoColor << c.material.metallic << ' ' << c.material.roughness;
         });
@@ -723,6 +859,10 @@ bool Scene::Serialize(const std::string& filepath) {
         SetSaveError("Scene save failed: empty filepath");
         return false;
     }
+    if (!ValidSceneFilePath(filepath)) {
+        SetSaveError("Scene save failed: filepath must be valid UTF-8 without null bytes");
+        return false;
+    }
     std::string serialized;
     if (!SerializeToString(serialized)) {
         SetSaveError("Scene save failed: scene validation/serialization failed");
@@ -752,6 +892,8 @@ bool Scene::Serialize(const std::string& filepath) {
         return false;
 
     ClearSaveError();
+    if (assetRoot_.empty())
+        assetRoot_ = InferAssetRootForScene(filepath);
     return true;
 }
 
@@ -760,14 +902,14 @@ bool Scene::DeserializeStream(std::istream& in) {
     unsigned version = 0;
     uint64 count = 0;
     if (!(in >> header >> version >> count) || header != "LuxEngineScene" ||
-        (version != 1 && version != 2) || count > MaxSceneEntities)
+        (version != 1 && version != 2 && version != 3) || count > MaxSceneEntities)
         return false;
     Scene parsed;
     parsed.nextEntityId_ = 1;
     uint32 lastId = 0;
     try {
         for (uint64 n = 0; n < count; ++n) {
-            if (version == 2) {
+            if (version >= 2) {
                 uint32 id = 0;
                 if (!(in >> id) || id == 0 || id <= lastId ||
                     id == std::numeric_limits<uint32>::max())
@@ -802,7 +944,9 @@ bool Scene::DeserializeStream(std::istream& in) {
             });
             load.operator()<SpriteRendererComponent>([&](auto& c) {
                 in >> c.color;
-                if (!Finite(c.color))
+                if (version >= 3)
+                    in >> std::quoted(c.texturePath);
+                if (!Finite(c.color) || !ValidTexturePath(c.texturePath))
                     in.setstate(std::ios::failbit);
             });
             load.operator()<MeshRendererComponent>([&](auto& c) {
@@ -841,7 +985,7 @@ bool Scene::DeserializeStream(std::istream& in) {
                     !Finite(c.offset))
                     in.setstate(std::ios::failbit);
             });
-            if (version == 2) {
+            if (version >= 2) {
                 load.operator()<TilemapComponent>([&](auto& c) {
                     std::string cells;
                     in >> c.width >> c.height >> c.tileSize >> std::quoted(cells);
@@ -896,6 +1040,8 @@ bool Scene::DeserializeStream(std::istream& in) {
     nextEntityId_ = parsed.nextEntityId_;
     physics2D_.reset();
     collisionEvents2D_.clear();
+    spriteTextureFailures_.clear();
+    spriteFrameTextures_.clear();
     lifetime_ = std::make_shared<int>(0);
     return true;
 }
@@ -908,7 +1054,7 @@ bool Scene::DeserializeFromString(const std::string& data) {
 }
 
 bool Scene::Deserialize(const std::string& filepath) {
-    if (filepath.empty())
+    if (!ValidSceneFilePath(filepath))
         return false;
     std::error_code ec;
     const auto fileSize = std::filesystem::file_size(Utf8Path(filepath), ec);
@@ -917,6 +1063,10 @@ bool Scene::Deserialize(const std::string& filepath) {
     std::ifstream in(Utf8Path(filepath), std::ios::binary);
     if (!in)
         return false;
-    return DeserializeStream(in);
+    const auto assetRoot = InferAssetRootForScene(filepath);
+    if (assetRoot.empty() || !DeserializeStream(in))
+        return false;
+    assetRoot_ = assetRoot;
+    return true;
 }
 } // namespace LuxEngine

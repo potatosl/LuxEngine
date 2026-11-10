@@ -1,5 +1,6 @@
 #include "ProjectArchive.hpp"
 #include "PathEncoding.hpp"
+#include "ProjectFileOperations.hpp"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -193,7 +194,11 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
     int zipError = 0;
     zip_t* zip = zip_open(PathUtf8(archive).c_str(), ZIP_RDONLY, &zipError);
     if (!zip) {
-        error = "프로젝트 압축 파일을 열 수 없습니다.";
+        zip_error_t failure;
+        zip_error_init_with_code(&failure, zipError);
+        error = "프로젝트 압축 파일을 열 수 없습니다: " + PathUtf8(archive) + ": " +
+                zip_error_strerror(&failure);
+        zip_error_fini(&failure);
         return false;
     }
     const auto count = zip_get_num_entries(zip, 0);
@@ -404,7 +409,8 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
         if (!input || !output) {
             if (input)
                 zip_fclose(input);
-            error = "압축 파일의 내용을 읽거나 쓸 수 없습니다.";
+            error = "압축 파일의 내용을 읽거나 쓸 수 없습니다: " + PathUtf8(target) + ": " +
+                    zip_strerror(zip);
             break;
         }
 
@@ -457,12 +463,14 @@ bool StageArchive(const std::filesystem::path& archive, const std::filesystem::p
         created = std::filesystem::create_directory(staging, ec);
     if (!created || ec || !ExtractArchive(archive, staging, error)) {
         if (error.empty())
-            error = "프로젝트 임시 폴더를 만들 수 없습니다.";
+            error = "프로젝트 임시 폴더를 만들 수 없습니다: " + PathUtf8(staging) + ": " +
+                    std::to_string(ec.value()) + " " + ec.message();
         if (created)
             std::filesystem::remove_all(staging, ec);
         return false;
     }
     if (!EditorProject::Open(staging / EditorProject::FileName, error)) {
+        error += " [" + PathUtf8(staging) + "]";
         std::filesystem::remove_all(staging, ec);
         return false;
     }
@@ -553,7 +561,7 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
         error = "프로젝트 파일을 읽지 못했습니다.";
     if (error.empty()) {
         if (zip_close(zip) != 0) {
-            error = "압축 파일을 완성하지 못했습니다.";
+            error = "압축 파일을 완성하지 못했습니다: " + std::string(zip_strerror(zip));
             zip_discard(zip);
         }
     } else {
@@ -563,17 +571,17 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
         std::filesystem::remove(temporary, ec);
         return false;
     }
-    std::filesystem::rename(temporary, archive, ec);
+    RenameProjectPath(temporary, archive, ec);
     if (ec && std::filesystem::is_regular_file(archive)) {
         const auto previous = TemporarySibling(archive);
         std::error_code moveError;
-        std::filesystem::rename(archive, previous, moveError);
+        RenameProjectPath(archive, previous, moveError);
         if (!moveError) {
             ec.clear();
-            std::filesystem::rename(temporary, archive, ec);
+            RenameProjectPath(temporary, archive, ec);
             if (ec) {
                 std::error_code rollback;
-                std::filesystem::rename(previous, archive, rollback);
+                RenameProjectPath(previous, archive, rollback);
                 if (rollback)
                     error =
                         "압축 파일 교체에 실패했습니다. 이전 파일은 임시 위치에 보존했습니다: " +
@@ -604,9 +612,10 @@ std::optional<EditorProject> ImportProject(const std::filesystem::path& archive,
     const auto staging = TemporarySibling(destination);
     if (!StageArchive(archive, staging, error))
         return std::nullopt;
-    std::filesystem::rename(staging, destination, ec);
+    RenameProjectPath(staging, destination, ec);
     if (ec) {
-        error = "프로젝트 폴더를 최종 위치로 옮기지 못했습니다.";
+        error = "프로젝트 폴더를 최종 위치로 옮기지 못했습니다: " + PathUtf8(staging) +
+                " -> " + PathUtf8(destination) + ": " + std::to_string(ec.value()) + " " + ec.message();
         std::filesystem::remove_all(staging, ec);
         return std::nullopt;
     }
@@ -703,22 +712,24 @@ bool RestoreProjectBackup(const EditorProject& project, const std::filesystem::p
             std::filesystem::copy(backups, staging / ".lux" / "backups",
                                   std::filesystem::copy_options::recursive, ec);
         if (ec) {
-            error = "기존 백업 목록을 보존할 수 없습니다.";
+            error = "기존 백업 목록을 보존할 수 없습니다: " + std::to_string(ec.value()) +
+                    " " + ec.message();
             std::filesystem::remove_all(staging, ec);
             return false;
         }
     }
     const auto previous = TemporarySibling(root);
-    std::filesystem::rename(root, previous, ec);
+    RenameProjectPath(root, previous, ec);
     if (ec) {
-        error = "현재 프로젝트를 임시 위치로 옮기지 못했습니다.";
+        error = "현재 프로젝트를 임시 위치로 옮기지 못했습니다: " + PathUtf8(root) +
+                " -> " + PathUtf8(previous) + ": " + std::to_string(ec.value()) + " " + ec.message();
         std::filesystem::remove_all(staging, ec);
         return false;
     }
-    std::filesystem::rename(staging, root, ec);
+    RenameProjectPath(staging, root, ec);
     if (ec) {
         std::error_code rollback;
-        std::filesystem::rename(previous, root, rollback);
+        RenameProjectPath(previous, root, rollback);
         if (rollback) {
             error = "백업 복구 및 이전 프로젝트 롤백에 실패했습니다. 이전 프로젝트는 임시 위치에 "
                     "보존되었습니다: " +

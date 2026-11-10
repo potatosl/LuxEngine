@@ -303,16 +303,24 @@ bool DeviceState::CreatePipelines() {
                      : vkCreateGraphicsPipelines(device, pipelineCache, 1, &create, nullptr,
                                                  &pipelineMesh);
     }
+    if (result == VK_SUCCESS) {
+        stages[1].pSpecializationInfo = nullptr;
+        blend.blendEnable = VK_TRUE;
+        result = ConsumeFault(Fault::PipelineCreation)
+                     ? VK_ERROR_OUT_OF_DEVICE_MEMORY
+                     : vkCreateGraphicsPipelines(device, pipelineCache, 1, &create, nullptr,
+                                                 &pipelineSprite3D);
+    }
     vkDestroyShaderModule(device, modules[0], nullptr);
     vkDestroyShaderModule(device, modules[1], nullptr);
     if (result != VK_SUCCESS) {
-        for (VkPipeline pipeline : {pipeline2D, pipeline3D})
+        for (VkPipeline pipeline : {pipeline2D, pipeline3D, pipelineMesh, pipelineSprite3D})
             if (pipeline)
                 vkDestroyPipeline(device, pipeline, nullptr);
-        pipeline2D = pipeline3D = pipelineMesh = VK_NULL_HANDLE;
+        pipeline2D = pipeline3D = pipelineMesh = pipelineSprite3D = VK_NULL_HANDLE;
         return Fail(result, "vkCreateGraphicsPipelines");
     }
-    counters.pipelinesCreated += 3;
+    counters.pipelinesCreated += 4;
     return true;
 }
 
@@ -325,9 +333,11 @@ void DeviceState::DestroyPipelines() {
         vkDestroyPipeline(device, pipeline3D, nullptr);
     if (pipelineMesh)
         vkDestroyPipeline(device, pipelineMesh, nullptr);
+    if (pipelineSprite3D)
+        vkDestroyPipeline(device, pipelineSprite3D, nullptr);
     if (renderPass)
         vkDestroyRenderPass(device, renderPass, nullptr);
-    pipeline2D = pipeline3D = pipelineMesh = VK_NULL_HANDLE;
+    pipeline2D = pipeline3D = pipelineMesh = pipelineSprite3D = VK_NULL_HANDLE;
     renderPass = VK_NULL_HANDLE;
     renderPassFormat = VK_FORMAT_UNDEFINED;
 }

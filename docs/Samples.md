@@ -24,7 +24,7 @@ cmake --build build --target SampleForestSurvivor
 
 Visual Studio 같은 다중 구성 생성기는 `cmake --build build --config Debug --target SampleForestSurvivor`로 빌드하고 `build/bin/Debug/`의 실행 파일을 연다. 실행 파일 옆의 `assets/`와 `shaders/`를 함께 유지한다.
 
-씬 파일만 실행하는 런타임 샘플은 `./build/bin/LuxPlayer samples/ScenePlayer/Scene.lux`로 연다. 런타임 단독 배포에도 이 파일을 `scenes/ScenePlayer.lux`로 포함한다. 씬의 텍스처 참조 직렬화는 아직 개발 중이므로 이 검증용 씬은 엔진의 색상 도형을 사용한다.
+씬 파일만 실행하는 런타임 샘플은 `./build/bin/LuxPlayer samples/ScenePlayer/Scene.lux`로 연다. 런타임 단독 배포에도 이 파일을 `scenes/ScenePlayer.lux`로 포함한다. 이 검증용 씬은 엔진의 색상 도형을 사용한다. 이미지가 있는 씬은 `SpriteRendererComponent::texturePath`에 에셋 기준 폴더의 상대 경로를 저장한다.
 
 서바이벌 게임의 일반 실행은 타이틀 화면에서 기다린다. **게임 시작 버튼을 마우스로 눌러야 시작한다.** Enter, Space, Esc 또는 화면의 빈 곳을 눌러도 시작하지 않는다. 메뉴 버튼은 누른 곳과 뗀 곳이 같은 버튼일 때 실행한다. 일시정지·계속·재시작·종료와 강화 선택에도 화면 버튼이 있다.
 
@@ -53,7 +53,23 @@ LUX_ENGINE_MAIN(RunGame)
 
 ForestSurvivor의 `Game/`은 전투와 성장 규칙, `App/`은 엔진 생명주기·입력·오디오 연결, `Presentation/`은 화면과 버튼 배치를 담당한다. 게임 규칙 테스트는 창이나 GPU 없이 실행한다. UI 테스트는 실제 입력 이벤트로 버튼 클릭, 드래그 취소, 메뉴 상태 전환과 창 크기 변경을 검사한다.
 
-픽셀 이미지는 텍스처 생성 시 `TextureFilter::Nearest`를 명시한다. 일반 텍스처의 기본 필터는 `Linear`다. 현재 엔진의 `SpriteComponent`에는 텍스처 참조 기능이 개발 중이므로, 샘플의 텍스처 출력은 GPU 렌더링 API를 사용한다. 관련 코드에도 이 경계를 주석으로 표시했다.
+픽셀 이미지는 텍스처 생성 시 `TextureFilter::Nearest`를 명시한다. 일반 텍스처의 기본 필터는 `Linear`다. 교육용 샘플의 텍스처 출력은 GPU 렌더링 API를 직접 사용하는 예제다. 저장 가능한 씬의 이미지는 `SpriteRendererComponent::texturePath`로 지정할 수 있다.
+
+### 씬의 텍스처 참조
+
+```cpp
+LuxEngine::Scene scene;
+scene.SetAssetRoot(projectDirectory);
+auto entity = scene.CreateEntity("이미지");
+entity.AddComponent<LuxEngine::SpriteRendererComponent>().texturePath = "Assets/player.png";
+scene.Serialize(sceneFile);
+```
+
+씬 v3는 텍스처 경로를 저장하고 v1·v2 씬도 계속 읽는다. 텍스처 경로가 비어 있으면 색상 도형을 그린다. 경로는 UTF-8 상대 경로이며 `/`를 구분자로 사용한다. 절대 경로와 상위 폴더 이동은 허용하지 않는다.
+
+씬 파일을 읽을 때 상위의 `project.luxproj`가 있는 폴더를 에셋 기준으로 삼고, 프로젝트 파일이 없으면 씬 파일의 폴더를 기준으로 삼는다. 따라서 프로젝트 전체를 다른 폴더로 옮겨도 이미지 경로는 유지된다. 명시한 에셋 루트의 절대 경로는 씬에 저장하지 않으므로, 프로젝트 파일 없이 별도 루트를 사용하는 프로그램은 씬을 읽은 뒤 `SetAssetRoot`를 다시 호출한다. 임시 씬이나 별도 에셋 폴더는 `LuxPlayer scene.lux --asset-root <project-directory>`로 실행한다. 이미지가 없거나 읽을 수 없으면 해당 경로를 오류 로그에 기록하고 스프라이트 색상을 대신 표시한다.
+
+에디터의 이미지 참조는 저장·재열기, Undo/Redo, 자동 저장 복구, 복사·붙여넣기에 보존된다. 이미지 참조가 있는 씬을 다른 에셋 기준 폴더로 저장하는 작업은 오류를 안내한다. 프로젝트를 이동할 때는 프로젝트 복제·내보내기를 사용한다. 에디터의 이미지 선택·드래그 배치 UI는 후속 작업이다.
 
 화면 안내와 메뉴는 한국어를 기본으로 표시한다. UTF-8은 바이트가 아닌 유니코드 코드포인트로 읽고, 줄바꿈도 문자 경계를 지킨다. 한글은 공식 배포처가 퍼블릭 도메인으로 공개한 둥근모꼴+Fixedsys 1.3을 포함하므로 운영체제의 한글 폰트 설치 여부에 의존하지 않는다. 게임명 MOSSBOUND와 키 이름은 그대로 사용한다.
 
