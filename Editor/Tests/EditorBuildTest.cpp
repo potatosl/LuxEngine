@@ -231,10 +231,14 @@ void TestPlan() {
                   fs::exists(outside / ".lux/build"),
               "clean rejects lexically matching but physically different build paths");
         alias.buildDirectory = alias.projectDirectory / ".lux/build";
-        Check(CleanBuildDirectory(alias, error) && fs::exists(victim / "build/keep.txt") &&
-                  !fs::exists(outside / ".lux/build"),
-              "clean resolves project symlinks before parent components and deletes the inspected "
-              "path");
+        // Win32 resolves '..' lexically before following the junction/symlink, unlike POSIX.
+        const bool resolvesOutside = fs::equivalent(fs::canonical(alias.projectDirectory), outside);
+        const bool cleanedAlias = CleanBuildDirectory(alias, error);
+        Check(fs::exists(victim / "build/keep.txt"),
+              "alias cleanup never deletes the linked victim");
+        Check(resolvesOutside ? cleanedAlias && !fs::exists(outside / ".lux/build")
+                              : !cleanedAlias && fs::exists(outside / ".lux/build"),
+              "clean follows native project-path semantics and deletes only the inspected path");
         fs::remove(project / ".lux");
     } else {
         std::cerr << "Link checks unavailable: " << linkError.message() << '\n';
