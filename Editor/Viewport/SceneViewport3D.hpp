@@ -28,7 +28,6 @@ public:
     }
 
 private:
-    std::optional<QPointF> Project(const Vec3& point) const;
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;

@@ -1,3 +1,4 @@
+#include "ViewportCamera3D.hpp"
 #include "EngineSceneRenderer.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Engine/Platform/Window.hpp"
@@ -406,27 +407,7 @@ bool EngineSceneRenderer::Render3D(Scene& scene, int pixelWidth, int pixelHeight
     auto& s = *state_;
     s.gpu.Clear(27.0f / 255.0f, 33.0f / 255.0f, 42.0f / 255.0f, 1.0f);
 
-    const double safeYaw = std::isfinite(yaw) ? yaw : 0.0;
-    const double safePitch = std::isfinite(pitch) ? pitch : 0.0;
-    const double cy = std::cos(safeYaw);
-    const double sy = std::sin(safeYaw);
-    const double cp = std::cos(safePitch);
-    const double sp = std::sin(safePitch);
-    const double safeDistance = std::max(0.1, std::isfinite(distance) ? distance : 5.0);
-    const Vec3 safeFocus = (std::isfinite(focus.x) && std::isfinite(focus.y) && std::isfinite(focus.z))
-                               ? focus
-                               : Vec3{0.0f, 0.0f, 0.0f};
-    const Vec3 eye{static_cast<float>(safeFocus.x + safeDistance * sy * cp),
-                   static_cast<float>(safeFocus.y - safeDistance * sp),
-                   static_cast<float>(safeFocus.z + safeDistance * cy * cp)};
-    const float rawAspect =
-        height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
-    const float aspect = (std::isfinite(rawAspect) && rawAspect > 0.001f) ? rawAspect : 1.0f;
-    constexpr float fovRadians = 60.0f * 3.14159265358979323846f / 180.0f;
-    PerspectiveCamera camera(fovRadians, aspect, 0.1f, 1000.0f);
-    camera.SetPosition(eye);
-    camera.SetTarget(safeFocus);
-    camera.SetUp({0.0f, 1.0f, 0.0f});
+    const auto camera = MakeViewportCamera3D(QSizeF(width, height), focus, yaw, pitch, distance);
 
     DirectionalLight sun;
     sun.direction = Vec3(0.5f, -1.0f, 0.5f).Normalized();

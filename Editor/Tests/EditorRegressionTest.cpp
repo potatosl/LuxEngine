@@ -1,7 +1,10 @@
 #include "App/EditorWindow.hpp"
+#include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Viewport/EngineSceneRenderer.hpp"
 #include "Viewport/SceneViewport2D.hpp"
+#include "Viewport/SceneViewport3D.hpp"
+#include "Viewport/ViewportCamera3D.hpp"
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
@@ -18,6 +21,7 @@
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <numbers>
 #include <stdexcept>
 
 namespace {
@@ -215,6 +219,124 @@ void TestPicking2D(QApplication& app, bool gpu = false) {
         Check(selected && selected.GetId() == (equalZ ? second.GetId() : first.GetId()),
               "click selects the visible front sprite with stable equal-Z ordering");
     }
+    if (gpu)
+        Check(renderer->GetGpuDevice()->GetCounters().validationErrors == 0,
+              "2D regression emits no Vulkan validation errors");
+}
+QPointF ReferenceProjection(Vec3 point, QSize size, double yaw, double pitch) {
+    const double cy = std::cos(yaw), sy = std::sin(yaw);
+    const double cp = std::cos(pitch), sp = std::sin(pitch);
+    const double depth = 22 - point.x * sy * cp + point.y * sp - point.z * cy * cp;
+    const double focal = size.height() / (2 * std::tan(std::numbers::pi / 6));
+    return {size.width() * .5 + (point.x * cy - point.z * sy) * focal / depth,
+            size.height() * .5 -
+                (point.x * sy * sp + point.y * cp + point.z * cy * sp) * focal / depth};
+}
+void TestPicking3D(QApplication& app, bool gpu = false) {
+    std::shared_ptr<EngineSceneRenderer> renderer;
+    if (gpu) {
+        renderer = std::make_shared<EngineSceneRenderer>();
+        if (!renderer->EnsureReady())
+            throw GpuUnavailable(renderer->LastError().toStdString());
+    }
+    EditorDocument document;
+    auto mesh = document.CreateEntity("Offset mesh");
+    mesh.GetComponent<TransformComponent>().position = {6, 0, 6};
+    mesh.GetComponent<TransformComponent>().scale = {3, 2, 2};
+    mesh.AddComponent<MeshRendererComponent>().material.albedoColor = {1, 0, 1, 1};
+    SceneViewport3D view(
+        nullptr, document, [&](std::optional<uint32> id) { document.Select(id); },
+        [](uint32, const TransformComponent&) {}, [] {}, [] {}, renderer);
+    for (int variant = 0; variant < 2; ++variant) {
+        const double yaw = variant == 0 ? .65 : .89;
+        const double pitch = variant == 0 ? .48 : .36;
+        if (variant == 1) {
+            const QPointF start(200, 200), finish(230, 185);
+            QMouseEvent press(QEvent::MouseButtonPress, start, view.mapToGlobal(start.toPoint()),
+                              Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+            QMouseEvent move(QEvent::MouseMove, finish, view.mapToGlobal(finish.toPoint()),
+                             Qt::NoButton, Qt::RightButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, finish,
+                                view.mapToGlobal(finish.toPoint()), Qt::RightButton, Qt::NoButton,
+                                Qt::NoModifier);
+            QApplication::sendEvent(&view, &press);
+            QApplication::sendEvent(&view, &move);
+            QApplication::sendEvent(&view, &release);
+            auto& transform = mesh.GetComponent<TransformComponent>();
+            transform.rotation = {.2f, -.3f, .35f};
+            transform.scale = {-3, 2, .75f};
+        }
+        for (const QSize size : {QSize(800, 600), QSize(1200, 600), QSize(600, 800)}) {
+            view.resize(size);
+            view.show();
+            app.processEvents();
+            const QPointF center = ReferenceProjection({6, 0, 6}, size, yaw, pitch);
+            const Vec3 eye{static_cast<float>(22 * std::sin(yaw) * std::cos(pitch)),
+                           static_cast<float>(-22 * std::sin(pitch)),
+                           static_cast<float>(22 * std::cos(yaw) * std::cos(pitch))};
+            const Vec3 direction = (Vec3{6, 0, 6} - eye).Normalized();
+            auto farMesh = document.CreateEntity("Farther mesh");
+            farMesh.GetComponent<TransformComponent>().position = Vec3{6, 0, 6} + direction * 8;
+            farMesh.AddComponent<MeshRendererComponent>().material.albedoColor = {0, 0, 1, 1};
+            if (gpu) {
+                const double ratio = view.devicePixelRatioF();
+                QImage image;
+                Check(renderer->Render3D(document.GetScene(), std::lround(size.width() * ratio),
+                                         std::lround(size.height() * ratio), {}, yaw, pitch, 22,
+                                         image),
+                      "real Vulkan 3D image renders without a software fallback");
+                const QColor pixel = image.pixelColor(std::lround(center.x() * ratio),
+                                                      std::lround(center.y() * ratio));
+                Check(pixel.red() > 3 && pixel.blue() > 3 && pixel.green() < 15,
+                      "reference projection lands on the actual GPU mesh");
+            }
+            document.Select(std::nullopt);
+            Click(view, center);
+            Check(document.GetSelected() && document.GetSelected().GetId() == mesh.GetId(),
+                  "clicking the rendered mesh center selects it at every aspect ratio");
+            Click(view, ReferenceProjection({7, 0, 6}, size, yaw, pitch));
+            Check(document.GetSelected() && document.GetSelected().GetId() == mesh.GetId(),
+                  "visible mesh surface is selectable beyond the center marker");
+            QImage overlay(view.size(), QImage::Format_RGBA8888);
+            view.render(&overlay);
+            const auto model = mesh.GetComponent<TransformComponent>().GetTransform();
+            int alignedCorners = 0;
+            for (int corner = 0; corner < 8; ++corner) {
+                const Vec3 local{(corner & 1) ? .5f : -.5f, (corner & 2) ? .5f : -.5f,
+                                 (corner & 4) ? .5f : -.5f};
+                const auto& m = model.elements;
+                const Vec3 world{m[0] * local.x + m[4] * local.y + m[8] * local.z + m[12],
+                                 m[1] * local.x + m[5] * local.y + m[9] * local.z + m[13],
+                                 m[2] * local.x + m[6] * local.y + m[10] * local.z + m[14]};
+                const QPoint expected = ReferenceProjection(world, size, yaw, pitch).toPoint();
+                bool found = false;
+                for (int y = expected.y() - 3; y <= expected.y() + 3; ++y)
+                    for (int x = expected.x() - 3; x <= expected.x() + 3; ++x) {
+                        if (!overlay.rect().contains(x, y))
+                            continue;
+                        const auto color = overlay.pixelColor(x, y);
+                        found |= color.red() > 220 && color.green() > 160 && color.blue() < 130;
+                    }
+                alignedCorners += found ? 1 : 0;
+            }
+            Check(alignedCorners == 8,
+                  "selection outline aligns with every transformed GPU corner");
+            Click(view, {20, static_cast<double>(size.height() - 20)});
+            Check(!document.GetSelected(), "empty viewport space clears the selection");
+            document.GetScene().DestroyEntity(farMesh);
+        }
+    }
+    const auto camera = MakeViewportCamera3D(view.size(), {}, .89, .36, 22);
+    const Vec3 forward = (camera.GetTarget() - camera.GetPosition()).Normalized();
+    Check(!ProjectViewportPoint(camera, view.size(), camera.GetPosition() - forward),
+          "points behind the camera are not projected");
+    Check(!ProjectViewportPoint(camera, view.size(), camera.GetPosition() + forward * .01f),
+          "points before the near plane are not projected");
+    Check(!ProjectViewportPoint(camera, view.size(), camera.GetPosition() + forward * 1100),
+          "points beyond the far plane are not projected");
+    if (gpu)
+        Check(renderer->GetGpuDevice()->GetCounters().validationErrors == 0,
+              "3D regression emits no Vulkan validation errors");
 }
 } // namespace
 int main(int argc, char** argv) {
@@ -239,6 +361,11 @@ int main(int argc, char** argv) {
         else if (suite == "picking2d-gpu") {
             EngineSceneRenderer::SetForceAllowed(true);
             TestPicking2D(app, true);
+        } else if (suite == "picking3d")
+            TestPicking3D(app);
+        else if (suite == "picking3d-gpu") {
+            EngineSceneRenderer::SetForceAllowed(true);
+            TestPicking3D(app, true);
         } else
             throw std::runtime_error("unknown regression suite");
         std::cout << suite << " regression checks passed\n";
