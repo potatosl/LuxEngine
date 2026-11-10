@@ -648,17 +648,29 @@ bool CreateProjectBackup(const EditorProject& project, std::filesystem::path& ba
          ".luxbackup");
     if (!ExportProject(project, backup, error))
         return false;
-    std::vector<std::filesystem::path> backups;
-    for (const auto& entry : std::filesystem::directory_iterator(directory, ec))
-        if (entry.is_regular_file() && entry.path().extension() == ".luxbackup")
-            backups.push_back(entry.path());
+    std::vector<std::pair<std::filesystem::file_time_type, std::filesystem::path>> backups;
+    for (const auto& entry : std::filesystem::directory_iterator(directory, ec)) {
+        if (entry.is_regular_file(ec) && entry.path().extension() == ".luxbackup") {
+            const auto modified = entry.last_write_time(ec);
+            if (!ec)
+                backups.emplace_back(modified, entry.path());
+        }
+        if (ec)
+            break;
+    }
     if (ec) {
         error = "백업 목록을 읽을 수 없습니다.";
         return false;
     }
-    std::sort(backups.begin(), backups.end());
+    // Prefixes (backup-/pre-restore-) do not encode age. Always retain the backup just created,
+    // including when the filesystem clock has coarse resolution or the system clock changed.
+    std::sort(backups.begin(), backups.end(), [&backup](const auto& a, const auto& b) {
+        if (a.second == backup || b.second == backup)
+            return a.second != backup && b.second == backup;
+        return a < b;
+    });
     while (backups.size() > project.GetSettings().backupLimit && !backups.empty()) {
-        std::filesystem::remove(backups.front(), ec);
+        std::filesystem::remove(backups.front().second, ec);
         if (ec) {
             error = "오래된 백업을 정리할 수 없습니다.";
             return false;
