@@ -1,6 +1,7 @@
 #include "App/EditorWindow.hpp"
 #include "Engine/Scene/Scene.hpp"
 #include "Project/PathEncoding.hpp"
+#include "Project/ProjectArchive.hpp"
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
@@ -17,6 +18,7 @@
 #include <QUrl>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -175,6 +177,75 @@ void TestRecoveryHistory(QApplication& app) {
     undo->undo();
     Check(!document.IsDirty(), "undo back to the saved baseline is clean");
 }
+void TestBrokenSceneRecovery(QApplication& app) {
+    for (const bool missing : {false, true})
+        for (const bool accept : {false, true}) {
+            ProjectFixture fixture;
+            const auto sceneFile = fixture.project.GetSceneFile();
+            LuxEngine::Scene recovery;
+            recovery.CreateEntity("Recovered from broken original");
+            std::string error;
+            Check(fixture.project.SaveAutosave(sceneFile, recovery, error), error.c_str());
+            if (missing)
+                fs::remove(sceneFile);
+            else
+                std::ofstream(sceneFile, std::ios::trunc) << "corrupt scene";
+            Check(!EditorProject::Open(fixture.project.GetFile(), error),
+                  "strict project validation rejects broken originals");
+            Check(EditorProject::OpenForRecovery(fixture.project.GetFile(), error).has_value(),
+                  "editor recovery accepts metadata with a valid autosave");
+            const auto archive =
+                sceneFile.parent_path().parent_path().parent_path() / "Broken.luxpack";
+            Check(ExportProject(fixture.project, archive, error),
+                  "broken project archive fixture exports");
+            const auto imported = archive.parent_path() / "Imported";
+            Check(!ImportProject(archive, imported, error) && !fs::exists(imported),
+                  "archive import still rejects a broken start scene despite editor recovery "
+                  "support");
+            RecentProjects recent(archive.parent_path() / "recent.txt");
+            Check(recent.Add(fixture.project.GetFile()),
+                  "recoverable projects stay accessible from recents");
+            recent.Load();
+            Check(recent.Get().size() == 1, "recent project reload retains recoverable metadata");
+            QTimer answer;
+            int prompts = 0;
+            QObject::connect(&answer, &QTimer::timeout, &app, [&] {
+                if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+                    ++prompts;
+                    message->button(accept ? QMessageBox::Yes : QMessageBox::Cancel)->click();
+                }
+            });
+            answer.start(5);
+            auto window = fixture.Open(app);
+            answer.stop();
+            Check(prompts == 1, "broken-original recovery prompts once");
+            auto* settings = window->findChild<QAction*>("projectSettings");
+            if (accept) {
+                Check(settings->isEnabled() && window->GetDocument().IsDirty() &&
+                          window->GetDocument().GetScene().GetEntityCount() == 1,
+                      "accepting recovery opens an unsaved recovered project scene");
+                Check(!EditorProject::Open(fixture.project.GetFile(), error),
+                      "recovery does not overwrite the original before saving");
+                window->findChild<QAction*>("saveScene")->trigger();
+                Check(EditorProject::Open(fixture.project.GetFile(), error).has_value() &&
+                          !window->GetDocument().IsDirty(),
+                      "explicit save repairs the original scene");
+            } else {
+                Check(!settings->isEnabled() && window->GetDocument().GetPath().empty(),
+                      "cancelling recovery leaves the document and project connection unchanged");
+                Check(fs::exists(fixture.project.GetAutosaveFile(sceneFile)),
+                      "cancelling keeps the recoverable autosave");
+            }
+        }
+    ProjectFixture fixture;
+    std::string error;
+    std::ofstream(fixture.project.GetSceneFile(), std::ios::trunc) << "corrupt scene";
+    const auto autosave = fixture.project.GetAutosaveFile(fixture.project.GetSceneFile());
+    fs::create_directories(autosave.parent_path());
+    std::ofstream(autosave, std::ios::trunc) << "corrupt autosave";
+    Check(!EditorProject::OpenForRecovery(fixture.project.GetFile(), error),
+          "two broken scene copies are rejected");
+}
 } // namespace
 int main(int argc, char** argv) {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
@@ -192,6 +263,8 @@ int main(int argc, char** argv) {
             TestSceneContext(app);
         else if (mode == "recovery-history")
             TestRecoveryHistory(app);
+        else if (mode == "broken-scene-recovery")
+            TestBrokenSceneRecovery(app);
         else
             throw std::runtime_error("Unknown editor state test mode");
         std::cout << "Editor state checks passed: " << mode << '\n';

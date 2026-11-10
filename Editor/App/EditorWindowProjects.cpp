@@ -60,7 +60,7 @@ void EditorWindow::OpenProjectDialog() {
 }
 void EditorWindow::OpenProjectFile(const std::filesystem::path& file) {
     std::string error;
-    auto opened = EditorProject::Open(file, error);
+    auto opened = EditorProject::OpenForRecovery(file, error);
     if (!opened) {
         ShowError(QStringLiteral("프로젝트 열기 실패"), Q(error));
         recentProjects_.Load();
@@ -69,7 +69,10 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file) {
     }
     if (!ConfirmDiscardChanges())
         return;
-    if (!document_.Open(PathUtf8(opened->GetSceneFile()))) {
+    const auto result = LoadSceneDocument(opened->GetSceneFile(), &*opened);
+    if (result == SceneOpenResult::Cancelled)
+        return;
+    if (result == SceneOpenResult::Failed) {
         ShowError(QStringLiteral("프로젝트 열기 실패"),
                   QStringLiteral("시작 장면을 열 수 없습니다."));
         return;
@@ -77,7 +80,11 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file) {
     project_ = std::move(opened);
     undo_->clear();
     ApplyProjectPreferences();
-    RecoverAutosaveIfNeeded();
+    if (result == SceneOpenResult::Recovered) {
+        undo_->resetClean();
+        document_.MarkDirty();
+    } else
+        RecoverAutosaveIfNeeded();
     recentProjects_.Add(project_->GetFile());
     UpdateRecentMenu();
     RefreshAll();
@@ -120,18 +127,47 @@ void EditorWindow::ApplyProjectPreferences() {
     else
         setWindowIcon(QIcon());
 }
+EditorWindow::SceneOpenResult
+EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
+                                const EditorProject* recoveryProject) {
+    if (document_.Open(PathUtf8(file)))
+        return SceneOpenResult::Opened;
+    if (!recoveryProject)
+        return SceneOpenResult::Failed;
+    const auto autosave = recoveryProject->GetAutosaveFile(file);
+    LuxEngine::Scene validation;
+    if (autosave.empty() || !validation.Deserialize(PathUtf8(autosave)))
+        return SceneOpenResult::Failed;
+    const auto answer = QMessageBox::question(
+        this, QStringLiteral("장면 자동 저장 복구"),
+        QStringLiteral("원본 장면을 읽을 수 없습니다. 자동 저장본으로 복구하시겠습니까?"),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (answer != QMessageBox::Yes)
+        return SceneOpenResult::Cancelled;
+    return document_.Recover(PathUtf8(file), PathUtf8(autosave)) ? SceneOpenResult::Recovered
+                                                                 : SceneOpenResult::Failed;
+}
+
 bool EditorWindow::OpenProjectScene(const std::filesystem::path& file) {
     if (!ConfirmDiscardChanges())
         return false;
-    if (!document_.Open(PathUtf8(file))) {
+    const bool owned = project_ && project_->ContainsScene(file);
+    const auto result = LoadSceneDocument(file, owned ? &*project_ : nullptr);
+    if (result == SceneOpenResult::Cancelled)
+        return false;
+    if (result == SceneOpenResult::Failed) {
         ShowError(QStringLiteral("장면 열기 실패"), QStringLiteral("장면 파일을 열 수 없습니다."));
         return false;
     }
-    if (project_ && !project_->ContainsScene(file))
+    if (project_ && !owned)
         project_.reset();
     undo_->clear();
     ApplyProjectPreferences();
-    RecoverAutosaveIfNeeded();
+    if (result == SceneOpenResult::Recovered) {
+        undo_->resetClean();
+        document_.MarkDirty();
+    } else
+        RecoverAutosaveIfNeeded();
     RefreshAll();
     return true;
 }
