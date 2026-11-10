@@ -90,6 +90,7 @@ add_library(LuxEditorUi STATIC
     Project/ProjectSettings.cpp
     Project/ProjectTemplates.cpp
     Scene/EditorDocument.cpp
+    Scene/SceneAuthoringIO.cpp
     Ui/IconFactory.cpp
     Viewport/EngineSceneRenderer.cpp
     Viewport/SceneViewport2D.cpp
@@ -137,8 +138,25 @@ if(MSVC)
 endif()
 
 if(LUX_BUILD_TESTS)
+    add_executable(LuxEditorSceneDocumentTests
+        Tests/EditorSceneDocumentTest.cpp
+        Scene/EditorDocument.cpp
+        Scene/SceneAuthoringIO.cpp
+        Project/EditorProject.cpp
+        Project/ProjectSettings.cpp
+        Project/ProjectTemplates.cpp)
+    target_include_directories(LuxEditorSceneDocumentTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(LuxEditorSceneDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
+    target_link_libraries(LuxEditorSceneDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui)
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxEditorSceneDocumentTests)
+    endif()
+    lux_editor_copy_runtime(LuxEditorSceneDocumentTests)
+    add_test(NAME Editor_scene_documents COMMAND LuxEditorSceneDocumentTests)
+    set_tests_properties(Editor_scene_documents PROPERTIES LABELS "headless;editor;scene" TIMEOUT 90)
     add_executable(LuxEditorDocumentTests
         Scene/EditorDocument.cpp
+    Scene/SceneAuthoringIO.cpp
         Project/EditorProject.cpp
         Project/ProjectArchive.cpp
         Project/ProjectSettings.cpp

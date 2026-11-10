@@ -4,8 +4,10 @@
 
 #include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/Scene.hpp"
+#include "Engine/Scene/SceneManager.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -116,8 +118,18 @@ bool ReplaceFile(const std::filesystem::path& temporary, const std::filesystem::
 }
 
 bool WriteProjectFile(const EditorProject& project, const std::filesystem::path& scene) {
+    static std::atomic<uint64_t> sequence{0};
     auto temporary = project.GetFile();
-    temporary += ".tmp";
+    temporary += ".writing-" +
+                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
+                 std::to_string(++sequence);
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code error;
+            std::filesystem::remove(path, error);
+        }
+    } cleanup{temporary};
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         const auto& settings = project.GetSettings();
@@ -375,6 +387,10 @@ std::optional<EditorProject> EditorProject::Read(const std::filesystem::path& fi
         error = "프로젝트 경로를 확인할 수 없습니다.";
         return std::nullopt;
     }
+    if (!project.ContainsScene(project.GetSceneFile())) {
+        error = "시작 씬은 프로젝트 내부에 있어야 합니다.";
+        return std::nullopt;
+    }
     LuxEngine::Scene validation;
     if (!validation.Deserialize(PathUtf8(project.GetSceneFile())) &&
         (!allowRecovery ||
@@ -414,6 +430,37 @@ bool EditorProject::Rename(const std::string& name, std::string& error) {
     auto settings = settings_;
     settings.name = name;
     return UpdateSettings(settings, error);
+}
+
+bool EditorProject::SetStartScene(const std::filesystem::path& sceneFile, std::string& error) {
+    error.clear();
+    std::error_code ec;
+    const auto root = std::filesystem::canonical(file_.parent_path(), ec);
+    if (ec) {
+        error = "프로젝트 경로를 확인할 수 없습니다.";
+        return false;
+    }
+    const auto candidate = sceneFile.is_absolute() ? sceneFile : root / sceneFile;
+    const auto target = std::filesystem::canonical(candidate, ec);
+    if (ec || !std::filesystem::is_regular_file(target, ec) || ec) {
+        error = "시작 씬 파일을 찾을 수 없습니다.";
+        return false;
+    }
+    auto relative = target.lexically_relative(root);
+    if (!ValidRelativeScene(relative) || !ContainsScene(target)) {
+        error = "시작 씬은 프로젝트 내부의 .lux 파일이어야 합니다.";
+        return false;
+    }
+    if (!LuxEngine::SceneManager().Load(target, error))
+        return false;
+    if (relative == scene_)
+        return true;
+    if (!WriteProjectFile(*this, relative)) {
+        error = "시작 씬 설정을 저장할 수 없습니다.";
+        return false;
+    }
+    scene_ = std::move(relative);
+    return true;
 }
 
 bool EditorProject::UpdateSettings(const ProjectSettings& settings, std::string& error) {

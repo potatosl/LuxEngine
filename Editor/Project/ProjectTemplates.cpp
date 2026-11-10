@@ -22,9 +22,29 @@ if(COMMAND lux_copy_runtime)
 elseif(COMMAND lux_copy_shaders)
     lux_copy_shaders(LuxGame)
 endif()
-add_custom_command(TARGET LuxGame POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/Scenes" "$<TARGET_FILE_DIR:LuxGame>/Scenes")
+add_custom_target(LuxGameContent
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:LuxGame>/Content"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproj"
+        "$<TARGET_FILE_DIR:LuxGame>/Content/project.luxproj"
+    VERBATIM)
+add_dependencies(LuxGame LuxGameContent)
+file(GLOB_RECURSE _lux_scenes CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.lux")
+foreach(_scene IN LISTS _lux_scenes)
+    if(_scene MATCHES "(^|/)(\\.git|\\.lux)(/|$)" OR
+       _scene MATCHES "^(build|out|cmake-build[^/]*)(/|$)")
+        continue()
+    endif()
+    get_filename_component(_scene_directory "${_scene}" DIRECTORY)
+    add_custom_command(TARGET LuxGameContent POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:LuxGame>/Content/${_scene_directory}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/${_scene}"
+            "$<TARGET_FILE_DIR:LuxGame>/Content/${_scene}"
+        VERBATIM)
+endforeach()
 if(WIN32)
     get_target_property(_engine_type LuxEngine::Engine TYPE)
     if(_engine_type STREQUAL "SHARED_LIBRARY")
@@ -51,15 +71,63 @@ endif()
 constexpr const char* GameSource = R"LUX(#include "Engine/LuxEngine.hpp"
 #include <SDL3/SDL_filesystem.h>
 #include "Engine/EntryPoint.hpp"
+#include "Engine/Scene/SceneManager.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace le = LuxEngine;
+
+std::filesystem::path FindStartScene(const std::filesystem::path& root) {
+    const auto manifest = root / "project.luxproj";
+    std::error_code error;
+    if (std::filesystem::file_size(manifest, error) > 65536 || error)
+        throw std::runtime_error("프로젝트 실행 정보를 읽을 수 없습니다.");
+    std::ifstream input(manifest, std::ios::binary);
+    std::string magic;
+    int version = 0;
+    if (!(input >> magic >> version) || magic != "LUXPROJECT" || (version != 1 && version != 2))
+        throw std::runtime_error("프로젝트 실행 정보 형식이 올바르지 않습니다.");
+    std::string line, scene;
+    bool found = false;
+    while (std::getline(input, line)) {
+        std::istringstream field(line);
+        std::string key, trailing;
+        if (!(field >> key) || key != "start_scene")
+            continue;
+        if (found || !(field >> std::quoted(scene)) || field >> trailing)
+            throw std::runtime_error("시작 씬 설정이 올바르지 않습니다.");
+        found = true;
+    }
+    const auto relative = std::filesystem::path(std::u8string(
+        reinterpret_cast<const char8_t*>(scene.data()), scene.size()));
+    if (!found || input.bad() || relative.empty() || relative.is_absolute() ||
+        relative.extension() != ".lux" || scene.find('\\') != std::string::npos ||
+        scene.find(':') != std::string::npos)
+        throw std::runtime_error("시작 씬을 지정해 주세요.");
+    for (const auto& part : relative)
+        if (part == ".." || part == ".")
+            throw std::runtime_error("시작 씬 경로가 콘텐츠 폴더를 벗어났습니다.");
+    const auto target = std::filesystem::canonical(root / relative, error);
+    if (error)
+        throw std::runtime_error("시작 씬 파일을 찾을 수 없습니다.");
+    const auto resolvedRelative = std::filesystem::relative(target, root, error);
+    if (error || resolvedRelative.empty())
+        throw std::runtime_error("시작 씬 경로를 확인할 수 없습니다.");
+    for (const auto& part : resolvedRelative)
+        if (part == "..")
+            throw std::runtime_error("시작 씬 경로가 콘텐츠 폴더를 벗어났습니다.");
+    return target;
+}
 
 class Game final : public le::Application {
 public:
@@ -70,15 +138,21 @@ public:
 protected:
     void OnInit() override {
         le::Renderer2D::Init(&GetGpuDevice());
+        le::Renderer3D::Init(&GetGpuDevice());
         le::PhysicsEngine::Init();
         const char* base = SDL_GetBasePath();
+        if (!base)
+            throw std::runtime_error("게임 실행 경로를 찾을 수 없습니다.");
         const auto basePath = std::filesystem::path(std::u8string(
             reinterpret_cast<const char8_t*>(base), std::strlen(base)));
-        const auto sceneFile = basePath / "Scenes" / "Main.lux";
-        const auto bytes = sceneFile.u8string();
-        const std::string scenePath(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        if (!scene_.Deserialize(scenePath))
-            throw std::runtime_error("시작 장면을 열 수 없습니다.");
+        const auto sceneFile = FindStartScene(basePath / "Content");
+        std::string error;
+        scene_ = manager_.Load(sceneFile, error);
+        if (!scene_)
+            throw std::runtime_error(error.empty() ? "시작 씬을 열 수 없습니다." : error);
+        camera3D_.SetPerspective(le::ToRadians(60), 16.0f / 9, .1f, 1000);
+        camera3D_.SetPosition({0, 6, 12});
+        camera3D_.SetTarget({0, 0, 0});
         le::Input::BindAction("Left", le::LuxKey::A);
         le::Input::BindAction("Left", le::LuxKey::Left);
         le::Input::BindAction("Right", le::LuxKey::D);
@@ -89,14 +163,45 @@ protected:
         le::Input::BindAction("Down", le::LuxKey::Down);
         le::Input::BindAction("Action", le::LuxKey::Space);
         le::Input::BindAction("Quit", le::LuxKey::Escape);
-        for (auto entity : scene_.GetEntities()) {
-            const auto& tag = entity.GetComponent<le::TagComponent>().tag;
+        FindActors();
+    }
+
+    void FindActors() {
+        player_ = {};
+        npc_ = {};
+        goal_ = {};
+        for (auto entity : scene_->GetEntities()) {
+            if (!entity.HasComponent<le::TransformComponent>())
+                continue;
+            const auto* tagComponent = entity.TryGetComponent<le::TagComponent>();
+            if (!tagComponent)
+                continue;
+            const auto& tag = tagComponent->tag;
             if (tag == "플레이어" || tag == "주인공" || tag == "블록")
                 player_ = entity;
             if (tag == "NPC")
                 npc_ = entity;
             if (tag == "목표")
                 goal_ = entity;
+        }
+    }
+
+    void TickStreaming(double dt) {
+        streamingElapsed_ += dt;
+        if (streamingElapsed_ < .1)
+            return;
+        streamingElapsed_ = 0;
+        const auto observer = player_ ? scene_->GetWorldTransform(player_.GetId()).position
+                                      : le::Vec3{};
+        std::string error;
+        bool changed = false;
+        if (!manager_.UpdateStreaming(*scene_, {observer.x, observer.y}, error, &changed)) {
+            if (error != streamingError_)
+                le::Log::Error(error);
+            streamingError_ = std::move(error);
+        } else if (changed) {
+            streamingError_.clear();
+            FindActors();
         }
     }
 
@@ -110,10 +215,11 @@ protected:
                                    (le::Input::IsActionDown("Down") ? 1.0f : 0.0f);
             auto& transform = player_.GetComponent<le::TransformComponent>();
             if constexpr (LUX_GAME_TEMPLATE_KIND == 1) {
-                auto& body = player_.GetComponent<le::Rigidbody2DComponent>();
-                body.velocity.x = horizontal * 4.0f;
-                if (body.isGrounded && le::Input::WasActionPressed("Action"))
-                    body.velocity.y = 7.0f;
+                if (auto* body = player_.TryGetComponent<le::Rigidbody2DComponent>()) {
+                    body->velocity.x = horizontal * 4.0f;
+                    if (body->isGrounded && le::Input::WasActionPressed("Action"))
+                        body->velocity.y = 7.0f;
+                }
             } else if constexpr (LUX_GAME_TEMPLATE_KIND == 4) {
                 if (le::Input::WasActionPressed("Left"))
                     transform.position.x -= 1.0f;
@@ -128,11 +234,8 @@ protected:
                 if (goal_) {
                     const auto& target = goal_.GetComponent<le::TransformComponent>().position;
                     if (transform.position.x == target.x && transform.position.y == target.y) {
-                        player_.GetComponent<le::SpriteRendererComponent>().color = {0.42f, 0.95f,
-                                                                                     0.58f, 1.0f};
-                        if (!puzzleSolved_)
-                            le::Log::Info("퍼즐 목표에 도착했습니다.");
-                        puzzleSolved_ = true;
+                        if (auto* sprite = player_.TryGetComponent<le::SpriteRendererComponent>())
+                            sprite->color = {0.42f, 0.95f, 0.58f, 1.0f};
                     }
                 }
             } else {
@@ -147,39 +250,55 @@ protected:
                     const auto& target = npc_.GetComponent<le::TransformComponent>().position;
                     if (std::abs(target.x - transform.position.x) < 1.5f &&
                         std::abs(target.y - transform.position.y) < 1.5f) {
-                        auto& color = npc_.GetComponent<le::SpriteRendererComponent>().color;
-                        color = color.x > 0.5f ? le::Vec4{0.34f, 0.78f, 0.54f, 1.0f}
-                                               : le::Vec4{0.82f, 0.52f, 0.38f, 1.0f};
+                        if (auto* sprite = npc_.TryGetComponent<le::SpriteRendererComponent>())
+                            sprite->color = sprite->color.x > 0.5f
+                                                ? le::Vec4{0.34f, 0.78f, 0.54f, 1.0f}
+                                                : le::Vec4{0.82f, 0.52f, 0.38f, 1.0f};
                     }
                 }
             }
         }
-        scene_.OnUpdate(dt);
-        if (smokeTest_ && ++frames_ >= 10)
+        TickStreaming(dt);
+        scene_->OnUpdate(dt);
+        if (smokeTest_ && ++frames_ >= 10) {
+            if (GetGpuDevice().GetCounters().validationErrors != 0)
+                throw std::runtime_error("Vulkan 검증에서 렌더링 오류가 발견되었습니다.");
             Close();
+        }
     }
 
     void OnRender(float) override {
+        const auto& settings = scene_->GetSettings();
+        GetGpuDevice().Clear(settings.clearColor.x, settings.clearColor.y,
+                             settings.clearColor.z, settings.clearColor.w);
+        le::Renderer3D::BeginScene(camera3D_, {});
+        scene_->OnRender3D();
+        le::Renderer3D::EndScene();
         le::Renderer2D::BeginScene(camera_);
         // Scene::OnRender draws tilemaps and sprites, so maps painted in the editor appear in game.
-        scene_.OnRender();
+        scene_->OnRender();
         le::Renderer2D::EndScene();
     }
 
     void OnShutdown() override {
         le::Input::ClearBindings();
+        manager_.ClearCache();
         le::PhysicsEngine::Shutdown();
+        le::Renderer3D::Shutdown();
         le::Renderer2D::Shutdown();
     }
 
 private:
-    le::Scene scene_;
+    le::SceneManager manager_;
+    std::shared_ptr<le::Scene> scene_;
     le::Entity player_;
     le::Entity npc_;
     le::Entity goal_;
     le::OrthographicCamera camera_;
+    le::PerspectiveCamera camera3D_;
+    double streamingElapsed_ = 0;
+    std::string streamingError_;
     bool smokeTest_ = false;
-    bool puzzleSolved_ = false;
     int frames_ = 0;
 };
 

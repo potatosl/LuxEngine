@@ -2,6 +2,7 @@
 // build it against the installed engine SDK, run it, and zip it. Skips (exit 77) when no SDK or
 // cmake is available, because nothing here is downloaded.
 #include "Build/ProjectBuild.hpp"
+#include "Engine/Scene/Entity.hpp"
 #include "Project/EditorProject.hpp"
 #include "Project/PathEncoding.hpp"
 
@@ -134,6 +135,21 @@ int main(int argc, char* argv[]) {
     auto project = EditorProject::Create(root, "빌드 테스트", ProjectTemplate::Platformer, error);
     if (!project) {
         std::cerr << "project creation failed: " << error << '\n';
+        return 1;
+    }
+    // The selected start scene must survive building and packaging even outside Scenes/.
+    // Removing the default catches a runner that silently keeps using Scenes/Main.lux.
+    LuxEngine::Scene alternate;
+    alternate.CreateEntity("플레이어"); // A named player without an optional rigidbody is valid.
+    const auto start = root / PathFromUtf8("Levels/새 시작 씬.lux");
+    fs::create_directories(start.parent_path(), ec);
+    if (ec || !alternate.Serialize(PathUtf8(start)) || !project->SetStartScene(start, error)) {
+        std::cerr << "start scene configuration failed: " << error << '\n';
+        return 1;
+    }
+    fs::remove(root / "Scenes/Main.lux", ec);
+    if (ec) {
+        std::cerr << "default scene removal failed: " << ec.message() << '\n';
         return 1;
     }
     bool ok = BuildRunAndPackage(root, BuildConfiguration::Debug, tools);

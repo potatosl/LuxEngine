@@ -1,5 +1,6 @@
 #include "EditorProject.hpp"
 #include "PathEncoding.hpp"
+#include "Scene/SceneAuthoringIO.hpp"
 
 #include "Engine/Scene/Scene.hpp"
 #include <QImageReader>
@@ -18,8 +19,11 @@ namespace {
 bool WithinProject(const std::filesystem::path& relative) {
     if (relative.empty() || relative.is_absolute())
         return false;
+    const auto first = PathUtf8(*relative.begin());
+    if (first == "build" || first == "out" || first.starts_with("cmake-build"))
+        return false;
     for (const auto& part : relative)
-        if (part == "..")
+        if (part == ".." || part == ".git" || part == ".lux")
             return false;
     return true;
 }
@@ -126,10 +130,19 @@ bool EditorProject::ContainsScene(const std::filesystem::path& sceneFile) const 
 
 std::filesystem::path EditorProject::GetAutosaveFile(const std::filesystem::path& sceneFile) const {
     std::error_code ec;
-    const auto relative = std::filesystem::relative(sceneFile, file_.parent_path(), ec);
+    const auto root = std::filesystem::canonical(file_.parent_path(), ec);
+    if (ec)
+        return {};
+    const auto relative = std::filesystem::relative(sceneFile, root, ec);
     if (ec || !WithinProject(relative) || relative.extension() != ".lux")
         return {};
-    return file_.parent_path() / ".lux" / "autosave" / relative;
+    const auto targetRelative = std::filesystem::path(".lux") / "autosave" / relative;
+    const auto target = root / targetRelative;
+    const auto resolved = std::filesystem::weakly_canonical(target, ec);
+    // Metadata links must not redirect an autosave onto a source scene or another user's file.
+    if (ec || resolved.lexically_relative(root) != targetRelative)
+        return {};
+    return target;
 }
 
 bool EditorProject::SaveAutosave(const std::filesystem::path& sceneFile, LuxEngine::Scene& scene,
@@ -142,23 +155,12 @@ bool EditorProject::SaveAutosave(const std::filesystem::path& sceneFile, LuxEngi
     }
     std::error_code ec;
     std::filesystem::create_directories(target.parent_path(), ec);
-    auto temporary = target;
-    temporary += ".tmp";
-    if (ec || !scene.Serialize(PathUtf8(temporary))) {
+    if (ec) {
         error = "장면 자동 저장 파일을 만들 수 없습니다.";
         return false;
     }
-    std::filesystem::rename(temporary, target, ec);
-    if (ec) {
-        std::filesystem::remove(target, ec);
-        ec.clear();
-        std::filesystem::rename(temporary, target, ec);
-    }
-    if (ec) {
-        error = "장면 자동 저장 파일을 교체할 수 없습니다.";
-        return false;
-    }
-    return true;
+    // The scene writer already uses atomic replacement and preserves the previous file on error.
+    return SaveAuthoredScene(scene, target, sceneFile, error);
 }
 
 bool EditorProject::HasNewerAutosave(const std::filesystem::path& sceneFile) const {
@@ -166,9 +168,11 @@ bool EditorProject::HasNewerAutosave(const std::filesystem::path& sceneFile) con
     std::error_code ec;
     if (autosave.empty() || !std::filesystem::is_regular_file(autosave, ec))
         return false;
-    return std::filesystem::last_write_time(autosave, ec) >
-               std::filesystem::last_write_time(sceneFile, ec) &&
-           !ec;
+    const auto autosaveTime = std::filesystem::last_write_time(autosave, ec);
+    if (ec)
+        return false;
+    const auto sourceTime = std::filesystem::last_write_time(sceneFile, ec);
+    return !ec && autosaveTime > sourceTime;
 }
 
 bool EditorProject::ClearAutosave(const std::filesystem::path& sceneFile) const {
