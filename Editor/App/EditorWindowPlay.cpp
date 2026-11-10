@@ -1,10 +1,13 @@
 #include "App/EditorWindow.hpp"
+#include "Project/PathEncoding.hpp"
 #include "Viewport/SceneViewport2D.hpp"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QTemporaryFile>
+#include <QVariant>
 
 namespace LuxEditor {
 namespace {
@@ -27,11 +30,21 @@ void EditorWindow::RunSceneInWindow() {
     }
     StopSceneWindow();
     // Run what is on screen, including unsaved edits, without touching the user's scene file.
-    playerScenePath_ =
-        QDir(QDir::tempPath())
-            .filePath(
-                QStringLiteral("LuxEditor-play-%1.lux").arg(QCoreApplication::applicationPid()));
-    if (!document_.GetScene().Serialize(playerScenePath_.toUtf8().toStdString())) {
+    QTemporaryFile temporary(QDir::tempPath() + QStringLiteral("/LuxEditor-play-XXXXXX.lux"));
+    if (!temporary.open()) {
+        ShowError(QStringLiteral("게임 실행"),
+                  QStringLiteral("실행용 씬 파일을 만들 수 없습니다."));
+        return;
+    }
+    playerScenePath_ = temporary.fileName();
+    temporary.setAutoRemove(false);
+    temporary.close();
+    std::string error;
+    if (!LuxEngine::SceneManager::Save(document_.GetScene(),
+                                       std::filesystem::path(playerScenePath_.toStdU16String()),
+                                       PathFromUtf8(document_.GetPath()), error)) {
+        QFile::remove(playerScenePath_);
+        playerScenePath_.clear();
         ShowError(QStringLiteral("게임 실행"),
                   QStringLiteral("실행용 장면 파일을 저장하지 못했습니다."));
         return;
@@ -46,31 +59,61 @@ void EditorWindow::RunSceneInWindow() {
     }
     playerProcess_ = new QProcess(this);
     playerProcess_->setProcessChannelMode(QProcess::MergedChannels);
-    connect(playerProcess_, &QProcess::readyReadStandardOutput, this, [this] {
-        const QString output = QString::fromUtf8(playerProcess_->readAllStandardOutput());
-        for (const QString& line : output.split(u'\n', Qt::SkipEmptyParts))
-            Log(QStringLiteral("[게임] %1").arg(line.trimmed()));
+    auto* process = playerProcess_;
+    const auto scenePath = playerScenePath_;
+    const auto consume = [this, process](bool flush) {
+        auto buffer =
+            process->property("outputBuffer").toByteArray() + process->readAllStandardOutput();
+        for (;;) {
+            const auto newline = buffer.indexOf('\n');
+            if (newline < 0 && !flush && buffer.size() < 65536)
+                break;
+            if (buffer.isEmpty())
+                break;
+            const auto count = newline < 0 ? buffer.size() : newline;
+            const auto line = QString::fromUtf8(buffer.left(count)).trimmed();
+            buffer.remove(0, count + (newline >= 0 ? 1 : 0));
+            if (line.contains(QStringLiteral("error"), Qt::CaseInsensitive) ||
+                line.contains(QStringLiteral("warning"), Qt::CaseInsensitive) ||
+                line.contains(QStringLiteral("failed"), Qt::CaseInsensitive) ||
+                line.contains(QStringLiteral("VUID-")))
+                Log(QStringLiteral("[게임] %1").arg(line), true);
+        }
+        process->setProperty("outputBuffer", buffer);
+    };
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process, consume] {
+        if (playerProcess_ == process)
+            consume(false);
     });
     connect(playerProcess_, &QProcess::finished, this,
-            [this](int exitCode, QProcess::ExitStatus status) {
+            [this, process, scenePath, consume](int exitCode, QProcess::ExitStatus status) {
+                if (playerProcess_ != process)
+                    return;
+                consume(true);
                 if (status == QProcess::CrashExit)
                     Log(QStringLiteral("게임 창이 비정상 종료되었습니다."), true);
                 else if (exitCode != 0)
                     Log(QStringLiteral("게임 창이 오류 코드 %1로 종료되었습니다.").arg(exitCode),
                         true);
-                else
-                    Log(QStringLiteral("게임 창을 닫았습니다."));
-                playerProcess_->deleteLater();
+                process->deleteLater();
                 playerProcess_ = nullptr;
-                QFile::remove(playerScenePath_);
+                QFile::remove(scenePath);
+                playerScenePath_.clear();
             });
-    connect(playerProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart)
-            Log(QStringLiteral("LuxPlayer를 시작하지 못했습니다."), true);
-    });
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process, scenePath](QProcess::ProcessError error) {
+                if (playerProcess_ != process)
+                    return;
+                if (error == QProcess::FailedToStart) {
+                    Log(QStringLiteral("LuxPlayer를 시작하지 못했습니다."), true);
+                    playerProcess_ = nullptr;
+                    process->deleteLater();
+                    QFile::remove(scenePath);
+                    playerScenePath_.clear();
+                }
+            });
     playerProcess_->setWorkingDirectory(QFileInfo(executable).absolutePath());
     playerProcess_->start(executable, arguments);
-    Log(QStringLiteral("현재 장면을 별도 창에서 실행합니다. (Esc 닫기, R 다시 불러오기)"));
 }
 
 void EditorWindow::StopSceneWindow() {
@@ -88,5 +131,6 @@ void EditorWindow::StopSceneWindow() {
     }
     process->deleteLater();
     QFile::remove(playerScenePath_);
+    playerScenePath_.clear();
 }
 } // namespace LuxEditor
