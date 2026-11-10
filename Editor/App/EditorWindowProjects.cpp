@@ -85,17 +85,15 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file,
             validation.Deserialize(PathUtf8(opened->GetAutosaveFile(preferredScene))))
             sceneFile = preferredScene;
     }
-    const auto previousTab = document_.GetActiveTabId();
-    const auto newTab = document_.NewTab();
-    const auto result = LoadSceneDocument(sceneFile, &*opened);
+    EditorDocument candidate;
+    const auto result = LoadSceneDocument(sceneFile, &*opened, &candidate);
     if (result == SceneOpenResult::Cancelled || result == SceneOpenResult::Failed) {
-        document_.CloseTab(newTab, true);
-        document_.ActivateTab(previousTab);
         if (result == SceneOpenResult::Failed)
             ShowError(QStringLiteral("프로젝트 열기 실패"),
                       QStringLiteral("시작 씬을 열 수 없습니다."));
         return;
     }
+    document_ = std::move(candidate);
     ResetSceneWorkspace();
     project_ = std::move(opened);
     sceneProjects_[document_.GetActiveTabId()] = project_;
@@ -158,12 +156,13 @@ void EditorWindow::ApplyProjectPreferences() {
     else
         setWindowIcon(QIcon());
 }
-EditorWindow::SceneOpenResult
-EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
-                                const EditorProject* recoveryProject) {
-    if (document_.Open(PathUtf8(file))) {
-        if (!document_.GetLoadWarning().empty())
-            Log(Q(document_.GetLoadWarning()), true);
+EditorWindow::SceneOpenResult EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
+                                                              const EditorProject* recoveryProject,
+                                                              EditorDocument* destination) {
+    auto& target = destination ? *destination : document_;
+    if (target.Open(PathUtf8(file))) {
+        if (!target.GetLoadWarning().empty())
+            Log(Q(target.GetLoadWarning()), true);
         return SceneOpenResult::Opened;
     }
     if (!recoveryProject)
@@ -178,8 +177,8 @@ EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
         QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
     if (answer != QMessageBox::Yes)
         return SceneOpenResult::Cancelled;
-    return document_.Recover(PathUtf8(file), PathUtf8(autosave)) ? SceneOpenResult::Recovered
-                                                                 : SceneOpenResult::Failed;
+    return target.Recover(PathUtf8(file), PathUtf8(autosave)) ? SceneOpenResult::Recovered
+                                                              : SceneOpenResult::Failed;
 }
 
 bool EditorWindow::OpenProjectScene(const std::filesystem::path& file) {
@@ -418,15 +417,13 @@ void EditorWindow::RestoreCurrentProject() {
         return;
     }
     auto restored = EditorProject::Open(projectFile, error);
-    const auto previousTab = document_.GetActiveTabId();
-    const auto newTab = document_.NewTab();
-    if (!restored || !document_.Open(PathUtf8(restored->GetSceneFile()))) {
-        document_.CloseTab(newTab, true);
-        document_.ActivateTab(previousTab);
+    EditorDocument candidate;
+    if (!restored || !candidate.Open(PathUtf8(restored->GetSceneFile()))) {
         ShowError(QStringLiteral("프로젝트 백업 복구 실패"),
-                  error.empty() ? QStringLiteral("복구한 프로젝트를 열 수 없습니다.") : Q(error));
+                  error.empty() ? Q(candidate.GetLastError()) : Q(error));
         return;
     }
+    document_ = std::move(candidate);
     ResetSceneWorkspace();
     project_ = std::move(restored);
     sceneProjects_[document_.GetActiveTabId()] = project_;

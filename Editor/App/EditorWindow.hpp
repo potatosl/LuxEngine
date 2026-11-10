@@ -125,7 +125,8 @@ private:
     void ApplyProjectPreferences();
     enum class SceneOpenResult { Opened, Recovered, Cancelled, Failed };
     SceneOpenResult LoadSceneDocument(const std::filesystem::path& file,
-                                      const EditorProject* recoveryProject);
+                                      const EditorProject* recoveryProject,
+                                      EditorDocument* destination = nullptr);
     bool OpenProjectScene(const std::filesystem::path& file);
     void RecoverAutosaveIfNeeded();
     void AutoSaveScene();
