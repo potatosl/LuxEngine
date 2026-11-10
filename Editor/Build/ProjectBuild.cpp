@@ -445,6 +445,19 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
         error = "배포 폴더 이름이 올바르지 않습니다.";
         return std::nullopt;
     }
+    std::error_code pathError;
+    const auto outputPath = fs::weakly_canonical(archive, pathError);
+    if (pathError) {
+        error = "배포 파일 경로를 확인할 수 없습니다: " + pathError.message();
+        return std::nullopt;
+    }
+    const auto executablePath = fs::weakly_canonical(executable, pathError);
+    std::error_code equivalentError;
+    if (pathError || outputPath == executablePath ||
+        fs::equivalent(archive, executable, equivalentError)) {
+        error = "배포 ZIP으로 실행 파일을 덮어쓸 수 없습니다.";
+        return std::nullopt;
+    }
     const fs::path root = executable.parent_path();
     std::vector<std::pair<fs::path, fs::path>> files; // absolute, relative
     uint64_t total = 0;
@@ -454,6 +467,12 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
          end;
          !ec && it != end; it.increment(ec)) {
         const fs::path relative = it->path().lexically_relative(root);
+        const auto inputPath = fs::weakly_canonical(it->path(), ec);
+        if (ec)
+            break;
+        std::error_code aliasError;
+        if (inputPath == outputPath || fs::equivalent(it->path(), archive, aliasError))
+            continue;
         if (SkipInPackage(relative)) {
             if (it->is_directory(ec))
                 it.disable_recursion_pending();

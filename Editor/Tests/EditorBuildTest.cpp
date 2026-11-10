@@ -317,6 +317,23 @@ void TestPackage() {
 
     Check(CreateDistributionArchive(out / exe, archive, "MyGame", error) && fs::exists(archive),
           "archive can be replaced");
+    const auto inFolder = out / "release.zip";
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        const auto spelling = iteration == 1 ? out / "Scenes" / ".." / "release.zip" : inFolder;
+        auto packaged = CreateDistributionArchive(out / exe, spelling, "MyGame", error);
+        Check(packaged && packaged->fileCount == 5, "package excludes its previous output");
+        zip_t* nested = zip_open(PathUtf8(inFolder).c_str(), ZIP_RDONLY, &zipError);
+        Check(nested && zip_name_locate(nested, "MyGame/release.zip", 0) < 0,
+              "repeated packaging never nests the previous archive");
+        zip_close(nested);
+    }
+#ifdef _WIN32
+    auto mixedCase = CreateDistributionArchive(out / exe, out / "RELEASE.ZIP", "MyGame", error);
+    Check(mixedCase && mixedCase->fileCount == 5,
+          "output exclusion respects case-insensitive paths");
+#endif
+    Check(!CreateDistributionArchive(out / exe, out / exe, "MyGame", error),
+          "packaging cannot overwrite its executable");
     bool leftover = false;
     for (const auto& entry : fs::directory_iterator(files.path / "dist"))
         leftover = leftover || entry.path().filename().string().find(".tmp-") != std::string::npos;
