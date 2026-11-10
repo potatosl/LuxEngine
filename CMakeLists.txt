@@ -41,10 +41,10 @@ endif()
 
 # Fallback mapping for imported targets (e.g. Box2D) that only provide Debug and/or Release builds,
 # preventing Visual Studio multi-config generators from failing on RelWithDebInfo or MinSizeRel.
-set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release Debug "")
-set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL Release Debug "")
-set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE Release Debug "")
-set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Debug Release "")
+set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;MinSizeRel;Debug;NOCONFIG;")
+set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;RelWithDebInfo;Debug;NOCONFIG;")
+set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo;MinSizeRel;Debug;NOCONFIG;")
+set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;MinSizeRel;NOCONFIG;")
 
 # -------------------------------------------------------------
 # Include Custom CMake Modules

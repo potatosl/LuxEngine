@@ -3,10 +3,10 @@ find_package(SDL3 3.2 CONFIG REQUIRED)
 find_package(box2d 2.4...<3 CONFIG REQUIRED)
 if(TARGET box2d::box2d)
     set_target_properties(box2d::box2d PROPERTIES
-        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"
-        MAP_IMPORTED_CONFIG_MINSIZEREL "Release;Debug"
-        MAP_IMPORTED_CONFIG_RELEASE "Release;Debug"
-        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release"
+        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo;Debug;NOCONFIG;"
+        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;NOCONFIG;"
     )
 endif()
 find_package(Vulkan 1.1 REQUIRED)

@@ -1,6 +1,7 @@
 #include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
+#include <cstring>
 #include <SDL3/SDL.h>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
