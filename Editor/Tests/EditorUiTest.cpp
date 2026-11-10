@@ -521,7 +521,8 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     window.show();
     app.processEvents();
 
-    Check(window.findChildren<QDockWidget*>().size() == 8, "eight dock panels are available");
+    Check(window.findChildren<QDockWidget*>().size() == 9,
+          "nine dock panels include the animation workspace");
     auto* tabs = window.findChild<QTabWidget*>();
     Check(tabs && tabs->count() == 2, "2D and 3D workspaces exist");
     const QByteArray state = window.saveState(1);

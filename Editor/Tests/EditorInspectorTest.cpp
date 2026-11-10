@@ -2,6 +2,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QGroupBox>
 #include <QListWidget>
@@ -164,7 +165,8 @@ void TestFields(QApplication& app, const QString& directory) {
           "changing body type also preserves negative gravity");
 
     QCheckBox* loop = nullptr;
-    for (auto* checkbox : Group(window, "TRANSFORM ANIMATION")->findChildren<QCheckBox*>())
+    for (auto* checkbox : window.findChild<QDockWidget*>(QStringLiteral("AnimationWorkspace"))
+                              ->findChildren<QCheckBox*>())
         if (checkbox->text() == QStringLiteral("반복 재생"))
             loop = checkbox;
     Check(loop != nullptr, "animation loop control exists");

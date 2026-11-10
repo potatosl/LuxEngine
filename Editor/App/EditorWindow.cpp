@@ -174,6 +174,7 @@ EditorWindow::EditorWindow(QWidget* parent)
     RefreshAll();
 }
 EditorWindow::~EditorWindow() {
+    StopAnimationPlayback();
     autosaveTimer_.stop();
     previewTimer_.stop();
     sceneLoadTimer_.stop();
@@ -261,6 +262,7 @@ void EditorWindow::BuildMenus() {
     add(edit, QStringLiteral("선택 삭제"), QStringLiteral("deleteEntity"), QKeySequence::Delete,
         [this] { DeleteEntity(); });
     QMenu* view = menuBar()->addMenu(QStringLiteral("보기"));
+    view->addAction(animationDock_->toggleViewAction());
     snapAction_ = view->addAction(QStringLiteral("격자에 맞춤"));
     snapAction_->setCheckable(true);
     snapAction_->setChecked(true);
@@ -754,6 +756,10 @@ void EditorWindow::RefreshInspector() {
     LuxEngine::Entity selected = document_.GetSelected();
     selectionLabel_->setText(selected ? QStringLiteral("엔티티 #%1").arg(selected.GetId())
                                       : QStringLiteral("선택된 엔티티 없음"));
+    animationPanel_->setEnabled(
+        selected && selected.HasComponent<LuxEngine::TransformComponent>() && !previewActive_);
+    animationTarget_->setText(selected ? QStringLiteral("대상 · 엔티티 #%1").arg(selected.GetId())
+                                       : QStringLiteral("대상 없음"));
     inspectorBody_->setEnabled(static_cast<bool>(selected) && !previewActive_);
     const auto* reference =
         selected ? selected.TryGetComponent<LuxEngine::SceneReferenceComponent>() : nullptr;
@@ -852,6 +858,10 @@ void EditorWindow::RefreshInspector() {
         const LuxEngine::AnimationComponent animation =
             animated ? selected.GetComponent<LuxEngine::AnimationComponent>()
                      : LuxEngine::AnimationComponent{};
+        animationName_->setEnabled(animated);
+        animationTime_->setEnabled(animated);
+        animationName_->setText(QString::fromUtf8(animation.clip.name));
+        animationTime_->setValue(animation.currentTime);
         animationLoop_->setChecked(animation.clip.loop);
         animationDuration_->setValue(animation.clip.duration);
         animationTimeline_->setValue(
@@ -891,6 +901,7 @@ void EditorWindow::UpdateChrome() {
             action->setEnabled(project_.has_value());
 }
 void EditorWindow::SelectEntity(std::optional<LuxEngine::uint32> id, bool syncHierarchy) {
+    StopAnimationPlayback();
     document_.Select(id);
     if (syncHierarchy)
         RefreshHierarchy();
@@ -1134,104 +1145,6 @@ void EditorWindow::OnPhysicsChanged(const QWidget* field) {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
-void EditorWindow::OnAnimationChanged(const QWidget* field) {
-    if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
-        return;
-    RecordEdit(QStringLiteral("애니메이션 변경"), [this, field] {
-        LuxEngine::Entity entity = document_.GetSelected();
-        if (field == animationEnabled_) {
-            if (animationEnabled_->isChecked() &&
-                !entity.HasComponent<LuxEngine::AnimationComponent>()) {
-                auto& animation = entity.AddComponent<LuxEngine::AnimationComponent>();
-                animation.clip.name = "Transform";
-                const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
-                animation.clip.AddKeyframe(
-                    {0, transform.position, transform.rotation, transform.scale});
-            } else if (!animationEnabled_->isChecked() &&
-                       entity.HasComponent<LuxEngine::AnimationComponent>())
-                entity.RemoveComponent<LuxEngine::AnimationComponent>();
-        } else if (entity.HasComponent<LuxEngine::AnimationComponent>()) {
-            auto& clip = entity.GetComponent<LuxEngine::AnimationComponent>().clip;
-            if (field == animationLoop_)
-                clip.loop = animationLoop_->isChecked();
-            else if (field == animationDuration_) {
-                clip.duration = static_cast<float>(animationDuration_->value());
-                if (!clip.keyframes.empty())
-                    clip.duration = std::max(clip.duration, clip.keyframes.back().time);
-            }
-        }
-        document_.MarkDirty();
-    });
-    RefreshInspector();
-    UpdateChrome();
-}
-void EditorWindow::AddKeyframe() {
-    if (previewActive_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>() ||
-        !document_.GetSelected().HasComponent<LuxEngine::AnimationComponent>())
-        return;
-    RecordEdit(QStringLiteral("애니메이션 키 추가"), [this] {
-        LuxEngine::Entity entity = document_.GetSelected();
-        auto& animation = entity.GetComponent<LuxEngine::AnimationComponent>();
-        const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
-        const float time = animation.clip.duration * animationTimeline_->value() / 1000.0f;
-        animation.clip.AddKeyframe({time, transform.position, transform.rotation, transform.scale});
-        document_.MarkDirty();
-    });
-    RefreshInspector();
-    UpdateChrome();
-}
-void EditorWindow::RemoveKeyframe() {
-    if (previewActive_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<LuxEngine::AnimationComponent>())
-        return;
-    const int row = keyframeList_->currentRow();
-    if (row < 0)
-        return;
-    RecordEdit(QStringLiteral("애니메이션 키 삭제"), [this, row] {
-        auto& keys =
-            document_.GetSelected().GetComponent<LuxEngine::AnimationComponent>().clip.keyframes;
-        if (static_cast<size_t>(row) < keys.size())
-            keys.erase(keys.begin() + row);
-        document_.MarkDirty();
-    });
-    RefreshInspector();
-    UpdateChrome();
-}
-void EditorWindow::ScrubAnimation(int value) {
-    if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
-        !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>() ||
-        !document_.GetSelected().HasComponent<LuxEngine::AnimationComponent>())
-        return;
-    auto& animation = document_.GetSelected().GetComponent<LuxEngine::AnimationComponent>();
-    animation.currentTime = animation.clip.duration * value / 1000.0f;
-    if (!animation.clip.keyframes.empty())
-        document_.GetSelected().GetComponent<LuxEngine::TransformComponent>() =
-            animation.clip.Sample(animation.currentTime);
-    document_.MarkDirty();
-    canvas_->RefreshScene();
-    canvas3D_->RefreshScene();
-    overviewCanvas_->RefreshScene();
-    UpdateChrome();
-}
-void EditorWindow::EndTimelineEdit() {
-    if (timelineBefore_.isEmpty())
-        return;
-    const auto after = SnapshotScene();
-    if (!timelineBefore_.isEmpty() && !after.isEmpty() && timelineBefore_ != after) {
-        const auto before = timelineBefore_;
-        const auto id = SelectedId(document_);
-        const auto tab = document_.GetActiveTabId();
-        PushSceneCommand(new SceneEditCommand(
-            QStringLiteral("애니메이션 시간 이동"),
-            [this, tab, before, id] { RestoreSceneAt(tab, before, id); },
-            [this, tab, after, id] { RestoreSceneAt(tab, after, id); }, {tab},
-            SceneHistoryBytes(before) + SceneHistoryBytes(after)));
-        UpdateSceneDirty(tab, after);
-    }
-    timelineBefore_.clear();
-}
 void EditorWindow::StartPreview() {
     // 개발 중: 전체 게임 런타임 임베딩 대신 엔진 Scene의 물리·애니메이션만 실행합니다.
     if (previewActive_)
@@ -1264,6 +1177,7 @@ void EditorWindow::StartPreview() {
     Log(QStringLiteral("장면 미리보기를 시작했습니다."));
 }
 void EditorWindow::StopPreview() {
+    StopAnimationPlayback();
     if (!previewActive_)
         return;
     previewTimer_.stop();

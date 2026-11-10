@@ -299,6 +299,8 @@ void TestPicking2D(QApplication& app, bool gpu = false) {
         const QColor visible = image.pixelColor(point);
         Check(equalZ ? visible.blue() > 240 : visible.red() > 240,
               "overlap fixture displays the expected front sprite");
+        Check(image.pixelColor(QPoint(320, 240)) == image.pixelColor(QPoint(325, 245)),
+              "opaque sprite hides the origin grid and its neighboring lines");
         if (gpu) {
             QImage engineImage;
             Check(renderer->Render(document.GetScene(), 640, 480,

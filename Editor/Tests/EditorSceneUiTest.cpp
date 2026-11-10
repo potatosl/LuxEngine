@@ -7,9 +7,11 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QDialog>
 #include <QDir>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -18,11 +20,15 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QSettings>
 #include <QTabBar>
 #include <QTemporaryDir>
@@ -374,6 +380,41 @@ void Drag(QWidget& view, QPointF start, QPointF end) {
     QApplication::sendEvent(&view, &release);
 }
 void ViewportAffinePicking() {
+    {
+        EditorDocument dragDocument;
+        auto object = dragDocument.CreateEntity("Move directly");
+        object.AddComponent<MeshRendererComponent>();
+        int transactions = 0;
+        SceneViewport3D dragView(
+            nullptr, dragDocument, [&](auto id) { dragDocument.Select(id); },
+            [&](uint32 id, const TransformComponent& transform) {
+                Check(dragDocument.GetScene().SetWorldTransform(id, transform),
+                      "world drag applies");
+            },
+            [&] { ++transactions; }, [&] { --transactions; });
+        dragView.resize(800, 600);
+        dragView.show();
+        Pump();
+        const auto camera = MakeViewportCamera3D(dragView.size(), {}, .65, -.48, 22);
+        const auto start = *ProjectViewportPoint(camera, dragView.size(), {});
+        const auto finish = start + QPointF(32, 18);
+        QMouseEvent press(QEvent::MouseButtonPress, start, dragView.mapToGlobal(start.toPoint()),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, finish, dragView.mapToGlobal(finish.toPoint()),
+                         Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, finish,
+                            dragView.mapToGlobal(finish.toPoint()), Qt::LeftButton, Qt::NoButton,
+                            Qt::NoModifier);
+        QApplication::sendEvent(&dragView, &press);
+        QApplication::sendEvent(&dragView, &move);
+        QApplication::sendEvent(&dragView, &release);
+        const auto world = dragDocument.GetScene().GetWorldTransform(object.GetId());
+        const auto projected = ProjectViewportPoint(camera, dragView.size(), world.position);
+        Check(projected &&
+                  std::hypot(projected->x() - finish.x(), projected->y() - finish.y()) < .1 &&
+                  transactions == 0,
+              "default selection drags a 3D object with the pointer on the ground plane");
+    }
     EditorDocument document;
     auto parent = document.CreateEntity("비균일 부모");
     auto& parentTransform = parent.GetComponent<TransformComponent>();
@@ -429,7 +470,8 @@ void ViewportAffinePicking() {
     Click(view, *screen);
     Check(document.GetSelected() && document.GetSelected().GetId() == child.GetId(),
           "default viewport camera and affine picking select the visible sheared child");
-    view.SetTool(EditorTool::Move);
+    begin = end = edits = 0;
+    view.SetTool(EditorTool::Select);
     QMouseEvent press(QEvent::MouseButtonPress, *screen, view.mapToGlobal(screen->toPoint()),
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(&view, &press);
@@ -485,7 +527,7 @@ void ViewportWorldEditing() {
     const auto local = child.GetComponent<TransformComponent>();
     Click(viewport, screen(initial.position));
     Check(document.GetSelected() == child, "world-space picking hits the transformed child");
-    viewport.SetTool(EditorTool::Move);
+    viewport.SetTool(EditorTool::Select);
     Drag(viewport, screen(initial.position), screen(initial.position) + QPointF(72, -36));
     const auto moved = scene.GetWorldTransform(child.GetId());
     Check(validMovement && movements > 0 && balance == 0 &&
@@ -525,6 +567,50 @@ void ViewportWorldEditing() {
     Click(viewport, cellCenter(.75f, .25f));
     Check(paints == 3 && map.Get(1, 0) == 0 && map.Get(2, 1) == 2 && balance == 0,
           "eraser uses the same inverse-world coordinates and completes its transaction");
+}
+
+void AnimationWorkspace() {
+    Fixture fixture;
+    auto& window = *fixture.window;
+    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("AnimationWorkspace"));
+    auto* enabled = window.findChild<QCheckBox*>(QStringLiteral("editorAnimation"));
+    Check(dock && enabled && dock->isAncestorOf(enabled),
+          "animation controls belong to their own dock");
+    auto entity = window.GetDocument().CreateEntity("Animated");
+    window.ExecuteRecordedEdit(QStringLiteral("select"),
+                               [&] { window.GetDocument().Select(entity.GetId()); });
+    enabled->setChecked(true);
+    Check(window.GetDocument().GetSelected().HasComponent<AnimationComponent>(),
+          "workspace adds animation to the selected target");
+    auto* clip = window.findChild<QLineEdit*>(QStringLiteral("animationClipName"));
+    clip->setText(QStringLiteral("Walk"));
+    QMetaObject::invokeMethod(clip, "editingFinished", Qt::DirectConnection);
+    Check(window.GetDocument().GetSelected().GetComponent<AnimationComponent>().clip.name == "Walk",
+          "clip rename updates engine data");
+    window.GetDocument().GetSelected().GetComponent<AnimationComponent>().clip.duration = 120;
+    window.findChild<QPushButton*>(QStringLiteral("animationNextFrame"))->click();
+    Check(window.GetDocument().GetSelected().GetComponent<AnimationComponent>().currentTime > 0,
+          "frame step advances animation time");
+    Check(Near(window.GetDocument().GetSelected().GetComponent<AnimationComponent>().currentTime,
+               1.0f / 30),
+          "frame stepping keeps sub-slider precision on long clips");
+    window.findChild<QPushButton*>(QStringLiteral("animationPlay"))->click();
+    Pump(80);
+    window.findChild<QPushButton*>(QStringLiteral("animationStop"))->click();
+    Check(window.GetDocument().GetSelected().GetComponent<AnimationComponent>().currentTime == 0,
+          "stop returns to the beginning");
+    auto* keys = window.findChild<QListWidget*>(QStringLiteral("animationKeys"));
+    keys->setCurrentRow(0);
+    QKeyEvent shortcut(QEvent::ShortcutOverride, Qt::Key_Delete, Qt::NoModifier);
+    QKeyEvent erase(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+    QApplication::sendEvent(keys, &shortcut);
+    QApplication::sendEvent(keys, &erase);
+    Check(shortcut.isAccepted() && window.GetDocument().GetSelected() &&
+              window.GetDocument()
+                  .GetSelected()
+                  .GetComponent<AnimationComponent>()
+                  .clip.keyframes.empty(),
+          "Delete in the key list removes a key while preserving its scene object");
 }
 
 void AsyncAndDuplicateOpen() {
@@ -861,6 +947,9 @@ void CaptureEditor(const QString& destination) {
     tree->expandAll();
     tree->setCurrentItem(Find(*tree, selected));
     Action(window, "view3D")->trigger();
+    auto* animationEnabled = window.findChild<QCheckBox*>(QStringLiteral("editorAnimation"));
+    animationEnabled->setChecked(true);
+    window.findChild<QDockWidget*>(QStringLiteral("AnimationWorkspace"))->raise();
     Pump(80);
     Check(QDir().mkpath(QFileInfo(destination).absolutePath()) &&
               window.grab().save(destination, "PNG"),
@@ -896,8 +985,9 @@ int main(int argc, char** argv) {
         }
         const std::string_view suite = argc > 1 ? argv[1] : "all";
         bool found = suite == "all";
-        for (const auto& [name, run] : std::array<std::pair<std::string_view, void (*)()>, 11>{
-                 {{"tabs", TabsAndGlobalUndo},
+        for (const auto& [name, run] : std::array<std::pair<std::string_view, void (*)()>, 12>{
+                 {{"animation-workspace", AnimationWorkspace},
+                  {"tabs", TabsAndGlobalUndo},
                   {"move", CrossSceneMove},
                   {"hierarchy", HierarchyActions},
                   {"clipboard", GroupClipboard},
