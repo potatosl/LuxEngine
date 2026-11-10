@@ -86,7 +86,8 @@ private:
     void AutoSaveScene();
     void NewProject();
     void OpenProjectDialog();
-    void OpenProjectFile(const std::filesystem::path& file);
+    void OpenProjectFile(const std::filesystem::path& file,
+                         const std::filesystem::path& preferredScene = {});
     void EditProjectSettings();
     void CloneCurrentProject();
     void ImportProjectDialog();

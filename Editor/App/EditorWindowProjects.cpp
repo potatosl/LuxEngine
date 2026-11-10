@@ -58,7 +58,8 @@ void EditorWindow::OpenProjectDialog() {
     if (!file.isEmpty())
         OpenProjectFile(PathFromUtf8(Utf8(file)));
 }
-void EditorWindow::OpenProjectFile(const std::filesystem::path& file) {
+void EditorWindow::OpenProjectFile(const std::filesystem::path& file,
+                                   const std::filesystem::path& preferredScene) {
     std::string error;
     auto opened = EditorProject::OpenForRecovery(file, error);
     if (!opened) {
@@ -69,7 +70,14 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file) {
     }
     if (!ConfirmDiscardChanges())
         return;
-    const auto result = LoadSceneDocument(opened->GetSceneFile(), &*opened);
+    auto sceneFile = opened->GetSceneFile();
+    if (!preferredScene.empty() && opened->ContainsScene(preferredScene)) {
+        LuxEngine::Scene validation;
+        if (validation.Deserialize(PathUtf8(preferredScene)) ||
+            validation.Deserialize(PathUtf8(opened->GetAutosaveFile(preferredScene))))
+            sceneFile = preferredScene;
+    }
+    const auto result = LoadSceneDocument(sceneFile, &*opened);
     if (result == SceneOpenResult::Cancelled)
         return;
     if (result == SceneOpenResult::Failed) {

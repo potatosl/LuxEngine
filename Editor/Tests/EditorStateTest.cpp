@@ -245,6 +245,84 @@ void TestBrokenSceneRecovery(QApplication& app) {
     std::ofstream(autosave, std::ios::trunc) << "corrupt autosave";
     Check(!EditorProject::OpenForRecovery(fixture.project.GetFile(), error),
           "two broken scene copies are rejected");
+
+    ProjectFixture original;
+    auto window = original.Open(app);
+    window->ExecuteRecordedEdit("Existing unsaved work",
+                                [&] { window->GetDocument().CreateEntity("Keep this edit"); });
+    std::string before;
+    Check(window->GetDocument().GetScene().SerializeToString(before),
+          "existing scene snapshot saves");
+    auto* history = window->findChild<QUndoStack*>();
+    const int historyIndex = history->index();
+    LuxEngine::Scene candidate;
+    candidate.CreateEntity("Recovery candidate");
+    Check(original.project.SaveAutosave(original.secondary, candidate, error), error.c_str());
+    std::ofstream(original.secondary, std::ios::trunc) << "broken secondary";
+    QTimer cancel;
+    QObject::connect(&cancel, &QTimer::timeout, &app, [] {
+        if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            if (auto* no = message->button(QMessageBox::No))
+                no->click();
+            else
+                message->button(QMessageBox::Cancel)->click();
+        }
+    });
+    cancel.start(5);
+    DropScene(*window, original.secondary);
+    cancel.stop();
+    std::string after;
+    Check(window->GetDocument().GetScene().SerializeToString(after) && before == after &&
+              history->index() == historyIndex && window->GetDocument().IsDirty() &&
+              PathFromUtf8(window->GetDocument().GetPath()) == original.project.GetSceneFile() &&
+              window->findChild<QAction*>("projectSettings")->isEnabled(),
+          "cancelling recovery preserves the prior document, unsaved edits, history and project");
+}
+void TestSessionScene(QApplication& app) {
+    ProjectFixture fixture;
+    {
+        auto window = fixture.Open(app);
+        OpenViaMenu(*window, fixture.secondary);
+        Check(window->close(), "clean secondary scene window closes");
+        Check(QSettings().value("lastScene").toString() == Q(fixture.secondary),
+              "closing stores the current project scene");
+    }
+    {
+        EditorWindow restored;
+        Check(PathFromUtf8(restored.GetDocument().GetPath()) == fixture.secondary &&
+                  restored.findChild<QAction*>("projectSettings")->isEnabled(),
+              "startup restores both the project and its last edited scene");
+    }
+    const auto missing = fixture.secondary.parent_path() / "Missing.lux";
+    const auto corrupt = fixture.secondary.parent_path() / "Corrupt.lux";
+    std::ofstream(corrupt) << "invalid scene";
+    for (const auto& candidate : {missing, corrupt, fixture.external}) {
+        QSettings().setValue("lastProject", Q(fixture.project.GetFile()));
+        QSettings().setValue("lastScene", Q(candidate));
+        EditorWindow restored;
+        Check(PathFromUtf8(restored.GetDocument().GetPath()) == fixture.project.GetSceneFile(),
+              "missing, damaged and external last scenes fall back to the start scene");
+    }
+    // A deleted last scene can still have a valid recovery candidate.
+    const auto deleted = fixture.secondary.parent_path() / "Deleted.lux";
+    LuxEngine::Scene recovered;
+    recovered.CreateEntity("Recovered secondary");
+    std::string error;
+    Check(fixture.project.SaveAutosave(deleted, recovered, error), error.c_str());
+    QSettings().setValue("lastProject", Q(fixture.project.GetFile()));
+    QSettings().setValue("lastScene", Q(deleted));
+    QTimer answer;
+    QObject::connect(&answer, &QTimer::timeout, &app, [] {
+        if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+            message->button(QMessageBox::Yes)->click();
+    });
+    answer.start(5);
+    EditorWindow restored;
+    answer.stop();
+    Check(PathFromUtf8(restored.GetDocument().GetPath()) == deleted &&
+              restored.GetDocument().IsDirty() &&
+              restored.GetDocument().GetScene().GetEntityCount() == 1,
+          "last edited scene recovery preserves project context and the unsaved baseline");
 }
 } // namespace
 int main(int argc, char** argv) {
@@ -265,6 +343,8 @@ int main(int argc, char** argv) {
             TestRecoveryHistory(app);
         else if (mode == "broken-scene-recovery")
             TestBrokenSceneRecovery(app);
+        else if (mode == "session-scene")
+            TestSessionScene(app);
         else
             throw std::runtime_error("Unknown editor state test mode");
         std::cout << "Editor state checks passed: " << mode << '\n';

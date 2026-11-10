@@ -120,7 +120,8 @@ EditorWindow::EditorWindow(QWidget* parent)
     const auto previous =
         PathFromUtf8(Utf8(settings.value(QStringLiteral("lastProject")).toString()));
     if (!previous.empty() && std::filesystem::is_regular_file(previous))
-        OpenProjectFile(previous);
+        OpenProjectFile(previous,
+                        PathFromUtf8(Utf8(settings.value(QStringLiteral("lastScene")).toString())));
     else {
         const std::string scene = Utf8(settings.value(QStringLiteral("lastScene")).toString());
         if (!scene.empty() && std::filesystem::is_regular_file(PathFromUtf8(scene)))
