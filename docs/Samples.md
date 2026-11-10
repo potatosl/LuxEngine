@@ -1,6 +1,6 @@
 # 엔진 샘플
 
-`samples/`의 각 폴더는 LuxEngine을 프레임워크로 사용하는 독립 실행 파일이다. 기존 `Sandbox/`와 Demo는 제거했다. 에디터를 빌드하지 않아도 샘플을 실행할 수 있다.
+`samples/`에는 LuxEngine을 프레임워크로 사용하는 독립 실행 파일과 런타임용 씬 데이터를 둔다. 기존 `Sandbox/`와 Demo는 제거했다. 에디터를 빌드하지 않아도 샘플을 실행할 수 있다.
 
 | 경로 | 빌드 타깃 | 확인할 기능 |
 | --- | --- | --- |
@@ -8,6 +8,7 @@
 | `samples/Physics2D/` | `SamplePhysics2D` | Box2D 동적 상자, 정적 지형, 회전과 충돌 |
 | `samples/InputBindings/` | `SampleInputBindings` | `LuxKey`, 키보드·마우스·게임패드 액션, 실행 중 키 변경 |
 | `samples/ForestSurvivor/` | `SampleForestSurvivor` | 자동 전투, 경험치, 강화 선택, 보스, 승패와 재시작 |
+| `samples/ScenePlayer/` | `LuxPlayer`에 씬 경로 전달 | 직렬화된 씬 파일을 별도 런타임에서 실행 |
 | `samples/Common/` | `LuxSampleSupport` | 앞의 세 교육용 샘플이 공유하는 실행·이미지·폰트·캡처 코드 |
 | `samples/Assets/` | `LuxSampleAssets` | 검증한 CC0 원본 에셋, 라이선스와 해시 목록 |
 
@@ -22,6 +23,8 @@ cmake --build build --target SampleForestSurvivor
 ```
 
 Visual Studio 같은 다중 구성 생성기는 `cmake --build build --config Debug --target SampleForestSurvivor`로 빌드하고 `build/bin/Debug/`의 실행 파일을 연다. 실행 파일 옆의 `assets/`와 `shaders/`를 함께 유지한다.
+
+씬 파일만 실행하는 런타임 샘플은 `./build/bin/LuxPlayer samples/ScenePlayer/Scene.lux`로 연다. 런타임 단독 배포에도 이 파일을 `scenes/ScenePlayer.lux`로 포함한다. 씬의 텍스처 참조 직렬화는 아직 개발 중이므로 이 검증용 씬은 엔진의 색상 도형을 사용한다.
 
 서바이벌 게임의 일반 실행은 타이틀 화면에서 기다린다. **게임 시작 버튼을 마우스로 눌러야 시작한다.** Enter, Space, Esc 또는 화면의 빈 곳을 눌러도 시작하지 않는다. 메뉴 버튼은 누른 곳과 뗀 곳이 같은 버튼일 때 실행한다. 일시정지·계속·재시작·종료와 강화 선택에도 화면 버튼이 있다.
 
