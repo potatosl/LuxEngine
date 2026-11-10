@@ -578,6 +578,29 @@ void AsyncAndDuplicateOpen() {
           "late duplicate completion cannot reset the clean baseline to an edited snapshot");
     Check(Data(*document.GetScene(b)) == bDirty && document.IsDirty(b),
           "async completion and undo leave other dirty scenes unchanged");
+    const auto modalFile = fixture.Path("async-during-dialog.lux");
+    Check(third.Serialize(PathUtf8(modalFile)) && window.OpenSceneDocument(modalFile, true),
+          "background scene queues before a modal property or save dialog opens");
+    QDialog dialog(&window);
+    dialog.setModal(true);
+    dialog.show();
+    Wait([&] { return window.PendingSceneLoadCount() == 0; },
+         "asynchronous scene finishes while a modal dialog remains open");
+    Check(document.FindTabByPath(PathUtf8(modalFile)) && document.GetActiveTabId() == c &&
+              QApplication::activeModalWidget() == &dialog,
+          "async completion cannot redirect a modal edit or save onto another scene");
+    dialog.hide();
+    const auto duplicateFile = fixture.Path("async-duplicate-during-dialog.lux");
+    Check(third.Serialize(PathUtf8(duplicateFile)) &&
+              window.OpenSceneDocument(duplicateFile, true) &&
+              window.OpenSceneDocument(duplicateFile) && window.SwitchSceneDocument(c, false),
+          "queued scene already has a tab before the original document's dialog opens");
+    dialog.show();
+    Wait([&] { return window.PendingSceneLoadCount() == 0; },
+         "late duplicate request completes while modal dialog remains open");
+    Check(document.GetActiveTabId() == c && QApplication::activeModalWidget() == &dialog,
+          "late duplicate completion also cannot redirect a modal edit or save");
+    dialog.hide();
 }
 
 void SettingsPrecisionAndHistoryBound() {

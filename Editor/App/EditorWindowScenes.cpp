@@ -7,6 +7,7 @@
 #include "Viewport/SceneViewport2D.hpp"
 #include "Viewport/SceneViewport3D.hpp"
 #include <QAction>
+#include <QApplication>
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -366,7 +367,7 @@ void EditorWindow::PollSceneLoads() {
         if (request.preload)
             continue;
         if (const auto existing = document_.FindTabByPath(PathUtf8(request.path))) {
-            if (document_.GetActiveTabId() == request.origin)
+            if (document_.GetActiveTabId() == request.origin && !QApplication::activeModalWidget())
                 SwitchSceneDocument(existing);
             continue;
         }
@@ -375,6 +376,7 @@ void EditorWindow::PollSceneLoads() {
         EndViewportEdit();
         sceneProjects_[document_.GetActiveTabId()] = project_;
         const auto previous = document_.GetActiveTabId();
+        const bool foreground = previous == request.origin && !QApplication::activeModalWidget();
         const auto id = document_.AdoptTab(PathUtf8(request.path), std::move(result.scene), false,
                                            std::move(warning));
         if (!id) {
@@ -386,7 +388,7 @@ void EditorWindow::PollSceneLoads() {
         if (!document_.GetLoadWarning().empty())
             Log(Q(document_.GetLoadWarning()), true);
         RememberSceneBaseline();
-        if (previous != request.origin) {
+        if (!foreground) {
             document_.ActivateTab(previous);
             project_ = sceneProjects_[previous];
         }
