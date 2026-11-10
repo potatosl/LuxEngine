@@ -357,8 +357,8 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
         return false;
 
     auto& s = *state_;
-    const auto background = scene.GetSettings().clearColor;
-    s.gpu.Clear(background.x, background.y, background.z, background.w);
+    // The widget draws the scene background and grid before compositing object pixels.
+    s.gpu.Clear(0, 0, 0, 0);
     const LuxEngine::OrthographicCamera camera(
         static_cast<float>(worldBounds.left()), static_cast<float>(worldBounds.right()),
         static_cast<float>(worldBounds.bottom()), static_cast<float>(worldBounds.top()));
@@ -385,7 +385,12 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
         error_ = QString::fromStdString(s.gpu.GetLastError());
         return false;
     }
-    return ReadbackToImage(output);
+    output.reinterpretAsFormat(QImage::Format_RGBA8888);
+    if (!ReadbackToImage(output))
+        return false;
+    // 2D alpha blending onto transparent black produces premultiplied color.
+    output.reinterpretAsFormat(QImage::Format_RGBA8888_Premultiplied);
+    return true;
 }
 
 bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
@@ -410,8 +415,8 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
         return false;
 
     auto& s = *state_;
-    const auto background = scene.GetSettings().clearColor;
-    s.gpu.Clear(background.x, background.y, background.z, background.w);
+    // The widget draws the scene background and grid before compositing object pixels.
+    s.gpu.Clear(0, 0, 0, 0);
 
     const auto camera = MakeViewportCamera3D(QSizeF(width, height), focus, yaw, pitch, distance);
 

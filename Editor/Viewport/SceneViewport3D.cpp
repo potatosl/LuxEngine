@@ -6,6 +6,7 @@
 #include <QFocusEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QWheelEvent>
 #include <algorithm>
 #include <array>
@@ -29,6 +30,30 @@ LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity) {
                LuxEngine::Mat4::Scale({width, height, .04f});
     }
     return world;
+}
+QPolygonF Outline(const std::vector<QPointF>& points) {
+    auto sorted = points;
+    std::sort(sorted.begin(), sorted.end(),
+              [](QPointF a, QPointF b) { return a.x() == b.x() ? a.y() < b.y() : a.x() < b.x(); });
+    if (sorted.size() < 3)
+        return QPolygonF();
+    const auto cross = [](QPointF a, QPointF b, QPointF c) {
+        return (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+    };
+    QPolygonF hull;
+    for (const auto p : sorted) {
+        while (hull.size() > 1 && cross(hull[hull.size() - 2], hull.last(), p) <= 0)
+            hull.removeLast();
+        hull << p;
+    }
+    const auto lower = hull.size();
+    for (auto it = sorted.rbegin() + 1; it != sorted.rend(); ++it) {
+        while (hull.size() > lower && cross(hull[hull.size() - 2], hull.last(), *it) <= 0)
+            hull.removeLast();
+        hull << *it;
+    }
+    hull.removeLast();
+    return hull;
 }
 LuxEngine::Vec3 TransformCorner(const LuxEngine::Mat4& model, LuxEngine::Vec3 point) {
     const auto& m = model.elements;
@@ -95,9 +120,6 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
     painter.fillRect(rect(), QColor::fromRgbF(color.x, color.y, color.z, color.w));
     painter.setRenderHint(QPainter::Antialiasing);
 
-    if (engineFrame_ && !cachedFrame_.isNull()) {
-        painter.drawImage(rect(), cachedFrame_);
-    }
     const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
     const auto project = [&](LuxEngine::Vec3 point) {
         return ProjectViewportPoint(camera, size(), point);
@@ -107,6 +129,31 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         color.setAlpha(gridAlpha);
         return color;
     };
+    painter.save();
+    if (!engineFrame_) {
+        QPainterPath visibleGrid;
+        visibleGrid.addRect(rect());
+        for (auto entity : document_.GetScene().GetEntities()) {
+            if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
+                !(entity.HasComponent<LuxEngine::MeshRendererComponent>() ||
+                  entity.HasComponent<LuxEngine::SpriteRendererComponent>() ||
+                  entity.HasComponent<LuxEngine::TilemapComponent>()))
+                continue;
+            std::vector<QPointF> points;
+            const auto model = BoundsModel(entity);
+            for (int corner = 0; corner < 8; ++corner) {
+                auto point = project(
+                    TransformCorner(model, {corner & 1 ? .5f : -.5f, corner & 2 ? .5f : -.5f,
+                                            corner & 4 ? .5f : -.5f}));
+                if (point)
+                    points.push_back(*point);
+            }
+            QPainterPath object;
+            object.addPolygon(Outline(points));
+            visibleGrid = visibleGrid.subtracted(object);
+        }
+        painter.setClipPath(visibleGrid);
+    }
     for (int unit = -20; unit <= 20; ++unit) {
         painter.setPen(QPen(line(unit == 0       ? QColor(95, 108, 124)
                                  : unit % 5 == 0 ? QColor(70, 81, 95)
@@ -121,6 +168,9 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         if (a && b)
             painter.drawLine(*a, *b);
     }
+    painter.restore();
+    if (engineFrame_ && !cachedFrame_.isNull())
+        painter.drawImage(rect(), cachedFrame_);
     const auto origin = project({0, 0, 0});
     for (const auto& [tip, color] :
          std::array<std::pair<LuxEngine::Vec3, QColor>, 3>{{{{2, 0, 0}, QColor(218, 97, 99)},
@@ -144,6 +194,8 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         const bool sprite = entity.HasComponent<LuxEngine::SpriteRendererComponent>();
         const bool mesh = entity.HasComponent<LuxEngine::MeshRendererComponent>();
         const bool active = selected && selected.GetId() == entity.GetId();
+        if (engineFrame_ && !active)
+            continue;
         QColor color = active   ? QColor(248, 197, 91)
                        : mesh   ? QColor(117, 183, 223)
                        : sprite ? QColor(130, 205, 158)
@@ -226,7 +278,7 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
         nearest = entity.GetId();
     }
     onSelect_(nearest);
-    if (nearest && tool_ != EditorTool::Select) {
+    if (nearest) {
         LuxEngine::Entity selected = document_.GetSelected();
         if (!selected || selected.GetId() != *nearest)
             return;
@@ -284,14 +336,24 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
             return;
         }
         const QPointF drag = event->position() - dragStart_;
-        if (tool_ == EditorTool::Move) {
-            const double scale = distance_ / std::max(1, height());
-            value.position.x = initialPosition_.x + static_cast<float>(drag.x() * scale * 1.6);
-            value.position.z = initialPosition_.z + static_cast<float>(drag.y() * scale * 1.6);
-            if (event->modifiers() & Qt::ShiftModifier) {
-                value.position.z = initialPosition_.z;
-                value.position.y = initialPosition_.y - static_cast<float>(drag.y() * scale * 1.6);
-            }
+        if (tool_ == EditorTool::Move || tool_ == EditorTool::Select) {
+            const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+            const auto startRay = MakeViewportRay3D(camera, size(), dragStart_);
+            const auto currentRay = MakeViewportRay3D(camera, size(), event->position());
+            if (!startRay || !currentRay)
+                return;
+            auto normal = event->modifiers() & Qt::ShiftModifier ? LuxEngine::Vec3{0, 0, 1}
+                                                                 : LuxEngine::Vec3{0, 1, 0};
+            if (std::abs(currentRay->direction.Dot(normal)) < .01f)
+                normal = (camera.GetPosition() - focus_).Normalized();
+            const auto intersect = [&](const ViewportRay3D& ray) {
+                const auto denominator = ray.direction.Dot(normal);
+                return ray.origin +
+                       ray.direction * ((initialPosition_ - ray.origin).Dot(normal) / denominator);
+            };
+            if (std::abs(startRay->direction.Dot(normal)) < .0001f)
+                return;
+            value.position = initialPosition_ + intersect(*currentRay) - intersect(*startRay);
         } else if (tool_ == EditorTool::Rotate) {
             value.rotation.y = initialRotation_.y + static_cast<float>(drag.x() * .01);
         } else if (tool_ == EditorTool::Scale) {

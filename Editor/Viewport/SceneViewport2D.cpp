@@ -191,10 +191,10 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
     };
     painter.setRenderHint(QPainter::Antialiasing);
 
+    DrawGrid(painter, 255);
     if (engineFrame_ && !cachedFrame_.isNull()) {
         painter.drawImage(rect(), cachedFrame_);
     }
-    DrawGrid(painter, engineFrame_ ? 70 : 255);
     const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
     const LuxEngine::Entity selected = document_.GetSelected();
     for (LuxEngine::Entity entity : entities) {
@@ -213,7 +213,9 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
                     entity, {x * map.tileSize, y * map.tileSize, map.tileSize, map.tileSize});
                 if (!shape.boundingRect().intersects(rect()))
                     continue;
-                painter.setPen(QPen(QColor(20, 24, 26, engineFrame_ ? 70 : 130), 1));
+                if (engineFrame_)
+                    continue; // GPU geometry already owns tile occlusion.
+                painter.setPen(QPen(QColor(20, 24, 26, 130), 1));
                 painter.setBrush(engineFrame_
                                      ? QBrush(Qt::NoBrush)
                                      : QBrush(Exposed(TileColor(tile), settings.exposure)));
@@ -321,7 +323,7 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
         }
     }
     onSelect_(hit);
-    if (hit && tool_ != EditorTool::Select) {
+    if (hit) {
         LuxEngine::Entity selected = document_.GetSelected();
         LuxEngine::TransformComponent transform;
         try {
@@ -370,7 +372,7 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
             onEndEdit_();
             return;
         }
-        if (tool_ == EditorTool::Move) {
+        if (tool_ == EditorTool::Move || tool_ == EditorTool::Select) {
             double x = dragInitial_[0] + world.x() - dragStartWorld_.x();
             double y = dragInitial_[1] + world.y() - dragStartWorld_.y();
             if (snapToGrid_) {

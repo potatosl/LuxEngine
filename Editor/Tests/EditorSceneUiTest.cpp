@@ -374,6 +374,41 @@ void Drag(QWidget& view, QPointF start, QPointF end) {
     QApplication::sendEvent(&view, &release);
 }
 void ViewportAffinePicking() {
+    {
+        EditorDocument dragDocument;
+        auto object = dragDocument.CreateEntity("Move directly");
+        object.AddComponent<MeshRendererComponent>();
+        int transactions = 0;
+        SceneViewport3D dragView(
+            nullptr, dragDocument, [&](auto id) { dragDocument.Select(id); },
+            [&](uint32 id, const TransformComponent& transform) {
+                Check(dragDocument.GetScene().SetWorldTransform(id, transform),
+                      "world drag applies");
+            },
+            [&] { ++transactions; }, [&] { --transactions; });
+        dragView.resize(800, 600);
+        dragView.show();
+        Pump();
+        const auto camera = MakeViewportCamera3D(dragView.size(), {}, .65, -.48, 22);
+        const auto start = *ProjectViewportPoint(camera, dragView.size(), {});
+        const auto finish = start + QPointF(32, 18);
+        QMouseEvent press(QEvent::MouseButtonPress, start, dragView.mapToGlobal(start.toPoint()),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, finish, dragView.mapToGlobal(finish.toPoint()),
+                         Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, finish,
+                            dragView.mapToGlobal(finish.toPoint()), Qt::LeftButton, Qt::NoButton,
+                            Qt::NoModifier);
+        QApplication::sendEvent(&dragView, &press);
+        QApplication::sendEvent(&dragView, &move);
+        QApplication::sendEvent(&dragView, &release);
+        const auto world = dragDocument.GetScene().GetWorldTransform(object.GetId());
+        const auto projected = ProjectViewportPoint(camera, dragView.size(), world.position);
+        Check(projected &&
+                  std::hypot(projected->x() - finish.x(), projected->y() - finish.y()) < .1 &&
+                  transactions == 0,
+              "default selection drags a 3D object with the pointer on the ground plane");
+    }
     EditorDocument document;
     auto parent = document.CreateEntity("비균일 부모");
     auto& parentTransform = parent.GetComponent<TransformComponent>();
@@ -429,7 +464,8 @@ void ViewportAffinePicking() {
     Click(view, *screen);
     Check(document.GetSelected() && document.GetSelected().GetId() == child.GetId(),
           "default viewport camera and affine picking select the visible sheared child");
-    view.SetTool(EditorTool::Move);
+    begin = end = edits = 0;
+    view.SetTool(EditorTool::Select);
     QMouseEvent press(QEvent::MouseButtonPress, *screen, view.mapToGlobal(screen->toPoint()),
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(&view, &press);
@@ -485,7 +521,7 @@ void ViewportWorldEditing() {
     const auto local = child.GetComponent<TransformComponent>();
     Click(viewport, screen(initial.position));
     Check(document.GetSelected() == child, "world-space picking hits the transformed child");
-    viewport.SetTool(EditorTool::Move);
+    viewport.SetTool(EditorTool::Select);
     Drag(viewport, screen(initial.position), screen(initial.position) + QPointF(72, -36));
     const auto moved = scene.GetWorldTransform(child.GetId());
     Check(validMovement && movements > 0 && balance == 0 &&
