@@ -85,4 +85,59 @@ if (-not $threwDebugCrt) {
 }
 Write-Host "   PASSED: Debug CRT DLL in Release configuration was rejected."
 
+$fixtureRoot = Join-Path $root "build/packaging-regression-$([guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+try {
+    foreach ($package in @("Runtime", "Editor", "Sdk")) {
+        $prefix = if ($package -eq "Runtime") { "LuxPlayer" } else { "LuxEditor" }
+        $output = Join-Path $fixtureRoot $package
+        $folder = if ($package -eq "Sdk") { "LuxEngine-SDK-0.1.0-x64" } else { "$prefix-Portable-0.1.0-x64" }
+        $staging = Join-Path $output $folder
+        New-Item -ItemType Directory -Path $staging -Force | Out-Null
+        $sentinel = Join-Path $staging "preserve.txt"
+        $archive = "$staging.zip"
+        Set-Content -LiteralPath $sentinel -Value "previous staging"
+        Set-Content -LiteralPath $archive -Value "previous archive"
+        & $psExe -ExecutionPolicy Bypass -File "$root/Tools/Package$package.ps1" -BuildDir (Join-Path $fixtureRoot "missing") -OutputDir $output
+        if ($LASTEXITCODE -eq 0) { throw "$package accepted a missing build" }
+        if ((Get-Content -LiteralPath $sentinel -Raw).Trim() -ne "previous staging" -or
+            (Get-Content -LiteralPath $archive -Raw).Trim() -ne "previous archive") {
+            throw "$package destroyed the previous package before checking the build"
+        }
+        & $psExe -ExecutionPolicy Bypass -File "$root/Tools/Package$package.ps1" -Version "bad/../../outside" -OutputDir $output
+        if ($LASTEXITCODE -eq 0) { throw "$package accepted path traversal in Version" }
+    }
+    Write-Host "   PASSED: Missing builds preserve previous packages and unsafe versions are rejected."
+    $portableBuild = Join-Path $fixtureRoot "portable-build"
+    $portableBin = Join-Path $portableBuild "bin/Release"
+    $portableShaders = Join-Path $portableBuild "shaders"
+    New-Item -ItemType Directory -Path $portableBin, $portableShaders -Force | Out-Null
+    foreach ($file in @("LuxPlayer.exe", "SDL3.dll", "LuxEngine.dll", "box2d.dll")) {
+        Set-Content -LiteralPath (Join-Path $portableBin $file) -Value "fixture"
+    }
+    foreach ($file in @("Basic.vert.spv", "Basic.frag.spv")) {
+        Set-Content -LiteralPath (Join-Path $portableShaders $file) -Value "shader fixture"
+    }
+    $portableOutput = Join-Path $fixtureRoot "portable-output"
+    & $psExe -ExecutionPolicy Bypass -File "$root/Tools/PackageRuntime.ps1" -BuildDir $portableBuild -OutputDir $portableOutput
+    if ($LASTEXITCODE -ne 0) { throw "Runtime packaging rejected an absolute build path with fallback shaders" }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $portableOutput "LuxPlayer-Portable-0.1.0-x64.zip"))
+    try {
+        $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+        foreach ($file in @("LuxEngine.dll", "box2d.dll", "shaders/Basic.vert.spv", "shaders/Basic.frag.spv")) {
+            if ($file -notin $entries) { throw "Runtime package is missing $file" }
+        }
+    } finally {
+        $zip.Dispose()
+    }
+    Write-Host "   PASSED: Absolute build paths, fallback shaders and shared runtime DLLs are packaged."
+} finally {
+    $resolvedFixture = [System.IO.Path]::GetFullPath($fixtureRoot)
+    $fixtureParent = [System.IO.Path]::GetFullPath((Join-Path $root "build"))
+    if ((Split-Path $resolvedFixture -Parent) -ne $fixtureParent) { throw "Unsafe fixture cleanup path" }
+    Remove-Item -LiteralPath $resolvedFixture -Recurse -Force
+}
+
 Write-Host "`n=== Packaging Integrity Tests: ALL PASSED ==="
+exit 0

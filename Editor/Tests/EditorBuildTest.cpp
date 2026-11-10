@@ -194,6 +194,22 @@ void TestPlan() {
     hostile.buildDirectory = project / ".lux" / "build" / ".." / "..";
     Check(!CleanBuildDirectory(hostile, error), "clean refuses parent paths");
 
+    {
+        const fs::path outside = files.path / "outside";
+        Write(outside / "build" / "keep.txt");
+        fs::remove(project / ".lux");
+        std::error_code linkError;
+        fs::create_directory_symlink(outside, project / ".lux", linkError);
+        if (!linkError) {
+            Check(!CleanBuildDirectory(*plan, error) &&
+                      fs::exists(outside / "build" / "keep.txt"),
+                  "clean refuses a symlink in the build directory's parent path");
+            fs::remove(project / ".lux");
+        } else {
+            std::cout << "Directory symlink regression skipped: " << linkError.message() << '\n';
+        }
+    }
+
     Check(!FindBuiltExecutable(*plan), "no executable before a build");
     const std::string exe = std::string("LuxGame")
 #ifdef _WIN32
@@ -260,6 +276,24 @@ void TestPackage() {
           "missing executable is an error");
     Check(!CreateDistributionArchive(out / exe, archive, "bad/name", error) && !error.empty(),
           "bad root name is an error");
+    Check(!CreateDistributionArchive(out / exe, archive, "..", error) && !error.empty(),
+          "parent directory cannot be an archive root");
+
+    const fs::path directoryTarget = files.path / "existing-directory";
+    fs::create_directory(directoryTarget);
+    Check(!CreateDistributionArchive(out / exe, directoryTarget, "MyGame", error) &&
+              fs::is_directory(directoryTarget),
+          "packaging never replaces a directory with an archive");
+    Check(!CreateDistributionArchive(out / exe, out / exe, "MyGame", error) &&
+              fs::file_size(out / exe) == 6,
+          "packaging never overwrites its source executable");
+
+    const fs::path localArchive = out / "game.zip";
+    auto local = CreateDistributionArchive(out / exe, localArchive, "MyGame", error);
+    Check(local && local->fileCount == 5, "archive can live beside the executable");
+    local = CreateDistributionArchive(out / exe, localArchive, "MyGame", error);
+    Check(local && local->fileCount == 5 && local->uncompressedBytes == result->uncompressedBytes,
+          "repackaging excludes the previous archive from the distribution");
 }
 } // namespace
 

@@ -521,12 +521,8 @@ bool DeviceState::PushUniform(const void* data, VkDeviceSize size, uint32& offse
 bool DeviceState::EnsureCaptureBuffer(VkDeviceSize size) {
     if (capture.buffer && capture.size == size)
         return true;
-    if (capture.buffer) {
-        Retire({0, capture.buffer, VK_NULL_HANDLE, VK_NULL_HANDLE, capture.allocation});
-        capture.buffer = VK_NULL_HANDLE;
-        capture.allocation = nullptr;
-        capture.size = 0;
-    }
+    if (ConsumeFault(Fault::BufferAllocation))
+        return Fail(VK_ERROR_OUT_OF_DEVICE_MEMORY, "Frame capture buffer");
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -535,14 +531,20 @@ bool DeviceState::EnsureCaptureBuffer(VkDeviceSize size) {
     allocationInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
     allocationInfo.flags =
         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    VkBuffer nextBuffer = VK_NULL_HANDLE;
+    VmaAllocation nextAllocation = nullptr;
     if (const VkResult result = vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo,
-                                                &capture.buffer, &capture.allocation, nullptr);
+                                                &nextBuffer, &nextAllocation, nullptr);
         result != VK_SUCCESS) {
-        capture.buffer = VK_NULL_HANDLE;
-        capture.allocation = nullptr;
         return Fail(result, "Frame capture buffer");
     }
+    if (capture.buffer)
+        Retire({0, capture.buffer, VK_NULL_HANDLE, VK_NULL_HANDLE, capture.allocation});
+    capture.buffer = nextBuffer;
+    capture.allocation = nextAllocation;
     capture.size = size;
+    capture.recorded = false;
+    capture.serial = 0;
     return true;
 }
 

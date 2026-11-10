@@ -1268,16 +1268,22 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
         return;
     }
     const auto previous = SelectedId(document_);
+    const bool wasDirty = document_.IsDirty();
+    const auto rollback = [&] {
+        RestoreScene(before, previous);
+        document_.SetDirty(wasDirty);
+        UpdateChrome();
+    };
     try {
         edit();
     } catch (const std::exception& error) {
-        RestoreScene(before, previous);
+        rollback();
         Log(QStringLiteral("편집 실패 (%1): %2 — 이전 장면 상태로 복원했습니다.")
                 .arg(name, QString::fromUtf8(error.what())),
             true);
         return;
     } catch (...) {
-        RestoreScene(before, previous);
+        rollback();
         Log(QStringLiteral("편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
                 .arg(name),
             true);
@@ -1285,7 +1291,7 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     }
     const auto after = SnapshotScene();
     if (after.isEmpty()) {
-        RestoreScene(before, previous);
+        rollback();
         Log(QStringLiteral("편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
                 .arg(name),
             true);
@@ -1296,6 +1302,10 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
         undo_->push(new SceneEditCommand(
             name, [this, before, previous] { RestoreScene(before, previous); },
             [this, after, next] { RestoreScene(after, next); }));
+    else {
+        document_.SetDirty(wasDirty);
+        UpdateChrome();
+    }
 }
 void EditorWindow::CopyEntity() {
     Entity selected = document_.GetSelected();

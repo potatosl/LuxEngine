@@ -13,13 +13,23 @@ Set-Location $root
 if ($Configuration -ne "Release" -and $Configuration -ne "Debug") {
     throw "Packaging failure: Unsupported configuration '$Configuration'. Must be 'Release' or 'Debug'."
 }
+if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') {
+    throw "Packaging failure: Version must be a single file-name component."
+}
 
 $suffix = if ($Configuration -eq "Release") { "" } else { "-Debug" }
-$outDirResolved = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $root $OutputDir }
+$outDirResolved = [System.IO.Path]::GetFullPath($(if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $root $OutputDir }))
 $playerStaging = Join-Path $outDirResolved "LuxPlayer-Portable-$Version$suffix-x64"
 $playerZip = Join-Path $outDirResolved "LuxPlayer-Portable-$Version$suffix-x64.zip"
 
 Write-Host "=== Packaging LuxPlayer Runtime (v$Version, Configuration=$Configuration) ==="
+
+$buildDirResolved = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
+$binSource = Join-Path $buildDirResolved "bin/$Configuration"
+$playerExe = Join-Path $binSource "LuxPlayer.exe"
+if (-not (Test-Path -LiteralPath $playerExe -PathType Leaf)) {
+    throw "Packaging failure: $Configuration executable LuxPlayer.exe not found in $binSource. Build $Configuration first."
+}
 
 if (Test-Path $playerStaging) {
     Remove-Item -Recurse -Force $playerStaging
@@ -29,13 +39,6 @@ if (Test-Path $playerZip) {
 }
 New-Item -ItemType Directory -Path $playerStaging -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path $playerZip) -Force | Out-Null
-
-$buildDirResolved = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
-$binSource = Join-Path $buildDirResolved "bin/$Configuration"
-$playerExe = Join-Path $binSource "LuxPlayer.exe"
-if (-not (Test-Path $playerExe)) {
-    throw "Packaging failure: $Configuration executable LuxPlayer.exe not found in $binSource. Build $Configuration first. Silent fallback to other configurations is forbidden for public release packaging."
-}
 
 # Verify no debug CRT runtime DLLs in Release package
 if ($Configuration -eq "Release") {
@@ -49,6 +52,11 @@ if ($Configuration -eq "Release") {
 
 # Copy executable
 Copy-Item -Path $playerExe -Destination $playerStaging -Force
+foreach ($pattern in @("LuxEngine*.dll", "box2d*.dll")) {
+    Get-ChildItem -LiteralPath $binSource -Filter $pattern -File | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $playerStaging -Force
+    }
+}
 
 # Copy SDL3 runtime DLL
 $sdlDll = Join-Path $binSource "SDL3.dll"
@@ -84,7 +92,7 @@ $shadersDir = Join-Path $playerStaging "shaders"
 New-Item -ItemType Directory -Path $shadersDir -Force | Out-Null
 $shaderSource = Join-Path $binSource "shaders"
 if (-not (Test-Path $shaderSource)) {
-    $shaderSource = Join-Path $root "$BuildDir/shaders"
+    $shaderSource = Join-Path $buildDirResolved "shaders"
 }
 if (Test-Path $shaderSource) {
     Copy-Item -Path "$shaderSource/*" -Destination $shadersDir -Recurse -Force
@@ -95,7 +103,7 @@ $scenesDir = Join-Path $playerStaging "scenes"
 New-Item -ItemType Directory -Path $scenesDir -Force | Out-Null
 $demoSceneSource = Join-Path $root "scenes/Demo.lux"
 if (-not (Test-Path $demoSceneSource)) {
-    $demoSceneSource = Join-Path $root "$BuildDir/Tests/PlayerSmoke.lux"
+    $demoSceneSource = Join-Path $buildDirResolved "Tests/PlayerSmoke.lux"
 }
 if (Test-Path $demoSceneSource) {
     Copy-Item -Path $demoSceneSource -Destination (Join-Path $scenesDir "Demo.lux") -Force

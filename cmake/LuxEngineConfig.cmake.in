@@ -5,19 +5,23 @@ set(LuxEngine_LICENSES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/licenses")
 set(LuxEngine_EXAMPLES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/examples")
 
 include(CMakeFindDependencyMacro)
-# The hints point at the packages the engine was built with, as well as the SDK prefix directory,
-# so games find them even when relocated or without the same CMAKE_PREFIX_PATH or vcpkg toolchain.
-find_dependency(SDL3 3.2 CONFIG HINTS
-    "@SDL3_DIR@"
-    "${PACKAGE_PREFIX_DIR}"
-    "${PACKAGE_PREFIX_DIR}/lib/cmake/SDL3"
-    "${PACKAGE_PREFIX_DIR}/share/sdl3"
-)
-find_dependency(box2d 2.4...<3 CONFIG HINTS
-    "@box2d_DIR@"
-    "${PACKAGE_PREFIX_DIR}"
-    "${PACKAGE_PREFIX_DIR}/lib/cmake/box2d"
-)
+set(_lux_sdk_prefix "${PACKAGE_PREFIX_DIR}")
+if(EXISTS "${_lux_sdk_prefix}/lib/cmake/SDL3/SDL3Config.cmake" OR
+   EXISTS "${_lux_sdk_prefix}/share/sdl3/SDL3Config.cmake")
+    find_dependency(SDL3 3.2 CONFIG PATHS
+        "${_lux_sdk_prefix}/lib/cmake/SDL3"
+        "${_lux_sdk_prefix}/share/sdl3"
+        NO_DEFAULT_PATH)
+else()
+    find_dependency(SDL3 3.2 CONFIG HINTS "@SDL3_DIR@")
+endif()
+if(EXISTS "${_lux_sdk_prefix}/lib/cmake/box2d/box2dConfig.cmake")
+    find_dependency(box2d 2.4...<3 CONFIG PATHS
+        "${_lux_sdk_prefix}/lib/cmake/box2d" NO_DEFAULT_PATH)
+else()
+    find_dependency(box2d 2.4...<3 CONFIG HINTS "@box2d_DIR@")
+endif()
+set(PACKAGE_PREFIX_DIR "${_lux_sdk_prefix}")
 if(TARGET box2d::box2d)
     set_target_properties(box2d::box2d PROPERTIES
         MAP_IMPORTED_CONFIG_RELWITHDEBINFO "Release;Debug"

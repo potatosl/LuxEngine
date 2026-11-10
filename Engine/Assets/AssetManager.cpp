@@ -87,21 +87,32 @@ stbi_uc* DecodeTexture(const std::string& filepath, int& width, int& height) {
 
     // Detect truncated BMP files where declared resolution exceeds actual file payload
     const auto* rawBytes = static_cast<const unsigned char*>(fileData);
-    if (byteCount >= 54 && rawBytes[0] == 'B' && rawBytes[1] == 'M') {
-        const uint32 claimedFileSize = rawBytes[2] | (rawBytes[3] << 8) | (rawBytes[4] << 16) | (rawBytes[5] << 24);
-        const uint32 pixelOffset = rawBytes[10] | (rawBytes[11] << 8) | (rawBytes[12] << 16) | (rawBytes[13] << 24);
-        const int32 bmpW = static_cast<int32>(rawBytes[18] | (rawBytes[19] << 8) | (rawBytes[20] << 16) | (rawBytes[21] << 24));
-        const int32 bmpH = std::abs(static_cast<int32>(rawBytes[22] | (rawBytes[23] << 8) | (rawBytes[24] << 16) | (rawBytes[25] << 24)));
-        const uint16 bpp = rawBytes[28] | (rawBytes[29] << 8);
-        const uint32 compression = rawBytes[30] | (rawBytes[31] << 8) | (rawBytes[32] << 16) | (rawBytes[33] << 24);
-        if (byteCount < pixelOffset || (claimedFileSize > 54 && byteCount < claimedFileSize)) {
+    if (byteCount >= 26 && rawBytes[0] == 'B' && rawBytes[1] == 'M') {
+        const auto read32 = [rawBytes](size_t offset) {
+            return static_cast<uint32>(rawBytes[offset]) |
+                   (static_cast<uint32>(rawBytes[offset + 1]) << 8) |
+                   (static_cast<uint32>(rawBytes[offset + 2]) << 16) |
+                   (static_cast<uint32>(rawBytes[offset + 3]) << 24);
+        };
+        const uint32 claimedFileSize = read32(2);
+        const uint32 pixelOffset = read32(10);
+        const uint32 dibSize = read32(14);
+        const size_t bppOffset = dibSize == 12 ? 24 : 28;
+        if (bppOffset + 2 > byteCount || (dibSize != 12 && byteCount < 34)) {
+            SDL_free(fileData);
+            return nullptr;
+        }
+        const uint16 bpp = static_cast<uint16>(rawBytes[bppOffset] |
+                                              (rawBytes[bppOffset + 1] << 8));
+        const uint32 compression = dibSize == 12 ? 0 : read32(30);
+        if (byteCount < pixelOffset || (claimedFileSize > 0 && byteCount < claimedFileSize)) {
             SDL_free(fileData);
             Log::Warn("BMP image file truncated before pixel data: " + filepath);
             return nullptr;
         }
-        if (compression == 0 && bpp > 0 && bmpW > 0 && bmpH > 0) {
-            const uint64 rowBytes = ((static_cast<uint64>(bmpW) * bpp + 31ull) / 32ull) * 4ull;
-            const uint64 minExpected = static_cast<uint64>(pixelOffset) + rowBytes * bmpH;
+        if (compression == 0 && bpp > 0) {
+            const uint64 rowBytes = ((static_cast<uint64>(testW) * bpp + 31ull) / 32ull) * 4ull;
+            const uint64 minExpected = static_cast<uint64>(pixelOffset) + rowBytes * testH;
             if (byteCount < minExpected) {
                 SDL_free(fileData);
                 Log::Warn("BMP image file truncated: declared resolution requires " +
@@ -133,12 +144,13 @@ stbi_uc* DecodeTexture(const std::string& filepath, int& width, int& height) {
 } // namespace
 
 void AssetManager::EvictUnusedUnderBudget(size_t incomingBytes) {
-    if (s_TextureCacheMemoryBytes + s_MeshCacheMemoryBytes + incomingBytes <= s_CacheMemoryBudget)
-        return;
+    const auto fits = [incomingBytes] {
+        const size_t current = s_TextureCacheMemoryBytes + s_MeshCacheMemoryBytes;
+        return current <= s_CacheMemoryBudget && incomingBytes <= s_CacheMemoryBudget - current;
+    };
 
     auto it = s_TextureCache.begin();
-    while (it != s_TextureCache.end() &&
-           ((s_TextureCacheMemoryBytes + s_MeshCacheMemoryBytes) + incomingBytes > s_CacheMemoryBudget)) {
+    while (it != s_TextureCache.end() && !fits()) {
         // Only evict if no outside references exist (use_count == 1)
         if (it->second.use_count() <= 1) {
             auto sizeIt = s_TextureSizes.find(it->first);
@@ -150,6 +162,15 @@ void AssetManager::EvictUnusedUnderBudget(size_t incomingBytes) {
         } else {
             ++it;
         }
+    }
+    auto meshIt = s_MeshCache.begin();
+    while (meshIt != s_MeshCache.end() && !fits()) {
+        const auto sizeIt = s_MeshSizes.find(meshIt->first);
+        if (sizeIt != s_MeshSizes.end()) {
+            s_MeshCacheMemoryBytes -= sizeIt->second;
+            s_MeshSizes.erase(sizeIt);
+        }
+        meshIt = s_MeshCache.erase(meshIt);
     }
 }
 
@@ -185,11 +206,18 @@ Ref<GpuTexture> AssetManager::LoadTexture(const std::string& filepath, GpuDevice
     const size_t textureBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
     {
         std::lock_guard<std::mutex> lock(s_AssetMutex);
-        EvictUnusedUnderBudget(textureBytes);
-
+        if (textureBytes > s_CacheMemoryBudget)
+            return texture;
         auto prevIt = s_TextureSizes.find(key);
-        if (prevIt != s_TextureSizes.end())
+        if (prevIt != s_TextureSizes.end()) {
             s_TextureCacheMemoryBytes -= prevIt->second;
+            s_TextureSizes.erase(prevIt);
+            s_TextureCache.erase(key);
+        }
+        EvictUnusedUnderBudget(textureBytes);
+        const size_t current = s_TextureCacheMemoryBytes + s_MeshCacheMemoryBytes;
+        if (current > s_CacheMemoryBudget || textureBytes > s_CacheMemoryBudget - current)
+            return texture;
 
         s_TextureCache[key] = texture;
         s_TextureSizes[key] = textureBytes;
@@ -363,15 +391,21 @@ bool AssetManager::LoadMesh(const std::string& filepath, RawMeshData& outMesh) {
     const size_t meshBytes = mesh.vertices.size() * sizeof(float) + mesh.indices.size() * sizeof(uint32);
     {
         std::lock_guard<std::mutex> lock(s_AssetMutex);
-        EvictUnusedUnderBudget(meshBytes);
-
-        auto prevIt = s_MeshSizes.find(key);
-        if (prevIt != s_MeshSizes.end())
-            s_MeshCacheMemoryBytes -= prevIt->second;
-
-        s_MeshCache[key] = mesh;
-        s_MeshSizes[key] = meshBytes;
-        s_MeshCacheMemoryBytes += meshBytes;
+        if (meshBytes <= s_CacheMemoryBudget) {
+            auto prevIt = s_MeshSizes.find(key);
+            if (prevIt != s_MeshSizes.end()) {
+                s_MeshCacheMemoryBytes -= prevIt->second;
+                s_MeshSizes.erase(prevIt);
+                s_MeshCache.erase(key);
+            }
+            EvictUnusedUnderBudget(meshBytes);
+            const size_t current = s_TextureCacheMemoryBytes + s_MeshCacheMemoryBytes;
+            if (current <= s_CacheMemoryBudget && meshBytes <= s_CacheMemoryBudget - current) {
+                s_MeshCache[key] = mesh;
+                s_MeshSizes[key] = meshBytes;
+                s_MeshCacheMemoryBytes += meshBytes;
+            }
+        }
     }
     outMesh = std::move(mesh);
     return true;

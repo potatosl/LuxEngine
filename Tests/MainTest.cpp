@@ -186,6 +186,17 @@ void Core() {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     Check(timer.ElapsedSeconds() > 0, "timer");
     Check(Near(Vec3(1, 0, 0).Cross({0, 1, 0}).z, 1), "cross product");
+    const auto smallDirection = Vec3(0.0f, 0.0f, -1e-8f).Normalized();
+    Check(Near(smallDirection.z, -1.0f), "small vectors normalize to unit length");
+    const auto largeDirection = Vec3(std::numeric_limits<float>::max(),
+                                     std::numeric_limits<float>::max(), 0.0f).Normalized();
+    Check(Near(largeDirection.x, std::sqrt(0.5f)) &&
+              Near(largeDirection.y, std::sqrt(0.5f)),
+          "large finite vectors normalize without overflow");
+    const auto closeView = Mat4::LookAt({0, 0, 0}, {0, 0, -1e-8f}, {0, 1, 0});
+    for (int i = 0; i < 16; ++i)
+        Check(Near(closeView.elements[i], i % 5 == 0 ? 1.0f : 0.0f),
+              "close camera targets preserve an orthonormal view");
     WindowCloseEvent event;
     EventDispatcher dispatcher(event);
     dispatcher.Dispatch<WindowCloseEvent>([](auto&) { return true; });
@@ -230,6 +241,14 @@ void Core() {
     }
     Check(animTime >= 0.0f && animTime <= clip.duration, "animation update loop keeps time wrapped and bounded");
     Throws([&] { clip.AddKeyframe({-1}); }, "invalid keyframe rejected");
+    AnimationClip shortClip;
+    shortClip.loop = false;
+    shortClip.AddKeyframe({0, {0, 0, 0}});
+    shortClip.AddKeyframe({0.00001f, {10, 0, 0}});
+    Check(Near(shortClip.Sample(0.000005f).position.x, 5),
+          "short animation segments interpolate");
+    Check(Near(shortClip.Sample(0.00001f).position.x, 10),
+          "short animation segments reach exact keyframes");
     PhysicsEngine::Init();
     Vec3 p{0, 0.5f, 0};
     Rigidbody2DComponent body;
@@ -654,6 +673,8 @@ void Scenes() {
     Check(!persistent.IsValid() && !b.IsValid() && scene.GetEntityCount() == 2,
           "load invalidates old handles");
     auto restored = scene.GetEntities();
+    Check(persistent != restored[1] && restored[1] == Entity(restored[1].GetId(), &scene),
+          "entity identity includes the scene generation after reload");
     Check(restored[1].GetComponent<TagComponent>().tag == "spaces and \"quotes\"", "loaded name");
     Check(Near(restored[1].GetComponent<TransformComponent>().position.x, 1.25f),
           "loaded transform");
@@ -899,6 +920,28 @@ void Scenes() {
         Check(!scene.SerializeToString(memSnapshot), "negative collider size rejected");
         scene.DestroyEntity(nanEnt);
 
+        {
+            Scene validated;
+            auto entity = validated.CreateEntity(std::string(257, 'A'));
+            std::string snapshot = "unchanged";
+            Check(!validated.SerializeToString(snapshot) && snapshot == "unchanged",
+                  "oversized tags are rejected before producing an unloadable snapshot");
+            entity.GetComponent<TagComponent>().tag = std::string(256, 'A');
+            Check(validated.SerializeToString(snapshot), "maximum tag length can be saved");
+            entity.GetComponent<TagComponent>().tag = "\xF5\x80\x80\x80";
+            Check(!validated.SerializeToString(snapshot), "out-of-range Unicode tags cannot be saved");
+            entity.GetComponent<TagComponent>().tag = "\xF4\x8F\xBF\xBF";
+            auto& animation = entity.AddComponent<AnimationComponent>();
+            animation.clip.name = std::string(257, 'A');
+            Check(!validated.SerializeToString(snapshot), "oversized animation names cannot be saved");
+            animation.clip.name = "\xF6\x80\x80\x80";
+            Check(!validated.SerializeToString(snapshot), "invalid Unicode animation names cannot be saved");
+            animation.clip.name = std::string(256, 'A');
+            Scene loaded;
+            Check(validated.SerializeToString(snapshot) && loaded.DeserializeFromString(snapshot),
+                  "maximum valid UTF-8 and name boundaries roundtrip");
+        }
+
         // 13. Phase 2 Scene Parser Security & Boundary Enforcement
         {
             Scene safeScene;
@@ -917,6 +960,13 @@ void Scenes() {
             // 13c. Invalid UTF-8 tag string rejected
             const std::string badUtf8Tag = "LuxEngineScene 2 1\n1\n1 \"\xFF\xFE\xFD\"\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n";
             Check(!safeScene.DeserializeFromString(badUtf8Tag), "invalid UTF-8 in tag rejected");
+            for (const int lead : {0xF5, 0xF6, 0xF7}) {
+                const std::string invalidScalar = std::string(1, static_cast<char>(lead)) + "\x80\x80\x80";
+                const std::string outOfRangeTag = "LuxEngineScene 2 1\n1\n1 \"" + invalidScalar +
+                    "\"\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n";
+                Check(!safeScene.DeserializeFromString(outOfRangeTag),
+                      "UTF-8 above Unicode maximum rejected");
+            }
 
             // 13d. Tag string exceeding 256 bytes rejected
             const std::string longTag(300, 'A');
@@ -2130,6 +2180,26 @@ void Failures() {
               "single submission failure keeps the device usable");
         Check(graphics.Begin() && gpu.EndFrame(), "rendering recovers after a failed submission");
 
+        Check(graphics.Begin() && gpu.RequestFrameCapture() && gpu.Clear(1, 0, 0, 1) &&
+                  gpu.EndFrame(),
+              "unread capture before resize");
+        uint32 oldWidth = 0, oldHeight = 0;
+        Check(window.GetFramebufferSize(oldWidth, oldHeight), "original capture dimensions");
+        Check(window.SetSize(400, 300), "resize before capture allocation failure");
+        gpu.NotifyResize();
+        Check(graphics.Begin() && gpu.RequestFrameCapture(), "resized capture requested");
+        Vk::InjectFault(Vk::Fault::BufferAllocation);
+        Check(gpu.EndFrame() && gpu.IsReady() &&
+                  Vk::TriggeredFaults(Vk::Fault::BufferAllocation) == 1,
+              "capture buffer allocation failure leaves the device usable");
+        GpuFrameCapture preserved;
+        Check(gpu.ReadFrameCapture(preserved) && preserved.width == oldWidth &&
+                  preserved.height == oldHeight && Pixel(preserved, 0.5f, 0.5f)[0] > 240,
+              "failed capture resize preserves the unread image and allocation");
+        const auto retriedCapture = graphics.Capture([&] { gpu.Clear(0, 1, 0, 1); });
+        Check(retriedCapture.width != oldWidth && Pixel(retriedCapture, 0.5f, 0.5f)[1] > 240,
+              "capture resize succeeds when allocation is retried");
+
         Vk::InjectFault(Vk::Fault::AcquireOutOfDate);
         window.PollEvents();
         const auto recreations = gpu.GetCounters().swapchainRecreations;
@@ -2720,6 +2790,28 @@ void Security() {
         Check(pixels.empty(), "memory properly freed on truncated decode failure");
     }
 
+    {
+        std::vector<uint8> coreBmp(62, 0);
+        coreBmp[0] = 'B';
+        coreBmp[1] = 'M';
+        WriteU32Le(coreBmp, 2, static_cast<uint32>(coreBmp.size()));
+        WriteU32Le(coreBmp, 10, 26);
+        WriteU32Le(coreBmp, 14, 12);
+        WriteU16Le(coreBmp, 18, 4);
+        WriteU16Le(coreBmp, 20, 3);
+        WriteU16Le(coreBmp, 22, 1);
+        WriteU16Le(coreBmp, 24, 24);
+        coreBmp[28] = 255;
+        files.Binary("core_header.bmp", coreBmp.data(), coreBmp.size());
+        int width = 0, height = 0;
+        std::vector<uint8> pixels;
+        Check(AssetManager::DecodeTextureCpu(files.Path("core_header.bmp"), width, height, pixels) &&
+                  width == 4 && height == 3 && pixels.size() == 48,
+              "OS/2 BMP core headers use their own field layout");
+        Check(pixels[8 * 4] == 255 && pixels[8 * 4 + 1] == 0 && pixels[8 * 4 + 2] == 0,
+              "OS/2 BMP pixel data decodes correctly");
+    }
+
     // 5. Shader byte loader limits
     std::vector<uint8> shaderBytes;
     files.Text("zero_shader", "");
@@ -2742,6 +2834,24 @@ void Security() {
     const size_t origBudget = AssetManager::GetCacheMemoryBudget();
     AssetManager::SetCacheMemoryBudget(meshMem / 2); // lower budget below usage
     Check(AssetManager::GetCacheMemoryBudget() == meshMem / 2, "budget set successfully");
+    Check(AssetManager::GetCachedMeshCount() == 0 && AssetManager::GetTotalCacheMemoryBytes() == 0,
+          "reducing asset budget evicts copied mesh cache entries");
+    Check(!mesh.vertices.empty() && mesh.indices.size() == 3,
+          "mesh cache eviction preserves the caller's mesh");
+    Check(AssetManager::LoadMesh(files.Path("cache_test.obj"), mesh) &&
+              AssetManager::GetCachedMeshCount() == 0,
+          "a mesh larger than the cache budget loads without caching");
+    AssetManager::SetCacheMemoryBudget(meshMem);
+    Check(AssetManager::LoadMesh(files.Path("cache_test.obj"), mesh), "mesh reloads with sufficient budget");
+    files.Text("cache_second.obj", "v 0 0 0\nv 2 0 0\nv 2 2 0\nf 1 2 3\n");
+    Check(AssetManager::LoadMesh(files.Path("cache_second.obj"), mesh) &&
+              AssetManager::GetCachedMeshCount() == 1 &&
+              AssetManager::GetTotalCacheMemoryBytes() <= meshMem,
+          "loading multiple meshes respects the cache budget");
+    AssetManager::SetCacheMemoryBudget(0);
+    Check(AssetManager::LoadMesh(files.Path("cache_second.obj"), mesh) &&
+              AssetManager::GetTotalCacheMemoryBytes() == 0,
+          "zero cache budget permits loading without retaining meshes");
     AssetManager::SetCacheMemoryBudget(origBudget);   // restore original budget
 
     AssetManager::Shutdown();

@@ -13,7 +13,7 @@ Write-Host "=== Testing LuxEditor Standalone Portable Package ==="
 $testStaging = $StagingDir
 $cleanup = $false
 if ([string]::IsNullOrWhiteSpace($testStaging)) {
-    $zipPath = Join-Path $root $PackageZip
+    $zipPath = if ([System.IO.Path]::IsPathRooted($PackageZip)) { $PackageZip } else { Join-Path $root $PackageZip }
     if (-not (Test-Path $zipPath)) {
         throw "Editor package zip not found: $zipPath. Run PackageEditor.ps1 first."
     }
@@ -32,12 +32,13 @@ try {
     }
 
     # Verify essential dependencies inside package
+    $qtSuffix = if (Test-Path (Join-Path $testStaging "Qt6Cored.dll")) { "d" } else { "" }
     $essentialFiles = @(
         "SDL3.dll",
-        "Qt6Core.dll",
-        "Qt6Gui.dll",
-        "Qt6Widgets.dll",
-        "platforms/qwindows.dll",
+        "Qt6Core$qtSuffix.dll",
+        "Qt6Gui$qtSuffix.dll",
+        "Qt6Widgets$qtSuffix.dll",
+        "platforms/qwindows$qtSuffix.dll",
         "shaders/Basic.vert.spv",
         "shaders/Basic.frag.spv",
         "licenses/LICENSE-LuxEngine.txt",
@@ -112,7 +113,7 @@ try {
     $psi2.Arguments = "--smoke-test"
     $psi2.WorkingDirectory = $testStaging
     $psi2.EnvironmentVariables["PATH"] = $cleanPath
-    if (Test-Path (Join-Path $testStaging "platforms/qoffscreen.dll")) {
+    if (Test-Path (Join-Path $testStaging "platforms/qoffscreen$qtSuffix.dll")) {
         $psi2.EnvironmentVariables["QT_QPA_PLATFORM"] = "offscreen"
     }
     $psi2.UseShellExecute = $false

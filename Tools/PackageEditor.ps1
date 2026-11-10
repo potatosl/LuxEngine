@@ -13,13 +13,24 @@ Set-Location $root
 if ($Configuration -ne "Release" -and $Configuration -ne "Debug") {
     throw "Packaging failure: Unsupported configuration '$Configuration'. Must be 'Release' or 'Debug'."
 }
+if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') {
+    throw "Packaging failure: Version must be a single file-name component."
+}
 
 $suffix = if ($Configuration -eq "Release") { "" } else { "-Debug" }
-$outDirResolved = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $root $OutputDir }
+$qtSuffix = if ($Configuration -eq "Debug") { "d" } else { "" }
+$outDirResolved = [System.IO.Path]::GetFullPath($(if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $root $OutputDir }))
 $editorStaging = Join-Path $outDirResolved "LuxEditor-Portable-$Version$suffix-x64"
 $editorZip = Join-Path $outDirResolved "LuxEditor-Portable-$Version$suffix-x64.zip"
 
 Write-Host "=== Packaging LuxEditor Standalone Portable (v$Version, Configuration=$Configuration) ==="
+
+$buildDirResolved = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
+$binSource = Join-Path $buildDirResolved "bin/$Configuration"
+$editorExe = Join-Path $binSource "LuxEditor.exe"
+if (-not (Test-Path -LiteralPath $editorExe -PathType Leaf)) {
+    throw "Packaging failure: $Configuration executable LuxEditor.exe not found in $binSource. Build $Configuration first."
+}
 
 if (Test-Path $editorStaging) {
     Remove-Item -Recurse -Force $editorStaging
@@ -29,13 +40,6 @@ if (Test-Path $editorZip) {
 }
 New-Item -ItemType Directory -Path $editorStaging -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path $editorZip) -Force | Out-Null
-
-$buildDirResolved = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
-$binSource = Join-Path $buildDirResolved "bin/$Configuration"
-$editorExe = Join-Path $binSource "LuxEditor.exe"
-if (-not (Test-Path $editorExe)) {
-    throw "Packaging failure: $Configuration executable LuxEditor.exe not found in $binSource. Build $Configuration first. Silent fallback to other configurations is forbidden for public release packaging."
-}
 
 if ($Configuration -eq "Release") {
     $debugDlls = Get-ChildItem -Path $binSource -Filter "*d.dll" -ErrorAction SilentlyContinue | Where-Object {
@@ -74,10 +78,10 @@ if (Test-Path (Join-Path $binSource "platforms")) {
         Copy-Item -Path $_.FullName -Destination $platformsDir -Force
     }
 }
-if (-not (Test-Path (Join-Path $platformsDir "qoffscreen.dll"))) {
+if (-not (Test-Path (Join-Path $platformsDir "qoffscreen$qtSuffix.dll"))) {
     foreach ($rootCand in $qtRoots) {
         if (Test-Path $rootCand) {
-            $candOffscreen = Get-ChildItem -Path $rootCand -Filter "qoffscreen.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            $candOffscreen = Get-ChildItem -Path $rootCand -Filter "qoffscreen$qtSuffix.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($candOffscreen) {
                 Copy-Item -Path $candOffscreen.FullName -Destination $platformsDir -Force
                 break
@@ -91,7 +95,7 @@ $shadersDir = Join-Path $editorStaging "shaders"
 New-Item -ItemType Directory -Path $shadersDir -Force | Out-Null
 $shaderSource = Join-Path $binSource "shaders"
 if (-not (Test-Path $shaderSource)) {
-    $shaderSource = Join-Path $root "$BuildDir/shaders"
+    $shaderSource = Join-Path $buildDirResolved "shaders"
 }
 if (Test-Path $shaderSource) {
     Copy-Item -Path "$shaderSource/*" -Destination $shadersDir -Recurse -Force
@@ -149,17 +153,29 @@ if (-not $windeployqt) {
 }
 if ($windeployqt -and (Test-Path $windeployqt)) {
     Write-Host "Running windeployqt ($windeployqt) to ensure all required Qt dependencies are bundled..."
-    & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw (Join-Path $editorStaging "LuxEditor.exe")
+    $deployArgs = @("--$($Configuration.ToLowerInvariant())", "--no-translations", "--no-compiler-runtime", "--no-system-d3d-compiler", "--no-opengl-sw")
+    $debugQtPaths = Join-Path (Split-Path $windeployqt) "qtpaths.debug.bat"
+    if ($Configuration -eq "Debug" -and (Test-Path -LiteralPath $debugQtPaths)) {
+        $deployArgs += @("--qtpaths", $debugQtPaths)
+    }
+    $savedPath = $env:PATH
+    try {
+        $env:PATH = "$binSource;$savedPath"
+        & $windeployqt @deployArgs (Join-Path $editorStaging "LuxEditor.exe")
+        if ($LASTEXITCODE -ne 0) { throw "Packaging failure: windeployqt failed with exit code $LASTEXITCODE" }
+    } finally {
+        $env:PATH = $savedPath
+    }
 }
 
 # Verify essential files strictly (throw immediately on missing file)
 $requiredEditorFiles = @(
     "LuxEditor.exe",
     "SDL3.dll",
-    "Qt6Core.dll",
-    "Qt6Gui.dll",
-    "Qt6Widgets.dll",
-    "platforms/qwindows.dll",
+    "Qt6Core$qtSuffix.dll",
+    "Qt6Gui$qtSuffix.dll",
+    "Qt6Widgets$qtSuffix.dll",
+    "platforms/qwindows$qtSuffix.dll",
     "shaders/Basic.vert.spv",
     "shaders/Basic.frag.spv",
     "licenses/LICENSE-LuxEngine.txt",

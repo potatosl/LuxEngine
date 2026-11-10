@@ -143,6 +143,8 @@ void EditorWindow::RecoverAutosaveIfNeeded() {
         if (!document_.Recover(document_.GetPath(), PathUtf8(path)))
             ShowError(QStringLiteral("복구 실패"),
                       QStringLiteral("자동 저장본을 읽을 수 없습니다."));
+        else
+            undo_->resetClean();
     } else
         project_->ClearAutosave(PathFromUtf8(document_.GetPath()));
 }

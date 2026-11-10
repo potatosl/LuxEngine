@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Core/Core.hpp"
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <stdexcept>
@@ -63,11 +64,12 @@ struct Vec3 {
     }
 
     Vec3 Normalized() const {
-        const float len = std::sqrt(x * x + y * y + z * z);
-        if (len > 0.00001f) {
-            return {x / len, y / len, z / len};
-        }
-        return *this;
+        const float scale = std::max({std::abs(x), std::abs(y), std::abs(z)});
+        if (scale == 0.0f)
+            return {};
+        const Vec3 scaled{x / scale, y / scale, z / scale};
+        const float len = std::sqrt(scaled.x * scaled.x + scaled.y * scaled.y + scaled.z * scaled.z);
+        return {scaled.x / len, scaled.y / len, scaled.z / len};
     }
 };
 

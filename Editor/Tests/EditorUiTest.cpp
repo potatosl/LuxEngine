@@ -5,6 +5,7 @@
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
 #include "Engine/Renderer/Vulkan/VulkanFault.hpp"
+#include "Project/PathEncoding.hpp"
 #include "Scene/EditorDocument.hpp"
 #include "Viewport/EngineSceneRenderer.hpp"
 #include "Viewport/SceneViewport2D.hpp"
@@ -873,6 +874,36 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     }
     std::cerr << "[Editor_ui] PART 3.4 PASS: RecordEdit exception recovery verified\n";
 
+    {
+        const bool wasDirty = window.GetDocument().IsDirty();
+        for (const bool dirty : {false, true}) {
+            window.GetDocument().SetDirty(dirty);
+            window.ExecuteRecordedEdit(QStringLiteral("변경 없는 편집"), [&] {
+                window.GetDocument().MarkDirty();
+            });
+            Check(window.GetDocument().IsDirty() == dirty,
+                  "no-op recorded edit preserves the previous dirty state");
+            window.ExecuteRecordedEdit(QStringLiteral("롤백 상태 검사"), [&] {
+                window.GetDocument().CreateEntity("RolledBack");
+                throw std::runtime_error("rollback");
+            });
+            Check(window.GetDocument().IsDirty() == dirty,
+                  "exception rollback preserves the previous dirty state");
+            window.ExecuteRecordedEdit(QStringLiteral("직렬화 실패 검사"), [&] {
+                window.GetDocument().GetSelected().GetComponent<TransformComponent>().position.x =
+                    std::numeric_limits<float>::infinity();
+            });
+            Check(window.GetDocument().IsDirty() == dirty,
+                  "serialization rollback preserves the previous dirty state");
+        }
+        std::string afterRollback;
+        Check(window.GetDocument().GetScene().SerializeToString(afterRollback) &&
+                  afterRollback == baselineSerialized && undo->count() == stableUndoCount &&
+                  undo->index() == stableUndoIndex,
+              "failed and no-op edits preserve the scene and undo history");
+        window.GetDocument().SetDirty(wasDirty);
+    }
+
     // --- PART 3.3: Actual Pasted Entity Save & Reopen ---
     std::cerr << "[Editor_ui] PART 3.3: Verifying actual pasted entity Scene Save & Reopen\n";
     {
@@ -946,6 +977,41 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
         undo->undo();
     std::cerr << "[Editor_ui] closing window\n";
     window.close();
+
+    {
+        const auto directory = PathFromUtf8(settings.filePath(QStringLiteral("recovery-project"))
+                                                .toUtf8().toStdString());
+        std::string error;
+        auto project = EditorProject::Create(directory, "Recovery", ProjectTemplate::Empty, error);
+        Check(project.has_value(), "autosave recovery project is created");
+        Scene recovered;
+        recovered.CreateEntity("Recovered");
+        Check(project->SaveAutosave(project->GetSceneFile(), recovered, error),
+              "autosave recovery fixture is written");
+        std::filesystem::last_write_time(
+            project->GetAutosaveFile(project->GetSceneFile()),
+            std::filesystem::last_write_time(project->GetSceneFile()) + std::chrono::seconds(1));
+        QSettings().setValue(QStringLiteral("lastProject"),
+                             QString::fromUtf8(PathUtf8(project->GetFile())));
+        app.setProperty("luxTestAcceptAutosaveRecovery", true);
+        EditorWindow recoveredWindow;
+        const bool acceptedRecovery = !app.property("luxTestAcceptAutosaveRecovery").toBool();
+        app.setProperty("luxTestAcceptAutosaveRecovery", false);
+        Check(acceptedRecovery, "autosave recovery prompt was accepted with its Yes button");
+        Check(recoveredWindow.GetDocument().IsDirty() &&
+                  recoveredWindow.GetDocument().GetScene().GetEntityCount() == 1,
+              "autosave recovery loads unsaved scene changes");
+        auto* recoveredUndo = recoveredWindow.findChild<QUndoStack*>();
+        recoveredWindow.findChild<QAction*>(QStringLiteral("addEntity"))->trigger();
+        recoveredUndo->undo();
+        Check(recoveredWindow.GetDocument().IsDirty() &&
+                  recoveredWindow.GetDocument().GetScene().GetEntityCount() == 1,
+              "undo to the recovered baseline keeps autosaved changes unsaved");
+        recoveredWindow.findChild<QAction*>(QStringLiteral("saveScene"))->trigger();
+        Check(!recoveredWindow.GetDocument().IsDirty() && recoveredUndo->isClean(),
+              "saving a recovered baseline establishes a clean undo position");
+        recoveredWindow.close();
+    }
     return 0;
 }
 
@@ -1799,7 +1865,13 @@ int main(int argc, char** argv) {
         if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
             ++dialogs;
             std::cerr << "dialog dismissed: " << box->text().toStdString() << '\n';
-            if (auto* no = box->button(QMessageBox::No))
+            if (qApp->property("luxTestAcceptAutosaveRecovery").toBool() &&
+                box->windowTitle() == QStringLiteral("장면 자동 저장 복구")) {
+                if (auto* yes = box->button(QMessageBox::Yes)) {
+                    qApp->setProperty("luxTestAcceptAutosaveRecovery", false);
+                    yes->click();
+                }
+            } else if (auto* no = box->button(QMessageBox::No))
                 no->click();
             else
                 box->reject();

@@ -273,10 +273,24 @@ bool CleanBuildDirectory(const BuildPlan& plan, std::string& error) {
     }
     std::error_code ec;
     const auto status = fs::symlink_status(expected, ec);
-    if (ec || !fs::exists(status))
+    if (ec == std::errc::no_such_file_or_directory || (!ec && !fs::exists(status)))
         return true; // nothing to clean
+    if (ec) {
+        error = "빌드 폴더를 확인할 수 없습니다: " + ec.message();
+        return false;
+    }
     if (fs::is_symlink(status)) {
         error = "빌드 폴더가 심볼릭 링크라서 지우지 않습니다.";
+        return false;
+    }
+    const fs::path projectRoot = fs::canonical(plan.projectDirectory, ec);
+    if (ec) {
+        error = "프로젝트 폴더를 확인할 수 없습니다: " + ec.message();
+        return false;
+    }
+    const fs::path resolvedBuild = fs::canonical(expected, ec);
+    if (ec || resolvedBuild != projectRoot / ".lux" / "build") {
+        error = "빌드 경로에 심볼릭 링크가 있어 지우지 않습니다.";
         return false;
     }
     fs::remove_all(expected, ec);
@@ -393,7 +407,8 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
         error = "빌드된 실행 파일이 없습니다. 먼저 빌드하세요.";
         return std::nullopt;
     }
-    if (rootName.empty() || rootName.find_first_of("/\\:") != std::string::npos) {
+    if (rootName.empty() || rootName == "." || rootName == ".." ||
+        rootName.find_first_of("/\\:") != std::string::npos) {
         error = "배포 폴더 이름이 올바르지 않습니다.";
         return std::nullopt;
     }
@@ -401,10 +416,34 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
     std::vector<std::pair<fs::path, fs::path>> files; // absolute, relative
     uint64_t total = 0;
     std::error_code ec;
+    const fs::path destination = fs::weakly_canonical(archive, ec);
+    if (ec || destination.empty()) {
+        error = "ZIP 파일 경로를 확인할 수 없습니다.";
+        return std::nullopt;
+    }
+    const auto destinationStatus = fs::symlink_status(destination, ec);
+    if (ec && ec != std::errc::no_such_file_or_directory) {
+        error = "ZIP 파일 경로를 확인할 수 없습니다: " + ec.message();
+        return std::nullopt;
+    }
+    ec.clear();
+    if (fs::exists(destinationStatus) && !fs::is_regular_file(destinationStatus)) {
+        error = "ZIP 저장 경로가 일반 파일이 아닙니다.";
+        return std::nullopt;
+    }
+    if (fs::equivalent(executable, destination, ec)) {
+        error = "실행 파일을 ZIP 파일로 덮어쓸 수 없습니다.";
+        return std::nullopt;
+    }
+    ec.clear();
     for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec),
          end;
          !ec && it != end; it.increment(ec)) {
         const fs::path relative = it->path().lexically_relative(root);
+        if (fs::weakly_canonical(it->path(), ec) == destination)
+            continue;
+        if (ec)
+            break;
         if (SkipInPackage(relative)) {
             if (it->is_directory(ec))
                 it.disable_recursion_pending();
@@ -434,7 +473,12 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
     fs::path temporary = archive;
     temporary += ".tmp-" + std::to_string(
         std::chrono::steady_clock::now().time_since_epoch().count());
-    fs::create_directories(archive.parent_path(), ec);
+    if (!archive.parent_path().empty())
+        fs::create_directories(archive.parent_path(), ec);
+    if (ec) {
+        error = "ZIP 저장 폴더를 만들 수 없습니다: " + ec.message();
+        return std::nullopt;
+    }
     int zipError = 0;
     zip_t* zip = zip_open(PathUtf8(temporary).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipError);
     if (!zip) {
@@ -466,14 +510,26 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
         return std::nullopt;
     }
     fs::rename(temporary, archive, ec);
-    if (ec) { // rename does not replace an existing file on every platform
-        fs::remove(archive, ec);
-        ec.clear();
-        fs::rename(temporary, archive, ec);
+    if (ec && IsFile(archive)) {
+        fs::path previous = temporary;
+        previous += ".previous";
+        std::error_code moveError;
+        fs::rename(archive, previous, moveError);
+        if (!moveError) {
+            fs::rename(temporary, archive, ec);
+            if (ec) {
+                fs::rename(previous, archive, moveError);
+                if (moveError)
+                    error = "이전 ZIP 파일을 임시 위치에 보존했습니다: " + PathUtf8(previous);
+            } else {
+                fs::remove(previous, moveError);
+            }
+        }
     }
     if (ec) {
         fs::remove(temporary, ec);
-        error = "ZIP 파일을 최종 위치로 옮길 수 없습니다.";
+        if (error.empty())
+            error = "ZIP 파일을 최종 위치로 옮길 수 없습니다.";
         return std::nullopt;
     }
     return PackageResult{archive, static_cast<uint64_t>(files.size()), total};

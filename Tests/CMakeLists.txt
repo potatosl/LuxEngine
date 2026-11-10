@@ -13,6 +13,17 @@ endforeach()
 set_tests_properties(Engine_audio PROPERTIES TIMEOUT 180 ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
 set_tests_properties(Engine_window PROPERTIES TIMEOUT 60 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
 
+if(WIN32)
+    find_program(LUX_POWERSHELL NAMES pwsh powershell)
+    if(LUX_POWERSHELL)
+        add_test(NAME Packaging_integrity
+            COMMAND "${LUX_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/TestPackagingIntegrity.ps1"
+                -BuildDir "${CMAKE_BINARY_DIR}")
+        set_tests_properties(Packaging_integrity PROPERTIES TIMEOUT 60 LABELS headless)
+    endif()
+endif()
+
 # GPU suites need a display and a Vulkan driver; they exit with 77 (skipped) when either is missing.
 set(LUX_GPU_TEST_ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")
 foreach(suite gpu vulkan failures stress lifecycle)

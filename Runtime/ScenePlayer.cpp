@@ -28,6 +28,7 @@ bool IsPlayerTag(const std::string& tag) {
 
 std::optional<ScenePlayerOptions> ParseScenePlayerArguments(const std::vector<std::string>& args,
                                                             std::string& error) {
+    error.clear();
     ScenePlayerOptions options;
     for (size_t i = 0; i < args.size(); ++i) {
         const std::string& arg = args[i];
@@ -88,23 +89,36 @@ std::optional<ScenePlayerOptions> ParseScenePlayerArguments(const std::vector<st
     return options;
 }
 
-ScenePlayerView FitSceneView(Scene& scene) {
+ScenePlayerView FitSceneView(Scene& scene, float aspect) {
+    if (!std::isfinite(aspect) || aspect <= 0.0f)
+        aspect = 16.0f / 9.0f;
     float minX = std::numeric_limits<float>::max(), minY = minX;
     float maxX = std::numeric_limits<float>::lowest(), maxY = maxX;
     for (Entity entity : scene.GetEntities()) {
         if (!entity.HasComponent<TransformComponent>())
             continue;
         const auto& t = entity.GetComponent<TransformComponent>();
-        float x0 = t.position.x - std::abs(t.scale.x) * 0.5f;
-        float x1 = t.position.x + std::abs(t.scale.x) * 0.5f;
-        float y0 = t.position.y - std::abs(t.scale.y) * 0.5f;
-        float y1 = t.position.y + std::abs(t.scale.y) * 0.5f;
+        const float c = std::abs(std::cos(t.rotation.z));
+        const float s = std::abs(std::sin(t.rotation.z));
+        const float halfWidth = (std::abs(t.scale.x) * c + std::abs(t.scale.y) * s) * 0.5f;
+        const float halfHeight = (std::abs(t.scale.x) * s + std::abs(t.scale.y) * c) * 0.5f;
+        float x0 = t.position.x - halfWidth;
+        float x1 = t.position.x + halfWidth;
+        float y0 = t.position.y - halfHeight;
+        float y1 = t.position.y + halfHeight;
         if (entity.HasComponent<TilemapComponent>()) {
             const auto& map = entity.GetComponent<TilemapComponent>();
-            x0 = t.position.x;
-            y0 = t.position.y;
-            x1 = t.position.x + map.width * map.tileSize;
-            y1 = t.position.y + map.height * map.tileSize;
+            if (entity.HasComponent<SpriteRendererComponent>()) {
+                x0 = std::min(x0, t.position.x);
+                y0 = std::min(y0, t.position.y);
+                x1 = std::max(x1, t.position.x + map.width * map.tileSize);
+                y1 = std::max(y1, t.position.y + map.height * map.tileSize);
+            } else {
+                x0 = t.position.x;
+                y0 = t.position.y;
+                x1 = t.position.x + map.width * map.tileSize;
+                y1 = t.position.y + map.height * map.tileSize;
+            }
         }
         if (!std::isfinite(x0) || !std::isfinite(x1) || !std::isfinite(y0) || !std::isfinite(y1))
             continue;
@@ -118,8 +132,7 @@ ScenePlayerView FitSceneView(Scene& scene) {
         return view;
     view.centerX = (minX + maxX) * 0.5f;
     view.centerY = (minY + maxY) * 0.5f;
-    // Fit both axes for a 16:9 window with a small margin.
-    view.halfHeight = std::max({(maxY - minY) * 0.5f, (maxX - minX) * 0.5f * 9.0f / 16.0f, 1.0f}) * 1.1f;
+    view.halfHeight = std::max({(maxY - minY) * 0.5f, (maxX - minX) * 0.5f / aspect, 1.0f}) * 1.1f;
     return view;
 }
 
@@ -141,6 +154,12 @@ bool ScenePlayer::LoadScene() {
             player_ = entity;
             break;
         }
+    uint32 width = options_.width, height = options_.height;
+    GetWindow().GetFramebufferSize(width, height);
+    const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height)
+                                   : 16.0f / 9.0f;
+    view_ = options_.view ? *options_.view : FitSceneView(scene_, aspect);
+    viewAspect_ = aspect;
     return true;
 }
 
@@ -148,12 +167,13 @@ void ScenePlayer::OnInit() {
     Renderer2D::Init(&GetGpuDevice());
     Renderer3D::Init(&GetGpuDevice());
     PhysicsEngine::Init();
+    if (options_.fullscreen)
+        GetWindow().SetFullscreen(true);
     if (!LoadScene()) {
         Close();
         return;
     }
     loaded_ = true;
-    view_ = options_.view ? *options_.view : FitSceneView(scene_);
     Input::BindAction("Left", LuxKey::A);
     Input::BindAction("Left", LuxKey::Left);
     Input::BindAction("Right", LuxKey::D);
@@ -165,8 +185,6 @@ void ScenePlayer::OnInit() {
     Input::BindAction("Jump", LuxKey::Space);
     Input::BindAction("Reload", LuxKey::R);
     Input::BindAction("Quit", LuxKey::Escape);
-    if (options_.fullscreen)
-        GetWindow().SetFullscreen(true);
     UpdateCamera();
     Log::Info("Playing scene " + options_.scenePath);
 }
@@ -176,6 +194,10 @@ void ScenePlayer::UpdateCamera() {
     float aspect = 16.0f / 9.0f;
     if (GetWindow().GetFramebufferSize(width, height) && width > 0 && height > 0)
         aspect = static_cast<float>(width) / static_cast<float>(height);
+    if (!options_.view && aspect != viewAspect_) {
+        view_ = FitSceneView(scene_, aspect);
+        viewAspect_ = aspect;
+    }
     const float halfWidth = view_.halfHeight * aspect;
     camera_.SetProjection(view_.centerX - halfWidth, view_.centerX + halfWidth,
                           view_.centerY - view_.halfHeight, view_.centerY + view_.halfHeight);
@@ -228,8 +250,6 @@ void ScenePlayer::OnUpdate(double dt) {
         }
     }
     scene_.OnUpdate(dt);
-    if (options_.maxFrames != 0 && ++frames_ >= options_.maxFrames)
-        Close();
 }
 
 void ScenePlayer::OnRender(float) {
@@ -253,6 +273,8 @@ void ScenePlayer::OnRender(float) {
     Renderer2D::BeginScene(camera_);
     scene_.OnRender();
     Renderer2D::EndScene();
+    if (options_.maxFrames != 0 && ++frames_ >= options_.maxFrames)
+        Close();
 }
 
 void ScenePlayer::OnShutdown() {

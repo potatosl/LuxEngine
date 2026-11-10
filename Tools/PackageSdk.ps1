@@ -2,6 +2,7 @@
 param(
     [string]$BuildDir = "build/local",
     [string]$OutputDir = "dist",
+    [ValidatePattern("^[A-Za-z0-9][A-Za-z0-9._-]*$")]
     [string]$Version = "0.1.0"
 )
 
@@ -9,10 +10,77 @@ $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
 
+$buildDirResolved = [System.IO.Path]::GetFullPath($(if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }))
+$cachePath = Join-Path $buildDirResolved "CMakeCache.txt"
+if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+    throw "CMake cache not found in build directory: $buildDirResolved"
+}
+$buildCache = @{}
+foreach ($line in Get-Content -LiteralPath $cachePath) {
+    if ($line -match '^([^#/:][^:]*):[^=]*=(.*)$') {
+        $buildCache[$matches[1]] = $matches[2]
+    }
+}
+$cmakeExe = $buildCache["CMAKE_COMMAND"]
+if (-not $cmakeExe -or -not (Test-Path -LiteralPath $cmakeExe -PathType Leaf)) {
+    $cmakeExe = (Get-Command cmake -ErrorAction Stop).Source
+}
+foreach ($sourceFile in @("lib/Release/LuxEngine.lib", "lib/Release/LuxRuntime.lib", "lib/Debug/LuxEngined.lib", "lib/Debug/LuxRuntimed.lib")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $buildDirResolved $sourceFile) -PathType Leaf)) {
+        throw "Required SDK build output missing: $sourceFile. Build Release and Debug first."
+    }
+}
+foreach ($dependency in @(@("SDL3_DIR", "SDL3Config.cmake"), @("box2d_DIR", "box2dConfig.cmake"))) {
+    $dependencyDir = $buildCache[$dependency[0]]
+    if (-not $dependencyDir -or -not (Test-Path -LiteralPath (Join-Path $dependencyDir $dependency[1]) -PathType Leaf)) {
+        throw "Dependency configuration missing from build cache: $($dependency[0])"
+    }
+}
+
+function Bundle-Dependency([string]$cacheKey, [string]$headerFolder, [string]$libraryPrefix) {
+    $configDir = $buildCache[$cacheKey]
+    if (-not $configDir -or -not (Test-Path -LiteralPath $configDir -PathType Container)) {
+        throw "Dependency configuration missing from build cache: $cacheKey"
+    }
+    $configDir = (Resolve-Path -LiteralPath $configDir).Path
+    $prefix = $configDir
+    while (-not (Test-Path -LiteralPath (Join-Path $prefix "include/$headerFolder") -PathType Container)) {
+        $parent = Split-Path -Parent $prefix
+        if (-not $parent -or $parent -eq $prefix) {
+            throw "Dependency headers not found above $configDir"
+        }
+        $prefix = $parent
+    }
+    $includeDestination = Join-Path $sdkStaging "include/$headerFolder"
+    New-Item -ItemType Directory -Path $includeDestination -Force | Out-Null
+    Copy-Item -Path (Join-Path $prefix "include/$headerFolder/*") -Destination $includeDestination -Recurse -Force
+    $configRelative = $configDir.Substring($prefix.TrimEnd('\', '/').Length).TrimStart('\', '/')
+    $configDestination = Join-Path $sdkStaging $configRelative
+    New-Item -ItemType Directory -Path $configDestination -Force | Out-Null
+    Copy-Item -Path (Join-Path $configDir "*") -Destination $configDestination -Recurse -Force
+    foreach ($directory in @("lib", "debug/lib", "bin", "debug/bin")) {
+        $source = Join-Path $prefix $directory
+        if (-not (Test-Path -LiteralPath $source -PathType Container)) { continue }
+        $extension = if ($directory.EndsWith("lib")) { ".lib" } else { ".dll" }
+        $files = @(Get-ChildItem -LiteralPath $source -File -Filter "$libraryPrefix*$extension")
+        if ($files.Count -eq 0) { continue }
+        $destination = Join-Path $sdkStaging $directory
+        New-Item -ItemType Directory -Path $destination -Force | Out-Null
+        $files | Copy-Item -Destination $destination -Force
+    }
+    Write-Host "Bundled $headerFolder from $prefix"
+}
+
 Write-Host "=== Packaging LuxEngine SDK (v$Version) ==="
 $outDirResolved = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $root $OutputDir }
+$outDirResolved = [System.IO.Path]::GetFullPath($outDirResolved).TrimEnd('\', '/')
 $sdkStaging = Join-Path $outDirResolved "LuxEngine-SDK-$Version-x64"
 $sdkZip = Join-Path $outDirResolved "LuxEngine-SDK-$Version-x64.zip"
+foreach ($target in @($sdkStaging, $sdkZip)) {
+    if (-not [System.IO.Path]::GetFullPath($target).StartsWith($outDirResolved + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Package output must stay inside $outDirResolved"
+    }
+}
 
 if (Test-Path $sdkStaging) {
     Remove-Item -Recurse -Force $sdkStaging
@@ -25,60 +93,15 @@ New-Item -ItemType Directory -Path (Split-Path $sdkZip) -Force | Out-Null
 
 # Install Release and Debug configurations into the staging directory
 Write-Host "Installing Release SDK to staging..."
-& cmake --install $BuildDir --config Release --prefix $sdkStaging
+& $cmakeExe --install $buildDirResolved --config Release --prefix $sdkStaging
 if ($LASTEXITCODE -ne 0) { throw "cmake --install Release failed" }
 
 Write-Host "Installing Debug SDK to staging..."
-& cmake --install $BuildDir --config Debug --prefix $sdkStaging
+& $cmakeExe --install $buildDirResolved --config Debug --prefix $sdkStaging
 if ($LASTEXITCODE -ne 0) { throw "cmake --install Debug failed" }
 
-# Copy SDL3 runtime DLL into bin from Release build
-$sdlDll = Join-Path $root "$BuildDir/bin/Release/SDL3.dll"
-if (Test-Path $sdlDll) {
-    Copy-Item -Path $sdlDll -Destination "$sdkStaging/bin/SDL3.dll" -Force
-    Write-Host "Copied SDL3.dll to SDK bin/"
-} else {
-    throw "Packaging failure: Release SDL3.dll not found in $BuildDir/bin/Release. Build Release first."
-}
-
-# Bundle Box2D headers, libraries and CMake configuration
-$box2dInclude = "C:/LuxDeps/include/box2d"
-if (Test-Path $box2dInclude) {
-    New-Item -ItemType Directory -Path "$sdkStaging/include/box2d" -Force | Out-Null
-    Copy-Item -Path "$box2dInclude/*" -Destination "$sdkStaging/include/box2d" -Recurse -Force
-    Write-Host "Bundled Box2D headers"
-}
-$box2dLibRelease = "C:/LuxDeps/lib/box2d.lib"
-if (Test-Path $box2dLibRelease) {
-    Copy-Item -Path $box2dLibRelease -Destination "$sdkStaging/lib/box2d.lib" -Force
-    Write-Host "Bundled Box2D Release lib"
-}
-$box2dLibDebug = "C:/LuxDeps/lib/box2dd.lib"
-if (Test-Path $box2dLibDebug) {
-    Copy-Item -Path $box2dLibDebug -Destination "$sdkStaging/lib/box2dd.lib" -Force
-    Write-Host "Bundled Box2D Debug lib"
-}
-$box2dCmakeDir = "C:/LuxDeps/lib/cmake/box2d"
-if (Test-Path $box2dCmakeDir) {
-    New-Item -ItemType Directory -Path "$sdkStaging/lib/cmake/box2d" -Force | Out-Null
-    Copy-Item -Path "$box2dCmakeDir/*" -Destination "$sdkStaging/lib/cmake/box2d" -Recurse -Force
-    Write-Host "Bundled Box2D CMake package"
-}
-
-# Bundle SDL3 headers, import library and CMake configuration
-$vcpkgBase = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif (Test-Path "C:/vcpkg") { "C:/vcpkg" } else { "" }
-$sdlInclude = if ($vcpkgBase) { "$vcpkgBase/installed/x64-windows/include/SDL3" } else { "" }
-if ($sdlInclude -and (Test-Path $sdlInclude)) {
-    New-Item -ItemType Directory -Path "$sdkStaging/include/SDL3" -Force | Out-Null
-    Copy-Item -Path "$sdlInclude/*" -Destination "$sdkStaging/include/SDL3" -Recurse -Force
-    Write-Host "Bundled SDL3 headers"
-}
-$sdlLib = if ($vcpkgBase) { "$vcpkgBase/installed/x64-windows/lib/SDL3.lib" } else { "" }
-if ($sdlLib -and (Test-Path $sdlLib)) {
-    Copy-Item -Path $sdlLib -Destination "$sdkStaging/lib/SDL3.lib" -Force
-    Write-Host "Bundled SDL3 import lib"
-}
-
+Bundle-Dependency "SDL3_DIR" "SDL3" "SDL3"
+Bundle-Dependency "box2d_DIR" "box2d" "box2d"
 # Verify essential files strictly (throw on missing file)
 $requiredFiles = @(
     "include/Engine/Application.hpp",
@@ -86,10 +109,14 @@ $requiredFiles = @(
     "include/SDL3/SDL.h",
     "lib/LuxEngine.lib",
     "lib/LuxRuntime.lib",
+    "lib/LuxEngined.lib",
+    "lib/LuxRuntimed.lib",
     "lib/box2d.lib",
+    "lib/box2dd.lib",
     "lib/SDL3.lib",
     "bin/SDL3.dll",
     "lib/cmake/LuxEngine/LuxEngineConfig.cmake",
+    "lib/cmake/box2d/box2dConfig.cmake",
     "share/LuxEngine/shaders/Basic.vert.spv",
     "share/LuxEngine/shaders/Basic.frag.spv",
     "licenses/LICENSE-LuxEngine.txt",

@@ -55,6 +55,12 @@ void Parse() {
         error.clear();
         Check(!ParseScenePlayerArguments(args, error) && !error.empty(), "invalid arguments rejected");
     }
+    options = ParseScenePlayerArguments({"scene.lux"}, error);
+    Check(options && error.empty(), "successful parse clears a previous error");
+    error = "stale error";
+    Check(!ParseScenePlayerArguments({"scene.lux", "--size", "0", "600"}, error) &&
+              error.find("--size expects") != std::string::npos,
+          "invalid values replace a previous error");
 }
 
 void Fit() {
@@ -70,6 +76,15 @@ void Fit() {
     Check(Near(view.centerX, 0) && Near(view.centerY, 2), "view centred on entities");
     // 21 units wide at 16:9 needs a half height of at least 21/2*9/16.
     Check(view.halfHeight >= 21.0f * 0.5f * 9.0f / 16.0f, "view fits width");
+    view = LuxEngine::FitSceneView(scene, 0.75f);
+    Check(view.halfHeight * 0.75f >= 10.5f, "portrait view fits the scene width");
+    LuxEngine::Scene rotated;
+    auto rectangle = rotated.CreateEntity("rotated");
+    auto& transform = rectangle.GetComponent<LuxEngine::TransformComponent>();
+    transform.scale = {20, 1, 1};
+    transform.rotation.z = LuxEngine::ToRadians(90);
+    view = LuxEngine::FitSceneView(rotated);
+    Check(view.halfHeight >= 10.0f, "view fits a rotated rectangle");
     auto map = scene.CreateEntity("map");
     map.GetComponent<LuxEngine::TransformComponent>().position = {0, -50, 0};
     map.AddComponent<LuxEngine::TilemapComponent>();

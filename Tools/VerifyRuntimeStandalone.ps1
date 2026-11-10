@@ -110,7 +110,7 @@ Write-Host "=== Testing LuxPlayer Standalone Portable Package ==="
 $testStaging = $StagingDir
 $cleanup = $false
 if ([string]::IsNullOrWhiteSpace($testStaging)) {
-    $zipPath = Join-Path $root $PackageZip
+    $zipPath = if ([System.IO.Path]::IsPathRooted($PackageZip)) { $PackageZip } else { Join-Path $root $PackageZip }
     if (-not (Test-Path $zipPath)) {
         throw "Runtime package zip not found: $zipPath. Run PackageRuntime.ps1 first."
     }

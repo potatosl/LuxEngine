@@ -52,7 +52,7 @@ TransformComponent AnimationClip::Sample(float time) const {
 
     const float segmentDuration = kf1.time - kf0.time;
     const float rawFactor =
-        (segmentDuration > 0.0001f) ? (clampedTime - kf0.time) / segmentDuration : 0.0f;
+        (segmentDuration > 0.0f) ? (clampedTime - kf0.time) / segmentDuration : 0.0f;
     const float factor = std::clamp(rawFactor, 0.0f, 1.0f);
 
     result.position = kf0.position + (kf1.position - kf0.position) * factor;

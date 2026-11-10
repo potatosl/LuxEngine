@@ -61,11 +61,12 @@ private:
     OrthographicCamera camera_;
     PerspectiveCamera camera3D_;
     ScenePlayerView view_;
+    float viewAspect_ = 0.0f;
     bool loaded_ = false;
     uint32 frames_ = 0;
 };
 
 // Computes a view that frames every entity with a transform; used when no view is given.
-ScenePlayerView FitSceneView(Scene& scene);
+ScenePlayerView FitSceneView(Scene& scene, float aspect = 16.0f / 9.0f);
 
 } // namespace LuxEngine

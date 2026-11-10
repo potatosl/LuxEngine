@@ -15,6 +15,7 @@
 #include <limits>
 #include <mutex>
 #include <sstream>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -101,6 +102,12 @@ void Scene::RemovePhysicsBody2D(uint32 id) {
     });
 }
 namespace {
+constexpr uint64 MaxSceneSizeBytes = 64ull * 1024ull * 1024ull;
+constexpr uint64 MaxSceneEntities = 100000;
+constexpr size_t MaxTagStringLength = 256;
+constexpr size_t MaxClipNameLength = 256;
+bool IsValidUtf8(std::string_view str);
+
 Vec4 TileColor(uint8_t tile) {
     switch (tile) {
     case 1:
@@ -493,6 +500,8 @@ std::istream& operator>>(std::istream& i, Vec4& v) {
 }
 } // namespace
 bool Scene::SerializeToString(std::string& output) {
+    if (entities_.size() > MaxSceneEntities)
+        return false;
     const std::unordered_set<std::type_index> supported{typeid(TagComponent),
                                                         typeid(TransformComponent),
                                                         typeid(SpriteRendererComponent),
@@ -508,6 +517,10 @@ bool Scene::SerializeToString(std::string& output) {
         if (!pool->Empty() && !supported.contains(type))
             return false;
     for (const uint32 id : entities_) {
+        if (const auto* tag = TryGetComponent<TagComponent>(id)) {
+            if (tag->tag.size() > MaxTagStringLength || !IsValidUtf8(tag->tag))
+                return false;
+        }
         if (const auto* transform = TryGetComponent<TransformComponent>(id)) {
             if (!Finite(transform->position) || !Finite(transform->rotation) ||
                 !Finite(transform->scale))
@@ -558,7 +571,9 @@ bool Scene::SerializeToString(std::string& output) {
                 return false;
         }
         if (const auto* animation = TryGetComponent<AnimationComponent>(id)) {
-            if (!std::isfinite(animation->clip.duration) || animation->clip.duration <= 0 ||
+            if (animation->clip.name.size() > MaxClipNameLength ||
+                !IsValidUtf8(animation->clip.name) ||
+                !std::isfinite(animation->clip.duration) || animation->clip.duration <= 0 ||
                 animation->clip.keyframes.size() > 4096)
                 return false;
             for (const auto& key : animation->clip.keyframes)
@@ -618,7 +633,10 @@ bool Scene::SerializeToString(std::string& output) {
     }
     if (!out)
         return false;
-    output = out.str();
+    auto serialized = out.str();
+    if (serialized.size() > MaxSceneSizeBytes)
+        return false;
+    output = std::move(serialized);
     return true;
 }
 
@@ -677,11 +695,6 @@ bool Scene::Serialize(const std::string& filepath) {
 }
 
 namespace {
-constexpr uint64 MaxSceneSizeBytes = 64ull * 1024ull * 1024ull; // 64 MiB
-constexpr uint64 MaxSceneEntities = 100000;                      // 100,000 entities
-constexpr size_t MaxTagStringLength = 256;                        // 256 bytes per tag
-constexpr size_t MaxClipNameLength = 256;                         // 256 bytes per animation clip name
-
 bool IsValidUtf8(std::string_view str) {
     size_t i = 0;
     while (i < str.size()) {
@@ -717,7 +730,7 @@ bool IsValidUtf8(std::string_view str) {
                 return false;
             if (c == 0xF0 && c1 < 0x90)
                 return false;
-            if (c == 0xF4 && c1 > 0x8F)
+            if (c > 0xF4 || (c == 0xF4 && c1 > 0x8F))
                 return false;
             i += 4;
         } else {
