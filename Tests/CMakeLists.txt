@@ -15,12 +15,15 @@ set_tests_properties(Engine_window PROPERTIES TIMEOUT 60 ENVIRONMENT "SDL_VIDEOD
 
 # GPU suites need a display and a Vulkan driver; they exit with 77 (skipped) when either is missing.
 set(LUX_GPU_TEST_ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")
-foreach(suite gpu vulkan failures stress lifecycle)
+foreach(suite gpu vulkan failures stress lifecycle multidevice)
     add_test(NAME Engine_${suite} COMMAND LuxEngineTests ${suite})
     set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 120 LABELS gpu SKIP_RETURN_CODE 77
         ENVIRONMENT "${LUX_GPU_TEST_ENVIRONMENT}"
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
 endforeach()
+# Mixed validation settings must be taken from each device config in this regression.
+set_tests_properties(Engine_multidevice PROPERTIES
+    ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=")
 add_test(NAME Engine_longrun COMMAND LuxEngineTests longrun)
 set_tests_properties(Engine_longrun PROPERTIES TIMEOUT 600 LABELS "gpu;long" SKIP_RETURN_CODE 77
     ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=off"

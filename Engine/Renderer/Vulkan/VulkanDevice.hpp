@@ -165,6 +165,12 @@ struct Capture {
 
 enum class SwapchainResult { Ready, Minimized, Failed };
 
+struct InstanceValidation {
+    std::atomic<uint32> errors = 0;
+    std::atomic<uint32> warnings = 0;
+};
+struct InstanceLease;
+
 struct DeviceState {
     DeviceState() = default;
     DeviceState(const DeviceState&) = delete;
@@ -177,8 +183,8 @@ struct DeviceState {
     GpuStatus lastFailure = GpuStatus::Ready;
     std::string lastError;
 
+    std::shared_ptr<InstanceLease> instanceLease;
     VkInstance instance = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties properties{};
@@ -190,8 +196,9 @@ struct DeviceState {
     bool portabilityEnumeration = false;
     bool portabilitySubset = false;
     float timestampPeriod = 0.0f;
-    std::atomic<uint32> validationErrors = 0;
-    std::atomic<uint32> validationWarnings = 0;
+    Ref<InstanceValidation> instanceValidation = CreateRef<InstanceValidation>();
+    uint32 validationErrorsAtInitialization = 0;
+    uint32 validationWarningsAtInitialization = 0;
 
     Swapchain swapchain;
     bool swapchainDirty = false;

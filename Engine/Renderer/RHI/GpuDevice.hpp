@@ -72,6 +72,8 @@ struct GpuDeviceCounters {
     uint64 submissions = 0;
     uint64 swapchainRecreations = 0;
     uint64 pipelinesCreated = 0;
+    // Messages from the shared Vulkan instance since this device initialized. Concurrent
+    // devices sharing an instance observe the same messages, but never inherit older history.
     uint32 validationErrors = 0;
     uint32 validationWarnings = 0;
 };
