@@ -1535,6 +1535,115 @@ struct Graphics {
         ++checks;
     }
 };
+// A renderer/window may be closed while another continues presenting. Exercise both matching
+// and mixed validation configurations, failed initialization, and reuse after a peer shuts down.
+void MultiDeviceLifetime() {
+    GpuDeviceConfig config;
+    config.validation = GpuValidation::Off;
+    Graphics first(config, 160, 120);
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    Check(Vk::GetInstanceLifetimeCounters().instances == 1 &&
+              Vk::GetInstanceLifetimeCounters().devices == 1,
+          "first device owns one live instance");
+#endif
+    Window secondWindow, thirdWindow;
+    WindowProps props;
+    props.width = 160;
+    props.height = 120;
+    props.vulkan = true;
+    props.hidden = true;
+    Check(secondWindow.Initialize(props) && thirdWindow.Initialize(props), "peer windows created");
+    GpuDevice second, third;
+    config.validation = GpuValidation::On;
+    Check(second.Initialize(secondWindow, config), "validation peer initialized");
+    config.validation = GpuValidation::Synchronization;
+    Check(third.Initialize(thirdWindow, config), "synchronization peer initialized");
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    const auto cohortInstances = Vk::GetInstanceLifetimeCounters().instances;
+    Check(cohortInstances <= 3 && Vk::GetInstanceLifetimeCounters().devices == 3,
+          "configuration variants share a bounded instance cohort");
+    if (second.GetInfo().validation && third.GetInfo().synchronizationValidation)
+        Check(cohortInstances == 3,
+              "off, on and synchronization validation use distinct instances");
+#endif
+    auto render = [](GpuDevice& gpu) {
+        Check(gpu.RequestFrameCapture(), "peer capture requested");
+        bool begun = false;
+        for (int attempt = 0; attempt < 12 && !begun; ++attempt) {
+            const auto result = gpu.BeginFrame();
+            Check(result != GpuDevice::FrameStart::Error, "peer remains usable");
+            begun = result == GpuDevice::FrameStart::Ready;
+            if (!begun)
+                SDL_Delay(5);
+        }
+        Check(begun && gpu.Clear(.25f, .5f, .75f, 1) && gpu.EndFrame(), "peer frame presented");
+        GpuFrameCapture capture;
+        Check(gpu.ReadFrameCapture(capture) && !capture.rgba.empty(), "peer frame read back");
+        Check(gpu.GetCounters().validationErrors == 0, "peer validation stays clean");
+    };
+    render(first.gpu);
+    render(second);
+    render(third);
+    second.Shutdown();
+    render(first.gpu);
+    render(third);
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    Vk::InjectFault(Vk::Fault::DeviceSelection);
+    config.validation = GpuValidation::On;
+    Check(!second.Initialize(secondWindow, config), "failed peer initialization is reported");
+    Vk::ClearFaults();
+    render(first.gpu);
+    render(third);
+#endif
+    config.validation = GpuValidation::On;
+    Check(second.Initialize(secondWindow, config), "peer can be recreated");
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    Check(Vk::GetInstanceLifetimeCounters().instances == cohortInstances,
+          "peer reinitialization reuses the configuration instance");
+#endif
+    render(second);
+    third.Shutdown();
+    render(first.gpu);
+    render(second);
+    first.gpu.Shutdown();
+    render(second);
+    second.Shutdown();
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    Check(Vk::GetInstanceLifetimeCounters().instances == 0 &&
+              Vk::GetInstanceLifetimeCounters().devices == 0,
+          "last device releases every retained instance");
+#endif
+    // No device now owns an instance: the next initialization starts a fresh lifetime cohort.
+    Check(first.gpu.Initialize(first.window, config),
+          "last release permits a fresh instance lifetime");
+    render(first.gpu);
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    Vk::InjectInstanceValidationCounters(2, 3);
+    Check(first.gpu.GetCounters().validationErrors == 2 &&
+              first.gpu.GetCounters().validationWarnings == 3,
+          "existing device records validation messages");
+    config.validation = GpuValidation::On;
+    for (int retry = 0; retry < 2; ++retry) {
+        Check(second.Initialize(secondWindow, config),
+              "new peer after earlier validation messages");
+        Check(second.GetCounters().validationErrors == 0 &&
+                  second.GetCounters().validationWarnings == 0,
+              "new and reinitialized devices do not inherit past instance messages");
+        Check(Vk::GetInstanceLifetimeCounters().instances == 1,
+              "matching validation peers share the same instance");
+        render(second);
+        if (retry == 0) {
+            Vk::InjectInstanceValidationCounters(1, 1);
+            Check(first.gpu.GetCounters().validationErrors == 3 &&
+                      second.GetCounters().validationErrors == 1 &&
+                      second.GetCounters().validationWarnings == 1,
+                  "concurrent peers observe new messages relative to their own baselines");
+        }
+        second.Shutdown();
+    }
+#endif
+    first.gpu.Shutdown();
+}
 std::array<int, 4> Pixel(const GpuFrameCapture& capture, float x, float y) {
     const auto px = std::min<uint32>(capture.width - 1, static_cast<uint32>(x * capture.width));
     const auto py = std::min<uint32>(capture.height - 1, static_cast<uint32>(y * capture.height));
@@ -2117,17 +2226,29 @@ void VulkanSystems() {
     } else {
         std::cout << "note: surface offers no non-vsync present mode\n";
     }
-    SDL_MinimizeWindow(graphics.window.GetNativeHandle());
-    SDL_SyncWindow(graphics.window.GetNativeHandle());
-    graphics.window.PollEvents();
-    if (graphics.window.IsMinimized()) {
-        Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped, "minimized window skips frames");
-        SDL_RestoreWindow(graphics.window.GetNativeHandle());
-        SDL_SyncWindow(graphics.window.GetNativeHandle());
+    const bool waylandSurface =
+        SDL_GetPointerProperty(SDL_GetWindowProperties(graphics.window.GetNativeHandle()),
+                               SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr) != nullptr;
+    if (waylandSurface) {
+        // xdg-shell defines set_minimized but has no matching unminimize request. SDL's
+        // success return only acknowledges the request; it cannot promise automatic restore.
+        std::cout << "note: Wayland has no programmatic unminimize; native minimize/restore "
+                     "check not run (zero-extent frame skipping is tested separately)\n";
     } else {
-        std::cout << "note: display server ignored minimize; minimized-frame check not run\n";
+        SDL_MinimizeWindow(graphics.window.GetNativeHandle());
+        SDL_SyncWindow(graphics.window.GetNativeHandle());
+        graphics.window.PollEvents();
+        if (graphics.window.IsMinimized()) {
+            Check(gpu.BeginFrame() == GpuDevice::FrameStart::Skipped,
+                  "minimized window skips frames");
+            SDL_RestoreWindow(graphics.window.GetNativeHandle());
+            SDL_SyncWindow(graphics.window.GetNativeHandle());
+        } else {
+            std::cout << "note: display server ignored minimize; minimized-frame check not run\n";
+        }
     }
-    Check(graphics.Begin(20) && gpu.EndFrame(), "rendering resumes after restore");
+    Check(graphics.Begin(20) && gpu.EndFrame(),
+          "rendering remains available after window-state checks");
 
     for (int frame = 0; frame < 6; ++frame)
         Check(graphics.Begin() && gpu.EndFrame(), "timestamp frames");
@@ -2891,6 +3012,8 @@ int main(int argc, char** argv) {
             Gpu();
         else if (suite == "lifecycle")
             Lifecycle();
+        else if (suite == "multidevice")
+            MultiDeviceLifetime();
         else if (suite == "vulkan")
             VulkanSystems();
         else if (suite == "failures")

@@ -177,8 +177,10 @@ GpuDeviceCounters GpuDevice::GetCounters() const {
     if (!state_)
         return {};
     GpuDeviceCounters counters = state_->counters;
-    counters.validationErrors = state_->validationErrors.load();
-    counters.validationWarnings = state_->validationWarnings.load();
+    counters.validationErrors =
+        state_->instanceValidation->errors.load() - state_->validationErrorsAtInitialization;
+    counters.validationWarnings =
+        state_->instanceValidation->warnings.load() - state_->validationWarningsAtInitialization;
     return counters;
 }
 

@@ -78,12 +78,16 @@ private:
     void UpdateChrome();
     void UpdateRecentMenu();
     void ApplyProjectPreferences();
+    enum class SceneOpenResult { Opened, Recovered, Cancelled, Failed };
+    SceneOpenResult LoadSceneDocument(const std::filesystem::path& file,
+                                      const EditorProject* recoveryProject);
     bool OpenProjectScene(const std::filesystem::path& file);
     void RecoverAutosaveIfNeeded();
     void AutoSaveScene();
     void NewProject();
     void OpenProjectDialog();
-    void OpenProjectFile(const std::filesystem::path& file);
+    void OpenProjectFile(const std::filesystem::path& file,
+                         const std::filesystem::path& preferredScene = {});
     void EditProjectSettings();
     void CloneCurrentProject();
     void ImportProjectDialog();
@@ -100,13 +104,13 @@ private:
     void DeleteEntity();
     void SelectEntity(std::optional<LuxEngine::uint32> id);
     void OnNameChanged();
-    void OnTransformChanged();
+    void OnTransformChanged(int row, int axis);
     void OnSpriteChanged();
-    void OnColorChanged();
-    void OnMeshChanged();
-    void OnTilemapChanged();
-    void OnPhysicsChanged();
-    void OnAnimationChanged();
+    void OnColorChanged(int channel);
+    void OnMeshChanged(const QWidget* field);
+    void OnTilemapChanged(const QWidget* field);
+    void OnPhysicsChanged(const QWidget* field);
+    void OnAnimationChanged(const QWidget* field);
     void AddKeyframe();
     void RemoveKeyframe();
     void ScrubAnimation(int value);

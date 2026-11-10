@@ -10,6 +10,13 @@
 #include <utility>
 #include <zip.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace LuxEditor {
 namespace fs = std::filesystem;
 
@@ -285,14 +292,40 @@ bool CleanBuildDirectory(const BuildPlan& plan, std::string& error) {
         return false;
     }
     std::error_code ec;
-    const auto status = fs::symlink_status(expected, ec);
-    if (ec || !fs::exists(status))
-        return true; // nothing to clean
-    if (fs::is_symlink(status)) {
-        error = "빌드 폴더가 심볼릭 링크라서 지우지 않습니다.";
+    // Inspect every component below the project, not just build: .lux can itself be a link.
+    fs::path component = fs::canonical(plan.projectDirectory, ec);
+    if (ec) {
+        error = "프로젝트 경로를 확인할 수 없습니다: " + ec.message();
         return false;
     }
-    fs::remove_all(expected, ec);
+    for (const char* name : {".lux", "build"}) {
+        component /= name;
+        const auto status = fs::symlink_status(component, ec);
+        if (ec == std::errc::no_such_file_or_directory || (!ec && !fs::exists(status)))
+            return true;
+        if (ec) {
+            error = "빌드 폴더를 확인할 수 없습니다: " + ec.message();
+            return false;
+        }
+        bool linked = fs::is_symlink(status);
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(component.c_str());
+        linked = linked || (attributes != INVALID_FILE_ATTRIBUTES &&
+                            (attributes & FILE_ATTRIBUTE_REPARSE_POINT));
+#endif
+        if (linked || !fs::is_directory(status)) {
+            error = "빌드 경로에 링크 또는 일반 폴더가 아닌 항목이 있어 지우지 않습니다.";
+            return false;
+        }
+    }
+    const auto requested = fs::canonical(plan.buildDirectory, ec);
+    if (ec || !fs::equivalent(requested, component, ec)) {
+        error = "빌드 경로의 실제 위치가 프로젝트 내부 경로와 다릅니다.";
+        return false;
+    }
+    // Delete the same physical path that was inspected. Lexically removing '..' before resolving
+    // a symlink can change its meaning and select a different project directory.
+    fs::remove_all(component, ec);
     if (ec) {
         error = "빌드 폴더를 지울 수 없습니다: " + ec.message();
         return false;
@@ -412,6 +445,19 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
         error = "배포 폴더 이름이 올바르지 않습니다.";
         return std::nullopt;
     }
+    std::error_code pathError;
+    const auto outputPath = fs::weakly_canonical(archive, pathError);
+    if (pathError) {
+        error = "배포 파일 경로를 확인할 수 없습니다: " + pathError.message();
+        return std::nullopt;
+    }
+    const auto executablePath = fs::weakly_canonical(executable, pathError);
+    std::error_code equivalentError;
+    if (pathError || outputPath == executablePath ||
+        fs::equivalent(archive, executable, equivalentError)) {
+        error = "배포 ZIP으로 실행 파일을 덮어쓸 수 없습니다.";
+        return std::nullopt;
+    }
     const fs::path root = executable.parent_path();
     std::vector<std::pair<fs::path, fs::path>> files; // absolute, relative
     uint64_t total = 0;
@@ -421,6 +467,12 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
          end;
          !ec && it != end; it.increment(ec)) {
         const fs::path relative = it->path().lexically_relative(root);
+        const auto inputPath = fs::weakly_canonical(it->path(), ec);
+        if (ec)
+            break;
+        std::error_code aliasError;
+        if (inputPath == outputPath || fs::equivalent(it->path(), archive, aliasError))
+            continue;
         if (SkipInPackage(relative)) {
             if (it->is_directory(ec))
                 it.disable_recursion_pending();

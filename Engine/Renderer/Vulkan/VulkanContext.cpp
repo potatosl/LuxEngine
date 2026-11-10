@@ -6,9 +6,67 @@
 #include <cstring>
 #include <mutex>
 #include <set>
+#include <sstream>
 
 namespace LuxEngine::Vk {
+struct InstanceOwner {
+    VkInstance handle = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+    Ref<InstanceValidation> validation = CreateRef<InstanceValidation>();
+    ~InstanceOwner() {
+        if (messenger) {
+            auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+                vkGetInstanceProcAddr(handle, "vkDestroyDebugUtilsMessengerEXT"));
+            if (destroy)
+                destroy(handle, messenger, nullptr);
+        }
+        if (handle)
+            vkDestroyInstance(handle, nullptr);
+    }
+};
+
+// NVIDIA Wayland WSI stores callbacks at process scope. Destroying one VkInstance while
+// another surface is live invalidates those callbacks (SDL issue #12053).
+// Reuse matching instances, and release
+// the bounded set of configuration variants only after the last device has released its lease.
+struct InstancePool {
+    std::mutex mutex;
+    size_t active = 0;
+    std::vector<std::pair<std::string, std::shared_ptr<InstanceOwner>>> instances;
+};
+struct InstanceLease {
+    std::shared_ptr<InstancePool> pool;
+    std::shared_ptr<InstanceOwner> owner;
+    // Acquired while pool->mutex is held; constructing the complete lease is non-throwing.
+    InstanceLease(std::shared_ptr<InstancePool> sharedPool,
+                  std::shared_ptr<InstanceOwner> sharedOwner)
+        : pool(std::move(sharedPool)), owner(std::move(sharedOwner)) {
+        ++pool->active;
+    }
+    InstanceLease(const InstanceLease&) = delete;
+    InstanceLease& operator=(const InstanceLease&) = delete;
+    ~InstanceLease() {
+        std::lock_guard lock(pool->mutex);
+        owner.reset();
+        if (--pool->active == 0)
+            pool->instances.clear();
+    }
+};
 namespace {
+std::shared_ptr<InstancePool> SharedInstances() {
+    static auto pool = std::make_shared<InstancePool>();
+    return pool;
+}
+std::string InstanceKey(const VkInstanceCreateInfo& create, bool syncValidation) {
+    std::ostringstream key;
+    key << create.pApplicationInfo->apiVersion << ':' << create.flags << ':' << syncValidation;
+    for (uint32 i = 0; i < create.enabledExtensionCount; ++i)
+        key << ':' << create.ppEnabledExtensionNames[i];
+    for (uint32 i = 0; i < create.enabledLayerCount; ++i)
+        key << ':' << create.ppEnabledLayerNames[i];
+    return key.str();
+}
+
 #if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
 struct FaultSlot {
     uint32 skip = 0;
@@ -81,13 +139,15 @@ VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBits
                                              VkDebugUtilsMessageTypeFlagsEXT,
                                              const VkDebugUtilsMessengerCallbackDataEXT* data,
                                              void* user) {
-    auto* state = static_cast<DeviceState*>(user);
+    auto* counters = static_cast<InstanceValidation*>(user);
     const char* message = data && data->pMessage ? data->pMessage : "";
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        ++state->validationErrors;
+        if (counters)
+            ++counters->errors;
         Log::Error(std::string("[Vulkan] ") + message);
     } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-        ++state->validationWarnings;
+        if (counters)
+            ++counters->warnings;
         Log::Warn(std::string("[Vulkan] ") + message);
     }
     return VK_FALSE;
@@ -120,6 +180,19 @@ struct Candidate {
 } // namespace
 
 #if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+InstanceLifetimeCounters GetInstanceLifetimeCounters() {
+    auto pool = SharedInstances();
+    std::lock_guard lock(pool->mutex);
+    return {static_cast<uint32>(pool->instances.size()), static_cast<uint32>(pool->active)};
+}
+void InjectInstanceValidationCounters(uint32 errors, uint32 warnings) {
+    auto pool = SharedInstances();
+    std::lock_guard lock(pool->mutex);
+    for (const auto& entry : pool->instances) {
+        entry.second->validation->errors += errors;
+        entry.second->validation->warnings += warnings;
+    }
+}
 void InjectFault(Fault fault, uint32 count, uint32 skip) {
     std::lock_guard lock(faultMutex);
     faults[static_cast<size_t>(fault)] = {skip, count, 0};
@@ -292,7 +365,8 @@ bool DeviceState::CreateInstance() {
                                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     messengerInfo.pfnUserCallback = DebugCallback;
-    messengerInfo.pUserData = this;
+    // Callback state is owned by the shared instance, never by an individual DeviceState.
+    messengerInfo.pUserData = nullptr;
 
     const VkValidationFeatureEnableEXT syncFeature =
         VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT;
@@ -318,20 +392,40 @@ bool DeviceState::CreateInstance() {
     if (syncValidation)
         *next = &features;
 
-    if (const VkResult result = vkCreateInstance(&create, nullptr, &instance);
-        result != VK_SUCCESS) {
-        instance = VK_NULL_HANDLE;
-        return Fail(result, "vkCreateInstance");
-    }
-    if (debugUtils) {
-        messengerInfo.pNext = nullptr;
-        auto createMessenger = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-            vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-        if (!createMessenger ||
-            createMessenger(instance, &messengerInfo, nullptr, &messenger) != VK_SUCCESS) {
-            messenger = VK_NULL_HANDLE;
-            Log::Warn("Vulkan debug messenger could not be created");
+    {
+        auto pool = SharedInstances();
+        std::lock_guard lock(pool->mutex);
+        const auto key = InstanceKey(create, syncValidation);
+        auto found = std::find_if(pool->instances.begin(), pool->instances.end(),
+                                  [&](const auto& entry) { return entry.first == key; });
+        std::shared_ptr<InstanceOwner> owner;
+        if (found != pool->instances.end()) {
+            owner = found->second;
+        } else {
+            owner = std::make_shared<InstanceOwner>();
+            messengerInfo.pUserData = owner->validation.get();
+            if (const VkResult result = vkCreateInstance(&create, nullptr, &owner->handle);
+                result != VK_SUCCESS) {
+                owner->handle = VK_NULL_HANDLE;
+                return Fail(result, "vkCreateInstance");
+            }
+            if (debugUtils) {
+                messengerInfo.pNext = nullptr;
+                auto createMessenger = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+                    vkGetInstanceProcAddr(owner->handle, "vkCreateDebugUtilsMessengerEXT"));
+                if (!createMessenger || createMessenger(owner->handle, &messengerInfo, nullptr,
+                                                        &owner->messenger) != VK_SUCCESS) {
+                    owner->messenger = VK_NULL_HANDLE;
+                    Log::Warn("Vulkan debug messenger could not be created");
+                }
+            }
+            pool->instances.emplace_back(key, owner);
         }
+        instanceLease = std::make_shared<InstanceLease>(pool, std::move(owner));
+        instance = instanceLease->owner->handle;
+        instanceValidation = instanceLease->owner->validation;
+        validationErrorsAtInitialization = instanceValidation->errors.load();
+        validationWarningsAtInitialization = instanceValidation->warnings.load();
     }
     info.validation = !layers.empty();
     info.synchronizationValidation = syncValidation;
@@ -546,15 +640,7 @@ void DeviceState::DestroyContext() {
     if (surface)
         Platform::DestroyVulkanSurface(instance, surface);
     surface = VK_NULL_HANDLE;
-    if (messenger) {
-        auto destroyMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-            vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
-        if (destroyMessenger)
-            destroyMessenger(instance, messenger, nullptr);
-    }
-    messenger = VK_NULL_HANDLE;
-    if (instance)
-        vkDestroyInstance(instance, nullptr);
+    instanceLease.reset();
     instance = VK_NULL_HANDLE;
     physical = VK_NULL_HANDLE;
 }

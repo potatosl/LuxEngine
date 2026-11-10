@@ -10,6 +10,7 @@
 #include <QClipboard>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -95,6 +96,70 @@ void TestTimeline(QApplication& app) {
         window->close();
     }
 }
+void TestNameLimits(QApplication& app) {
+    QTemporaryDir files;
+    Scene scene;
+    scene.CreateEntity("Seed");
+    auto window = OpenScene(app, scene, files);
+    QLineEdit* name = nullptr;
+    for (auto* field : window->findChildren<QLineEdit*>())
+        if (field->text() == QStringLiteral("Seed"))
+            name = field;
+    Check(name != nullptr, "name editor exists");
+    auto* undo = window->findChild<QUndoStack*>();
+    const QString koreanBoundary = QString(85, QChar(0xac00)) + QLatin1Char('a');
+    for (const auto& valid : {QString(256, QLatin1Char('a')), koreanBoundary}) {
+        name->setText(valid);
+        QMetaObject::invokeMethod(name, "editingFinished", Qt::DirectConnection);
+        Check(window->GetDocument().Save(), "boundary-length names save");
+        EditorDocument reopened;
+        Check(reopened.Open(window->GetDocument().GetPath()), "saved name reopens");
+        undo->undo();
+        undo->redo();
+        Check(window->GetDocument().GetSelected().GetComponent<TagComponent>().tag ==
+                  valid.toUtf8().toStdString(),
+              "name redo round trips");
+        window->findChild<QAction*>(QStringLiteral("copyEntity"))->trigger();
+        window->findChild<QAction*>(QStringLiteral("pasteEntity"))->trigger();
+        Check(window->GetDocument().GetScene().GetEntityCount() == 2,
+              "boundary-length names can still be copied and pasted");
+        undo->undo();
+        const int index = undo->index();
+        name->setText(valid + QLatin1Char('b'));
+        QMetaObject::invokeMethod(name, "editingFinished", Qt::DirectConnection);
+        Check(undo->index() == index &&
+                  window->GetDocument().GetSelected().GetComponent<TagComponent>().tag ==
+                      valid.toUtf8().toStdString(),
+              "oversized names roll back without history");
+        Check(window->GetDocument().Save() && reopened.Open(window->GetDocument().GetPath()),
+              "rejected name leaves a reopenable scene");
+    }
+    Scene invalid;
+    auto entity = invalid.CreateEntity(std::string(257, 'a'));
+    std::string output = "unchanged";
+    Check(!invalid.SerializeToString(output) && output == "unchanged",
+          "engine rejects oversized tags");
+    entity.GetComponent<TagComponent>().tag = std::string("\xc0\xaf", 2);
+    Check(!invalid.SerializeToString(output), "engine rejects invalid UTF-8 tags");
+    entity.GetComponent<TagComponent>().tag = std::string("\xf5\x80\x80\x80", 4);
+    Check(!invalid.SerializeToString(output), "engine rejects UTF-8 beyond Unicode range");
+    entity.GetComponent<TagComponent>().tag = std::string("\xf4\x8f\xbf\xbf", 4);
+    Scene boundary;
+    Check(invalid.SerializeToString(output) && boundary.DeserializeFromString(output),
+          "maximum Unicode code point round trips");
+    entity.GetComponent<TagComponent>().tag = "A\r\nB\x1a C";
+    const auto controlsFile = PathFromUtf8(files.path().toUtf8().toStdString()) / "controls.lux";
+    Check(invalid.Serialize(PathUtf8(controlsFile)) &&
+              boundary.Deserialize(PathUtf8(controlsFile)) &&
+              boundary.GetEntities()[0].GetComponent<TagComponent>().tag ==
+                  entity.GetComponent<TagComponent>().tag,
+          "binary scene IO preserves valid UTF-8 control bytes on all platforms");
+    entity.GetComponent<TagComponent>().tag = "valid";
+    entity.AddComponent<AnimationComponent>().clip.name = std::string(257, 'x');
+    Check(!invalid.SerializeToString(output), "engine validates clip-name read/write symmetry");
+    window->GetDocument().SetDirty(false);
+    window->close();
+}
 void TestSparseCopy(QApplication& app) {
     for (const auto [hasTag, hasTransform] :
          {std::pair{false, true}, std::pair{true, false}, std::pair{false, false}}) {
@@ -167,6 +232,34 @@ void Click(QWidget& view, QPointF point) {
                         Qt::NoModifier);
     QApplication::sendEvent(&view, &press);
     QApplication::sendEvent(&view, &release);
+}
+void TestSparseTilemap(QApplication& app) {
+    for (const auto tool : {EditorTool::TileBrush, EditorTool::TileErase}) {
+        for (const bool selected : {false, true}) {
+            EditorDocument document;
+            auto sparse = document.CreateEntity("Sparse map");
+            sparse.AddComponent<TilemapComponent>();
+            sparse.RemoveComponent<TransformComponent>();
+            if (!selected)
+                document.Select(std::nullopt);
+            int edits = 0, paints = 0;
+            SceneViewport2D view(
+                nullptr, document, [&](auto id) { document.Select(id); }, [](auto, const auto&) {},
+                [&](auto, auto, auto, auto) { ++paints; }, [&] { ++edits; }, [&] { --edits; });
+            view.resize(640, 480);
+            view.SetTool(tool);
+            view.show();
+            app.processEvents();
+            Click(view, {340, 220});
+            Check(edits == 0 && paints == 0, "invalid maps cannot start a brush transaction");
+            auto valid = document.CreateEntity("Valid map");
+            valid.AddComponent<TilemapComponent>();
+            document.Select(sparse.GetId());
+            Click(view, {340, 220});
+            Check(document.GetSelected() == valid && edits == 0 && paints == 1,
+                  "brush skips sparse maps and selects a valid map under the cursor");
+        }
+    }
 }
 void TestPicking2D(QApplication& app, bool gpu = false) {
     std::shared_ptr<EngineSceneRenderer> renderer;
@@ -357,6 +450,10 @@ int main(int argc, char** argv) {
             TestTimeline(app);
         else if (suite == "sparse-copy")
             TestSparseCopy(app);
+        else if (suite == "names")
+            TestNameLimits(app);
+        else if (suite == "sparse-tilemap")
+            TestSparseTilemap(app);
         else if (suite == "picking2d")
             TestPicking2D(app);
         else if (suite == "picking2d-gpu") {

@@ -39,6 +39,10 @@ public:
                                                const std::string& name,
                                                ProjectTemplate projectTemplate, std::string& error);
     static std::optional<EditorProject> Open(const std::filesystem::path& file, std::string& error);
+    // Editor recovery only: a broken/missing start scene is accepted only with a valid autosave.
+    // Archive validation must continue using Open().
+    static std::optional<EditorProject> OpenForRecovery(const std::filesystem::path& file,
+                                                        std::string& error);
     bool Rename(const std::string& name, std::string& error);
     bool UpdateSettings(const ProjectSettings& settings, std::string& error);
     bool SetIcon(const std::filesystem::path& image, std::string& error);
@@ -46,6 +50,7 @@ public:
     std::filesystem::path GetAutosaveFile(const std::filesystem::path& sceneFile) const;
     bool SaveAutosave(const std::filesystem::path& sceneFile, LuxEngine::Scene& scene,
                       std::string& error) const;
+    bool ContainsScene(const std::filesystem::path& sceneFile) const;
     bool HasNewerAutosave(const std::filesystem::path& sceneFile) const;
     bool ClearAutosave(const std::filesystem::path& sceneFile) const;
     size_t RescanResources(std::string& error) const;
@@ -74,6 +79,8 @@ public:
     static std::string CurrentEngineVersion();
 
 private:
+    static std::optional<EditorProject> Read(const std::filesystem::path& file, std::string& error,
+                                             bool allowRecovery);
     std::filesystem::path file_;
     std::filesystem::path scene_ = "Scenes/Main.lux";
     std::string engineVersion_ = "0.1.0";

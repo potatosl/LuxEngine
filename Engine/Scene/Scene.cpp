@@ -513,7 +513,61 @@ std::istream& operator>>(std::istream& i, Vec4& v) {
     return i >> v.x >> v.y >> v.z >> v.w;
 }
 } // namespace
+namespace {
+constexpr uint64 MaxSceneSizeBytes = 64ull * 1024ull * 1024ull; // 64 MiB
+constexpr uint64 MaxSceneEntities = 100000;                     // 100,000 entities
+constexpr size_t MaxTagStringLength = 256;                      // 256 bytes per tag
+constexpr size_t MaxClipNameLength = 256;                       // 256 bytes per animation clip name
+
+bool IsValidUtf8(std::string_view str) {
+    size_t i = 0;
+    while (i < str.size()) {
+        const auto c = static_cast<unsigned char>(str[i]);
+        if (c < 0x80) {
+            ++i;
+        } else if ((c & 0xE0) == 0xC0) {
+            if (i + 1 >= str.size())
+                return false;
+            const auto c1 = static_cast<unsigned char>(str[i + 1]);
+            if ((c1 & 0xC0) != 0x80 || c < 0xC2)
+                return false;
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 >= str.size())
+                return false;
+            const auto c1 = static_cast<unsigned char>(str[i + 1]);
+            const auto c2 = static_cast<unsigned char>(str[i + 2]);
+            if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80)
+                return false;
+            if (c == 0xE0 && c1 < 0xA0)
+                return false;
+            if (c == 0xED && c1 >= 0xA0)
+                return false;
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            if (c > 0xF4 || i + 3 >= str.size())
+                return false;
+            const auto c1 = static_cast<unsigned char>(str[i + 1]);
+            const auto c2 = static_cast<unsigned char>(str[i + 2]);
+            const auto c3 = static_cast<unsigned char>(str[i + 3]);
+            if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
+                return false;
+            if (c == 0xF0 && c1 < 0x90)
+                return false;
+            if (c == 0xF4 && c1 > 0x8F)
+                return false;
+            i += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
 bool Scene::SerializeToString(std::string& output) {
+    if (entities_.size() > MaxSceneEntities)
+        return false;
     const std::unordered_set<std::type_index> supported{typeid(TagComponent),
                                                         typeid(TransformComponent),
                                                         typeid(SpriteRendererComponent),
@@ -529,6 +583,9 @@ bool Scene::SerializeToString(std::string& output) {
         if (!pool->Empty() && !supported.contains(type))
             return false;
     for (const uint32 id : entities_) {
+        if (const auto* tag = TryGetComponent<TagComponent>(id))
+            if (tag->tag.size() > MaxTagStringLength || !IsValidUtf8(tag->tag))
+                return false;
         if (const auto* transform = TryGetComponent<TransformComponent>(id)) {
             if (!Finite(transform->position) || !Finite(transform->rotation) ||
                 !Finite(transform->scale))
@@ -579,8 +636,9 @@ bool Scene::SerializeToString(std::string& output) {
                 return false;
         }
         if (const auto* animation = TryGetComponent<AnimationComponent>(id)) {
-            if (!std::isfinite(animation->clip.duration) || animation->clip.duration <= 0 ||
-                animation->clip.keyframes.size() > 4096)
+            if (animation->clip.name.size() > MaxClipNameLength ||
+                !IsValidUtf8(animation->clip.name) || !std::isfinite(animation->clip.duration) ||
+                animation->clip.duration <= 0 || animation->clip.keyframes.size() > 4096)
                 return false;
             for (const auto& key : animation->clip.keyframes)
                 if (!std::isfinite(key.time) || key.time < 0 || !Finite(key.position) ||
@@ -637,7 +695,7 @@ bool Scene::SerializeToString(std::string& output) {
                 out << ' ' << key.time << ' ' << key.position << key.rotation << key.scale;
         });
     }
-    if (!out)
+    if (!out || out.tellp() > static_cast<std::streamoff>(MaxSceneSizeBytes))
         return false;
     output = out.str();
     return true;
@@ -696,58 +754,6 @@ bool Scene::Serialize(const std::string& filepath) {
     ClearSaveError();
     return true;
 }
-
-namespace {
-constexpr uint64 MaxSceneSizeBytes = 64ull * 1024ull * 1024ull; // 64 MiB
-constexpr uint64 MaxSceneEntities = 100000;                     // 100,000 entities
-constexpr size_t MaxTagStringLength = 256;                      // 256 bytes per tag
-constexpr size_t MaxClipNameLength = 256;                       // 256 bytes per animation clip name
-
-bool IsValidUtf8(std::string_view str) {
-    size_t i = 0;
-    while (i < str.size()) {
-        const auto c = static_cast<unsigned char>(str[i]);
-        if (c < 0x80) {
-            ++i;
-        } else if ((c & 0xE0) == 0xC0) {
-            if (i + 1 >= str.size())
-                return false;
-            const auto c1 = static_cast<unsigned char>(str[i + 1]);
-            if ((c1 & 0xC0) != 0x80 || c < 0xC2)
-                return false;
-            i += 2;
-        } else if ((c & 0xF0) == 0xE0) {
-            if (i + 2 >= str.size())
-                return false;
-            const auto c1 = static_cast<unsigned char>(str[i + 1]);
-            const auto c2 = static_cast<unsigned char>(str[i + 2]);
-            if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80)
-                return false;
-            if (c == 0xE0 && c1 < 0xA0)
-                return false;
-            if (c == 0xED && c1 >= 0xA0)
-                return false;
-            i += 3;
-        } else if ((c & 0xF8) == 0xF0) {
-            if (i + 3 >= str.size())
-                return false;
-            const auto c1 = static_cast<unsigned char>(str[i + 1]);
-            const auto c2 = static_cast<unsigned char>(str[i + 2]);
-            const auto c3 = static_cast<unsigned char>(str[i + 3]);
-            if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
-                return false;
-            if (c == 0xF0 && c1 < 0x90)
-                return false;
-            if (c == 0xF4 && c1 > 0x8F)
-                return false;
-            i += 4;
-        } else {
-            return false;
-        }
-    }
-    return true;
-}
-} // namespace
 
 bool Scene::DeserializeStream(std::istream& in) {
     std::string header;
@@ -908,7 +914,7 @@ bool Scene::Deserialize(const std::string& filepath) {
     const auto fileSize = std::filesystem::file_size(Utf8Path(filepath), ec);
     if (ec || fileSize == 0 || fileSize > MaxSceneSizeBytes)
         return false;
-    std::ifstream in(Utf8Path(filepath));
+    std::ifstream in(Utf8Path(filepath), std::ios::binary);
     if (!in)
         return false;
     return DeserializeStream(in);

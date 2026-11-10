@@ -327,7 +327,7 @@ void EditorWindow::BuildLayout() {
                             axisRow, axisCol);
             grid->addWidget(transform_[row][axis], axisRow, axisCol + 1);
             connect(transform_[row][axis], qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-                    [this] { OnTransformChanged(); });
+                    [this, row, axis] { OnTransformChanged(row, axis); });
         }
     }
     body->addWidget(transformGroup);
@@ -344,7 +344,7 @@ void EditorWindow::BuildLayout() {
         color_[channel] = Number(spriteGroup, 0, 1, 1, .05);
         colors->addWidget(color_[channel], row * 2 + 1, col);
         connect(color_[channel], qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-                [this] { OnColorChanged(); });
+                [this, channel] { OnColorChanged(channel); });
     }
     spriteLayout->addLayout(colors);
     body->addWidget(spriteGroup);
@@ -359,11 +359,11 @@ void EditorWindow::BuildLayout() {
     meshLayout->addRow(QStringLiteral("금속성"), metallic_);
     meshLayout->addRow(QStringLiteral("거칠기"), roughness_);
     body->addWidget(meshGroup);
-    connect(meshEnabled_, &QCheckBox::toggled, this, [this] { OnMeshChanged(); });
+    connect(meshEnabled_, &QCheckBox::toggled, this, [this] { OnMeshChanged(meshEnabled_); });
     connect(metallic_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this] { OnMeshChanged(); });
+            [this] { OnMeshChanged(metallic_); });
     connect(roughness_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this] { OnMeshChanged(); });
+            [this] { OnMeshChanged(roughness_); });
     auto* tileGroup = new QGroupBox(QStringLiteral("TILEMAP"), inspectorBody_);
     auto* tileLayout = new QFormLayout(tileGroup);
     tilemapEnabled_ = new QCheckBox(QStringLiteral("타일맵 사용"), tileGroup);
@@ -378,13 +378,14 @@ void EditorWindow::BuildLayout() {
     tileLayout->addRow(QStringLiteral("세로 칸"), tilemapHeight_);
     tileLayout->addRow(QStringLiteral("칸 크기"), tilemapSize_);
     body->addWidget(tileGroup);
-    connect(tilemapEnabled_, &QCheckBox::toggled, this, [this] { OnTilemapChanged(); });
+    connect(tilemapEnabled_, &QCheckBox::toggled, this,
+            [this] { OnTilemapChanged(tilemapEnabled_); });
     connect(tilemapWidth_, qOverload<int>(&QSpinBox::valueChanged), this,
-            [this] { OnTilemapChanged(); });
+            [this] { OnTilemapChanged(tilemapWidth_); });
     connect(tilemapHeight_, qOverload<int>(&QSpinBox::valueChanged), this,
-            [this] { OnTilemapChanged(); });
+            [this] { OnTilemapChanged(tilemapHeight_); });
     connect(tilemapSize_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this] { OnTilemapChanged(); });
+            [this] { OnTilemapChanged(tilemapSize_); });
     // 개발 중: 엔진에 아직 없는 원형·다각형 충돌체와 조인트는 편집 도구를 노출하지 않습니다.
     auto* physicsGroup = new QGroupBox(QStringLiteral("2D PHYSICS"), inspectorBody_);
     auto* physicsLayout = new QFormLayout(physicsGroup);
@@ -411,18 +412,21 @@ void EditorWindow::BuildLayout() {
     }
     physicsLayout->addRow(triggerEnabled_);
     body->addWidget(physicsGroup);
-    connect(bodyEnabled_, &QCheckBox::toggled, this, [this] { OnPhysicsChanged(); });
-    connect(bodyType_, &QComboBox::currentIndexChanged, this, [this] { OnPhysicsChanged(); });
+    connect(bodyEnabled_, &QCheckBox::toggled, this, [this] { OnPhysicsChanged(bodyEnabled_); });
+    connect(bodyType_, &QComboBox::currentIndexChanged, this,
+            [this] { OnPhysicsChanged(bodyType_); });
     connect(gravityScale_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this] { OnPhysicsChanged(); });
-    connect(colliderEnabled_, &QCheckBox::toggled, this, [this] { OnPhysicsChanged(); });
-    connect(triggerEnabled_, &QCheckBox::toggled, this, [this] { OnPhysicsChanged(); });
+            [this] { OnPhysicsChanged(gravityScale_); });
+    connect(colliderEnabled_, &QCheckBox::toggled, this,
+            [this] { OnPhysicsChanged(colliderEnabled_); });
+    connect(triggerEnabled_, &QCheckBox::toggled, this,
+            [this] { OnPhysicsChanged(triggerEnabled_); });
     for (auto* field : colliderSize_)
         connect(field, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-                [this] { OnPhysicsChanged(); });
+                [this, field] { OnPhysicsChanged(field); });
     for (auto* field : colliderOffset_)
         connect(field, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-                [this] { OnPhysicsChanged(); });
+                [this, field] { OnPhysicsChanged(field); });
 
     // 개발 중: 스프라이트 시트·본 애니메이션은 엔진 구현 후 타임라인에 연결합니다.
     auto* animationGroup = new QGroupBox(QStringLiteral("TRANSFORM ANIMATION"), inspectorBody_);
@@ -451,10 +455,12 @@ void EditorWindow::BuildLayout() {
     animationLayout->addWidget(keyframeList_);
     animationLayout->addLayout(keyButtons);
     body->addWidget(animationGroup);
-    connect(animationEnabled_, &QCheckBox::toggled, this, [this] { OnAnimationChanged(); });
-    connect(animationLoop_, &QCheckBox::toggled, this, [this] { OnAnimationChanged(); });
+    connect(animationEnabled_, &QCheckBox::toggled, this,
+            [this] { OnAnimationChanged(animationEnabled_); });
+    connect(animationLoop_, &QCheckBox::toggled, this,
+            [this] { OnAnimationChanged(animationLoop_); });
     connect(animationDuration_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this] { OnAnimationChanged(); });
+            [this] { OnAnimationChanged(animationDuration_); });
     connect(addKey, &QPushButton::clicked, this, [this] { AddKeyframe(); });
     connect(removeKey, &QPushButton::clicked, this, [this] { RemoveKeyframe(); });
     connect(animationTimeline_, &QSlider::sliderPressed, this,

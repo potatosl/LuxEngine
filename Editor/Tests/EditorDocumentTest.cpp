@@ -37,6 +37,28 @@ struct TempDirectory {
     }
 };
 
+void TestSceneWriteLimits() {
+    using namespace LuxEngine;
+    {
+        Scene scene;
+        for (unsigned i = 0; i < 100001; ++i)
+            scene.CreateEntity("Count");
+        std::string output = "preserved";
+        Check(!scene.SerializeToString(output) && output == "preserved",
+              "writer refuses entity counts the reader cannot load");
+    }
+    {
+        Scene scene;
+        TilemapComponent map;
+        Check(map.Resize(256, 256), "large scene tile fixture creates");
+        for (unsigned i = 0; i < 1024; ++i)
+            scene.CreateEntity("Map").AddComponent<TilemapComponent>(map);
+        std::string output = "preserved";
+        Check(!scene.SerializeToString(output) && output == "preserved",
+              "writer refuses scene bytes above the reader limit");
+    }
+}
+
 void TestDocument() {
     using namespace LuxEngine;
     using namespace LuxEditor;
@@ -859,6 +881,37 @@ void TestEmptyProjectDirectories() {
           "import repairs the basic layout of older packages without empty directory entries");
 }
 
+void TestBackupRetentionAfterRestore() {
+    using namespace LuxEditor;
+    TempDirectory files;
+    for (const unsigned limit : {1u, 2u}) {
+        std::string error;
+        auto project = EditorProject::Create(files.path / std::to_string(limit), "Retention",
+                                             ProjectTemplate::Empty, error);
+        Check(project.has_value(), "retention project creates");
+        auto settings = project->GetSettings();
+        settings.backupLimit = limit;
+        Check(project->UpdateSettings(settings, error), "retention limit saves");
+        std::filesystem::path initial;
+        Check(CreateProjectBackup(*project, initial, error), "initial backup exists");
+        Check(RestoreProjectBackup(*project, initial, error), "backup restores with safety copy");
+        for (int iteration = 0; iteration < 3; ++iteration) {
+            std::filesystem::path newest;
+            Check(CreateProjectBackup(*project, newest, error) && std::filesystem::exists(newest),
+                  "new backup survives pruning mixed backup prefixes");
+            size_t count = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(newest.parent_path()))
+                count += entry.path().extension() == ".luxbackup";
+            Check(count == limit, "all backup kinds share the configured retention limit");
+            auto restored = ImportProject(
+                newest,
+                files.path / (std::to_string(limit) + "-restored-" + std::to_string(iteration)),
+                error);
+            Check(restored.has_value(), "retained backup remains readable");
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -869,10 +922,12 @@ int main(int argc, char** argv) {
             return 0;
         }
         TestDocument();
+        TestSceneWriteLimits();
         Test3DEditorEntity();
         Test2DEditorComponents();
         TestProjectManagement();
         TestProjectOperations();
+        TestBackupRetentionAfterRestore();
         TestUnicodeProjectPaths();
         TestArchiveSecurityAndFuzzing();
         TestEmptyProjectDirectories();

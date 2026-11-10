@@ -293,6 +293,16 @@ std::optional<EditorProject> EditorProject::Create(const std::filesystem::path& 
 
 std::optional<EditorProject> EditorProject::Open(const std::filesystem::path& file,
                                                  std::string& error) {
+    return Read(file, error, false);
+}
+
+std::optional<EditorProject> EditorProject::OpenForRecovery(const std::filesystem::path& file,
+                                                            std::string& error) {
+    return Read(file, error, true);
+}
+
+std::optional<EditorProject> EditorProject::Read(const std::filesystem::path& file,
+                                                 std::string& error, bool allowRecovery) {
     error.clear();
     std::error_code ec;
     if (std::filesystem::file_size(file, ec) > 65536 || ec) {
@@ -361,12 +371,14 @@ std::optional<EditorProject> EditorProject::Open(const std::filesystem::path& fi
     }
     project.projectTemplate_ = static_cast<ProjectTemplate>(found - TemplateNames.begin());
     project.file_ = std::filesystem::absolute(file, ec).lexically_normal();
-    if (ec || !std::filesystem::is_regular_file(project.GetSceneFile(), ec)) {
-        error = "시작 장면을 찾을 수 없습니다.";
+    if (ec) {
+        error = "프로젝트 경로를 확인할 수 없습니다.";
         return std::nullopt;
     }
     LuxEngine::Scene validation;
-    if (!validation.Deserialize(PathUtf8(project.GetSceneFile()))) {
+    if (!validation.Deserialize(PathUtf8(project.GetSceneFile())) &&
+        (!allowRecovery ||
+         !validation.Deserialize(PathUtf8(project.GetAutosaveFile(project.GetSceneFile()))))) {
         error = "시작 장면 파일을 읽을 수 없습니다.";
         return std::nullopt;
     }
@@ -450,7 +462,7 @@ void RecentProjects::Load() {
     while (files_.size() < 10 && input >> std::quoted(item)) {
         std::string error;
         const auto path = PathFromUtf8(item).lexically_normal();
-        if (EditorProject::Open(path, error)) {
+        if (EditorProject::OpenForRecovery(path, error)) {
             if (std::find(files_.begin(), files_.end(), path) == files_.end())
                 files_.push_back(path);
         }
@@ -459,7 +471,7 @@ void RecentProjects::Load() {
 
 bool RecentProjects::Add(const std::filesystem::path& projectFile) {
     std::string error;
-    auto project = EditorProject::Open(projectFile, error);
+    auto project = EditorProject::OpenForRecovery(projectFile, error);
     if (!project)
         return false;
     const auto path = project->GetFile();
