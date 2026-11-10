@@ -1569,19 +1569,27 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
               "viewport B initial 3D render");
         if (closeOrder == 0) {
             rendererA.reset();
-            Check(rendererB->IsReady() &&
-                      rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0,
-                                          imgB) &&
-                      rendererB->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgB),
-                  "viewport B renders 3D & 2D after viewport A GpuDevice is destroyed first");
+            CheckWithGpuDiagnostics(
+                rendererB->IsReady() &&
+                    rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0, imgB),
+                "ViewportPeerTeardown::B3DAfterA", closeOrder + 1, rendererB.get(),
+                "viewport B renders 3D after viewport A GpuDevice is destroyed first");
+            CheckWithGpuDiagnostics(
+                rendererB->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgB),
+                "ViewportPeerTeardown::B2DAfterA", closeOrder + 1, rendererB.get(),
+                "viewport B renders 2D after viewport A GpuDevice is destroyed first");
             totalValidationErrors += rendererB->GetGpuDevice()->GetCounters().validationErrors;
         } else {
             rendererB.reset();
-            Check(
+            CheckWithGpuDiagnostics(
                 rendererA->IsReady() &&
-                    rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgA) &&
-                    rendererA->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.3, 0.1, 4.0, imgA),
-                "viewport A renders 2D & 3D after viewport B GpuDevice is destroyed first");
+                    rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgA),
+                "ViewportPeerTeardown::A2DAfterB", closeOrder + 1, rendererA.get(),
+                "viewport A renders 2D after viewport B GpuDevice is destroyed first");
+            CheckWithGpuDiagnostics(
+                rendererA->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.3, 0.1, 4.0, imgA),
+                "ViewportPeerTeardown::A3DAfterB", closeOrder + 1, rendererA.get(),
+                "viewport A renders 3D after viewport B GpuDevice is destroyed first");
             totalValidationErrors += rendererA->GetGpuDevice()->GetCounters().validationErrors;
         }
     }
