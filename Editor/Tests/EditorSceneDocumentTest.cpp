@@ -245,15 +245,31 @@ void TestBaseColorPaths() {
     document.GetScene()
         .AddComponent<MeshRendererComponent>(entity.GetId())
         .material.baseColorTexture = PathUtf8(texture);
+    const auto environment = files.root / "Assets" / PathFromUtf8("환경.HDR");
+    fs::create_directories(environment.parent_path());
+    {
+        std::ofstream output(environment, std::ios::binary);
+        output << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n";
+        const unsigned char pixels[8] = {128, 128, 128, 129, 64, 64, 64, 129};
+        output.write(reinterpret_cast<const char*>(pixels), 8);
+    }
+    auto settings = document.GetScene().GetSettings();
+    settings.render3D.mode = Render3DMode::Pbr;
+    settings.render3D.environmentPath = PathUtf8(environment);
+    Check(document.GetScene().SetSettings(settings), "environment fixture settings apply");
     Check(document.SaveAs(PathUtf8(first)) && document.SaveAs(PathUtf8(second)),
           "textured default cubes can be saved and moved without an OBJ path");
     Scene disk;
-    Check(disk.Deserialize(PathUtf8(second)), "version 5 scene reopens");
+    Check(disk.Deserialize(PathUtf8(second)), "version 6 textured environment scene reopens");
     const auto path =
         disk.GetComponent<MeshRendererComponent>(entity.GetId()).material.baseColorTexture;
     Check(PathFromUtf8(path).is_relative() &&
               fs::equivalent(PathFromUtf8(disk.ResolveAssetPath(path)), texture),
           "Save As preserves portable texture paths against the new scene owner");
+    const auto& envPath = disk.GetSettings().render3D.environmentPath;
+    Check(PathFromUtf8(envPath).is_relative() &&
+              fs::equivalent(PathFromUtf8(disk.ResolveAssetPath(envPath)), environment),
+          "v6 Save As preserves environment path against new scene owner");
     EditorDocument reopened;
     Check(reopened.Open(PathUtf8(second)), "textured editor scene opens");
     Scene owner;

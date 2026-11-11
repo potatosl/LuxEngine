@@ -15,6 +15,19 @@ constexpr float Pi = std::numbers::pi_v<float>;
 std::mutex revisionsMutex;
 std::unordered_map<std::string, uint64> revisions;
 uint64 nextRevision = 1;
+std::string Key(const std::string& path) {
+    if (path.empty())
+        return {};
+    try {
+        const auto source = std::filesystem::path(
+            std::u8string(reinterpret_cast<const char8_t*>(path.data()), path.size()));
+        const auto normalized =
+            std::filesystem::weakly_canonical(std::filesystem::absolute(source)).generic_u8string();
+        return {reinterpret_cast<const char*>(normalized.data()), normalized.size()};
+    } catch (...) {
+        return path;
+    }
+}
 
 float RadicalInverse(uint32 bits) {
     bits = (bits << 16) | (bits >> 16);
@@ -77,7 +90,7 @@ bool Decode(const std::string& path, int& width, int& height, std::vector<float>
         if (!stbi_is_hdr_from_memory(bytes.data(), static_cast<int>(size)) ||
             !stbi_info_from_memory(bytes.data(), static_cast<int>(size), &width, &height,
                                    &channels) ||
-            width < 2 || height < 1 || width != 2 * height || width > 8192 ||
+            width < 2 || height < 1 || width > 8192 || height > 4096 || width != 2 * height ||
             static_cast<uint64>(width) * height * 4 * sizeof(float) > (256ull << 20))
             throw std::runtime_error("Invalid 2:1 HDR dimensions or decoded size");
         std::unique_ptr<float, decltype(&stbi_image_free)> decoded(
@@ -139,7 +152,7 @@ template <class Sample> EnvironmentImage Cube(uint32 size, uint32 levels, Sample
     }
     return image;
 }
-} // namespace
+}
 
 std::shared_ptr<EnvironmentData> EnvironmentData::Neutral() {
     auto data = std::make_shared<EnvironmentData>();
@@ -231,16 +244,16 @@ bool EnvironmentData::ValidateFile(const std::string& path, std::string& error) 
 }
 uint64 EnvironmentData::Revision(const std::string& path) {
     std::lock_guard lock(revisionsMutex);
-    auto it = revisions.find(path);
+    auto it = revisions.find(Key(path));
     return it == revisions.end() ? 0 : it->second;
 }
 bool EnvironmentData::Reload(const std::string& path, std::string& error) {
     if (!path.empty() && !ValidateFile(path, error))
         return false;
     std::lock_guard lock(revisionsMutex);
-    if (revisions.size() >= 128 && !revisions.contains(path))
+    if (revisions.size() >= 128 && !revisions.contains(Key(path)))
         revisions.clear();
-    revisions[path] = nextRevision++;
+    revisions[Key(path)] = nextRevision++;
     return true;
 }
-} // namespace LuxEngine
+}

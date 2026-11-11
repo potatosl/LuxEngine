@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <stb_image.h>
 #include <stdexcept>
 #include <string_view>
@@ -3603,6 +3604,23 @@ void Pbr() {
           "legacy metallic and roughness preserve old appearance");
     render(1, 0, true);
     render(0, 1, true);
+    const auto mixed = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        Render3DSettings r;
+        r.mode = Render3DMode::Pbr;
+        r.imageBasedLighting = false;
+        r.shadows = false;
+        Renderer3D::BeginScene(camera, r, 1);
+        Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+        Renderer3D::EndScene();
+        const std::array<RenderVertex, 3> overlay{{{{-1, -1, 0}, {0, 1, 0, 1}, {0, 0}},
+                                                   {{1, -1, 0}, {0, 1, 0, 1}, {0, 0}},
+                                                   {{0, 1, 0}, {0, 1, 0, 1}, {0, 0}}}};
+        Check(graphics.gpu.DrawTriangles(overlay, Mat4{}),
+              "2D overlay draws after HDR tone mapping");
+    });
+    Check(IsColor(Pixel(mixed, .5f, .5f), 0, 255, 0),
+          "2D overlay retains legacy color after modern scene");
     graphics.ValidationClean("PBR material boundaries");
 }
 
@@ -3667,6 +3685,29 @@ void HdrEnvironment() {
         frame();
     Check(graphics.gpu.GetMemoryStats().allocationBytes == stable,
           "steady HDR frames do not grow allocations");
+    std::string replacement = hdr;
+    const unsigned char green[8] = {0, 128, 0, 130, 0, 128, 0, 130};
+    replacement.replace(replacement.size() - 8, 8, reinterpret_cast<const char*>(green), 8);
+    files.Binary("environment.HDR", replacement.data(), replacement.size());
+    Check(EnvironmentData::Reload(path, error), "valid HDR reload starts new generation");
+    frame();
+    const auto uploadDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(100);
+    do {
+        Vk::InjectFault(Vk::Fault::ImageAllocation);
+        frame();
+        Vk::ClearFaults();
+        if (!context.GetLastAssetError().empty())
+            break;
+    } while (std::chrono::steady_clock::now() < uploadDeadline);
+    Check(!context.GetLastAssetError().empty(), "environment GPU allocation failure is reported");
+    Check(Pixel(frame(), .5f, .5f) == rotated,
+          "failed environment upload keeps the last complete GPU resource");
+    Check(EnvironmentData::Reload(path, error), "environment upload can be retried explicitly");
+    wait();
+    Check(Pixel(frame(), .5f, .5f) != rotated, "successful retry atomically replaces environment");
+    settings.showSkybox = true;
+    Check(Pixel(frame(), 0, 0)[3] == 255, "ready environment draws skybox into background");
+    settings.showSkybox = false;
     settings.imageBasedLighting = false;
     settings.environmentIntensity = 1;
     settings.environmentColor = {.25f, .25f, .25f};
@@ -3679,7 +3720,244 @@ void HdrEnvironment() {
     settings.toneMapping = false;
     Check(std::abs(Pixel(frame(), .5f, .5f)[0] - 137) <= 3,
           "tone mapping toggle retains linear exposure pipeline");
+    const auto profiling = graphics.gpu.GetFrameStats();
+    Check(profiling.pipelineBinds >= 2 && profiling.uniformBinds > 0 &&
+              profiling.descriptorBinds > 0,
+          "modern passes report pipeline and descriptor profiling counters");
     graphics.ValidationClean("HDR and IBL");
+}
+
+void Shadows() {
+    GpuDeviceConfig config;
+    config.framesInFlight = 3;
+    Graphics graphics(config, 256, 192);
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(55), 256.f / 192, .1f, 100);
+    camera.SetPosition({6, 7, 9});
+    camera.SetTarget({0, 1, 0});
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.imageBasedLighting = false;
+    settings.environmentColor = {.04f, .04f, .04f};
+    settings.sun.direction = {.7f, -1, .3f};
+    settings.sun.intensity = 3;
+    settings.shadows = false;
+    Material3D ground;
+    ground.albedoColor = {.5f, .5f, .5f, 1};
+    ground.roughness = .7f;
+    Material3D object;
+    object.albedoColor = {.6f, .15f, .04f, 1};
+    object.roughness = .4f;
+    auto frame = [&](float shift = 0) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(.03f, .04f, .05f, 1);
+            Renderer3D::BeginScene(camera, settings, 1);
+            Renderer3D::DrawCube({0, -.1f, 0}, {10, .2f, 10}, ground);
+            Renderer3D::DrawCube({shift, 1, 0}, {1, 2, 1}, object);
+            Renderer3D::EndScene();
+        });
+    };
+    auto original = frame();
+    frame();
+    frame();
+    settings.shadows = true;
+    Vk::InjectFault(Vk::Fault::ImageAllocation);
+    const auto fallback = frame();
+    Vk::ClearFaults();
+    Check(!context.GetLastAssetError().empty(), "shadow allocation failure is reported");
+    Check(fallback.rgba == original.rgba, "shadow failure preserves unshadowed HDR rendering");
+    const auto shadowed = frame();
+    size_t darker = 0;
+    for (size_t i = 0; i < original.rgba.size(); i += 4)
+        if (original.rgba[i] > shadowed.rgba[i] + 20)
+            ++darker;
+    std::cout << "Shadow darkened_pixels=" << darker << '\n';
+    Check(darker > 50, "directional shadow darkens actual receiver pixels");
+    Check(frame(2).rgba != shadowed.rgba, "moving caster updates shadow");
+    for (int resolution : {1024, 2048, 4096}) {
+        settings.shadowResolution = resolution;
+        frame();
+    }
+    settings.shadowResolution = 2048;
+    frame();
+    frame();
+    frame();
+    const auto baseline = graphics.gpu.GetMemoryStats().allocationBytes;
+    for (int i = 0; i < 100; ++i) {
+        settings.shadows = (i % 2) == 0;
+        settings.shadowNormalBias = .02f;
+        frame();
+    }
+    settings.shadows = true;
+    frame();
+    frame();
+    frame();
+    Check(graphics.gpu.GetMemoryStats().allocationBytes == baseline,
+          "100 shadow toggles retain stable GPU allocation bytes");
+    settings.shadowRange = 1;
+    frame();
+    graphics.ValidationClean("directional shadows and failure fallback");
+}
+
+void ModernFailures() {
+    Graphics graphics({}, 128, 96);
+    PerspectiveCamera camera(ToRadians(60), 128.f / 96, .1f, 20);
+    camera.SetPosition({0, 0, 3});
+    camera.SetTarget({0, 0, 0});
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.imageBasedLighting = false;
+    settings.shadows = false;
+    for (auto fault :
+         {Vk::Fault::ShaderModule, Vk::Fault::PipelineCreation, Vk::Fault::ImageAllocation}) {
+        Renderer3D::Context context(&graphics.gpu);
+        Renderer3D::ScopedContext scoped(context);
+        const auto capture = graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            Renderer3D::BeginScene(camera, settings, 1);
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+            Vk::InjectFault(fault);
+            Renderer3D::EndScene();
+            Vk::ClearFaults();
+        });
+        Check(!context.GetLastAssetError().empty(),
+              "HDR initialization failure reports fallback reason");
+        const auto center = Pixel(capture, .5f, .5f);
+        Check(center[0] > 10 && center[1] > 10, "HDR failure still draws legacy mesh pixels");
+    }
+    graphics.ValidationClean("HDR resource failure fallback");
+}
+
+void ModernLifetimes() {
+    GpuDeviceConfig config;
+    config.framesInFlight = 3;
+    Graphics graphics(config, 128, 96);
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.imageBasedLighting = false;
+    settings.shadows = true;
+    settings.shadowResolution = 1024;
+    PerspectiveCamera camera(ToRadians(60), 128.f / 96, .1f, 20);
+    camera.SetPosition({2, 2, 4});
+    camera.SetTarget({0, 0, 0});
+    auto empty = [&] { graphics.Capture([&] { graphics.gpu.Clear(0, 0, 0, 1); }); };
+    empty();
+    empty();
+    empty();
+    const auto baseline = graphics.gpu.GetMemoryStats().allocationBytes;
+    for (int i = 0; i < 100; ++i) {
+        Check(graphics.Begin(), "lifetime frame begins");
+        graphics.gpu.Clear(0, 0, 0, 1);
+        {
+            Renderer3D::Context local(&graphics.gpu);
+            Renderer3D::ScopedContext scoped(local);
+            Renderer3D::BeginScene(camera, settings, 1);
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+            Renderer3D::EndScene();
+            local.Shutdown();
+        }
+        Check(graphics.gpu.EndFrame(),
+              "destroyed CPU context still submits retained GPU resources");
+    }
+    empty();
+    empty();
+    empty();
+    empty();
+    graphics.gpu.WaitIdle();
+    const auto after = graphics.gpu.GetMemoryStats().allocationBytes;
+    std::cout << "Modern lifetime baseline=" << baseline << " after=" << after << '\n';
+    Check(after == baseline, "100 mid-frame context shutdowns return GPU allocations to baseline");
+    graphics.ValidationClean("mid-frame PBR context destruction");
+}
+
+void RenderingBenchmark() {
+    GpuDeviceConfig config;
+    config.validation = GpuValidation::Off;
+    config.vsync = false;
+    Graphics graphics(config, 1920, 1080);
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(55), 1920.f / 1080, .1f, 150);
+    camera.SetPosition({22, 24, 32});
+    camera.SetTarget({0, 1, 0});
+    const auto file = std::filesystem::path(__FILE__).parent_path().parent_path() /
+                      "examples/MeshFoundation/Assets/SmoothSphere.obj";
+    const auto bytes = file.u8string();
+    const std::string mesh(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.showSkybox = true;
+    settings.shadows = false;
+    Material3D ground;
+    ground.albedoColor = {.25f, .25f, .25f, 1};
+    ground.roughness = .7f;
+    auto frame = [&] {
+        Check(graphics.Begin(), "benchmark frame begins");
+        graphics.gpu.Clear(.04f, .05f, .07f, 1);
+        Renderer3D::BeginScene(camera, settings, 1);
+        for (int i = 0; i < 100; ++i) {
+            Material3D material;
+            material.albedoColor = {.7f, .35f, .12f, 1};
+            material.metallic = i < 50 ? 0.f : 1.f;
+            material.roughness = .1f + .8f * (i % 10) / 9;
+            Renderer3D::DrawMeshAsset(
+                mesh, Mat4::Translate({(i % 10 - 4.5f) * 2, 1, (i / 10 - 4.5f) * 2}), material);
+        }
+        Renderer3D::DrawCube({0, -.2f, 0}, {24, .4f, 24}, ground);
+        Renderer3D::EndScene();
+        Check(context.GetLastAssetError().empty(), "benchmark has no renderer errors");
+        Check(graphics.gpu.EndFrame(), "benchmark frame submits");
+    };
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(100);
+    do {
+        frame();
+    } while (!context.IsEnvironmentReady() && std::chrono::steady_clock::now() < deadline);
+    Check(context.IsEnvironmentReady(), "benchmark environment ready");
+    uint32 actualWidth = 0, actualHeight = 0;
+    Check(graphics.window.GetFramebufferSize(actualWidth, actualHeight) && actualWidth == 1920 &&
+              actualHeight == 1080,
+          "benchmark uses actual 1920x1080 framebuffer");
+    std::ofstream output("build/rendering-benchmark.json");
+    output << "{\"width\":1920,\"height\":1080,\"spheres\":100,\"frames_per_case\":600,"
+              "\"environment_preparation_ms\":"
+           << context.GetEnvironmentPreparationMs() << ",\"cases\":[";
+    bool first = true;
+    for (int resolution : {0, 1024, 2048, 4096}) {
+        settings.shadows = resolution != 0;
+        if (resolution)
+            settings.shadowResolution = resolution;
+        for (int i = 0; i < 60; ++i)
+            frame();
+        std::vector<double> cpu, gpu;
+        for (int i = 0; i < 600; ++i) {
+            const auto start = std::chrono::steady_clock::now();
+            frame();
+            cpu.push_back(
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                    .count());
+            const auto stats = graphics.gpu.GetFrameStats();
+            if (stats.gpuTimeMs >= 0)
+                gpu.push_back(stats.gpuTimeMs);
+        }
+        std::sort(cpu.begin(), cpu.end());
+        std::sort(gpu.begin(), gpu.end());
+        Check(!gpu.empty(), "benchmark GPU timestamps available");
+        const auto memory = graphics.gpu.GetMemoryStats();
+        const double mean = std::accumulate(gpu.begin(), gpu.end(), 0.0) / gpu.size();
+        if (!first)
+            output << ',';
+        first = false;
+        output << "{\"shadow_resolution\":" << resolution << ",\"cpu_median_ms\":" << cpu[300]
+               << ",\"cpu_p95_ms\":" << cpu[570] << ",\"gpu_mean_ms\":" << mean
+               << ",\"gpu_p95_ms\":" << gpu[gpu.size() * 95 / 100]
+               << ",\"allocation_bytes\":" << memory.allocationBytes << '}';
+        output.flush();
+        std::cout << "BENCH shadow=" << resolution << " cpu_median_ms=" << cpu[300]
+                  << " gpu_mean_ms=" << mean << " allocation_bytes=" << memory.allocationBytes
+                  << std::endl;
+    }
+    output << "]}\n";
 }
 
 int vulkanValidationMessages = 0;
@@ -3714,6 +3992,14 @@ int main(int argc, char** argv) {
             WindowEvents();
         else if (suite == "gpu")
             Gpu();
+        else if (suite == "render_failures")
+            ModernFailures();
+        else if (suite == "render_lifetime")
+            ModernLifetimes();
+        else if (suite == "render_bench")
+            RenderingBenchmark();
+        else if (suite == "shadows")
+            Shadows();
         else if (suite == "hdr")
             HdrEnvironment();
         else if (suite == "pbr")

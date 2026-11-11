@@ -36,3 +36,21 @@ float3 EnvironmentLighting(float3 base, float metal, float rough, float3 n, floa
     return ((1 - f) * (1 - metal) * base * irradiance + reflected * (f0 * brdf.x + brdf.y)) *
            scene.environment.w;
 }
+
+float DirectionalShadow(float3 world, float3 normal) {
+    if (scene.shadowOptions.x < 0.5)
+        return 1;
+    const float4 clip = mul(scene.shadowMatrix, float4(world + normal * scene.shadowOptions.w, 1));
+    const float3 p = clip.xyz / clip.w;
+    const float2 uv = float2(p.x * .5 + .5, .5 - p.y * .5);
+    if (any(uv < 0) || any(uv > 1) || p.z < 0 || p.z > 1)
+        return 1;
+    const int resolution = (int)round(1 / scene.shadowOptions.y);
+    const int2 center = (int2)(uv * resolution);
+    float visibility = 0;
+    [unroll] for (int y = -1; y <= 1; ++y)[unroll] for (int x = -1; x <= 1; ++x) {
+        const int2 pixel = clamp(center + int2(x, y), 0, resolution - 1);
+        visibility += p.z - scene.shadowOptions.z <= shadowImage.Load(int3(pixel, 0)) ? 1 : 0;
+    }
+    return visibility / 9;
+}

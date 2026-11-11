@@ -98,7 +98,7 @@ VkShaderModule Shader(DeviceState& s, const char* name) {
     return module;
 }
 VkPipeline Pipeline(DeviceState& s, VkPipelineLayout layout, VkRenderPass pass, const char* vertex,
-                    const char* fragment, bool mesh, bool depth) {
+                    const char* fragment, bool mesh, bool depth, bool shadow = false) {
     VkShaderModule modules[2]{};
     try {
         modules[0] = Shader(s, vertex);
@@ -113,7 +113,7 @@ VkPipeline Pipeline(DeviceState& s, VkPipelineLayout layout, VkRenderPass pass, 
         const VkBool32 lit = VK_TRUE;
         const VkSpecializationMapEntry entry{0, 0, sizeof(lit)};
         const VkSpecializationInfo special{1, &entry, sizeof(lit), &lit};
-        if (mesh)
+        if (mesh && !shadow)
             stages[1].pSpecializationInfo = &special;
         const VkVertexInputBindingDescription binding{0, sizeof(RenderVertex),
                                                       VK_VERTEX_INPUT_RATE_VERTEX};
@@ -126,7 +126,7 @@ VkPipeline Pipeline(DeviceState& s, VkPipelineLayout layout, VkRenderPass pass, 
             VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         input.vertexBindingDescriptionCount = mesh ? 1 : 0;
         input.pVertexBindingDescriptions = &binding;
-        input.vertexAttributeDescriptionCount = mesh ? 4 : 0;
+        input.vertexAttributeDescriptionCount = mesh ? (shadow ? 3 : 4) : 0;
         input.pVertexAttributeDescriptions = attributes;
         VkPipelineInputAssemblyStateCreateInfo assembly{
             VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -150,7 +150,7 @@ VkPipeline Pipeline(DeviceState& s, VkPipelineLayout layout, VkRenderPass pass, 
         color.colorWriteMask = 15;
         VkPipelineColorBlendStateCreateInfo blend{
             VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        blend.attachmentCount = 1;
+        blend.attachmentCount = shadow ? 0 : 1;
         blend.pAttachments = &color;
         const VkDynamicState states[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
         VkPipelineDynamicStateCreateInfo dynamic{
@@ -194,7 +194,7 @@ void Viewport(VkCommandBuffer cmd, uint32 width, uint32 height) {
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
-} // namespace
+}
 
 struct Scene3DRenderer::Impl {
     std::weak_ptr<DeviceState> owner;
@@ -203,6 +203,11 @@ struct Scene3DRenderer::Impl {
     VkRenderPass hdrPass{}, loadPass{};
     VkPipeline meshPipeline{}, postPipeline{}, skyPipeline{};
     VkSampler sampler{};
+    VkRenderPass shadowPass{};
+    VkPipeline shadowPipeline{};
+    VkFormat shadowFormat = VK_FORMAT_UNDEFINED;
+    bool shadowInitializationAttempted = false;
+    std::string shadowError;
     VkFormat outputFormat = VK_FORMAT_UNDEFINED;
     struct Environment {
         std::weak_ptr<DeviceState> owner;
@@ -216,7 +221,9 @@ struct Scene3DRenderer::Impl {
         }
     };
     struct Frame {
-        Image hdr, depth;
+        Image hdr, depth, shadow;
+        VkFramebuffer shadowFramebuffer{};
+        uint32 shadowResolution = 0;
         VkFramebuffer framebuffer{};
         VkDescriptorPool pool{};
         VkDescriptorSet sceneSet{}, toneSet{};
@@ -241,6 +248,9 @@ struct Scene3DRenderer::Impl {
             vkDestroyFramebuffer(s.device, f.framebuffer, nullptr);
         if (f.pool)
             vkDestroyDescriptorPool(s.device, f.pool, nullptr);
+        if (f.shadowFramebuffer)
+            vkDestroyFramebuffer(s.device, f.shadowFramebuffer, nullptr);
+        Destroy(s, f.shadow);
         Destroy(s, f.hdr);
         Destroy(s, f.depth);
         f = {};
@@ -253,10 +263,10 @@ struct Scene3DRenderer::Impl {
                     DestroyFrame(*s, *f);
             environment.reset();
             neutral.reset();
-            for (auto p : {meshPipeline, postPipeline, skyPipeline})
+            for (auto p : {meshPipeline, postPipeline, skyPipeline, shadowPipeline})
                 if (p)
                     vkDestroyPipeline(s->device, p, nullptr);
-            for (auto p : {hdrPass, loadPass})
+            for (auto p : {hdrPass, loadPass, shadowPass})
                 if (p)
                     vkDestroyRenderPass(s->device, p, nullptr);
             for (auto p : {meshLayout, postLayout})
@@ -352,7 +362,7 @@ struct Scene3DRenderer::Impl {
                     environmentError = data->error;
             }
         }
-        if (settings.imageBasedLighting && !pending.valid() &&
+        if ((settings.imageBasedLighting || settings.showSkybox) && !pending.valid() &&
             (!hasAttempt || attemptedPath != settings.environmentPath ||
              attemptedRevision != revision)) {
             requestedPath = attemptedPath = settings.environmentPath;
@@ -550,6 +560,90 @@ struct Scene3DRenderer::Impl {
         return f;
     }
 
+    bool PrepareShadow(DeviceState& s, Frame& f, const Render3DSettings& settings) {
+        if (!settings.shadows) {
+            shadowError.clear();
+            return false;
+        }
+        try {
+            if (!shadowPipeline) {
+                if (shadowInitializationAttempted)
+                    return false;
+                shadowInitializationAttempted = true;
+                for (auto format : {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D16_UNORM}) {
+                    VkFormatProperties props{};
+                    vkGetPhysicalDeviceFormatProperties(s.physical, format, &props);
+                    const auto flags = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                       VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+                    if ((props.optimalTilingFeatures & flags) == flags) {
+                        shadowFormat = format;
+                        break;
+                    }
+                }
+                if (shadowFormat == VK_FORMAT_UNDEFINED)
+                    throw std::runtime_error("Sampled shadow depth format unsupported");
+                VkAttachmentDescription attachment{};
+                attachment.format = shadowFormat;
+                attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+                attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+                const VkAttachmentReference depth{0,
+                                                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+                VkSubpassDescription subpass{};
+                subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+                subpass.pDepthStencilAttachment = &depth;
+                const VkSubpassDependency deps[2] = {
+                    {VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                     VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 0},
+                    {0, VK_SUBPASS_EXTERNAL,
+                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 0}};
+                VkRenderPassCreateInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+                pass.attachmentCount = 1;
+                pass.pAttachments = &attachment;
+                pass.subpassCount = 1;
+                pass.pSubpasses = &subpass;
+                pass.dependencyCount = 2;
+                pass.pDependencies = deps;
+                Check(vkCreateRenderPass(s.device, &pass, nullptr, &shadowPass));
+                shadowPipeline = Pipeline(s, meshLayout, shadowPass, "Shadow.vert.spv",
+                                          "Shadow.frag.spv", true, true, true);
+            }
+            if (f.shadowResolution != settings.shadowResolution) {
+                if (f.shadowFramebuffer)
+                    vkDestroyFramebuffer(s.device, f.shadowFramebuffer, nullptr);
+                f.shadowFramebuffer = VK_NULL_HANDLE;
+                Destroy(s, f.shadow);
+                f.shadowResolution = 0;
+                f.shadow = CreateImage(
+                    s, settings.shadowResolution, settings.shadowResolution, 1, 1, shadowFormat,
+                    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_ASPECT_DEPTH_BIT);
+                VkFramebufferCreateInfo framebuffer{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+                framebuffer.renderPass = shadowPass;
+                framebuffer.attachmentCount = 1;
+                framebuffer.pAttachments = &f.shadow.view;
+                framebuffer.width = framebuffer.height = settings.shadowResolution;
+                framebuffer.layers = 1;
+                Check(vkCreateFramebuffer(s.device, &framebuffer, nullptr, &f.shadowFramebuffer));
+                f.shadowResolution = settings.shadowResolution;
+            }
+            shadowError.clear();
+            return true;
+        } catch (const std::exception& e) {
+            shadowError = e.what();
+            return false;
+        }
+    }
+
     void Descriptors(DeviceState& s, Frame& f) {
         const auto env = f.environment;
         VkDescriptorImageInfo images[6]{};
@@ -557,6 +651,9 @@ struct Scene3DRenderer::Impl {
                                       env->brdf.view,    env->brdf.view,     f.hdr.view};
         for (int i = 0; i < 6; ++i)
             images[i] = {VK_NULL_HANDLE, views[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        if (f.shadowFramebuffer)
+            images[4] = {VK_NULL_HANDLE, f.shadow.view,
+                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo sampling{sampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
         const VkDescriptorBufferInfo uniform{s.frames[s.frameSlot].uniforms.buffer, 0,
                                              sizeof(SceneUniform)};
@@ -586,7 +683,7 @@ struct Scene3DRenderer::Impl {
 };
 
 Scene3DRenderer::Scene3DRenderer(const std::shared_ptr<DeviceState>& state)
-    : impl_(std::make_unique<Impl>(state)) {}
+    : impl_(std::make_shared<Impl>(state)) {}
 Scene3DRenderer::~Scene3DRenderer() = default;
 bool Scene3DRenderer::EnvironmentReady() const {
     return impl_->ready && impl_->activePath == impl_->attemptedPath &&
@@ -602,7 +699,10 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
     if (!locked || !locked->Usable() || !locked->frameActive)
         return false;
     auto& s = *locked;
+    if (impl_->outputFormat != VK_FORMAT_UNDEFINED && impl_->outputFormat != s.swapchain.format)
+        impl_ = std::make_shared<Impl>(locked);
     auto& p = *impl_;
+    s.frames[s.frameSlot].retained.push_back(impl_);
     try {
         p.Initialize(s);
         if (p.outputFormat != s.swapchain.format)
@@ -611,6 +711,7 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
         auto& f = p.GetFrame(s);
         f.environment =
             p.environment && p.activePath == settings.environmentPath ? p.environment : p.neutral;
+        const bool shadows = p.PrepareShadow(s, f, settings);
         p.Descriptors(s, f);
         SceneUniform uniform{};
         const auto position = camera.GetPosition();
@@ -637,9 +738,39 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
             uniform.up[i] = view[i * 4 + 1] / projection[5];
             uniform.forward[i] = -view[i * 4 + 2];
         }
+        Mat4 shadowMatrix;
+        if (shadows) {
+            const auto direction = settings.sun.direction.Normalized();
+            const auto target = camera.GetTarget();
+            auto lightView =
+                Mat4::LookAt(target - direction * (settings.shadowRange * 2), target,
+                             std::abs(direction.y) > .99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0});
+            const float texel = settings.shadowRange / settings.shadowResolution;
+            lightView.elements[12] = std::round(lightView.elements[12] / texel) * texel;
+            lightView.elements[13] = std::round(lightView.elements[13] / texel) * texel;
+            const float half = settings.shadowRange * .5f;
+            shadowMatrix =
+                Mat4::Orthographic(-half, half, -half, half, .1f, settings.shadowRange * 4) *
+                lightView;
+            std::memcpy(uniform.shadowMatrix, shadowMatrix.elements, sizeof(Mat4));
+            uniform.shadowOptions[0] = 1;
+            uniform.shadowOptions[1] = 1.f / settings.shadowResolution;
+            uniform.shadowOptions[2] = settings.shadowDepthBias;
+            uniform.shadowOptions[3] = settings.shadowNormalBias;
+        }
         uint32 offset = 0;
         if (!s.PushUniform(&uniform, sizeof(uniform), offset))
             throw std::runtime_error("3D uniform budget exceeded");
+        const auto& ring = s.frames[s.frameSlot].uniforms;
+        const auto alignment = s.uniformAlignment;
+        const auto aligned = (ring.used + alignment - 1) / alignment * alignment;
+        const auto stride = (sizeof(SceneObject) + alignment - 1) / alignment * alignment;
+        const auto limit =
+            aligned < ring.capacity ? static_cast<size_t>((ring.capacity - aligned) / stride) : 0;
+        if (draws.size() > limit) {
+            draws = draws.first(limit);
+            error = "3D object uniform budget reached; excess objects skipped";
+        }
         std::vector<uint32> objects;
         objects.reserve(draws.size());
         for (const auto& draw : draws) {
@@ -667,6 +798,38 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
             s.BeginRenderPass();
         vkCmdEndRenderPass(cmd);
         s.renderPassActive = false;
+        if (shadows) {
+            const VkClearValue clear{.depthStencil = {1, 0}};
+            VkRenderPassBeginInfo shadowBegin{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+            shadowBegin.renderPass = p.shadowPass;
+            shadowBegin.framebuffer = f.shadowFramebuffer;
+            shadowBegin.renderArea = {{0, 0}, {f.shadowResolution, f.shadowResolution}};
+            shadowBegin.clearValueCount = 1;
+            shadowBegin.pClearValues = &clear;
+            vkCmdBeginRenderPass(cmd, &shadowBegin, VK_SUBPASS_CONTENTS_INLINE);
+            Viewport(cmd, f.shadowResolution, f.shadowResolution);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.shadowPipeline);
+            ++s.frameStats.pipelineBinds;
+            vkCmdPushConstants(cmd, p.meshLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
+                               shadowMatrix.elements);
+            ++s.frameStats.pushConstantUpdates;
+            for (size_t i = 0; i < draws.size(); ++i) {
+                const auto& draw = draws[i];
+                const VkDeviceSize zero = 0;
+                vkCmdBindVertexBuffers(cmd, 0, 1, &draw.vertices, &zero);
+                vkCmdBindIndexBuffer(cmd, draw.indices, 0, VK_INDEX_TYPE_UINT32);
+                const uint32 dynamic[2] = {objects[i], s.lightOffset};
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.meshLayout, 0, 1,
+                                        &draw.texture, 0, nullptr);
+                ++s.frameStats.descriptorBinds;
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.meshLayout, 1, 1,
+                                        &s.frames[s.frameSlot].uniformSet, 2, dynamic);
+                ++s.frameStats.uniformBinds;
+                vkCmdDrawIndexed(cmd, draw.indexCount, 1, 0, 0, 0);
+                ++s.frameStats.drawCalls;
+            }
+            vkCmdEndRenderPass(cmd);
+        }
         VkClearValue clears[2]{};
         clears[0].color = s.clearColor;
         clears[1].depthStencil = {1, 0};
@@ -680,16 +843,21 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
         Viewport(cmd, f.width, f.height);
         if (uniform.options[3] > 0) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.skyPipeline);
+            ++s.frameStats.pipelineBinds;
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.meshLayout, 2, 1,
                                     &f.sceneSet, 1, &offset);
+            ++s.frameStats.descriptorBinds;
             vkCmdDraw(cmd, 3, 1, 0, 0);
             ++s.frameStats.drawCalls;
         }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.meshPipeline);
+        ++s.frameStats.pipelineBinds;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.meshLayout, 2, 1,
                                 &f.sceneSet, 1, &offset);
+        ++s.frameStats.descriptorBinds;
         vkCmdPushConstants(cmd, p.meshLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
                            camera.GetViewProjectionMatrix().elements);
+        ++s.frameStats.pushConstantUpdates;
         for (size_t i = 0; i < draws.size(); ++i) {
             const auto& draw = draws[i];
             const VkDeviceSize zero = 0;
@@ -698,8 +866,10 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
             const uint32 dynamic[2] = {objects[i], s.lightOffset};
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.meshLayout, 0, 1,
                                     &draw.texture, 0, nullptr);
+            ++s.frameStats.descriptorBinds;
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.meshLayout, 1, 1,
                                     &s.frames[s.frameSlot].uniformSet, 2, dynamic);
+            ++s.frameStats.uniformBinds;
             vkCmdDrawIndexed(cmd, draw.indexCount, 1, 0, 0, 0);
             ++s.frameStats.drawCalls;
         }
@@ -724,8 +894,10 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
         vkCmdBeginRenderPass(cmd, &begin, VK_SUBPASS_CONTENTS_INLINE);
         Viewport(cmd, f.width, f.height);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.postPipeline);
+        ++s.frameStats.pipelineBinds;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.postLayout, 0, 1,
                                 &f.toneSet, 1, &offset);
+        ++s.frameStats.descriptorBinds;
         vkCmdDraw(cmd, 3, 1, 0, 0);
         ++s.frameStats.drawCalls;
         s.renderPassActive = true;
@@ -736,6 +908,8 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
         s.boundObjectOffset = s.boundLightOffset = UINT32_MAX;
         if (!p.environmentError.empty())
             error = p.environmentError;
+        if (!p.shadowError.empty())
+            error += (error.empty() ? "" : "; ") + p.shadowError;
         return true;
     } catch (const std::exception& e) {
         error = e.what();
@@ -744,8 +918,10 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
             if (!s.renderPassActive)
                 s.BeginRenderPass();
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelineMesh);
+            ++s.frameStats.pipelineBinds;
             vkCmdPushConstants(cmd, s.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4),
                                camera.GetViewProjectionMatrix().elements);
+            ++s.frameStats.pushConstantUpdates;
             for (const auto& draw : draws) {
                 SceneObject object{};
                 std::memcpy(object.model, draw.model.elements, sizeof(object.model));
@@ -763,8 +939,10 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
                 vkCmdBindIndexBuffer(cmd, draw.indices, 0, VK_INDEX_TYPE_UINT32);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelineLayout, 0,
                                         1, &draw.texture, 0, nullptr);
+                ++s.frameStats.descriptorBinds;
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelineLayout, 1,
                                         1, &s.frames[s.frameSlot].uniformSet, 2, dynamic);
+                ++s.frameStats.uniformBinds;
                 vkCmdDrawIndexed(cmd, draw.indexCount, 1, 0, 0, 0);
                 ++s.frameStats.drawCalls;
             }
@@ -777,4 +955,4 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
         return false;
     }
 }
-} // namespace LuxEngine::Vk
+}

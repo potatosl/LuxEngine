@@ -119,6 +119,7 @@ struct VertexRing {
 };
 
 struct FrameData {
+    std::vector<std::shared_ptr<void>> retained;
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkSemaphore imageAvailable = VK_NULL_HANDLE;

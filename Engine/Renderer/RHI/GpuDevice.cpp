@@ -246,6 +246,7 @@ GpuDevice::FrameStart GpuDevice::BeginFrame() {
     // times out, no new acquire semaphore has been signaled and the same slot remains retryable.
     if (!s.WaitForSerial(frame.serial) || !s.WaitForPresent(frame, s.config.gpuTimeoutNs))
         return FrameStart::Error;
+    frame.retained.clear();
     s.frameStats.cpuWaitMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
             .count();

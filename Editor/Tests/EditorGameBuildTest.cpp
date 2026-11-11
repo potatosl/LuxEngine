@@ -132,9 +132,12 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
     const bool hasTexture =
         packaged && zip_name_locate(packaged, "LuxGame/Content/Assets/한글 기본색상.PnG",
                                     ZIP_FL_ENC_UTF_8) >= 0;
+    const bool hasEnvironment =
+        packaged &&
+        zip_name_locate(packaged, "LuxGame/Content/Assets/한글 환경.HdR", ZIP_FL_ENC_UTF_8) >= 0;
     if (packaged)
         zip_close(packaged);
-    if (!hasMesh || !hasTexture) {
+    if (!hasMesh || !hasTexture || !hasEnvironment) {
         std::cerr << "distribution ZIP is missing its OBJ mesh\n";
         return false;
     }
@@ -152,6 +155,12 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
     LuxEngine::Scene portable;
     if (!portable.Deserialize(PathUtf8(unpackedScene))) {
         std::cerr << "packaged scene did not reopen\n";
+        return false;
+    }
+    const auto environment = portable.GetSettings().render3D.environmentPath;
+    if (environment.empty() || PathFromUtf8(environment).is_absolute() ||
+        !fs::is_regular_file(PathFromUtf8(portable.ResolveAssetPath(environment)))) {
+        std::cerr << "packaged environment path is not portable\n";
         return false;
     }
     for (auto entity : portable.GetEntities())
@@ -213,6 +222,19 @@ int main(int argc, char* argv[]) {
     QImage baseColor(4, 4, QImage::Format_RGBA8888);
     baseColor.fill(QColor(160, 90, 40));
     if (!baseColor.save(ToQString(textureFile), "PNG"))
+        return 1;
+    const auto environmentFile = root / "Assets" / PathFromUtf8("한글 환경.HdR");
+    {
+        std::ofstream stream(environmentFile, std::ios::binary);
+        stream << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n";
+        const unsigned char pixels[8] = {128, 128, 128, 129, 64, 64, 64, 129};
+        stream.write(reinterpret_cast<const char*>(pixels), 8);
+    }
+    auto rendering = alternate.GetSettings();
+    rendering.render3D.mode = LuxEngine::Render3DMode::Pbr;
+    rendering.render3D.environmentPath = "../Assets/한글 환경.HdR";
+    rendering.render3D.showSkybox = true;
+    if (!alternate.SetSettings(rendering))
         return 1;
     auto& meshComponent =
         alternate.CreateEntity("Mesh").AddComponent<LuxEngine::MeshRendererComponent>();

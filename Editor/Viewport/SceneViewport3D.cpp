@@ -123,7 +123,7 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         const int pxH = static_cast<int>(std::lround(height() * ratio));
         if (pxW > 0 && pxH > 0) {
             if (engineRenderer_->Render3D(document_.GetScene(), pxW, pxH, focus_, yaw_, pitch_,
-                                          distance_, cachedFrame_)) {
+                                          distance_, cachedFrame_, &cachedBackground_)) {
                 engineFrame_ = true;
             }
         }
@@ -135,6 +135,8 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
 
     const auto& color = document_.GetScene().GetSettings().clearColor;
     painter.fillRect(rect(), QColor::fromRgbF(color.x, color.y, color.z, color.w));
+    if (engineFrame_ && !cachedBackground_.isNull())
+        painter.drawImage(rect(), cachedBackground_);
     painter.setRenderHint(QPainter::Antialiasing);
 
     const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);

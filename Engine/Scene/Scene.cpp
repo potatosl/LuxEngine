@@ -808,9 +808,9 @@ bool Scene::SerializeToString(std::string& output) {
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene "
         << (!IsDefaultRender3DSettings(settings_.render3D) ? 6
-            : textureAssets ? 5
-            : meshAssets  ? 4
-                          : 3)
+            : textureAssets                                ? 5
+            : meshAssets                                   ? 4
+                                                           : 3)
         << ' ' << entities_.size() << '\n';
     out << "Settings " << settings_.clearColor << settings_.exposure << ' ' << settings_.gravity
         << settings_.gravity3D << settings_.overrideGravity << ' ' << settings_.fixedStep << ' '
@@ -974,12 +974,12 @@ bool Scene::DeserializeStream(std::istream& in) {
             int mode = -1;
             auto settings = parsed.GetSettings();
             auto& r = settings.render3D;
-            if (!(in >> marker >> mode >> r.sun.direction >> r.sun.color >> r.sun.intensity
-                     >> r.environmentColor >> r.environmentIntensity >> r.environmentRotation
-                     >> std::quoted(r.environmentPath) >> r.imageBasedLighting >> r.showSkybox
-                     >> r.toneMapping >> r.shadows >> r.shadowResolution >> r.shadowRange
-                     >> r.shadowDepthBias >> r.shadowNormalBias) || marker != "Render3D" ||
-                mode < 0 || mode > 1 || !IsValidUtf8(r.environmentPath))
+            if (!(in >> marker >> mode >> r.sun.direction >> r.sun.color >> r.sun.intensity >>
+                  r.environmentColor >> r.environmentIntensity >> r.environmentRotation >>
+                  std::quoted(r.environmentPath) >> r.imageBasedLighting >> r.showSkybox >>
+                  r.toneMapping >> r.shadows >> r.shadowResolution >> r.shadowRange >>
+                  r.shadowDepthBias >> r.shadowNormalBias) ||
+                marker != "Render3D" || mode < 0 || mode > 1 || !IsValidUtf8(r.environmentPath))
                 return false;
             r.mode = static_cast<Render3DMode>(mode);
             if (!parsed.SetSettings(settings))

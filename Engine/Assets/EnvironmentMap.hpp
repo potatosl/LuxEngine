@@ -13,7 +13,7 @@ struct EnvironmentImage {
     std::vector<float> pixels;
 };
 
-struct EnvironmentData {
+struct LUX_API EnvironmentData {
     EnvironmentImage sky, diffuse, specular, brdf;
     double preparationMs = 0;
     std::string error;
@@ -23,4 +23,4 @@ struct EnvironmentData {
     static uint64 Revision(const std::string& path);
     static bool Reload(const std::string& path, std::string& error);
 };
-} // namespace LuxEngine
+}

@@ -338,7 +338,13 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera,
         std::array<GpuPointLight, MaxPointLights> gpuPoints{};
         for (size_t i = 0; i < impl_->pointLights.size(); ++i) {
             const auto& p = impl_->pointLights[i];
-            gpuPoints[i] = {p.position, p.radius, p.color, p.intensity};
+            const auto finite = [](Vec3 v) {
+                return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+            };
+            gpuPoints[i] = {finite(p.position) ? p.position : Vec3{},
+                            std::isfinite(p.radius) ? std::max(0.f, p.radius) : 0.f,
+                            finite(p.color) ? p.color : Vec3{},
+                            std::isfinite(p.intensity) ? std::max(0.f, p.intensity) : 0.f};
         }
         impl_->device->SetLighting(
             {impl_->light.direction, impl_->light.color, impl_->light.intensity,

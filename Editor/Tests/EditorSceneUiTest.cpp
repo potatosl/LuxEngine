@@ -1009,7 +1009,8 @@ void InactiveSessionRecoversAutosave() {
 void AsyncOwnerUsesLatestStartup() {
     ProjectSessionFixture fixture;
     EditorWindow window;
-    Check(Action(window, "projectSettings")->isEnabled(), "async startup fixture owns its initial project");
+    Check(Action(window, "projectSettings")->isEnabled(),
+          "async startup fixture owns its initial project");
     const auto directory = fixture.project.GetSceneFile().parent_path();
     const auto pending = directory / "Pending.lux", latest = directory / "NewStart.lux";
     Scene scene;
@@ -1044,9 +1045,9 @@ void AsyncOwnerUsesLatestStartup() {
         qputenv("SDL_VIDEO_DRIVER", previousDriver);
     if (!std::filesystem::equivalent(PathFromUtf8(window.GetDocument().GetPath()), latest))
         std::cerr << "async startup: active=" << window.GetDocument().GetPath()
-                  << " expected=" << PathUtf8(latest) << " projectEnabled="
-                  << Action(window, "projectSettings")->isEnabled() << " log="
-                  << window.LastLogMessage().toUtf8().toStdString() << '\n';
+                  << " expected=" << PathUtf8(latest)
+                  << " projectEnabled=" << Action(window, "projectSettings")->isEnabled()
+                  << " log=" << window.LastLogMessage().toUtf8().toStdString() << '\n';
     Check(std::filesystem::equivalent(PathFromUtf8(window.GetDocument().GetPath()), latest),
           "async owner preserves a startup scene changed while its load was pending");
     const auto external = PathFromUtf8(fixture.files.path().toUtf8().toStdString()) / "Outside.lux";
@@ -1070,6 +1071,15 @@ void CaptureMeshScene(const QString& destination, const QString& source) {
     window.show();
     Action(window, "view3D")->trigger();
     Pump(150);
+    if (window.GetDocument().GetScene().GetSettings().render3D.mode ==
+        LuxEngine::Render3DMode::Pbr) {
+        for (int i = 0; i < 60; ++i) {
+            for (auto* widget : window.findChildren<QWidget*>())
+                if (dynamic_cast<SceneViewport3D*>(widget))
+                    widget->repaint();
+            Pump(100);
+        }
+    }
     Check(window.grab().save(destination), "mesh demonstration capture saves");
     bool viewportSaved = false;
     for (auto* widget : window.findChildren<QWidget*>())

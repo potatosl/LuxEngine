@@ -107,6 +107,30 @@ void TestSourcesAndSnapshots() {
     reference.baseline = "broken snapshot";
     RejectWithoutMutation(fixture, scene, "malformed stored dependency state is rejected");
 }
+void TestEnvironmentDependencies() {
+    Fixture fixture;
+    Scene scene;
+    const auto file = fixture.project.GetFile().parent_path() / "Assets" / PathFromUtf8("환경.HDR");
+    fs::create_directories(file.parent_path());
+    {
+        std::ofstream stream(file, std::ios::binary);
+        stream << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n";
+        const unsigned char pixels[8] = {128, 128, 128, 129, 64, 64, 64, 129};
+        stream.write(reinterpret_cast<const char*>(pixels), 8);
+    }
+    auto settings = scene.GetSettings();
+    settings.render3D.mode = Render3DMode::Pbr;
+    settings.render3D.environmentPath = PathUtf8(file);
+    Check(scene.SetSettings(settings), "environment settings apply");
+    std::string error;
+    Check(ValidateProjectSceneReferences(fixture.project, scene, error), "project HDR accepted");
+    std::ofstream(file) << "broken";
+    RejectWithoutMutation(fixture, scene,
+                          "corrupt disk HDR rejected independently of live GPU cache");
+    settings.render3D.environmentPath = PathUtf8(fixture.root / "outside.hdr");
+    scene.SetSettings(settings);
+    RejectWithoutMutation(fixture, scene, "outside environment rejected");
+}
 void TestMeshDependencies() {
     Fixture fixture;
     Scene scene;
@@ -273,6 +297,7 @@ int RunDependencyChecks(int, char**) {
     try {
         TestSourcesAndSnapshots();
         TestMeshDependencies();
+        TestEnvironmentDependencies();
         TestTextureDependencies();
         TestTransitiveSources();
         TestAliasesAndProjectScan();

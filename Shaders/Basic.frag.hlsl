@@ -59,6 +59,9 @@ float4 main(Input input) : SV_Target0 {
             const float rough = clamp(input.options.z, 0.045, 1.0);
             float3 result = Brdf(color.rgb, metal, rough, normal, v, -lights.direction.xyz) *
                             lights.colorIntensity.rgb * max(lights.colorIntensity.w, 0.0);
+#ifdef MODERN_3D
+            result *= DirectionalShadow(input.world, normal);
+#endif
             for (uint i = 0; i < min(lights.count.x, 16u); ++i) {
                 const PointLightData source = lights.points[i];
                 const float3 delta = source.positionRadius.xyz - input.world;

@@ -138,6 +138,21 @@ ShowSceneSettingsDialog(QWidget* parent, const LuxEngine::SceneSettings& setting
             QMessageBox::warning(&dialog, QStringLiteral("환경 이미지 오류"),
                                  QString::fromUtf8(error));
     });
+    auto* shadowGroup = group(QStringLiteral("방향광 그림자"));
+    auto* shadows = new QCheckBox(QStringLiteral("그림자 사용"), &dialog);
+    shadows->setObjectName(QStringLiteral("directionalShadows"));
+    shadows->setChecked(r.shadows);
+    shadowGroup->addRow(shadows);
+    auto* resolution = new QComboBox(&dialog);
+    for (int size : {1024, 2048, 4096})
+        resolution->addItem(QString::number(size), size);
+    resolution->setCurrentIndex(resolution->findData(static_cast<int>(r.shadowResolution)));
+    shadowGroup->addRow(QStringLiteral("해상도"), resolution);
+    auto* range = number(shadowGroup, QStringLiteral("적용 영역 크기"), r.shadowRange, 1, 10000);
+    auto* depthBias =
+        number(shadowGroup, QStringLiteral("깊이 바이어스"), r.shadowDepthBias, 0, .1, 6);
+    auto* normalBias =
+        number(shadowGroup, QStringLiteral("법선 바이어스"), r.shadowNormalBias, 0, 10, 4);
     auto* physics = group(QStringLiteral("물리"));
     auto* overrideGravity = new QCheckBox(QStringLiteral("씬 중력 사용"), &dialog);
     overrideGravity->setChecked(settings.overrideGravity);
@@ -191,6 +206,11 @@ ShowSceneSettingsDialog(QWidget* parent, const LuxEngine::SceneSettings& setting
     render.imageBasedLighting = ibl->isChecked();
     render.showSkybox = skybox->isChecked();
     render.toneMapping = tone->isChecked();
+    render.shadows = shadows->isChecked();
+    render.shadowResolution = static_cast<LuxEngine::uint32>(resolution->currentData().toUInt());
+    render.shadowRange = value(range, r.shadowRange);
+    render.shadowDepthBias = value(depthBias, r.shadowDepthBias);
+    render.shadowNormalBias = value(normalBias, r.shadowNormalBias);
     result.overrideGravity = overrideGravity->isChecked();
     result.gravity = {value(gx, settings.gravity.x), value(gy, settings.gravity.y)};
     result.gravity3D = {value(gravity3D[0], settings.gravity3D.x),

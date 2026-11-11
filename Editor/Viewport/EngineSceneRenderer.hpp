@@ -37,7 +37,7 @@ public:
     // 3D perspective rendering with native Vulkan Renderer3D.
     bool Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                   const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
-                  QImage& output);
+                  QImage& output, QImage* skyboxBackground = nullptr);
     const QString& LastError() const {
         return error_;
     }
@@ -58,6 +58,9 @@ public:
     }
 
 private:
+    bool Render3DPass(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
+                      const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
+                      QImage& output, bool backgroundOnly, bool drawSkybox);
     bool InitializeState(LuxEngine::uint32 initialWidth = 640,
                          LuxEngine::uint32 initialHeight = 360);
     bool BeginViewportFrame(LuxEngine::uint32 width, LuxEngine::uint32 height);

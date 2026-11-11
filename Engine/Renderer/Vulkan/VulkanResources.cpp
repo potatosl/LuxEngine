@@ -758,6 +758,8 @@ void DeviceState::Shutdown() {
             // An unexpected host-allocation failure is not completion evidence. Retry rather
             // than release presentation payloads that the implementation may still reference.
         }
+        for (auto& frame : frames)
+            frame.retained.clear();
         for (const Retired& resource : uploadStaging)
             DestroyRetired(resource);
         for (const Retired& resource : pendingRetire)

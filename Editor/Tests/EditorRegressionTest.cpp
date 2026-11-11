@@ -22,6 +22,7 @@
 #include <QTemporaryDir>
 #include <QTreeWidget>
 #include <QUndoStack>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -475,6 +476,71 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
         const auto expected = full.green() * (128.0 / 255) + 255 * (127.0 / 255);
         Check(std::abs(composite.pixelColor(200, 150).green() - expected) <= 3,
               "Qt viewport compositing never applies the material alpha twice");
+        auto settings = materialScene.GetSettings();
+        settings.render3D.mode = Render3DMode::Pbr;
+        settings.render3D.imageBasedLighting = false;
+        settings.render3D.shadows = true;
+        Check(materialScene.SetSettings(settings), "PBR Qt fixture settings apply");
+        material.material.baseColorTexture = opaque.toUtf8().toStdString();
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
+              "PBR opaque Qt image renders");
+        const auto pbrOpaque = image.pixelColor(200, 150);
+        material.material.baseColorTexture = partial.toUtf8().toStdString();
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
+              "PBR partial-alpha Qt image renders");
+        const auto pbrPartial = image.pixelColor(200, 150);
+        Check(std::abs(pbrPartial.alpha() - 128) <= 1 &&
+                  std::abs(pbrPartial.green() - pbrOpaque.green()) <= 3,
+              "HDR tone mapping preserves straight-alpha material color");
+        Check(image.pixelColor(0, 0).alpha() == 0, "HDR editor background stays transparent");
+        settings.exposure = 2.25f;
+        Check(materialScene.SetSettings(settings), "shared rendering exposure applies");
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
+              "editor exposure comparison renders");
+        const auto editorPixel = image.pixelColor(200, 150);
+        auto* device = renderer->GetGpuDevice();
+        Check(device->RequestFrameCapture() && device->BeginFrame() == GpuDevice::FrameStart::Ready,
+              "runtime-path comparison frame begins");
+        device->Clear(0, 0, 0, 0);
+        {
+            Renderer3D::Context runtimeContext(device);
+            Renderer3D::ScopedContext scoped(runtimeContext);
+            const auto parityCamera = MakeViewportCamera3D(QSizeF(400, 300), {}, 0, 0, 5);
+            Renderer3D::BeginScene(parityCamera, settings.render3D, settings.exposure);
+            materialScene.OnRender3D();
+            Renderer3D::EndScene();
+        }
+        Check(device->EndFrame(), "runtime-path comparison submits after context release");
+        GpuFrameCapture runtimeCapture;
+        Check(device->ReadFrameCapture(runtimeCapture), "runtime-path comparison capture reads");
+        const size_t offset = (150 * 400 + 200) * 4;
+        Check(
+            std::abs(runtimeCapture.rgba[offset] - editorPixel.red()) <= 2 &&
+                std::abs(runtimeCapture.rgba[offset + 1] - editorPixel.green()) <= 2 &&
+                std::abs(runtimeCapture.rgba[offset + 2] - editorPixel.blue()) <= 2,
+            "editor and runtime scene path agree for identical camera and post-lighting exposure");
+        settings.render3D.showSkybox = true;
+        Check(materialScene.SetSettings(settings), "skybox composition settings apply");
+        QImage background, foreground;
+        const auto skyboxDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        do {
+            Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, foreground, &background),
+                  "editor skybox and foreground render separately");
+            if (background.pixelColor(0, 0).alpha() == 255)
+                break;
+        } while (std::chrono::steady_clock::now() < skyboxDeadline);
+        Check(background.pixelColor(0, 0).alpha() == 255 &&
+                  foreground.pixelColor(0, 0).alpha() == 0,
+              "skybox remains opaque beneath transparent object-only foreground");
+        QImage layered = background;
+        {
+            QPainter painter(&layered);
+            painter.setPen(QColor(255, 0, 0));
+            painter.drawLine(0, 0, 30, 0);
+            painter.drawImage(0, 0, foreground);
+        }
+        Check(layered.pixelColor(10, 0).red() == 255 && layered.pixelColor(10, 0).green() == 0,
+              "editor grid remains visible above skybox outside object coverage");
     }
     if (gpu)
         Check(renderer->GetGpuDevice()->GetCounters().validationErrors == 0,

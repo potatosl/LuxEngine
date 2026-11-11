@@ -14,7 +14,7 @@ if(NOT LUX_DXC AND NOT LUX_GLSLC)
 endif()
 find_program(LUX_SPIRV_VAL NAMES spirv-val HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
 
-foreach(shader Basic.vert Basic.frag Modern.frag Tone.vert Tone.frag Sky.frag)
+foreach(shader Basic.vert Basic.frag Modern.frag Tone.vert Tone.frag Sky.frag Shadow.vert Shadow.frag)
     get_filename_component(stage "${shader}" LAST_EXT)
     string(SUBSTRING "${stage}" 1 -1 stage)
     if(stage STREQUAL "vert")

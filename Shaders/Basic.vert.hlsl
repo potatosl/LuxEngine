@@ -31,10 +31,10 @@ Output main(Input input) {
     output.world = world.xyz;
     output.options = object.colorOptions;
     const float3x3 model = (float3x3)object.model;
-    const float3x3 cofactors = float3x3(cross(model[1], model[2]), cross(model[2], model[0]),
-                                      cross(model[0], model[1]));
+    const float3x3 cofactors =
+        float3x3(cross(model[1], model[2]), cross(model[2], model[0]), cross(model[0], model[1]));
     const float determinant = dot(model[0], cofactors[0]);
-    output.normal = abs(determinant) > 1e-10 ? mul(cofactors, input.normal) / determinant
-                                            : float3(0, 0, 0);
+    output.normal =
+        abs(determinant) > 1e-10 ? mul(cofactors, input.normal) / determinant : float3(0, 0, 0);
     return output;
 }

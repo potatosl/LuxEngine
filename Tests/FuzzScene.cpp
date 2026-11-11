@@ -89,6 +89,12 @@ int main(int argc, char** argv) {
         mesh.material.baseColorTexture = "Assets/기본 색상.PnG";
         if (validScene.SerializeToString(serialized))
             seeds.push_back(MakeBytes(serialized));
+        auto settings = validScene.GetSettings();
+        settings.render3D.mode = LuxEngine::Render3DMode::Pbr;
+        settings.render3D.environmentPath = "Assets/environment.hdr";
+        validScene.SetSettings(settings);
+        if (validScene.SerializeToString(serialized))
+            seeds.push_back(MakeBytes(serialized));
     }
 
     size_t targetRuns = 0;

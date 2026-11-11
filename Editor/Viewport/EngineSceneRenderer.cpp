@@ -400,7 +400,23 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
 
 bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                                    const LuxEngine::Vec3& focus, double yaw, double pitch,
-                                   double distance, QImage& output) {
+                                   double distance, QImage& output, QImage* skyboxBackground) {
+    if (skyboxBackground) {
+        *skyboxBackground = {};
+        if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Pbr &&
+            scene.GetSettings().render3D.showSkybox)
+            if (!Render3DPass(scene, pixelWidth, pixelHeight, focus, yaw, pitch, distance,
+                              *skyboxBackground, true, true))
+                return false;
+    }
+    return Render3DPass(scene, pixelWidth, pixelHeight, focus, yaw, pitch, distance, output, false,
+                        skyboxBackground == nullptr);
+}
+
+bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
+                                       const LuxEngine::Vec3& focus, double yaw, double pitch,
+                                       double distance, QImage& output, bool backgroundOnly,
+                                       bool drawSkybox) {
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
         return false;
@@ -434,6 +450,9 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
     LuxEngine::Renderer3D::ScopedContext scope3D(s.context3D);
     try {
         auto renderSettings = scene.GetSettings().render3D;
+        renderSettings.showSkybox = renderSettings.showSkybox && drawSkybox;
+        if (backgroundOnly)
+            renderSettings.shadows = false;
         if (!renderSettings.environmentPath.empty())
             renderSettings.environmentPath = scene.ResolveAssetPath(renderSettings.environmentPath);
         if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Pbr)
@@ -441,10 +460,14 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
         else
             LuxEngine::Renderer3D::BeginScene(camera, sun);
         for (LuxEngine::Entity entity : scene.GetEntities()) {
+            if (backgroundOnly)
+                break;
             if (!entity.HasComponent<LuxEngine::TransformComponent>())
                 continue;
             const auto world = scene.GetWorldMatrix(entity.GetId());
             const auto expose = [&](LuxEngine::Vec4 color) {
+                if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Pbr)
+                    return color;
                 color.x *= scene.GetSettings().exposure;
                 color.y *= scene.GetSettings().exposure;
                 color.z *= scene.GetSettings().exposure;

@@ -1,0 +1,46 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "spheres": 100,
+  "frames_per_case": 600,
+  "environment_preparation_ms": 270.166,
+  "cases": [
+    {
+      "shadow_resolution": 0,
+      "cpu_median_ms": 0.1943,
+      "cpu_p95_ms": 0.5715,
+      "gpu_mean_ms": 0.0810295,
+      "gpu_p95_ms": 0.081856,
+      "allocation_bytes": 74913312
+    },
+    {
+      "shadow_resolution": 1024,
+      "cpu_median_ms": 0.1911,
+      "cpu_p95_ms": 0.5558,
+      "gpu_mean_ms": 0.102972,
+      "gpu_p95_ms": 0.102624,
+      "allocation_bytes": 83301920
+    },
+    {
+      "shadow_resolution": 2048,
+      "cpu_median_ms": 0.2151,
+      "cpu_p95_ms": 0.5929,
+      "gpu_mean_ms": 0.114807,
+      "gpu_p95_ms": 0.11744,
+      "allocation_bytes": 108467744
+    },
+    {
+      "shadow_resolution": 4096,
+      "cpu_median_ms": 0.212,
+      "cpu_p95_ms": 0.5669,
+      "gpu_mean_ms": 0.157804,
+      "gpu_p95_ms": 0.154656,
+      "allocation_bytes": 209131040
+    }
+  ],
+  "date": "2026-11-11",
+  "gpu": "NVIDIA GeForce RTX 5070",
+  "configuration": "Release",
+  "validation": false,
+  "note": "Simple comparison scene; GPU allocation bytes include renderer frame resources, not total process or driver memory."
+}
