@@ -69,6 +69,7 @@ public:
     void OnUpdate(double dt);
     void OnRender();
     void OnRender3D();
+    std::string ResolveAssetPath(const std::string& path) const;
     // BeginContact events from the most recent 2D physics step, including sensors.
     const std::vector<Collision2DEvent>& GetCollisionEvents2D() const {
         return collisionEvents2D_;

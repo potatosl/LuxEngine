@@ -1,4 +1,5 @@
 #include "App/EditorWindow.hpp"
+#include "Build/BuildOutput.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Scene/SceneDependencies.hpp"
 #include <QApplication>
@@ -127,6 +128,7 @@ void EditorWindow::RunNextBuildStep() {
             .arg(QString::fromUtf8(step.title)));
     buildLineBuffer_.clear();
     buildProcess_ = new QProcess(this);
+    buildProcess_->setProcessEnvironment(Utf8BuildEnvironment());
     buildProcess_->setProcessChannelMode(QProcess::MergedChannels);
     buildProcess_->setWorkingDirectory(Q(buildPlan_->projectDirectory));
     connect(buildProcess_, &QProcess::readyReadStandardOutput, this,
@@ -171,11 +173,7 @@ void EditorWindow::HandleBuildOutput(const QByteArray& chunk) {
         }
         const QByteArray rawLine = buildLineBuffer_.left(end);
         buildLineBuffer_.remove(0, end + 1);
-        const QString utf8Line = QString::fromUtf8(rawLine);
-        const QString line =
-            (utf8Line.contains(QChar::ReplacementCharacter) ? QString::fromLocal8Bit(rawLine)
-                                                            : utf8Line)
-                .trimmed();
+        const QString line = DecodeBuildOutput(rawLine).trimmed();
         if (line.isEmpty())
             continue;
         const std::string text = line.toUtf8().toStdString();

@@ -86,6 +86,7 @@ struct TilemapComponent {
 
 struct MeshRendererComponent {
     Material3D material;
+    std::string meshPath;
 };
 
 struct CameraComponent {

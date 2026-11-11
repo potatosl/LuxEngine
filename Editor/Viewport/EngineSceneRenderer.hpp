@@ -43,6 +43,8 @@ public:
     }
     LuxEngine::GpuDevice* GetGpuDevice() noexcept;
     const LuxEngine::GpuDevice* GetGpuDevice() const noexcept;
+    bool GetMeshBounds(const std::string& path, LuxEngine::Vec3& minimum,
+                       LuxEngine::Vec3& maximum) const;
     LuxEngine::uint32 GetRecoveryCount() const noexcept {
         return recoveries_;
     }

@@ -1,4 +1,5 @@
 #include "App/EditorWindow.hpp"
+#include "Build/BuildOutput.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Viewport/EngineSceneRenderer.hpp"
 #include "Viewport/SceneViewport2D.hpp"
@@ -39,6 +40,7 @@
 #include <QUndoStack>
 #include <array>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -130,6 +132,164 @@ struct Fixture {
         return window->GetDocument().GetActiveTabId();
     }
 };
+
+void MeshAssetEditing() {
+    Fixture fixture;
+    auto& window = *fixture.window;
+    auto& document = window.GetDocument();
+    const auto model = fixture.Path("triangle.obj");
+    std::ofstream(model) << "v 1 0 0\nv 3 0 0\nv 2 2 0\nvn 0 0 1\nf 1//1 2//1 3//1\n";
+    window.ExecuteRecordedEdit(QStringLiteral("메시 생성"), [&] {
+        document.CreateEntity("OBJ").AddComponent<MeshRendererComponent>();
+    });
+    const auto id = document.GetSelected().GetId();
+    auto* path = window.findChild<QLineEdit*>(QStringLiteral("meshAssetPath"));
+    auto* choose = window.findChild<QPushButton*>(QStringLiteral("chooseMeshAsset"));
+    auto* clear = window.findChild<QPushButton*>(QStringLiteral("clearMeshAsset"));
+    Check(path && choose && clear && path->text().isEmpty(), "mesh asset inspector controls exist");
+    QTimer picker;
+    QObject::connect(&picker, &QTimer::timeout, &window, [&] {
+        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+            dialog->selectFile(QString::fromUtf8(PathUtf8(model)));
+            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+        }
+    });
+    picker.start(5);
+    choose->click();
+    picker.stop();
+    const auto selectedPath = document.GetScene().GetComponent<MeshRendererComponent>(id).meshPath;
+    Check(PathFromUtf8(selectedPath) == model && path->text() == QString::fromUtf8(selectedPath),
+          "OBJ selection updates the selected scene component and inspector");
+    History(window)->undo();
+    Check(document.GetScene().GetComponent<MeshRendererComponent>(id).meshPath.empty(),
+          "mesh assignment is undoable");
+    History(window)->redo();
+    Check(document.GetScene().GetComponent<MeshRendererComponent>(id).meshPath == selectedPath,
+          "mesh assignment is redoable");
+    Action(window, "copyEntity")->trigger();
+    Action(window, "pasteEntity")->trigger();
+    const auto copiedPath = document.GetSelected().GetComponent<MeshRendererComponent>().meshPath;
+    Check(document.GetSelected().GetId() != id &&
+              std::filesystem::equivalent(PathFromUtf8(copiedPath), model),
+          "single-object clipboard copying preserves the mesh asset");
+    clear->click();
+    Check(document.GetSelected().GetComponent<MeshRendererComponent>().meshPath.empty(),
+          "mesh assignment can be reset to the default cube");
+    History(window)->undo();
+    Check(document.GetSelected().GetComponent<MeshRendererComponent>().meshPath == copiedPath,
+          "resetting a mesh is undoable");
+    EditorDocument picking;
+    auto object = picking.CreateEntity("Offset OBJ bounds");
+    object.AddComponent<MeshRendererComponent>().meshPath = PathUtf8(model);
+    picking.Select({});
+    SceneViewport3D view(
+        nullptr, picking, [&](auto selected) { picking.Select(selected); },
+        [](uint32, const TransformComponent&) {}, [] {}, [] {});
+    view.resize(800, 600);
+    view.show();
+    Pump();
+    const auto camera = MakeViewportCamera3D(view.size(), {}, .65, -.48, 22);
+    const auto point = *ProjectViewportPoint(camera, view.size(), {2, 1, 0});
+    QMouseEvent press(QEvent::MouseButtonPress, point, view.mapToGlobal(point.toPoint()),
+                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, point, view.mapToGlobal(point.toPoint()),
+                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(&view, &press);
+    QApplication::sendEvent(&view, &release);
+    Check(picking.GetSelectedId(picking.GetActiveTabId()) == object.GetId(),
+          "3D picking uses actual offset OBJ bounds rather than the default unit cube");
+}
+
+void BaseColorEditingAndReload() {
+    Fixture fixture;
+    auto& window = *fixture.window;
+    auto& document = window.GetDocument();
+    const auto texture = fixture.Path("base-color.PnG");
+    QImage image(4, 4, QImage::Format_RGBA8888);
+    image.fill(QColor(120, 80, 40));
+    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"), "editor texture fixture writes");
+    window.ExecuteRecordedEdit(QStringLiteral("텍스처 대상"), [&] {
+        document.CreateEntity("Textured cube").AddComponent<MeshRendererComponent>();
+    });
+    const auto tab = document.GetActiveTabId();
+    const auto id = document.GetSelected().GetId();
+    auto* choose = window.findChild<QPushButton*>(QStringLiteral("chooseBaseColorTexture"));
+    auto* clear = window.findChild<QPushButton*>(QStringLiteral("clearBaseColorTexture"));
+    auto* reload = window.findChild<QPushButton*>(QStringLiteral("reloadMeshAssets"));
+    auto* path = window.findChild<QLineEdit*>(QStringLiteral("baseColorTexturePath"));
+    Check(choose && clear && reload && path, "base color controls exist");
+    QTimer picker;
+    QObject::connect(&picker, &QTimer::timeout, &window, [&] {
+        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+            dialog->selectFile(QString::fromUtf8(PathUtf8(texture)));
+            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+        }
+    });
+    picker.start(5);
+    choose->click();
+    picker.stop();
+    const auto assigned =
+        document.GetScene().GetComponent<MeshRendererComponent>(id).material.baseColorTexture;
+    Check(std::filesystem::equivalent(PathFromUtf8(assigned), texture) && !path->text().isEmpty(),
+          "the inspector assigns a base color map to a default cube");
+    History(window)->undo();
+    Check(document.GetScene()
+              .GetComponent<MeshRendererComponent>(id)
+              .material.baseColorTexture.empty(),
+          "texture assignment is undoable");
+    History(window)->redo();
+    Check(document.GetScene().GetComponent<MeshRendererComponent>(id).material.baseColorTexture ==
+              assigned,
+          "texture assignment is redoable");
+    Action(window, "copyEntity")->trigger();
+    Action(window, "pasteEntity")->trigger();
+    const auto copied =
+        document.GetSelected().GetComponent<MeshRendererComponent>().material.baseColorTexture;
+    Check(document.GetSelected().GetId() != id &&
+              std::filesystem::equivalent(PathFromUtf8(copied), texture),
+          "entity clipboard copying preserves base-color textures");
+    clear->click();
+    Check(document.GetSelected()
+              .GetComponent<MeshRendererComponent>()
+              .material.baseColorTexture.empty(),
+          "a material can return to solid color");
+    History(window)->undo();
+    const auto before = Data(document.GetScene());
+    const auto history = History(window)->index();
+    const auto dirty = document.IsDirty();
+    reload->click();
+    Check(Data(document.GetScene()) == before && History(window)->index() == history &&
+              document.IsDirty() == dirty,
+          "asset reload does not alter scene data, dirty state or history");
+    std::ofstream(texture, std::ios::binary | std::ios::trunc) << "broken image";
+    reload->click();
+    Check(!window.LastLogMessage().isEmpty() && Data(document.GetScene()) == before &&
+              History(window)->index() == history,
+          "failed texture reload reports an error without changing editing state");
+    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"), "texture source recovers");
+    reload->click();
+    const auto oldTab = document.GetActiveTabId();
+    const auto oldScene = Data(document.GetScene());
+    QTimer switchPicker;
+    bool switched = false;
+    QObject::connect(&switchPicker, &QTimer::timeout, &window, [&] {
+        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+            if (!switched) {
+                window.NewSceneDocument();
+                switched = true;
+            }
+            dialog->selectFile(QString::fromUtf8(PathUtf8(texture)));
+            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+        }
+    });
+    switchPicker.start(5);
+    choose->click();
+    switchPicker.stop();
+    Check(switched && document.GetScene().GetEntityCount() == 0 &&
+              Data(*document.GetScene(oldTab)) == oldScene,
+          "a delayed file picker never applies an asset to a different active document");
+    (void)tab;
+}
 
 void TabsAndGlobalUndo() {
     Fixture fixture;
@@ -849,6 +1009,7 @@ void InactiveSessionRecoversAutosave() {
 void AsyncOwnerUsesLatestStartup() {
     ProjectSessionFixture fixture;
     EditorWindow window;
+    Check(Action(window, "projectSettings")->isEnabled(), "async startup fixture owns its initial project");
     const auto directory = fixture.project.GetSceneFile().parent_path();
     const auto pending = directory / "Pending.lux", latest = directory / "NewStart.lux";
     Scene scene;
@@ -856,7 +1017,13 @@ void AsyncOwnerUsesLatestStartup() {
     Check(scene.Serialize(PathUtf8(pending)) && scene.Serialize(PathUtf8(latest)) &&
               window.OpenSceneDocument(pending, true) && window.OpenSceneDocument(latest),
           "scene load is pending when another scene becomes current");
+    Check(std::filesystem::equivalent(PathFromUtf8(window.GetDocument().GetPath()), latest),
+          "the synchronous destination is active before changing startup");
     Action(window, "setStartupScene")->trigger();
+    std::string startupError;
+    const auto updatedProject = EditorProject::Open(fixture.project.GetFile(), startupError);
+    Check(updatedProject && std::filesystem::equivalent(updatedProject->GetSceneFile(), latest),
+          "the new startup scene is saved before waiting for async completion");
     Wait([&] { return window.PendingSceneLoadCount() == 0; }, "pending project scene finishes");
     const auto tab = window.GetDocument().FindTabByPath(PathUtf8(pending));
     Check(tab && window.SwitchSceneDocument(tab, false), "async scene activates after completion");
@@ -875,8 +1042,47 @@ void AsyncOwnerUsesLatestStartup() {
         qunsetenv("SDL_VIDEO_DRIVER");
     else
         qputenv("SDL_VIDEO_DRIVER", previousDriver);
+    if (!std::filesystem::equivalent(PathFromUtf8(window.GetDocument().GetPath()), latest))
+        std::cerr << "async startup: active=" << window.GetDocument().GetPath()
+                  << " expected=" << PathUtf8(latest) << " projectEnabled="
+                  << Action(window, "projectSettings")->isEnabled() << " log="
+                  << window.LastLogMessage().toUtf8().toStdString() << '\n';
     Check(std::filesystem::equivalent(PathFromUtf8(window.GetDocument().GetPath()), latest),
           "async owner preserves a startup scene changed while its load was pending");
+    const auto external = PathFromUtf8(fixture.files.path().toUtf8().toStdString()) / "Outside.lux";
+    Check(scene.Serialize(PathUtf8(external)) && window.OpenSceneDocument(external, true),
+          "external asynchronous scene queues from an owned project");
+    Wait([&] { return window.PendingSceneLoadCount() == 0; }, "external async scene finishes");
+    const auto externalTab = window.GetDocument().FindTabByPath(PathUtf8(external));
+    Check(externalTab && window.SwitchSceneDocument(externalTab, false) &&
+              !Action(window, "projectSettings")->isEnabled(),
+          "loaded canonical paths prevent external scenes from retaining project ownership");
+}
+
+void CaptureMeshScene(const QString& destination, const QString& source) {
+    Check(QFileInfo(destination).isAbsolute() && QFileInfo(source).isAbsolute(),
+          "scene capture paths must be absolute");
+    QSettings().clear();
+    EditorWindow window;
+    window.resize(1600, 1000);
+    Check(window.OpenSceneDocument(PathFromUtf8(source.toUtf8().toStdString())),
+          "mesh demonstration scene opens");
+    window.show();
+    Action(window, "view3D")->trigger();
+    Pump(150);
+    Check(window.grab().save(destination), "mesh demonstration capture saves");
+    bool viewportSaved = false;
+    for (auto* widget : window.findChildren<QWidget*>())
+        if (auto* viewport = dynamic_cast<SceneViewport3D*>(widget)) {
+            const auto file = QFileInfo(destination).absolutePath() + '/' +
+                              QFileInfo(destination).completeBaseName() + "-viewport.png";
+            viewportSaved = viewport->grab().save(file);
+        }
+    Check(viewportSaved, "mesh viewport capture saves");
+    for (const auto& tab : window.GetDocument().ListTabs())
+        window.GetDocument().SetDirty(tab.id, false);
+    window.close();
+    Pump();
 }
 
 void CaptureEditor(const QString& destination) {
@@ -974,19 +1180,36 @@ int main(int argc, char** argv) {
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
     EngineSceneRenderer::SetForceAllowed(false);
     try {
+        const QString koreanOutput = QStringLiteral("한글 빌드 경고: 프로젝트/캐릭터 🙂");
+        Check(DecodeBuildOutput(koreanOutput.toUtf8()) == koreanOutput,
+              "UTF-8 build output preserves Korean paths and supplementary characters");
+        const QString replacementOutput = koreanOutput + QChar::ReplacementCharacter;
+        Check(DecodeBuildOutput(replacementOutput.toUtf8()) == replacementOutput,
+              "valid UTF-8 replacement characters do not trigger legacy decoding");
+#ifdef _WIN32
+        const QByteArray legacyOutput = koreanOutput.left(2).toLocal8Bit();
+        Check(DecodeBuildOutput(legacyOutput) == koreanOutput.left(2),
+              "legacy Windows tool output is converted without losing Korean text");
+#endif
         const auto capture = qEnvironmentVariable("LUX_EDITOR_SCENE_CAPTURE");
         if (!capture.isEmpty()) {
             if (qEnvironmentVariableIntValue("LUX_EDITOR_SCENE_CAPTURE_GPU") == 1) {
                 qunsetenv("LUX_EDITOR_SOFTWARE_VIEWPORT");
                 EngineSceneRenderer::SetForceAllowed(true);
             }
-            CaptureEditor(capture);
+            const auto source = qEnvironmentVariable("LUX_EDITOR_SCENE_CAPTURE_SOURCE");
+            if (source.isEmpty())
+                CaptureEditor(capture);
+            else
+                CaptureMeshScene(capture, source);
             return 0;
         }
         const std::string_view suite = argc > 1 ? argv[1] : "all";
         bool found = suite == "all";
-        for (const auto& [name, run] : std::array<std::pair<std::string_view, void (*)()>, 12>{
-                 {{"animation-workspace", AnimationWorkspace},
+        for (const auto& [name, run] : std::array<std::pair<std::string_view, void (*)()>, 14>{
+                 {{"base-color", BaseColorEditingAndReload},
+                  {"mesh-assets", MeshAssetEditing},
+                  {"animation-workspace", AnimationWorkspace},
                   {"tabs", TabsAndGlobalUndo},
                   {"move", CrossSceneMove},
                   {"hierarchy", HierarchyActions},

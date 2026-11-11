@@ -1,4 +1,5 @@
 #include "SceneDependencies.hpp"
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/SceneManager.hpp"
 #include "Project/EditorProject.hpp"
@@ -108,6 +109,62 @@ private:
     void Inspect(LuxEngine::Scene& scene, const fs::path& owner, size_t depth) {
         CheckDepth(depth);
         for (const auto& entity : scene.GetEntities()) {
+            if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
+                mesh && !mesh->meshPath.empty()) {
+                if (mesh->meshPath.size() > 4096 || mesh->meshPath.find('\0') != std::string::npos)
+                    throw std::runtime_error("메시 경로가 올바르지 않습니다.");
+                const auto input = PathFromUtf8(mesh->meshPath);
+                std::error_code error;
+                const auto file =
+                    fs::canonical(input.is_absolute() ? input : owner.parent_path() / input, error);
+                const auto relative = file.lexically_relative(root);
+                if (error || relative.empty() || relative.is_absolute() ||
+                    *relative.begin() == ".." || Ignored(relative))
+                    throw std::runtime_error("메시 파일은 프로젝트 내부에 있어야 합니다: " +
+                                             mesh->meshPath);
+                if (meshFiles_.insert(file).second) {
+                    const auto size = fs::file_size(file, error);
+                    if (error)
+                        throw std::runtime_error("메시 파일을 읽을 수 없습니다: " + mesh->meshPath);
+                    Charge(size);
+                    bool hasUvs = false;
+                    if (!LuxEngine::AssetManager::ValidateMeshFile(GenericPathUtf8(file), &hasUvs))
+                        throw std::runtime_error("OBJ 메시 파일이 올바르지 않습니다: " +
+                                                 mesh->meshPath);
+                    meshHasUvs_[file] = hasUvs;
+                }
+                if (!mesh->material.baseColorTexture.empty() && !meshHasUvs_.at(file))
+                    throw std::runtime_error("텍스처를 적용할 UV 좌표가 없는 OBJ입니다: " +
+                                             mesh->meshPath);
+            }
+            if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
+                mesh && !mesh->material.baseColorTexture.empty()) {
+                const auto& resource = mesh->material.baseColorTexture;
+                if (!LuxEngine::AssetManager::IsBaseColorTextureFile(resource))
+                    throw std::runtime_error("지원하지 않는 기본 색상 텍스처 형식입니다: " +
+                                             resource);
+                const auto input = PathFromUtf8(resource);
+                std::error_code error;
+                const auto file =
+                    fs::canonical(input.is_absolute() ? input : owner.parent_path() / input, error);
+                const auto relative = file.lexically_relative(root);
+                if (error || relative.empty() || relative.is_absolute() ||
+                    *relative.begin() == ".." || Ignored(relative))
+                    throw std::runtime_error("기본 색상 텍스처는 프로젝트 내부에 있어야 합니다: " +
+                                             resource);
+                if (textureFiles_.insert(file).second) {
+                    const auto size = fs::file_size(file, error);
+                    if (error)
+                        throw std::runtime_error("텍스처 파일을 읽을 수 없습니다: " + resource);
+                    Charge(size);
+                    int width = 0, height = 0;
+                    std::vector<LuxEngine::uint8> pixels;
+                    if (!LuxEngine::AssetManager::DecodeTextureCpu(GenericPathUtf8(file), width,
+                                                                   height, pixels))
+                        throw std::runtime_error("기본 색상 텍스처 파일이 올바르지 않습니다: " +
+                                                 resource);
+                }
+            }
             const auto* reference = entity.TryGetComponent<LuxEngine::SceneReferenceComponent>();
             if (!reference)
                 continue;
@@ -133,6 +190,9 @@ private:
     const EditorProject& project_;
     std::uintmax_t remaining_ = MaximumBytes;
     std::set<fs::path> active_;
+    std::set<fs::path> meshFiles_;
+    std::map<fs::path, bool> meshHasUvs_;
+    std::set<fs::path> textureFiles_;
     std::map<fs::path, size_t> checked_;
 };
 } // namespace

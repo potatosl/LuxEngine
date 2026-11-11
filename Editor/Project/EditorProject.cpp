@@ -1,5 +1,6 @@
 #include "EditorProject.hpp"
 #include "PathEncoding.hpp"
+#include "ProjectFileOperations.hpp"
 #include "ProjectTemplates.hpp"
 
 #include "Engine/Scene/Entity.hpp"
@@ -293,7 +294,7 @@ std::optional<EditorProject> EditorProject::Create(const std::filesystem::path& 
         discardStaging();
         return std::nullopt;
     }
-    std::filesystem::rename(staging, root, ec);
+    RenameProjectPath(staging, root, ec);
     if (ec) {
         error = "프로젝트 폴더를 최종 위치로 옮길 수 없습니다.";
         discardStaging();

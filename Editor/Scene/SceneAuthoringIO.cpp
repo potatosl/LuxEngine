@@ -8,7 +8,7 @@ namespace {
 namespace fs = std::filesystem;
 
 fs::path CanonicalPath(const fs::path& path) {
-    if (path.empty())
+    if (path.empty() || path.native().find(fs::path::value_type{}) != fs::path::string_type::npos)
         throw std::runtime_error("씬 파일 경로가 비어 있습니다.");
     std::error_code error;
     const auto absolute = fs::absolute(path, error);
@@ -26,6 +26,19 @@ void RebaseSceneReferences(LuxEngine::Scene& scene, const fs::path& owner,
     if (depth > 16)
         throw std::runtime_error("씬 참조 스냅샷의 중첩 한도를 넘었습니다.");
     for (auto entity : scene.GetEntities()) {
+        if (auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>())
+            for (auto* resource : {&mesh->meshPath, &mesh->material.baseColorTexture}) {
+                if (resource->empty())
+                    continue;
+                auto path = PathFromUtf8(*resource);
+                if (path.is_relative())
+                    path = owner.parent_path() / path;
+                const auto absolute = CanonicalPath(path);
+                const auto relative = destination
+                                          ? absolute.lexically_relative(destination->parent_path())
+                                          : fs::path{};
+                *resource = GenericPathUtf8(destination && !relative.empty() ? relative : absolute);
+            }
         auto* reference = entity.TryGetComponent<LuxEngine::SceneReferenceComponent>();
         if (!reference)
             continue;

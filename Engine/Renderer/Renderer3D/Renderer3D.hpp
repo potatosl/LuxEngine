@@ -18,6 +18,7 @@ struct Material3D {
     Vec4 albedoColor{1.0f, 1.0f, 1.0f, 1.0f};
     float metallic = 0.0f;
     float roughness = 0.5f;
+    std::string baseColorTexture;
 };
 
 struct DirectionalLight {
@@ -83,6 +84,8 @@ class LUX_API Mesh3D {
 public:
     bool Upload(GpuDevice* device, std::span<const Vec3> positions,
                 std::span<const uint32> indices);
+    bool Upload(GpuDevice* device, std::span<const Vertex3D> vertices,
+                std::span<const uint32> indices);
     void Release();
     bool IsValid() const;
     uint32 GetIndexCount() const {
@@ -126,14 +129,21 @@ public:
 
         void DrawMesh(const Mat4& transform, const Material3D& material);
         void DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material);
+        void DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material,
+                      GpuTexture* texture);
+        bool DrawMeshAsset(const std::string& path, const Mat4& transform,
+                           const Material3D& material);
         void DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
                       const Mat4& transform, const Material3D& material);
         void DrawCube(const Vec3& position, const Vec3& scale, const Material3D& material);
 
         void ResetStats();
         Statistics GetStats() const;
+        const std::string& GetLastAssetError() const;
+        bool GetMeshBounds(const std::string& path, Vec3& minimum, Vec3& maximum) const;
 
     private:
+        GpuTexture* ResolveBaseColorTexture(const std::string& path);
         struct Impl;
         std::unique_ptr<Impl> impl_;
     };
@@ -161,12 +171,17 @@ public:
 
     static void DrawMesh(const Mat4& transform, const Material3D& material);
     static void DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material);
+    static void DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material,
+                         GpuTexture* texture);
+    static bool DrawMeshAsset(const std::string& path, const Mat4& transform,
+                              const Material3D& material);
     static void DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
                          const Mat4& transform, const Material3D& material);
     static void DrawCube(const Vec3& position, const Vec3& scale, const Material3D& material);
 
     static void ResetStats();
     static Statistics GetStats();
+    static const std::string& GetLastAssetError();
 };
 
 } // namespace LuxEngine

@@ -15,7 +15,7 @@ namespace LuxEngine::Vk {
 
 constexpr uint32 MaxFramesInFlight = 3;
 constexpr uint32 MaxPointLights = 16;
-constexpr VkDeviceSize UniformObjectBytes = 80;
+constexpr VkDeviceSize UniformObjectBytes = 96;
 constexpr VkDeviceSize UniformLightBytes = 48 + 32 * MaxPointLights;
 
 const char* ResultString(VkResult result);
@@ -314,7 +314,8 @@ struct DeviceState {
     bool UploadBuffer(BufferRecord& record, const void* data, VkDeviceSize size,
                       VkDeviceSize offset);
     bool CreateTextureResource(uint32 width, uint32 height, const void* pixels,
-                               TextureRecord& record, TextureFilter filter = TextureFilter::Linear);
+                               TextureRecord& record, TextureFilter filter = TextureFilter::Linear,
+                               TextureColorSpace colorSpace = TextureColorSpace::Linear);
     bool EnsureVertexCapacity(FrameData& frame, VkDeviceSize bytes);
     bool EnsureCaptureBuffer(VkDeviceSize size);
     bool PushUniform(const void* data, VkDeviceSize size, uint32& offset);

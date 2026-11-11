@@ -6,6 +6,7 @@ param(
     [string]$SDL3Dir = ""
 )
 
+. (Join-Path $PSScriptRoot "Utf8.ps1")
 $ErrorActionPreference = "Stop"
 $rootDir = (Get-Item $PSScriptRoot).Parent.FullName
 $sdl3CMakeArg = @()

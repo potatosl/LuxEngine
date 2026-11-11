@@ -184,6 +184,9 @@ EditorWindow::~EditorWindow() {
     CancelBuild();
     pendingSceneLoads_.clear();
     undo_->clear();
+    removeDockWidget(animationDock_);
+    delete animationDock_;
+    animationDock_ = nullptr;
     delete takeCentralWidget();
     for (QDockWidget* dock : docks_) {
         removeDockWidget(dock);
@@ -807,6 +810,15 @@ void EditorWindow::RefreshInspector() {
         }
         const bool mesh = selected.HasComponent<LuxEngine::MeshRendererComponent>();
         meshEnabled_->setChecked(mesh);
+        meshPath_->setText(
+            mesh ? Q(selected.GetComponent<LuxEngine::MeshRendererComponent>().meshPath)
+                 : QString{});
+        meshPath_->setEnabled(mesh);
+        baseColorTexturePath_->setText(
+            mesh ? Q(selected.GetComponent<LuxEngine::MeshRendererComponent>()
+                         .material.baseColorTexture)
+                 : QString{});
+        baseColorTexturePath_->setEnabled(mesh);
         const LuxEngine::Material3D material =
             mesh ? selected.GetComponent<LuxEngine::MeshRendererComponent>().material
                  : LuxEngine::Material3D{};
@@ -1418,6 +1430,11 @@ void EditorWindow::CopyEntity() {
          selected.GetComponent<LuxEngine::HierarchyComponent>().group)) {
         LuxEngine::Scene subtree;
         const auto ids = subtree.ImportEntities(document_.GetScene(), {selected.GetId()});
+        for (auto object : subtree.GetEntities())
+            if (auto* mesh = object.TryGetComponent<LuxEngine::MeshRendererComponent>(); mesh)
+                for (auto* resource : {&mesh->meshPath, &mesh->material.baseColorTexture})
+                    if (!resource->empty())
+                        *resource = document_.GetScene().ResolveAssetPath(*resource);
         std::string serialized;
         if (!ids.contains(selected.GetId()) || !subtree.SerializeToString(serialized)) {
             Log(QStringLiteral("계층을 복사하지 못했습니다."), true);
@@ -1460,6 +1477,17 @@ void EditorWindow::CopyEntity() {
         const auto& c = m.albedoColor;
         object.insert(QStringLiteral("mesh"),
                       QJsonArray{m.metallic, m.roughness, c.x, c.y, c.z, c.w});
+        const auto& path = selected.GetComponent<LuxEngine::MeshRendererComponent>().meshPath;
+        if (!path.empty())
+            object.insert(QStringLiteral("meshPath"),
+                          Q(document_.GetScene().ResolveAssetPath(path)));
+    }
+    if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
+        const auto& path =
+            selected.GetComponent<LuxEngine::MeshRendererComponent>().material.baseColorTexture;
+        if (!path.empty())
+            object.insert(QStringLiteral("baseColorTexture"),
+                          Q(document_.GetScene().ResolveAssetPath(path)));
     }
     if (selected.HasComponent<LuxEngine::CameraComponent>()) {
         const auto& cam = selected.GetComponent<LuxEngine::CameraComponent>();
@@ -1677,13 +1705,20 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             key != QStringLiteral("camera") && key != QStringLiteral("tilemap") &&
             key != QStringLiteral("rigidbody2d") && key != QStringLiteral("collider2d") &&
             key != QStringLiteral("rigidbody3d") && key != QStringLiteral("collider3d") &&
-            key != QStringLiteral("animation") && key != QStringLiteral("version") &&
+            key != QStringLiteral("animation") && key != QStringLiteral("meshPath") &&
+            key != QStringLiteral("baseColorTexture") && key != QStringLiteral("version") &&
             key != QStringLiteral("hasTag") && key != QStringLiteral("hasTransform")) {
             errorMsg = QStringLiteral("알 수 없는 클립보드 필드가 포함되어 있습니다: %1").arg(key);
             return false;
         }
     }
 
+    if ((object.contains(QStringLiteral("meshPath")) ||
+         object.contains(QStringLiteral("baseColorTexture"))) &&
+        !object.contains(QStringLiteral("mesh"))) {
+        errorMsg = QStringLiteral("메시 컴포넌트가 없는 자산 경로는 붙여넣을 수 없습니다.");
+        return false;
+    }
     if (object.contains(QStringLiteral("version"))) {
         const auto version = object.value(QStringLiteral("version"));
         if (!version.isDouble() || version.toDouble() != 2 ||
@@ -1772,6 +1807,31 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
                 !ParseFiniteFloat(meshArr[4], comp.material.albedoColor.z, 0.0f, 100.0f) ||
                 !ParseFiniteFloat(meshArr[5], comp.material.albedoColor.w, 0.0f, 100.0f)) {
                 errorMsg = QStringLiteral("메시 알베도 색상이 유효하지 않습니다.");
+                return false;
+            }
+        }
+        if (object.contains(QStringLiteral("meshPath"))) {
+            const auto path = object.value(QStringLiteral("meshPath"));
+            if (!path.isString()) {
+                errorMsg = QStringLiteral("메시 파일 경로가 문자열이 아닙니다.");
+                return false;
+            }
+            comp.meshPath = path.toString().toUtf8().toStdString();
+            if (comp.meshPath.size() > 4096 || comp.meshPath.find('\0') != std::string::npos) {
+                errorMsg = QStringLiteral("메시 파일 경로가 올바르지 않습니다.");
+                return false;
+            }
+        }
+        if (object.contains(QStringLiteral("baseColorTexture"))) {
+            const auto path = object.value(QStringLiteral("baseColorTexture"));
+            if (!path.isString()) {
+                errorMsg = QStringLiteral("기본 색상 텍스처 경로가 문자열이 아닙니다.");
+                return false;
+            }
+            comp.material.baseColorTexture = path.toString().toUtf8().toStdString();
+            if (comp.material.baseColorTexture.size() > 4096 ||
+                comp.material.baseColorTexture.find('\0') != std::string::npos) {
+                errorMsg = QStringLiteral("기본 색상 텍스처 경로가 올바르지 않습니다.");
                 return false;
             }
         }

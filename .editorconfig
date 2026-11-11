@@ -1,0 +1,8 @@
+root = true
+
+[*.{c,cpp,h,hpp,cmake,txt,md,json,py,ps1,yml,yaml,ini,lux,luxproject}]
+charset = utf-8
+insert_final_newline = true
+
+[CMakeLists.txt]
+charset = utf-8

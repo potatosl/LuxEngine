@@ -1,4 +1,5 @@
 #include "SceneViewport3D.hpp"
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "EngineSceneRenderer.hpp"
 #include "Scene/EditorDocument.hpp"
@@ -17,10 +18,25 @@
 
 namespace LuxEditor {
 namespace {
-LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity) {
+LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity,
+                            const EngineSceneRenderer* renderer = nullptr) {
     const auto world = entity.GetScene()->GetWorldMatrix(entity.GetId());
-    if (entity.HasComponent<LuxEngine::MeshRendererComponent>())
+    if (entity.HasComponent<LuxEngine::MeshRendererComponent>()) {
+        const auto& mesh = entity.GetComponent<LuxEngine::MeshRendererComponent>();
+        LuxEngine::Vec3 minimum, maximum;
+        const auto path = entity.GetScene()->ResolveAssetPath(mesh.meshPath);
+        if (!mesh.meshPath.empty() &&
+            ((renderer && renderer->GetMeshBounds(path, minimum, maximum)) ||
+             LuxEngine::AssetManager::GetMeshBounds(path, minimum, maximum))) {
+            auto size = maximum - minimum;
+            size.x = std::max(size.x, .001f);
+            size.y = std::max(size.y, .001f);
+            size.z = std::max(size.z, .001f);
+            return world * LuxEngine::Mat4::Translate((minimum + maximum) * .5f) *
+                   LuxEngine::Mat4::Scale(size);
+        }
         return world;
+    }
     if (entity.HasComponent<LuxEngine::SpriteRendererComponent>())
         return world * LuxEngine::Mat4::Scale({1, 1, .02f});
     if (entity.HasComponent<LuxEngine::TilemapComponent>()) {
@@ -88,7 +104,8 @@ void SceneViewport3D::focusOutEvent(QFocusEvent* event) {
 void SceneViewport3D::FocusSelection() {
     LuxEngine::Entity selected = document_.GetSelected();
     if (selected && selected.HasComponent<LuxEngine::TransformComponent>()) {
-        focus_ = TransformCorner(BoundsModel(selected), {});
+        focus_ = TransformCorner(
+            BoundsModel(selected, engineFrame_ ? engineRenderer_.get() : nullptr), {});
         update();
     }
 }
@@ -140,7 +157,7 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
                   entity.HasComponent<LuxEngine::TilemapComponent>()))
                 continue;
             std::vector<QPointF> points;
-            const auto model = BoundsModel(entity);
+            const auto model = BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr);
             for (int corner = 0; corner < 8; ++corner) {
                 auto point = project(
                     TransformCorner(model, {corner & 1 ? .5f : -.5f, corner & 2 ? .5f : -.5f,
@@ -171,6 +188,13 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
     painter.restore();
     if (engineFrame_ && !cachedFrame_.isNull())
         painter.drawImage(rect(), cachedFrame_);
+    if (engineFrame_ && engineRenderer_ && !engineRenderer_->LastError().isEmpty()) {
+        const auto message = painter.fontMetrics().elidedText(
+            engineRenderer_->LastError(), Qt::ElideMiddle, std::max(1, width() - 32));
+        painter.fillRect(QRect(8, 8, std::max(1, width() - 16), 30), QColor(80, 24, 28, 225));
+        painter.setPen(QColor(255, 210, 210));
+        painter.drawText(QRect(16, 8, std::max(1, width() - 32), 30), Qt::AlignVCenter, message);
+    }
     const auto origin = project({0, 0, 0});
     for (const auto& [tip, color] :
          std::array<std::pair<LuxEngine::Vec3, QColor>, 3>{{{{2, 0, 0}, QColor(218, 97, 99)},
@@ -202,7 +226,8 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
                                 : QColor(176, 187, 201);
         if (engineFrame_ && !active)
             color.setAlpha(120);
-        const LuxEngine::Mat4 model = BoundsModel(entity);
+        const LuxEngine::Mat4 model =
+            BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr);
         const LuxEngine::Vec3 boxCenter = TransformCorner(model, {});
         std::array<std::optional<QPointF>, 8> corners;
         for (size_t i = 0; i < 8; ++i)
@@ -267,7 +292,8 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
-        const auto distance = IntersectViewportBox(*ray, BoundsModel(entity));
+        const auto distance = IntersectViewportBox(
+            *ray, BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr));
         if (!distance || *distance >= best)
             continue;
         const LuxEngine::Vec3 surface =

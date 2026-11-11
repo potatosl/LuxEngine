@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +32,7 @@
 
 namespace {
 int checks = 0;
+std::atomic<uint64_t> warningMessages{0};
 void Check(bool ok, const char* message) {
     ++checks;
     if (!ok)
@@ -180,10 +182,23 @@ std::string Sha256Hex(const std::string& input) {
     return out;
 }
 struct Files {
-    std::filesystem::path root = std::filesystem::temp_directory_path() /
-                                 ("luxengine-tests-" + std::to_string(SDL_GetTicksNS()));
+    std::filesystem::path root;
     Files() {
-        std::filesystem::create_directories(root);
+        const auto temporary = std::filesystem::temp_directory_path();
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        for (unsigned attempt = 0; attempt < 128; ++attempt) {
+            const auto candidate = temporary / ("luxengine-tests-" + std::to_string(stamp) + "-" +
+                                                std::to_string(attempt));
+            std::error_code error;
+            if (std::filesystem::create_directory(candidate, error)) {
+                root = candidate;
+                return;
+            }
+            if (error && error != std::errc::file_exists)
+                throw std::filesystem::filesystem_error("Cannot create test directory", candidate,
+                                                        error);
+        }
+        throw std::runtime_error("Cannot reserve a unique test directory");
     }
     ~Files() {
         std::error_code ec;
@@ -1065,6 +1080,80 @@ void Assets() {
     files.Text("quad.obj", "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf -4 -3 -2 -1\n");
     Check(AssetManager::LoadMesh(files.Path("quad.obj"), mesh), "OBJ load");
     Check(mesh.vertices.size() == 12 && mesh.indices.size() == 6, "OBJ triangulation");
+    Check(mesh.normals.size() == mesh.vertices.size() && mesh.texCoords.size() == 8 &&
+              Near(mesh.normals[2], 1) && !mesh.hasTexCoords,
+          "missing OBJ attributes receive generated normals and UVs");
+    files.Text("attributes.obj", "v -2 0 0\nv 2 0 0\nv 0 2 0\n"
+                                 "vt 0 0\nvt 1 0\nvt .5 1\nvn 0 1 1\n"
+                                 "f -3/-3/-1 -2/-2/-1 -1/-1/-1\n");
+    Check(AssetManager::LoadMesh(files.Path("attributes.obj"), mesh) && mesh.vertices.size() == 9 &&
+              mesh.normals.size() == 9 && mesh.texCoords.size() == 6 &&
+              Near(mesh.texCoords[2], 1) && Near(mesh.texCoords[5], 1) &&
+              Near(mesh.normals[1], std::sqrt(.5f)) && Near(mesh.normals[2], std::sqrt(.5f)) &&
+              Near(mesh.boundsMin.x, -2) && Near(mesh.boundsMax.y, 2) && mesh.hasTexCoords,
+          "OBJ negative indices preserve normalized authored normals, UVs and bounds");
+    files.Text("seams.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 1\nvn 0 0 1\n"
+                            "f 1/1/1 2/1/1 3/1/1\nf 1/2/1 3/1/1 2/1/1\n");
+    Check(AssetManager::LoadMesh(files.Path("seams.obj"), mesh) && mesh.vertices.size() == 12 &&
+              mesh.indices[0] != mesh.indices[3],
+          "UV seams split a shared position without losing attributes");
+    files.Text("bad-normal.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\nf 1//2 2//1 3//1\n");
+    Check(!AssetManager::LoadMesh(files.Path("bad-normal.obj"), mesh) && mesh.normals.empty(),
+          "out-of-range normal indices fail without publishing partial geometry");
+    files.Text("smooth.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\ns 1\nf 1 2 3\nf 1 4 2\n");
+    Check(AssetManager::LoadMesh(files.Path("smooth.obj"), mesh) && mesh.vertices.size() == 12 &&
+              mesh.normals[1] > .6f && mesh.normals[2] > .6f,
+          "smoothing groups generate shared vertex normals across adjacent faces");
+    files.Text("reload.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    RawMeshData original, updated;
+    Check(AssetManager::LoadMesh(files.Path("reload.obj"), original), "mesh reload fixture loads");
+    const auto stamp = std::filesystem::last_write_time(files.Path("reload.obj"));
+    files.Text("reload.obj", "v 0 0 0\nv 2 0 0\nv 0 1 0\nf 1 2 3\n");
+    std::filesystem::last_write_time(files.Path("reload.obj"), stamp);
+    std::string reloadError;
+    Check(AssetManager::ReloadMesh(files.Path("reload.obj"), reloadError) && reloadError.empty() &&
+              AssetManager::LoadMesh(files.Path("reload.obj"), updated) &&
+              updated.revision > original.revision && Near(updated.boundsMax.x, 2),
+          "explicit mesh reload detects edits even when file size and timestamp are unchanged");
+    const auto acceptedRevision = updated.revision;
+    files.Text("reload.obj", "invalid OBJ");
+    Check(!AssetManager::ReloadMesh(files.Path("reload.obj"), reloadError) &&
+              !reloadError.empty() &&
+              AssetManager::GetMeshRevision(files.Path("reload.obj")) == acceptedRevision &&
+              AssetManager::LoadMesh(files.Path("reload.obj"), updated) &&
+              Near(updated.boundsMax.x, 2),
+          "failed reload preserves immutable geometry and its published revision");
+    std::filesystem::remove(files.Path("reload.obj"));
+    Check(!AssetManager::ReloadMesh(files.Path("reload.obj"), reloadError) &&
+              AssetManager::LoadMesh(files.Path("reload.obj"), updated) &&
+              Near(updated.boundsMax.x, 2),
+          "deleted source files do not discard the last valid mesh");
+    files.Text("concurrent.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    std::atomic<bool> consistent{true};
+    std::vector<std::thread> reloading;
+    for (int worker = 0; worker < 4; ++worker)
+        reloading.emplace_back([&] {
+            for (int iteration = 0; iteration < 25; ++iteration) {
+                RawMeshData candidate;
+                if (AssetManager::LoadMesh(files.Path("concurrent.obj"), candidate, true)) {
+                    if (candidate.vertices.size() != 9 || candidate.normals.size() != 9 ||
+                        candidate.texCoords.size() != 6 || candidate.indices.size() != 3 ||
+                        candidate.revision == 0)
+                        consistent = false;
+                } else if (!candidate.vertices.empty() || !candidate.normals.empty()) {
+                    consistent = false;
+                }
+            }
+        });
+    for (auto& worker : reloading)
+        worker.join();
+    Check(consistent && AssetManager::LoadMesh(files.Path("concurrent.obj"), updated),
+          "concurrent reloads publish complete immutable snapshots or fail without partial output");
+    const auto previousBudget = AssetManager::GetCacheMemoryBudget();
+    AssetManager::SetCacheMemoryBudget(1);
+    Check(AssetManager::GetCachedMeshCount() == 0 && AssetManager::GetMeshCacheMemoryBytes() == 0,
+          "CPU mesh caches obey an explicitly reduced budget");
+    AssetManager::SetCacheMemoryBudget(previousBudget);
     files.Text("bad.obj", "v 0 0 0\nf 0 1 2\n");
     Check(!AssetManager::LoadMesh(files.Path("bad.obj"), mesh) && mesh.vertices.empty(),
           "invalid mesh fails");
@@ -1838,6 +1927,217 @@ void Lifecycle() {
     }
     SDL_Quit();
 }
+void MaterialAssetReloading(Graphics& graphics) {
+    Files files;
+    const auto modelPath = files.Path("reload-plane.obj");
+    const auto imagePath = files.Path("reload-color.BmP");
+    const auto writeMesh = [&](float offset) {
+        std::ofstream file(modelPath, std::ios::binary | std::ios::trunc);
+        file << "v " << -1 + offset << " -1 0\nv " << 1 + offset << " -1 0\nv " << 1 + offset
+             << " 1 0\nv " << -1 + offset << " 1 0\n"
+             << "vt 0 1\nvt 1 1\nvt 1 0\nvt 0 0\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1 4/4/1\n";
+        Check(static_cast<bool>(file), "reload OBJ writes completely");
+    };
+    const auto writeImage = [&](uint8 r, uint8 g, uint8 b) {
+        std::array<uint8, 16> pixels{r, g, b, 255, r, g, b, 255, r, g, b, 255, r, g, b, 255};
+        auto* surface = SDL_CreateSurfaceFrom(2, 2, SDL_PIXELFORMAT_RGBA32, pixels.data(), 8);
+        Check(surface && SDL_SaveBMP(surface, imagePath.c_str()), "reload BMP writes");
+        SDL_DestroySurface(surface);
+    };
+    writeMesh(0);
+    writeImage(128, 128, 128);
+    Check(graphics.gpu.WaitIdle(), "reload baseline drains");
+    const auto baseline = graphics.gpu.GetMemoryStats();
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scope(context);
+    Scene scene;
+    auto entity = scene.CreateEntity("Textured OBJ");
+    auto& component = entity.AddComponent<MeshRendererComponent>();
+    component.meshPath = modelPath;
+    component.material.baseColorTexture = imagePath;
+    const auto draw = [&] {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            PerspectiveCamera camera(ToRadians(60), 4.f / 3, .1f, 100);
+            camera.SetPosition({0, 0, 5});
+            DirectionalLight sun;
+            sun.direction = {0, 0, -1};
+            sun.intensity = .35f;
+            Renderer3D::BeginScene(camera, sun);
+            scene.OnRender3D();
+            Renderer3D::EndScene();
+        });
+    };
+    auto frame = draw();
+    Check(IsColor(Pixel(frame, .5f, .5f), 92, 92, 92, 4) && context.GetLastAssetError().empty(),
+          "sRGB base color is decoded before lighting and encoded for the display");
+    const auto oldTime = std::filesystem::last_write_time(imagePath);
+    writeImage(255, 0, 0);
+    std::filesystem::last_write_time(imagePath, oldTime);
+    Check(IsColor(Pixel(draw(), .5f, .5f), 92, 92, 92, 4),
+          "external edits remain stable until explicit reload");
+    std::string error;
+    Check(AssetManager::ReloadTexture(imagePath, error), "texture CPU reload succeeds");
+    Check(IsColor(Pixel(draw(), .5f, .5f), 188, 0, 0, 4),
+          "explicit texture reload updates pixels even with an unchanged timestamp and size");
+    const auto imageRevision = AssetManager::GetTextureRevision(imagePath);
+    files.Text("reload-color.BmP", "broken image");
+    Check(!AssetManager::ReloadTexture(imagePath, error) && !error.empty() &&
+              AssetManager::GetTextureRevision(imagePath) == imageRevision,
+          "corrupt image reload does not publish a new revision");
+    Check(IsColor(Pixel(draw(), .5f, .5f), 188, 0, 0, 4) && !context.GetLastAssetError().empty(),
+          "corrupt image reload retains the previous GPU texture and reports the error");
+    std::filesystem::remove(imagePath);
+    Check(!AssetManager::ReloadTexture(imagePath, error) &&
+              IsColor(Pixel(draw(), .5f, .5f), 188, 0, 0, 4),
+          "deleted image sources retain the previous GPU texture");
+    writeImage(0, 0, 255);
+    Check(AssetManager::ReloadTexture(imagePath, error) &&
+              IsColor(Pixel(draw(), .5f, .5f), 0, 0, 188, 4) && context.GetLastAssetError().empty(),
+          "restoring an image clears the error and publishes its replacement");
+    const auto middleFrame = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        PerspectiveCamera camera(ToRadians(60), 4.f / 3, .1f, 100);
+        camera.SetPosition({0, 0, 5});
+        DirectionalLight sun;
+        sun.direction = {0, 0, -1};
+        sun.intensity = .35f;
+        Renderer3D::BeginScene(camera, sun);
+        Material3D material;
+        material.baseColorTexture = imagePath;
+        Renderer3D::DrawMeshAsset(
+            modelPath, Mat4::Translate({-1.2f, 0, 0}) * Mat4::Scale({.7f, .7f, .7f}), material);
+        writeImage(0, 255, 0);
+        Check(AssetManager::ReloadTexture(imagePath, error),
+              "mid-frame texture replacement validates");
+        Renderer3D::DrawMeshAsset(
+            modelPath, Mat4::Translate({1.2f, 0, 0}) * Mat4::Scale({.7f, .7f, .7f}), material);
+        Renderer3D::EndScene();
+    });
+    Check(IsColor(Pixel(middleFrame, .35f, .5f), 0, 0, 188, 4) &&
+              IsColor(Pixel(middleFrame, .65f, .5f), 0, 188, 0, 4),
+          "mid-frame texture replacement preserves descriptors referenced by earlier draws");
+    writeImage(0, 0, 255);
+    Check(AssetManager::ReloadTexture(imagePath, error) && Pixel(draw(), .5f, .5f)[2] > 100,
+          "the allocation failure fixture restores its blue texture");
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    writeImage(0, 255, 0);
+    Check(AssetManager::ReloadTexture(imagePath, error), "GPU failure texture candidate validates");
+    Vk::InjectFault(Vk::Fault::ImageAllocation);
+    Check(IsColor(Pixel(draw(), .5f, .5f), 0, 0, 188, 4) && !context.GetLastAssetError().empty(),
+          "failed GPU texture uploads retain the old image without invalidating the device");
+    Vk::ClearFaults();
+    Check(IsColor(Pixel(draw(), .5f, .5f), 0, 0, 188, 4),
+          "failed GPU uploads are not retried every frame");
+    Check(AssetManager::ReloadTexture(imagePath, error) &&
+              IsColor(Pixel(draw(), .5f, .5f), 0, 188, 0, 4),
+          "a new reload retries a failed upload");
+#endif
+    writeImage(0, 255, 0);
+    Check(AssetManager::ReloadTexture(imagePath, error) && Pixel(draw(), .5f, .5f)[1] > 100,
+          "the mesh reload fixture has a valid green material");
+    writeImage(255, 255, 0);
+    AssetManager::Clear();
+    Check(IsColor(Pixel(draw(), .5f, .5f), 188, 188, 0, 4),
+          "global cache clearing invalidates already resident mesh and texture generations");
+    writeImage(0, 255, 0);
+    Check(AssetManager::ReloadTexture(imagePath, error) && Pixel(draw(), .5f, .5f)[1] > 100,
+          "the mesh fixture restores its green texture after cache invalidation");
+    Check(graphics.gpu.WaitIdle(), "texture stress baseline drains");
+    const auto stableTextureMemory = graphics.gpu.GetMemoryStats();
+    for (int reload = 0; reload < 50; ++reload) {
+        writeImage(0, reload % 2 ? 255 : 0, reload % 2 ? 0 : 255);
+        Check(AssetManager::ReloadTexture(imagePath, error), "repeated texture reload validates");
+        draw();
+    }
+    writeImage(0, 255, 0);
+    Check(AssetManager::ReloadTexture(imagePath, error), "stress fixture restores green");
+    for (int drain = 0; drain < 3; ++drain)
+        draw();
+    Check(graphics.gpu.WaitIdle(), "texture stress drains deferred releases");
+    const auto reloadedMemory = graphics.gpu.GetMemoryStats();
+    Check(reloadedMemory.allocationCount == stableTextureMemory.allocationCount &&
+              reloadedMemory.allocationBytes == stableTextureMemory.allocationBytes,
+          "50 texture replacements return to the same actual GPU allocation count and bytes");
+    const auto uvRevision = AssetManager::GetMeshRevision(modelPath);
+    files.Text("reload-plane.obj", "v 2 -1 0\nv 4 -1 0\nv 3 1 0\nf 1 2 3\n");
+    Check(
+        !AssetManager::ReloadMesh(modelPath, error, true) && !error.empty() &&
+            AssetManager::GetMeshRevision(modelPath) == uvRevision &&
+            Pixel(draw(), .5f, .5f)[1] > 100,
+        "a textured mesh reload rejects missing UVs without discarding the previous mapped model");
+    writeMesh(0);
+    Check(AssetManager::ReloadMesh(modelPath, error, true),
+          "a UV-compatible mesh restores normal reload state");
+    draw();
+    files.Text("reload-plane.obj", "broken mesh");
+    Check(!AssetManager::ReloadMesh(modelPath, error) && Pixel(draw(), .5f, .5f)[1] > 100,
+          "corrupt mesh reload retains previously uploaded geometry");
+    writeMesh(3);
+    Check(AssetManager::ReloadMesh(modelPath, error), "replacement mesh validates");
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    Vk::InjectFault(Vk::Fault::BufferAllocation);
+    Check(Pixel(draw(), .5f, .5f)[1] > 100,
+          "GPU mesh allocation failure keeps the original silhouette");
+    Vk::ClearFaults();
+    Vec3 minimum, maximum;
+    Check(context.GetMeshBounds(scene.ResolveAssetPath(modelPath), minimum, maximum) &&
+              Near(minimum.x, -1) && Near(maximum.x, 1),
+          "failed GPU mesh replacement retains the displayed model's picking bounds");
+    Check(AssetManager::ReloadMesh(modelPath, error), "a new reload retries mesh allocation");
+#endif
+    Check(IsColor(Pixel(draw(), .5f, .5f), 0, 0, 0, 2),
+          "successful mesh reload changes its silhouette");
+    auto missing = scene.CreateEntity("Missing OBJ");
+    missing.AddComponent<MeshRendererComponent>().meshPath = files.Path("missing.obj");
+    const auto missingFrame = draw();
+    Check(!context.GetLastAssetError().empty() && Pixel(missingFrame, .5f, .5f)[0] > 50 &&
+              Pixel(missingFrame, .85f, .5f)[1] > 100 && graphics.gpu.IsReady(),
+          "missing meshes show a placeholder while valid neighboring geometry keeps rendering");
+    const auto reports = warningMessages.load();
+    for (int repeat = 0; repeat < 8; ++repeat)
+        draw();
+    Check(warningMessages.load() == reports, "unchanged asset errors are not logged every frame");
+    std::array<uint8, 34> transparent{};
+    transparent[2] = 2;
+    transparent[12] = transparent[14] = 2;
+    transparent[16] = 32;
+    transparent[17] = 0x28;
+    files.Binary("transparent.tga", transparent.data(), transparent.size());
+    Material3D cutout;
+    cutout.baseColorTexture = files.Path("transparent.tga");
+    writeMesh(0);
+    Check(AssetManager::ReloadMesh(modelPath, error), "cutout mesh returns to the foreground");
+    const auto cutoutFrame = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        PerspectiveCamera camera(ToRadians(60), 4.f / 3, .1f, 100);
+        camera.SetPosition({0, 0, 5});
+        DirectionalLight sun;
+        sun.direction = {0, 0, -1};
+        sun.intensity = .35f;
+        Renderer3D::BeginScene(camera, sun);
+        Renderer3D::DrawMeshAsset(modelPath, Mat4::Identity(), cutout);
+        Material3D blue;
+        blue.albedoColor = {0, 0, 1, 1};
+        Renderer3D::DrawCube({0, 0, -2}, {4, 4, 1}, blue);
+        Renderer3D::EndScene();
+    });
+    const auto transparentPixel = Pixel(cutoutFrame, .5f, .5f);
+    Check(transparentPixel[2] > 90 && transparentPixel[0] < 10,
+          "fully transparent base-color pixels never occlude geometry through depth writes");
+    context.Shutdown();
+    for (int i = 0; i < 3; ++i)
+        graphics.Capture([&] { graphics.gpu.Clear(0, 0, 0, 1); });
+    Check(graphics.gpu.WaitIdle(), "reload resources drain");
+    const auto final = graphics.gpu.GetMemoryStats();
+    Check(final.liveTextures == baseline.liveTextures &&
+              final.liveBuffers == baseline.liveBuffers &&
+              final.allocationCount == baseline.allocationCount &&
+              final.allocationBytes == baseline.allocationBytes,
+          "reloaded meshes and textures release all GPU allocations after context shutdown");
+    graphics.ValidationClean("material reload lifetime and failure preservation");
+}
+
 void RenderOutput(Graphics& graphics) {
     const Mat4 identity;
     auto capture = graphics.Capture([&] { Check(graphics.gpu.Clear(1, 0, 0, 1), "clear red"); });
@@ -2058,8 +2358,67 @@ void RenderOutput(Graphics& graphics) {
     });
     Check(Pixel(released, 0.5f, 0.5f)[0] > 0,
           "mesh released mid-frame stays alive until the frame finishes");
+    std::array<Vertex3D, 4> attributed{{{{-1, -1, 0}, {0, 0, 1}, {0, 1}},
+                                        {{1, -1, 0}, {0, 0, 1}, {1, 1}},
+                                        {{1, 1, 0}, {0, 0, 1}, {1, 0}},
+                                        {{-1, 1, 0}, {0, 0, 1}, {0, 0}}}};
+    const std::array<uint32, 6> quadIndices{0, 1, 2, 0, 2, 3};
+    Mesh3D attributedMesh;
+    Check(attributedMesh.Upload(&graphics.gpu, attributed, quadIndices),
+          "attributed GPU mesh uploads");
+    const std::array<uint8, 16> checkerPixels{255, 0, 0,   255, 0,   255, 0,   255,
+                                              0,   0, 255, 255, 255, 255, 255, 255};
+    GpuTexture checker;
+    Check(checker.Initialize(&graphics.gpu, 2, 2, checkerPixels.data(), TextureFilter::Nearest),
+          "mesh UV test texture uploads");
+    const auto drawAttributed = [&](const Mat4& model, GpuTexture* image, DirectionalLight light) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            PerspectiveCamera camera(ToRadians(60), 4.0f / 3, .1f, 100);
+            camera.SetPosition({0, 0, 5});
+            Renderer3D::BeginScene(camera, light);
+            Renderer3D::DrawMesh(attributedMesh, model, {}, image);
+            Renderer3D::EndScene();
+        });
+    };
+    DirectionalLight facing;
+    facing.direction = {0, 0, -1};
+    facing.intensity = .85f;
+    const auto uvFrame = drawAttributed(Mat4::Identity(), &checker, facing);
+    Check(IsColor(Pixel(uvFrame, .44f, .44f), 255, 0, 0, 3) &&
+              IsColor(Pixel(uvFrame, .56f, .44f), 0, 255, 0, 3) &&
+              IsColor(Pixel(uvFrame, .44f, .56f), 0, 0, 255, 3),
+          "indexed 3D vertex UVs reach the shader and sample separate texture quadrants");
+    for (auto& vertex : attributed)
+        vertex.normal = Vec3{1, 0, 1}.Normalized();
+    Check(attributedMesh.Upload(&graphics.gpu, attributed, quadIndices), "authored normals upload");
+    facing.direction = {-1, 0, 0};
+    facing.intensity = 1;
+    const auto normalFrame = drawAttributed(Mat4::Scale({2, 1, .5f}), nullptr, facing);
+    Check(IsColor(Pixel(normalFrame, .5f, .5f), 100, 100, 100, 5),
+          "authored vertex normals use inverse transpose under nonuniform scale");
+    Files assetFiles;
+    assetFiles.Text("scene-mesh.obj", "v -1 -1 0\nv 1 -1 0\nv 0 1 0\nvn 0 0 1\nf 1//1 2//1 3//1\n");
+    Scene meshScene;
+    auto meshEntity = meshScene.CreateEntity("OBJ triangle");
+    meshEntity.AddComponent<MeshRendererComponent>().meshPath = assetFiles.Path("scene-mesh.obj");
+    const auto assetFrame = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        PerspectiveCamera camera(ToRadians(60), 4.0f / 3, .1f, 100);
+        camera.SetPosition({0, 0, 5});
+        facing.direction = {0, 0, -1};
+        Renderer3D::BeginScene(camera, facing);
+        meshScene.OnRender3D();
+        Renderer3D::EndScene();
+        Check(Renderer3D::GetStats().drawCalls == 1, "scene mesh paths submit resident geometry");
+    });
+    Check(Pixel(assetFrame, .5f, .5f)[0] > 240 && Pixel(assetFrame, .38f, .38f)[0] == 0,
+          "scene rendering uses the OBJ triangle silhouette rather than a default cube");
+    attributedMesh.Release();
+    checker.Release();
     texture.Release();
     empty.Release();
+    MaterialAssetReloading(graphics);
     graphics.ValidationClean("render output checks");
 }
 void TextureFiltering() {
@@ -2583,7 +2942,9 @@ void Failures() {
         for (int cube = 0; cube < 3300; ++cube)
             Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
         Renderer3D::EndScene();
-        Check(Renderer3D::GetStats().drawCalls == 2 && gpu.IsReady(),
+        Check(Renderer3D::GetStats().drawCalls > 0 && gpu.IsReady() &&
+                  gpu.GetFrameStats().vertexBytes <= medium.maxFrameVertexBytes &&
+                  gpu.GetLastFailure() == GpuStatus::OutOfMemory,
               "3D scene over the vertex budget keeps the chunks that fit");
         Check(gpu.EndFrame(), "over-budget 3D frame submitted");
 
@@ -3179,6 +3540,8 @@ SDL_LogOutputFunction defaultLogOutput = nullptr;
 void* defaultLogData = nullptr;
 void SDLCALL CountValidation(void* data, int category, SDL_LogPriority priority,
                              const char* message) {
+    if (priority == SDL_LOG_PRIORITY_WARN)
+        ++warningMessages;
     if (priority >= SDL_LOG_PRIORITY_ERROR && message && std::strstr(message, "[Vulkan]"))
         ++vulkanValidationMessages;
     if (defaultLogOutput)

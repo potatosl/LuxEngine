@@ -162,6 +162,11 @@ bool EngineSceneRenderer::IsReady() const {
     return state_ && state_->gpu.IsReady();
 }
 
+bool EngineSceneRenderer::GetMeshBounds(const std::string& path, LuxEngine::Vec3& minimum,
+                                        LuxEngine::Vec3& maximum) const {
+    return state_ && state_->context3D.GetMeshBounds(path, minimum, maximum);
+}
+
 LuxEngine::GpuDevice* EngineSceneRenderer::GetGpuDevice() noexcept {
     return state_ ? &state_->gpu : nullptr;
 }
@@ -442,7 +447,13 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
             if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>()) {
                 auto material = mesh->material;
                 material.albedoColor = expose(material.albedoColor);
-                LuxEngine::Renderer3D::DrawMesh(world, material);
+                if (!material.baseColorTexture.empty())
+                    material.baseColorTexture = scene.ResolveAssetPath(material.baseColorTexture);
+                if (mesh->meshPath.empty())
+                    LuxEngine::Renderer3D::DrawMesh(world, material);
+                else
+                    LuxEngine::Renderer3D::DrawMeshAsset(scene.ResolveAssetPath(mesh->meshPath),
+                                                         world, material);
             } else if (const auto* sprite =
                            entity.TryGetComponent<LuxEngine::SpriteRendererComponent>()) {
                 LuxEngine::Material3D material;
@@ -473,6 +484,7 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
             }
         }
         LuxEngine::Renderer3D::EndScene();
+        error_ = QString::fromUtf8(s.context3D.GetLastAssetError());
     } catch (const std::exception& exception) {
         s.context3D.AbortScene();
         s.gpu.EndFrame();

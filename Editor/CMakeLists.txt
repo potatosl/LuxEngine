@@ -288,7 +288,7 @@ if(LUX_BUILD_TESTS)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1"
         TIMEOUT 60 LABELS "headless;editor")
     add_executable(LuxEditorGameBuildTests Tests/EditorGameBuildTest.cpp)
-    target_link_libraries(LuxEditorGameBuildTests PRIVATE LuxEditorUi)
+    target_link_libraries(LuxEditorGameBuildTests PRIVATE LuxEditorUi libzip::zip)
     if(MSVC)
         target_compile_options(LuxEditorGameBuildTests PRIVATE /utf-8)
     endif()

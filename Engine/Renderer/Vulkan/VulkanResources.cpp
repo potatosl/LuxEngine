@@ -400,7 +400,10 @@ bool DeviceState::UploadBuffer(BufferRecord& record, const void* data, VkDeviceS
 }
 
 bool DeviceState::CreateTextureResource(uint32 width, uint32 height, const void* pixels,
-                                        TextureRecord& record, TextureFilter filter) {
+                                        TextureRecord& record, TextureFilter filter,
+                                        TextureColorSpace colorSpace) {
+    if (colorSpace != TextureColorSpace::Linear && colorSpace != TextureColorSpace::Srgb)
+        return Fail(GpuStatus::Error, "Texture color space is invalid");
     if (filter != TextureFilter::Linear && filter != TextureFilter::Nearest)
         return Fail(GpuStatus::Error, "Texture filter is invalid");
     if (width == 0 || height == 0 || width > info.maxTextureSize || height > info.maxTextureSize)
@@ -411,7 +414,8 @@ bool DeviceState::CreateTextureResource(uint32 width, uint32 height, const void*
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    imageInfo.format =
+        colorSpace == TextureColorSpace::Srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
     imageInfo.extent = {width, height, 1};
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
@@ -440,7 +444,7 @@ bool DeviceState::CreateTextureResource(uint32 width, uint32 height, const void*
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = record.image;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    viewInfo.format = imageInfo.format;
     viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     if (const VkResult result = vkCreateImageView(device, &viewInfo, nullptr, &record.view);
         result != VK_SUCCESS) {

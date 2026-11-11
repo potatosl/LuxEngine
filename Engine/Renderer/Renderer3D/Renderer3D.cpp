@@ -1,4 +1,5 @@
 #include "Engine/Renderer/Renderer3D/Renderer3D.hpp"
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace LuxEngine {
 namespace {
@@ -56,6 +58,44 @@ struct Renderer3D::Context::Impl {
     std::vector<RenderVertex> vertices;
     Renderer3D::Statistics stats;
     bool active = false;
+    struct CachedMesh {
+        Ref<Mesh3D> mesh;
+        uint64 used = 0;
+        size_t bytes = 0;
+        uint64 attempted = std::numeric_limits<uint64>::max();
+        std::string error;
+        Vec3 minimum{-.5f, -.5f, -.5f}, maximum{.5f, .5f, .5f};
+        bool hasUvs = false, uvBlocked = false;
+    };
+    struct CachedTexture {
+        Ref<GpuTexture> texture;
+        uint64 attempted = std::numeric_limits<uint64>::max();
+        uint64 used = 0;
+        size_t bytes = 0;
+        std::string error;
+    };
+    std::unordered_map<std::string, CachedTexture> textures;
+    std::unordered_map<std::string, std::string> warnings;
+    std::string lastError;
+    size_t textureBytes = 0;
+    void Report(const std::string& key, const std::string& message) {
+        if (message.empty()) {
+            warnings.erase(key);
+            return;
+        }
+        if (lastError.empty())
+            lastError = message;
+        const auto previous = warnings.find(key);
+        if (previous == warnings.end() || previous->second != message) {
+            if (warnings.size() >= 128)
+                warnings.erase(warnings.begin());
+            warnings[key] = message;
+            Log::Warn(message);
+        }
+    }
+    std::unordered_map<std::string, CachedMesh> meshes;
+    uint64 sequence = 0;
+    size_t meshBytes = 0;
 
     std::shared_ptr<Vk::DeviceState> LockValidState() {
         if (!device)
@@ -88,20 +128,40 @@ void PerspectiveCamera::RecalculateMatrix() {
 
 bool Mesh3D::Upload(GpuDevice* gpu, std::span<const Vec3> positions,
                     std::span<const uint32> indices) {
-    Release();
     if (!gpu || positions.empty() || indices.empty() || indices.size() % 3 != 0 ||
         positions.size() > std::numeric_limits<uint32>::max() / sizeof(RenderVertex) ||
+        indices.size() > std::numeric_limits<uint32>::max() / sizeof(uint32)) {
+        Release();
+        return false;
+    }
+    std::vector<Vertex3D> vertices;
+    vertices.reserve(positions.size());
+    for (const auto& position : positions)
+        vertices.push_back({position, {}, {}});
+    return Upload(gpu, vertices, indices);
+}
+
+bool Mesh3D::Upload(GpuDevice* gpu, std::span<const Vertex3D> vertices,
+                    std::span<const uint32> indices) {
+    Release();
+    if (!gpu || vertices.empty() || indices.empty() || indices.size() % 3 != 0 ||
+        vertices.size() > std::numeric_limits<uint32>::max() / sizeof(RenderVertex) ||
         indices.size() > std::numeric_limits<uint32>::max() / sizeof(uint32))
         return false;
     for (uint32 index : indices)
-        if (index >= positions.size())
+        if (index >= vertices.size())
             return false;
     std::vector<RenderVertex> data;
-    data.reserve(positions.size());
-    for (const Vec3& position : positions) {
-        if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+    data.reserve(vertices.size());
+    for (const auto& vertex : vertices) {
+        const auto& position = vertex.position;
+        const auto& normal = vertex.normal;
+        if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
+            !std::isfinite(position.z) || !std::isfinite(normal.x) || !std::isfinite(normal.y) ||
+            !std::isfinite(normal.z) || !std::isfinite(vertex.texCoords.x) ||
+            !std::isfinite(vertex.texCoords.y))
             return false;
-        data.push_back({position, {1, 1, 1, 1}, {0, 0}});
+        data.push_back({position, {1, 1, 1, 1}, vertex.texCoords, normal});
     }
     const auto vertexBytes = static_cast<uint32>(data.size() * sizeof(RenderVertex));
     const auto indexBytes = static_cast<uint32>(indices.size_bytes());
@@ -160,6 +220,12 @@ void Renderer3D::Context::Shutdown() {
     if (!impl_)
         return;
     impl_->vertices.clear();
+    impl_->meshes.clear();
+    impl_->textures.clear();
+    impl_->warnings.clear();
+    impl_->lastError.clear();
+    impl_->textureBytes = 0;
+    impl_->meshBytes = 0;
     impl_->pointLights.clear();
     impl_->device = nullptr;
     impl_->deviceOwner.reset();
@@ -194,6 +260,7 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
         impl_ = std::make_unique<Impl>();
     if (impl_->active)
         throw std::logic_error("3D scene already active");
+    impl_->lastError.clear();
     impl_->viewProjection = camera.GetViewProjectionMatrix();
     const float sunIntensity = std::isfinite(sun.intensity) ? std::max(0.0f, sun.intensity) : 0.0f;
     const Vec3 sunDir = (std::isfinite(sun.direction.x) && std::isfinite(sun.direction.y) &&
@@ -302,20 +369,232 @@ void Renderer3D::Context::DrawMesh(std::span<const Vec3> positions, std::span<co
 }
 
 void Renderer3D::Context::DrawMesh(const Mat4& transform, const Material3D& material) {
-    DrawMesh(CubePositions, CubeIndices, transform, material);
+    if (!material.baseColorTexture.empty())
+        DrawMeshAsset({}, transform, material);
+    else
+        DrawMesh(CubePositions, CubeIndices, transform, material);
 }
 
 void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
                                    const Material3D& material) {
+    DrawMesh(mesh, transform, material, ResolveBaseColorTexture(material.baseColorTexture));
+}
+
+void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
+                                   const Material3D& material, GpuTexture* texture) {
     if (!impl_ || !impl_->active || !mesh.IsValid())
         return;
     auto lockedState = impl_->LockValidState();
     if (!lockedState)
         return;
     if (impl_->device->DrawIndexed(mesh.vertices_, mesh.indices_, mesh.indexCount_,
-                                   impl_->viewProjection, transform, material.albedoColor))
+                                   impl_->viewProjection, transform, material.albedoColor, texture))
         ++impl_->stats.drawCalls;
     ++impl_->stats.meshCount;
+}
+
+GpuTexture* Renderer3D::Context::ResolveBaseColorTexture(const std::string& path) {
+    if (path.empty() || !impl_ || !impl_->LockValidState())
+        return nullptr;
+    auto found = impl_->textures.find(path);
+    if (found == impl_->textures.end()) {
+        if (impl_->textures.size() >= 32) {
+            const auto oldest = std::min_element(
+                impl_->textures.begin(), impl_->textures.end(),
+                [](const auto& a, const auto& b) { return a.second.used < b.second.used; });
+            impl_->textureBytes -= oldest->second.bytes;
+            impl_->textures.erase(oldest);
+        }
+        found = impl_->textures.emplace(path, Impl::CachedTexture{}).first;
+    }
+    auto& cached = found->second;
+    cached.used = ++impl_->sequence;
+    const auto revision = AssetManager::GetTextureRevision(path);
+    if (cached.attempted != revision) {
+        cached.attempted = revision;
+        try {
+            int width = 0, height = 0;
+            std::vector<uint8> pixels;
+            const bool decoded = AssetManager::IsBaseColorTextureFile(path) &&
+                                 AssetManager::DecodeTextureCpu(path, width, height, pixels);
+            const size_t bytes = pixels.size();
+            constexpr size_t Budget = 256ull * 1024 * 1024;
+            bool room = decoded && bytes <= Budget;
+            if (room) {
+                while (impl_->textureBytes - cached.bytes + bytes > Budget &&
+                       impl_->textures.size() > 1) {
+                    auto oldest = impl_->textures.end();
+                    for (auto item = impl_->textures.begin(); item != impl_->textures.end(); ++item)
+                        if (item != found && (oldest == impl_->textures.end() ||
+                                              item->second.used < oldest->second.used))
+                            oldest = item;
+                    if (oldest == impl_->textures.end())
+                        break;
+                    impl_->textureBytes -= oldest->second.bytes;
+                    impl_->textures.erase(oldest);
+                }
+                room = impl_->textureBytes - cached.bytes + bytes <= Budget;
+            }
+            auto next = CreateRef<GpuTexture>();
+            if (room && next->Initialize(impl_->device, static_cast<uint32>(width),
+                                         static_cast<uint32>(height), pixels.data(),
+                                         TextureFilter::Linear, TextureColorSpace::Srgb)) {
+                impl_->textureBytes = impl_->textureBytes - cached.bytes + bytes;
+                cached.texture = std::move(next);
+                cached.bytes = bytes;
+                cached.error.clear();
+            } else {
+                cached.error =
+                    !decoded ? "텍스처 파일을 디코딩하지 못했습니다: " + path
+                    : !room
+                        ? "텍스처 캐시 예산을 초과했습니다: " + path
+                        : "GPU 텍스처 업로드 실패: " + impl_->device->GetLastError() + " / " + path;
+            }
+        } catch (const std::exception&) {
+            cached.error = "기본 색상 텍스처 갱신에 실패했습니다: " + path;
+        }
+    }
+    auto error = AssetManager::GetAssetError(path, true);
+    if (error.empty())
+        error = cached.error;
+    if (!error.empty() && cached.texture)
+        error += " (이전 정상 텍스처 유지)";
+    impl_->Report("texture:" + path, error);
+    return cached.texture.get();
+}
+
+bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& transform,
+                                        const Material3D& material) {
+    if (!impl_ || !impl_->active || !impl_->LockValidState())
+        return false;
+    auto found = impl_->meshes.find(path);
+    if (found == impl_->meshes.end()) {
+        if (impl_->meshes.size() >= 32) {
+            const auto oldest = std::min_element(
+                impl_->meshes.begin(), impl_->meshes.end(),
+                [](const auto& a, const auto& b) { return a.second.used < b.second.used; });
+            impl_->meshBytes -= oldest->second.bytes;
+            impl_->meshes.erase(oldest);
+        }
+        found = impl_->meshes.emplace(path, Impl::CachedMesh{}).first;
+    }
+    auto& cached = found->second;
+    cached.used = ++impl_->sequence;
+    const auto revision = path.empty() ? uint64{1} : AssetManager::GetMeshRevision(path);
+    const bool requiresUv = !material.baseColorTexture.empty();
+    if (cached.attempted != revision || (cached.uvBlocked && !requiresUv) ||
+        (requiresUv && !cached.hasUvs && !cached.uvBlocked)) {
+        cached.attempted = revision;
+        cached.uvBlocked = false;
+        try {
+            RawMeshData raw;
+            std::vector<Vertex3D> vertices;
+            std::vector<uint32> indices;
+            bool loaded = path.empty();
+            if (path.empty()) {
+                const std::array<Vec2, 6> uv{{{0, 1}, {1, 0}, {1, 1}, {0, 1}, {0, 0}, {1, 0}}};
+                for (size_t face = 0; face < 6; ++face) {
+                    const auto normal = (CubePositions[CubeIndices[face * 6 + 1]] -
+                                         CubePositions[CubeIndices[face * 6]])
+                                            .Cross(CubePositions[CubeIndices[face * 6 + 2]] -
+                                                   CubePositions[CubeIndices[face * 6]])
+                                            .Normalized();
+                    for (size_t corner = 0; corner < 6; ++corner) {
+                        indices.push_back(static_cast<uint32>(vertices.size()));
+                        vertices.push_back(
+                            {CubePositions[CubeIndices[face * 6 + corner]], normal, uv[corner]});
+                    }
+                }
+            } else if ((loaded = AssetManager::LoadMesh(path, raw))) {
+                cached.attempted = raw.revision;
+                vertices.reserve(raw.vertices.size() / 3);
+                for (size_t i = 0; i < raw.vertices.size() / 3; ++i)
+                    vertices.push_back(
+                        {{raw.vertices[i * 3], raw.vertices[i * 3 + 1], raw.vertices[i * 3 + 2]},
+                         {raw.normals[i * 3], raw.normals[i * 3 + 1], raw.normals[i * 3 + 2]},
+                         {raw.texCoords[i * 2], raw.texCoords[i * 2 + 1]}});
+                indices = std::move(raw.indices);
+            }
+            const bool missingUv = loaded && requiresUv && !path.empty() && !raw.hasTexCoords;
+            if (missingUv) {
+                loaded = false;
+                cached.uvBlocked = true;
+            }
+            const size_t bytes =
+                vertices.size() * sizeof(RenderVertex) + indices.size() * sizeof(uint32);
+            constexpr size_t Budget = 256ull * 1024 * 1024;
+            bool room = loaded && bytes <= Budget;
+            if (room) {
+                while (impl_->meshBytes - cached.bytes + bytes > Budget &&
+                       impl_->meshes.size() > 1) {
+                    auto oldest = impl_->meshes.end();
+                    for (auto item = impl_->meshes.begin(); item != impl_->meshes.end(); ++item)
+                        if (item != found && (oldest == impl_->meshes.end() ||
+                                              item->second.used < oldest->second.used))
+                            oldest = item;
+                    if (oldest == impl_->meshes.end())
+                        break;
+                    impl_->meshBytes -= oldest->second.bytes;
+                    impl_->meshes.erase(oldest);
+                }
+                room = impl_->meshBytes - cached.bytes + bytes <= Budget;
+            }
+            auto next = CreateRef<Mesh3D>();
+            if (room && next->Upload(impl_->device, vertices, indices)) {
+                impl_->meshBytes = impl_->meshBytes - cached.bytes + bytes;
+                cached.mesh = std::move(next);
+                cached.bytes = bytes;
+                cached.error.clear();
+                cached.hasUvs = path.empty() || raw.hasTexCoords;
+                cached.minimum = path.empty() ? Vec3{-.5f, -.5f, -.5f} : raw.boundsMin;
+                cached.maximum = path.empty() ? Vec3{.5f, .5f, .5f} : raw.boundsMax;
+            } else {
+                const auto asset = path.empty() ? std::string("기본 큐브") : path;
+                cached.error = missingUv ? "텍스처를 적용할 UV 좌표가 없는 OBJ입니다: " + asset
+                               : !loaded ? "OBJ 메시를 읽지 못했습니다: " + asset
+                               : !room ? "메시 캐시 예산을 초과했습니다: " + asset
+                                       : "GPU 메시 업로드 실패: " + impl_->device->GetLastError() +
+                                             " / " + asset;
+            }
+        } catch (const std::exception&) {
+            cached.error = "3D 메시 갱신에 실패했습니다: " + path;
+        }
+    }
+    auto error = path.empty() ? std::string{} : AssetManager::GetAssetError(path);
+    if (error.empty())
+        error = cached.error;
+    if (!error.empty() && cached.mesh)
+        error += " (이전 정상 메시 유지)";
+    impl_->Report("mesh:" + path, error);
+    if (!cached.mesh) {
+        Material3D placeholder;
+        placeholder.albedoColor = {.85f, .15f, .25f, 1};
+        DrawMesh(CubePositions, CubeIndices, transform, placeholder);
+        return false;
+    }
+    const auto previous = impl_->stats.drawCalls;
+    auto drawable = material;
+    if (!cached.hasUvs)
+        drawable.baseColorTexture.clear();
+    DrawMesh(*cached.mesh, transform, drawable);
+    return impl_->stats.drawCalls > previous;
+}
+
+const std::string& Renderer3D::Context::GetLastAssetError() const {
+    static const std::string empty;
+    return impl_ ? impl_->lastError : empty;
+}
+
+bool Renderer3D::Context::GetMeshBounds(const std::string& path, Vec3& minimum,
+                                        Vec3& maximum) const {
+    if (!impl_)
+        return false;
+    const auto found = impl_->meshes.find(path);
+    if (found == impl_->meshes.end())
+        return false;
+    minimum = found->second.minimum;
+    maximum = found->second.maximum;
+    return true;
 }
 
 void Renderer3D::Context::DrawCube(const Vec3& p, const Vec3& scale, const Material3D& material) {
@@ -418,6 +697,24 @@ void Renderer3D::DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Mater
     DefaultContext3D().DrawMesh(mesh, transform, material);
 }
 
+void Renderer3D::DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material,
+                          GpuTexture* texture) {
+    if (t_ActiveContext3D) {
+        t_ActiveContext3D->DrawMesh(mesh, transform, material, texture);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
+    DefaultContext3D().DrawMesh(mesh, transform, material, texture);
+}
+
+bool Renderer3D::DrawMeshAsset(const std::string& path, const Mat4& transform,
+                               const Material3D& material) {
+    if (t_ActiveContext3D)
+        return t_ActiveContext3D->DrawMeshAsset(path, transform, material);
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
+    return DefaultContext3D().DrawMeshAsset(path, transform, material);
+}
+
 void Renderer3D::DrawCube(const Vec3& p, const Vec3& scale, const Material3D& material) {
     if (t_ActiveContext3D) {
         t_ActiveContext3D->DrawCube(p, scale, material);
@@ -441,5 +738,11 @@ Renderer3D::Statistics Renderer3D::GetStats() {
         return t_ActiveContext3D->GetStats();
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
     return DefaultContext3D().GetStats();
+}
+const std::string& Renderer3D::GetLastAssetError() {
+    if (t_ActiveContext3D)
+        return t_ActiveContext3D->GetLastAssetError();
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
+    return DefaultContext3D().GetLastAssetError();
 }
 } // namespace LuxEngine

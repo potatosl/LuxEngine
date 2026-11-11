@@ -1,8 +1,11 @@
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/EntryPoint.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Project/EditorProject.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Scene/SceneDependencies.hpp"
+#include <QColor>
+#include <QImage>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -104,6 +107,76 @@ void TestSourcesAndSnapshots() {
     reference.baseline = "broken snapshot";
     RejectWithoutMutation(fixture, scene, "malformed stored dependency state is rejected");
 }
+void TestMeshDependencies() {
+    Fixture fixture;
+    Scene scene;
+    auto entity = scene.CreateEntity("Mesh");
+    auto& mesh = entity.AddComponent<MeshRendererComponent>();
+    const auto file = fixture.project.GetFile().parent_path() / "Assets" / PathFromUtf8("한글.obj");
+    fs::create_directories(file.parent_path());
+    std::ofstream(file) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    mesh.meshPath = PathUtf8(file);
+    std::string error;
+    Check(ValidateProjectSceneReferences(fixture.project, scene, error),
+          "valid project mesh dependencies are accepted");
+    mesh.meshPath = PathUtf8(fixture.root / "Outside.obj");
+    std::ofstream(PathFromUtf8(mesh.meshPath)) << Bytes(file);
+    RejectWithoutMutation(fixture, scene,
+                          "external mesh files cannot silently escape a packaged project");
+    mesh.meshPath = PathUtf8(file.parent_path() / "Missing.obj");
+    RejectWithoutMutation(fixture, scene,
+                          "missing mesh dependencies are rejected before game builds");
+}
+
+void TestTextureDependencies() {
+    Fixture fixture;
+    Scene scene;
+    auto entity = scene.CreateEntity("Textured cube");
+    auto& material = entity.AddComponent<MeshRendererComponent>().material;
+    const auto file =
+        fixture.project.GetFile().parent_path() / "Assets" / PathFromUtf8("한글 텍스처.PnG");
+    fs::create_directories(file.parent_path());
+    QImage image(2, 2, QImage::Format_RGBA8888);
+    image.fill(QColor(128, 90, 30));
+    Check(image.save(QString::fromUtf8(PathUtf8(file)), "PNG"),
+          "dependency texture fixture writes");
+    material.baseColorTexture = PathUtf8(file);
+    std::string error;
+    Check(ValidateProjectSceneReferences(fixture.project, scene, error),
+          "valid texture dependencies are accepted");
+    const auto model = file.parent_path() / "unmapped.obj";
+    std::ofstream(model) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    entity.GetComponent<MeshRendererComponent>().meshPath = PathUtf8(model);
+    RejectWithoutMutation(fixture, scene,
+                          "textured models without authored UVs fail before packaging");
+    std::ofstream(model, std::ios::trunc)
+        << "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
+    Check(AssetManager::ReloadMesh(PathUtf8(model), error, true) &&
+              ValidateProjectSceneReferences(fixture.project, scene, error),
+          "UV-complete replacement meshes restore valid material dependencies");
+    RawMeshData cached;
+    Check(AssetManager::LoadMesh(PathUtf8(model), cached) && cached.hasTexCoords,
+          "valid UV geometry is cached before external edits");
+    std::ofstream(model, std::ios::trunc) << "corrupt cached OBJ";
+    RejectWithoutMutation(
+        fixture, scene, "build validation reads disk instead of trusting stale mesh cache entries");
+    RawMeshData preserved;
+    Check(AssetManager::LoadMesh(PathUtf8(model), preserved) &&
+              preserved.revision == cached.revision,
+          "failed build validation does not replace a previously valid CPU cache snapshot");
+    entity.GetComponent<MeshRendererComponent>().meshPath.clear();
+    const auto outside = fixture.root / "outside.png";
+    fs::copy_file(file, outside);
+    material.baseColorTexture = PathUtf8(outside);
+    RejectWithoutMutation(fixture, scene,
+                          "external textures cannot silently escape packaged projects");
+    material.baseColorTexture = PathUtf8(file.parent_path() / "missing.png");
+    RejectWithoutMutation(fixture, scene, "missing textures fail before build");
+    material.baseColorTexture = PathUtf8(file);
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << "truncated PNG";
+    RejectWithoutMutation(fixture, scene, "corrupt images fail full decoding before build");
+}
+
 void TestTransitiveSources() {
     Fixture fixture;
     Scene current, nested;
@@ -199,6 +272,8 @@ void TestIndependentSceneBudgets() {
 int RunDependencyChecks(int, char**) {
     try {
         TestSourcesAndSnapshots();
+        TestMeshDependencies();
+        TestTextureDependencies();
         TestTransitiveSources();
         TestAliasesAndProjectScan();
         TestDepth();

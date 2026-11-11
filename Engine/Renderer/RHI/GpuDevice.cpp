@@ -20,6 +20,7 @@ const GpuDeviceInfo NoInfo;
 struct ObjectUniform {
     float model[16];
     float albedo[4];
+    float colorOptions[4];
 };
 static_assert(sizeof(ObjectUniform) == Vk::UniformObjectBytes);
 
@@ -468,7 +469,8 @@ bool GpuDevice::SetLighting(const GpuLighting& lighting) {
 }
 
 bool GpuDevice::DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices, uint32 indexCount,
-                            const Mat4& viewProjection, const Mat4& model, const Vec4& albedo) {
+                            const Mat4& viewProjection, const Mat4& model, const Vec4& albedo,
+                            GpuTexture* texture) {
     if (!state_ || !state_->frameActive || !state_->commandsOpen || indexCount == 0 ||
         indexCount % 3 != 0 || vertices.type_ != BufferType::Vertex ||
         indices.type_ != BufferType::Index || !vertices.BelongsTo(*this) ||
@@ -478,7 +480,9 @@ bool GpuDevice::DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices,
     auto& s = *state_;
     Vk::BufferRecord* vertexRecord = s.buffers.Get(vertices.handle_);
     Vk::BufferRecord* indexRecord = s.buffers.Get(indices.handle_);
-    Vk::TextureRecord* white = s.textures.Get(s.whiteTexture);
+    if (texture && !texture->BelongsTo(*this))
+        return false;
+    Vk::TextureRecord* white = s.textures.Get(texture ? texture->handle_ : s.whiteTexture);
     if (!vertexRecord || !indexRecord || !white)
         return false;
     ObjectUniform object{};
@@ -487,6 +491,8 @@ bool GpuDevice::DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices,
     object.albedo[1] = albedo.y;
     object.albedo[2] = albedo.z;
     object.albedo[3] = albedo.w;
+    object.colorOptions[0] =
+        texture && texture->GetColorSpace() == TextureColorSpace::Srgb ? 1.f : 0.f;
     uint32 objectOffset = 0;
     if (!s.PushUniform(&object, sizeof(object), objectOffset))
         return false;

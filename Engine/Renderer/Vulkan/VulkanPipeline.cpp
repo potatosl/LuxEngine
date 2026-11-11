@@ -216,15 +216,16 @@ bool DeviceState::CreatePipelines() {
     }
     const VkVertexInputBindingDescription binding{0, sizeof(RenderVertex),
                                                   VK_VERTEX_INPUT_RATE_VERTEX};
-    const VkVertexInputAttributeDescription attributes[3] = {
+    const VkVertexInputAttributeDescription attributes[4] = {
         {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RenderVertex, position)},
         {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(RenderVertex, color)},
-        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(RenderVertex, uv)}};
+        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(RenderVertex, uv)},
+        {3, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RenderVertex, normal)}};
     VkPipelineVertexInputStateCreateInfo vertexInput{};
     vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInput.vertexBindingDescriptionCount = 1;
     vertexInput.pVertexBindingDescriptions = &binding;
-    vertexInput.vertexAttributeDescriptionCount = 3;
+    vertexInput.vertexAttributeDescriptionCount = 4;
     vertexInput.pVertexAttributeDescriptions = attributes;
     VkPipelineInputAssemblyStateCreateInfo assembly{};
     assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;

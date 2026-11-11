@@ -249,6 +249,8 @@ private:
     QLineEdit* name_ = nullptr;
     QCheckBox* spriteEnabled_ = nullptr;
     QCheckBox* meshEnabled_ = nullptr;
+    QLineEdit* meshPath_ = nullptr;
+    QLineEdit* baseColorTexturePath_ = nullptr;
     QCheckBox* tilemapEnabled_ = nullptr;
     QSpinBox* tilemapWidth_ = nullptr;
     QSpinBox* tilemapHeight_ = nullptr;

@@ -36,7 +36,7 @@ fs::path Path(const std::string& value) {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(value.data()), value.size()));
 }
 fs::path Canonical(const fs::path& path, const fs::path& owner = {}) {
-    if (path.empty())
+    if (path.empty() || path.native().find(fs::path::value_type{}) != fs::path::string_type::npos)
         throw std::runtime_error("씬 경로가 비어 있습니다.");
     std::error_code error;
     const auto joined = path.is_absolute() ? path : owner.parent_path() / path;
@@ -210,6 +210,16 @@ void RewritePaths(Scene& scene, const fs::path& owner, const fs::path* destinati
     if (depth > MaxDepth)
         throw std::runtime_error("씬 참조 스냅샷의 중첩 한도를 넘었습니다.");
     for (auto entity : scene.GetEntities()) {
+        if (auto* mesh = entity.TryGetComponent<MeshRendererComponent>())
+            for (auto* resource : {&mesh->meshPath, &mesh->material.baseColorTexture}) {
+                if (resource->empty())
+                    continue;
+                const auto absolute = Canonical(Path(*resource), owner);
+                const auto relative = destination
+                                          ? absolute.lexically_relative(destination->parent_path())
+                                          : fs::path{};
+                *resource = Utf8(destination && !relative.empty() ? relative : absolute);
+            }
         auto* reference = entity.TryGetComponent<SceneReferenceComponent>();
         if (!reference)
             continue;
@@ -701,6 +711,8 @@ std::future<SceneLoadResult> SceneManager::LoadAsync(const fs::path& path) {
     auto future = promise->get_future();
     fs::path submitted;
     try {
+        if (path.native().find(fs::path::value_type{}) != fs::path::string_type::npos)
+            throw std::runtime_error("씬 경로에 NUL 문자를 사용할 수 없습니다.");
         submitted = fs::absolute(path).lexically_normal();
     } catch (const std::exception& error) {
         promise->set_value({nullptr, error.what()});
@@ -739,6 +751,8 @@ std::future<SceneLoadResult> SceneManager::PreloadAsync(const fs::path& path) {
     auto future = promise->get_future();
     fs::path submitted;
     try {
+        if (path.native().find(fs::path::value_type{}) != fs::path::string_type::npos)
+            throw std::runtime_error("씬 경로에 NUL 문자를 사용할 수 없습니다.");
         submitted = fs::absolute(path).lexically_normal();
     } catch (const std::exception& error) {
         promise->set_value({nullptr, error.what()});

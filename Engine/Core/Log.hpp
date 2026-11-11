@@ -9,6 +9,7 @@ enum class LogLevel { Trace, Info, Warn, Error, Fatal };
 
 class LUX_API Log {
 public:
+    static void ConfigureUtf8Output() noexcept;
     static void Init();
     static void Shutdown();
 

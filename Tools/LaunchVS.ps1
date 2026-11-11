@@ -1,3 +1,4 @@
+. (Join-Path $PSScriptRoot "Utf8.ps1")
 <#
 .SYNOPSIS
     Opens LuxEngine in Visual Studio 2026

@@ -1,4 +1,5 @@
 #include "Build/ProjectBuild.hpp"
+#include "Project/ErrorEncoding.hpp"
 #include "Project/PathEncoding.hpp"
 
 #include <algorithm>
@@ -136,7 +137,9 @@ bool SkipInPackage(const fs::path& relative) {
                                                             ".lastbuildstate",
                                                             ".recipe"};
     const std::string extension = LowerAscii(PathUtf8(relative.extension()));
-    if (skippedExtensions.contains(extension))
+    const bool meshContent = extension == ".obj" && !relative.empty() &&
+                             LowerAscii(PathUtf8(*relative.begin())) == "content";
+    if (skippedExtensions.contains(extension) && !meshContent)
         return true;
     for (const auto& part : relative) {
         const std::string name = PathUtf8(part);
@@ -295,7 +298,7 @@ bool CleanBuildDirectory(const BuildPlan& plan, std::string& error) {
     // Inspect every component below the project, not just build: .lux can itself be a link.
     fs::path component = fs::canonical(plan.projectDirectory, ec);
     if (ec) {
-        error = "프로젝트 경로를 확인할 수 없습니다: " + ec.message();
+        error = "프로젝트 경로를 확인할 수 없습니다: " + ErrorMessageUtf8(ec);
         return false;
     }
     for (const char* name : {".lux", "build"}) {
@@ -304,7 +307,7 @@ bool CleanBuildDirectory(const BuildPlan& plan, std::string& error) {
         if (ec == std::errc::no_such_file_or_directory || (!ec && !fs::exists(status)))
             return true;
         if (ec) {
-            error = "빌드 폴더를 확인할 수 없습니다: " + ec.message();
+            error = "빌드 폴더를 확인할 수 없습니다: " + ErrorMessageUtf8(ec);
             return false;
         }
         bool linked = fs::is_symlink(status);
@@ -327,7 +330,7 @@ bool CleanBuildDirectory(const BuildPlan& plan, std::string& error) {
     // a symlink can change its meaning and select a different project directory.
     fs::remove_all(component, ec);
     if (ec) {
-        error = "빌드 폴더를 지울 수 없습니다: " + ec.message();
+        error = "빌드 폴더를 지울 수 없습니다: " + ErrorMessageUtf8(ec);
         return false;
     }
     return true;
@@ -448,7 +451,7 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
     std::error_code pathError;
     const auto outputPath = fs::weakly_canonical(archive, pathError);
     if (pathError) {
-        error = "배포 파일 경로를 확인할 수 없습니다: " + pathError.message();
+        error = "배포 파일 경로를 확인할 수 없습니다: " + ErrorMessageUtf8(pathError);
         return std::nullopt;
     }
     const auto executablePath = fs::weakly_canonical(executable, pathError);
@@ -494,7 +497,7 @@ std::optional<PackageResult> CreateDistributionArchive(const fs::path& executabl
         files.emplace_back(it->path(), relative);
     }
     if (ec) {
-        error = "빌드 폴더를 읽을 수 없습니다: " + ec.message();
+        error = "빌드 폴더를 읽을 수 없습니다: " + ErrorMessageUtf8(ec);
         return std::nullopt;
     }
     std::sort(files.begin(), files.end(),

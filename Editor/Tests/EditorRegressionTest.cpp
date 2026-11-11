@@ -8,12 +8,14 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QColor>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
@@ -21,6 +23,7 @@
 #include <QTreeWidget>
 #include <QUndoStack>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <numbers>
@@ -431,6 +434,48 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
           "points before the near plane are not projected");
     Check(!ProjectViewportPoint(camera, view.size(), camera.GetPosition() + forward * 1100),
           "points beyond the far plane are not projected");
+    if (gpu) {
+        QTemporaryDir files;
+        Check(files.isValid(), "alpha material fixture directory exists");
+        const auto model = PathFromUtf8(files.filePath("plane.obj").toUtf8().toStdString());
+        std::ofstream(model)
+            << "v -1 -1 0\nv 1 -1 0\nv 1 1 0\nv -1 1 0\n"
+            << "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1 4/4/1\n";
+        const auto opaque = files.filePath("opaque.png"), partial = files.filePath("partial.png");
+        QImage source(4, 4, QImage::Format_RGBA8888);
+        source.fill(QColor(0, 200, 0, 255));
+        Check(source.save(opaque), "opaque texture writes");
+        source.fill(QColor(0, 200, 0, 128));
+        Check(source.save(partial), "partial-alpha texture writes");
+        Scene materialScene;
+        auto& material =
+            materialScene.CreateEntity("Alpha plane").AddComponent<MeshRendererComponent>();
+        material.meshPath = PathUtf8(model);
+        material.material.baseColorTexture = opaque.toUtf8().toStdString();
+        QImage image;
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
+              "opaque material renders");
+        const auto full = image.pixelColor(200, 150);
+        material.material.baseColorTexture = partial.toUtf8().toStdString();
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image) &&
+                  image.format() == QImage::Format_RGBA8888,
+              "3D readback declares the opaque pipeline's straight alpha format");
+        const auto alpha = image.pixelColor(200, 150);
+        std::cout << "alpha material: opaque=" << full.red() << ',' << full.green() << ','
+                  << full.blue() << ',' << full.alpha() << " partial=" << alpha.red() << ','
+                  << alpha.green() << ',' << alpha.blue() << ',' << alpha.alpha() << '\n';
+        Check(std::abs(alpha.alpha() - 128) <= 1 && std::abs(alpha.green() - full.green()) <= 3,
+              "partial-alpha 3D textures retain their straight color when read through Qt");
+        QImage composite(400, 300, QImage::Format_RGBA8888);
+        composite.fill(Qt::white);
+        {
+            QPainter painter(&composite);
+            painter.drawImage(0, 0, image);
+        }
+        const auto expected = full.green() * (128.0 / 255) + 255 * (127.0 / 255);
+        Check(std::abs(composite.pixelColor(200, 150).green() - expected) <= 3,
+              "Qt viewport compositing never applies the material alpha twice");
+    }
     if (gpu)
         Check(renderer->GetGpuDevice()->GetCounters().validationErrors == 0,
               "3D regression emits no Vulkan validation errors");

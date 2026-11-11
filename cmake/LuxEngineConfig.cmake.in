@@ -63,6 +63,31 @@ endfunction()
 
 function(lux_copy_runtime target)
     lux_copy_shaders(${target})
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproj")
+        file(GLOB_RECURSE _lux_mesh_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[oO][bB][jJ]"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[pP][nN][gG]"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[jJ][pP][gG]"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[jJ][pP][eE][gG]"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[bB][mM][pP]"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[tT][gG][aA]")
+        add_custom_target(${target}_LuxMeshContent)
+        foreach(_mesh IN LISTS _lux_mesh_files)
+            if(_mesh MATCHES "(^|/)(\\.git|\\.lux)(/|$)" OR
+               _mesh MATCHES "^(build|out|cmake-build[^/]*)(/|$)")
+                continue()
+            endif()
+            get_filename_component(_mesh_directory "${_mesh}" DIRECTORY)
+            add_custom_command(TARGET ${target}_LuxMeshContent POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:${target}>/Content/${_mesh_directory}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_CURRENT_SOURCE_DIR}/${_mesh}"
+                    "$<TARGET_FILE_DIR:${target}>/Content/${_mesh}"
+                VERBATIM)
+        endforeach()
+        add_dependencies(${target} ${target}_LuxMeshContent)
+    endif()
     if(WIN32)
         if(TARGET SDL3::SDL3-shared)
             add_custom_command(TARGET ${target} POST_BUILD

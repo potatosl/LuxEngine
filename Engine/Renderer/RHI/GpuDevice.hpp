@@ -17,6 +17,7 @@ struct RenderVertex {
     Vec3 position;
     Vec4 color;
     Vec2 uv;
+    Vec3 normal{};
 };
 
 enum class GpuValidation { Auto, Off, On, Synchronization };
@@ -154,7 +155,8 @@ private:
     friend class Renderer3D;
     bool SetLighting(const GpuLighting& lighting);
     bool DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices, uint32 indexCount,
-                     const Mat4& viewProjection, const Mat4& model, const Vec4& albedo);
+                     const Mat4& viewProjection, const Mat4& model, const Vec4& albedo,
+                     GpuTexture* texture = nullptr);
     bool DrawTexturedTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection,
                                uint64 textureHandle, bool depth);
     Ref<Vk::DeviceState> state_;
