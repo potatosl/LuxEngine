@@ -2,8 +2,8 @@
 
 #include "Engine/Core/Core.hpp"
 #include "Engine/Core/Math.hpp"
-#include "Engine/Renderer/Renderer3D/Render3DSettings.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
+#include "Engine/Renderer/Renderer3D/Render3DSettings.hpp"
 #include <memory>
 #include <vector>
 
@@ -137,6 +137,8 @@ public:
         void ResetStats();
         Statistics GetStats() const;
         const std::string& GetLastAssetError() const;
+        bool IsEnvironmentReady() const;
+        double GetEnvironmentPreparationMs() const;
         bool GetMeshBounds(const std::string& path, Vec3& minimum, Vec3& maximum) const;
 
     private:

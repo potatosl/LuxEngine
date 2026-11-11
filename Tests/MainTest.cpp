@@ -1,3 +1,4 @@
+#include "Engine/Assets/EnvironmentMap.hpp"
 #include "Engine/LuxEngine.hpp"
 #include "Engine/Platform/Branding.hpp"
 #include "Engine/Renderer/Vulkan/VulkanFault.hpp"
@@ -3550,7 +3551,7 @@ void Pbr() {
           "PBR scenes select v6");
     Scene restored;
     Check(restored.DeserializeFromString(serialized) &&
-          restored.GetSettings().render3D.mode == Render3DMode::Pbr,
+              restored.GetSettings().render3D.mode == Render3DMode::Pbr,
           "v6 scene and default mesh roundtrip");
     settings.render3D.shadowResolution = 17;
     Check(!legacy.SetSettings(settings), "invalid shadow resolution rejected transactionally");
@@ -3563,24 +3564,24 @@ void Pbr() {
     PerspectiveCamera camera(ToRadians(60), 1, .1f, 10);
     camera.SetPosition({0, 0, 3});
     camera.SetTarget({0, 0, 0});
-    const std::array<Vertex3D, 4> vertices{{{{-1,-1,0},{0,0,1},{0,0}},
-                                           {{1,-1,0},{0,0,1},{1,0}},
-                                           {{1,1,0},{0,0,1},{1,1}},
-                                           {{-1,1,0},{0,0,1},{0,1}}}};
-    const std::array<uint32, 6> indices{0,1,2,0,2,3};
+    const std::array<Vertex3D, 4> vertices{{{{-1, -1, 0}, {0, 0, 1}, {0, 0}},
+                                            {{1, -1, 0}, {0, 0, 1}, {1, 0}},
+                                            {{1, 1, 0}, {0, 0, 1}, {1, 1}},
+                                            {{-1, 1, 0}, {0, 0, 1}, {0, 1}}}};
+    const std::array<uint32, 6> indices{0, 1, 2, 0, 2, 3};
     Mesh3D plane;
     Check(plane.Upload(&graphics.gpu, vertices, indices), "PBR test plane uploads");
     auto render = [&](float metallic, float roughness, bool modern) {
         return graphics.Capture([&] {
-            graphics.gpu.Clear(0,0,0,1);
+            graphics.gpu.Clear(0, 0, 0, 1);
             Render3DSettings r;
             r.mode = modern ? Render3DMode::Pbr : Render3DMode::Legacy;
-            r.sun.direction = {0,0,-1};
+            r.sun.direction = {0, 0, -1};
             r.shadows = false;
             r.imageBasedLighting = false;
             Renderer3D::BeginScene(camera, r, 1);
             Material3D material;
-            material.albedoColor = {.3f,.1f,.03f,1};
+            material.albedoColor = {.3f, .1f, .03f, 1};
             material.metallic = metallic;
             material.roughness = roughness;
             Renderer3D::DrawMesh(plane, Mat4{}, material);
@@ -3588,21 +3589,97 @@ void Pbr() {
         });
     };
     const auto pixel = [](const GpuFrameCapture& f) {
-        const size_t offset = (static_cast<size_t>(f.height/2)*f.width+f.width/2)*4;
-        return std::array<int,3>{f.rgba[offset],f.rgba[offset+1],f.rgba[offset+2]};
+        const size_t offset = (static_cast<size_t>(f.height / 2) * f.width + f.width / 2) * 4;
+        return std::array<int, 3>{f.rgba[offset], f.rgba[offset + 1], f.rgba[offset + 2]};
     };
-    const auto dielectric = pixel(render(0,.65f,true));
-    const auto metal = pixel(render(1,.65f,true));
-    const auto glossy = pixel(render(0,.2f,true));
-    std::cout << "PBR dielectric=" << dielectric[0] << ',' << dielectric[1]
-              << " metal=" << metal[0] << ',' << metal[1] << " glossy=" << glossy[0] << '\n';
+    const auto dielectric = pixel(render(0, .65f, true));
+    const auto metal = pixel(render(1, .65f, true));
+    const auto glossy = pixel(render(0, .2f, true));
+    std::cout << "PBR dielectric=" << dielectric[0] << ',' << dielectric[1] << " metal=" << metal[0]
+              << ',' << metal[1] << " glossy=" << glossy[0] << '\n';
     Check(dielectric != metal, "metallicity changes actual GPU output");
     Check(glossy[0] > dielectric[0] + 10, "roughness changes specular highlight");
-    Check(pixel(render(0,.1f,false)) == pixel(render(1,.9f,false)),
+    Check(pixel(render(0, .1f, false)) == pixel(render(1, .9f, false)),
           "legacy metallic and roughness preserve old appearance");
-    render(1,0,true);
-    render(0,1,true);
+    render(1, 0, true);
+    render(0, 1, true);
     graphics.ValidationClean("PBR material boundaries");
+}
+
+void HdrEnvironment() {
+    Files files;
+    std::string hdr = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n";
+    const unsigned char samples[8] = {128, 16, 0, 130, 0, 32, 128, 130};
+    hdr.append(reinterpret_cast<const char*>(samples), 8);
+    files.Binary("environment.HDR", hdr.data(), hdr.size());
+    const auto path = files.Path("environment.HDR");
+    std::string error;
+    Check(EnvironmentData::ValidateFile(path, error), "valid bounded HDR accepted");
+    const auto originalRevision = EnvironmentData::Revision(path);
+    files.Text("broken.hdr", "invalid");
+    Check(!EnvironmentData::ValidateFile(files.Path("broken.hdr"), error), "invalid HDR rejected");
+    Graphics graphics({}, 128, 128);
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(60), 1, .1f, 20);
+    camera.SetPosition({0, 0, 3});
+    camera.SetTarget({0, 0, 0});
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.shadows = false;
+    settings.sun.intensity = 0;
+    settings.environmentPath = path;
+    Material3D material;
+    material.albedoColor = {.8f, .8f, .8f, 1};
+    material.metallic = 1;
+    material.roughness = .1f;
+    auto frame = [&] {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 0);
+            Renderer3D::BeginScene(camera, settings, 1);
+            Renderer3D::DrawCube({0, 0, 0}, {2, 2, .1f}, material);
+            Renderer3D::EndScene();
+        });
+    };
+    auto wait = [&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(100);
+        do {
+            frame();
+            if (context.IsEnvironmentReady())
+                return;
+        } while (std::chrono::steady_clock::now() < deadline);
+        throw std::runtime_error("Environment prefilter timed out: " + context.GetLastAssetError());
+    };
+    wait();
+    const auto initial = Pixel(frame(), .5f, .5f);
+    settings.environmentRotation = 180;
+    const auto rotated = Pixel(frame(), .5f, .5f);
+    std::cout << "IBL first=" << initial[0] << ',' << initial[2] << " rotated=" << rotated[0] << ','
+              << rotated[2] << " preparation_ms=" << context.GetEnvironmentPreparationMs() << '\n';
+    Check(initial != rotated, "HDR environment rotation changes real reflected pixels");
+    const auto stable = graphics.gpu.GetMemoryStats().allocationBytes;
+    files.Text("environment.HDR", "corrupt");
+    Check(!EnvironmentData::Reload(path, error) &&
+              EnvironmentData::Revision(path) == originalRevision,
+          "corrupt reload does not replace revision");
+    Check(Pixel(frame(), .5f, .5f) == rotated, "corrupt environment preserves previous GPU image");
+    for (int i = 0; i < 12; ++i)
+        frame();
+    Check(graphics.gpu.GetMemoryStats().allocationBytes == stable,
+          "steady HDR frames do not grow allocations");
+    settings.imageBasedLighting = false;
+    settings.environmentIntensity = 1;
+    settings.environmentColor = {.25f, .25f, .25f};
+    material.metallic = 0;
+    material.albedoColor = {1, 1, 1, 1};
+    const auto gray = Pixel(frame(), .5f, .5f);
+    Check(std::abs(gray[0] - 165) <= 3, "linear gray receives ACES and one sRGB conversion");
+    const auto clear = Pixel(frame(), 0, 0);
+    Check(clear[3] == 0, "HDR post process preserves transparent editor background");
+    settings.toneMapping = false;
+    Check(std::abs(Pixel(frame(), .5f, .5f)[0] - 137) <= 3,
+          "tone mapping toggle retains linear exposure pipeline");
+    graphics.ValidationClean("HDR and IBL");
 }
 
 int vulkanValidationMessages = 0;
@@ -3637,6 +3714,8 @@ int main(int argc, char** argv) {
             WindowEvents();
         else if (suite == "gpu")
             Gpu();
+        else if (suite == "hdr")
+            HdrEnvironment();
         else if (suite == "pbr")
             Pbr();
         else if (suite == "texture_filter")

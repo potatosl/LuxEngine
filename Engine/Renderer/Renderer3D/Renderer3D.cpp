@@ -2,6 +2,7 @@
 #include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
+#include "Engine/Renderer/Vulkan/VulkanScene3D.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -62,6 +63,9 @@ struct Renderer3D::Context::Impl {
     Vec3 camera;
     Render3DSettings settings;
     float exposure = 1;
+    PerspectiveCamera sceneCamera;
+    std::unique_ptr<Vk::Scene3DRenderer> modern;
+    std::vector<Vk::SceneDraw> draws;
     struct CachedMesh {
         Ref<Mesh3D> mesh;
         uint64 used = 0;
@@ -113,6 +117,13 @@ struct Renderer3D::Context::Impl {
         return locked;
     }
 };
+
+bool Renderer3D::Context::IsEnvironmentReady() const {
+    return impl_ && impl_->modern && impl_->modern->EnvironmentReady();
+}
+double Renderer3D::Context::GetEnvironmentPreparationMs() const {
+    return impl_ && impl_->modern ? impl_->modern->EnvironmentPreparationMs() : 0;
+}
 
 PerspectiveCamera::PerspectiveCamera(float fovRadians, float aspect, float nearClip,
                                      float farClip) {
@@ -224,6 +235,8 @@ void Renderer3D::Context::Shutdown() {
     if (!impl_)
         return;
     impl_->vertices.clear();
+    impl_->draws.clear();
+    impl_->modern.reset();
     impl_->meshes.clear();
     impl_->textures.clear();
     impl_->warnings.clear();
@@ -267,6 +280,8 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
         throw std::logic_error("3D scene already active");
     impl_->pbr = false;
     impl_->camera = camera.GetPosition();
+    impl_->sceneCamera = camera;
+    impl_->draws.clear();
     impl_->lastError.clear();
     impl_->viewProjection = camera.GetViewProjectionMatrix();
     const float sunIntensity = std::isfinite(sun.intensity) ? std::max(0.0f, sun.intensity) : 0.0f;
@@ -300,10 +315,9 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
                                  : Vec3{1.0f, 1.0f, 1.0f};
             gpuPoints[index] = {pos, r, col, inten};
         }
-        impl_->device->SetLighting({impl_->light.direction, impl_->light.color,
-                                    impl_->light.intensity,
-                                    std::span(gpuPoints.data(), impl_->pointLights.size()),
-                                    camera.GetPosition(), false});
+        impl_->device->SetLighting(
+            {impl_->light.direction, impl_->light.color, impl_->light.intensity,
+             std::span(gpuPoints.data(), impl_->pointLights.size()), camera.GetPosition(), false});
     }
     impl_->vertices.clear();
     impl_->stats = {};
@@ -313,7 +327,8 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
 void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera,
                                      const Render3DSettings& settings, float exposure,
                                      std::span<const PointLight> points) {
-    if (!ValidateRender3DSettings(settings) || !std::isfinite(exposure) || exposure < 0 || exposure > 16)
+    if (!ValidateRender3DSettings(settings) || !std::isfinite(exposure) || exposure < 0 ||
+        exposure > 16)
         throw std::invalid_argument("Invalid 3D rendering settings");
     BeginScene(camera, settings.sun, points);
     impl_->settings = settings;
@@ -325,9 +340,9 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera,
             const auto& p = impl_->pointLights[i];
             gpuPoints[i] = {p.position, p.radius, p.color, p.intensity};
         }
-        impl_->device->SetLighting({impl_->light.direction, impl_->light.color, impl_->light.intensity,
-                                    std::span(gpuPoints.data(), impl_->pointLights.size()),
-                                    camera.GetPosition(), true});
+        impl_->device->SetLighting(
+            {impl_->light.direction, impl_->light.color, impl_->light.intensity,
+             std::span(gpuPoints.data(), impl_->pointLights.size()), camera.GetPosition(), true});
     }
 }
 
@@ -335,6 +350,17 @@ void Renderer3D::Context::EndScene() {
     if (!impl_ || !impl_->active)
         return;
     impl_->active = false;
+    if (impl_->pbr) {
+        if (auto state = impl_->LockValidState()) {
+            if (!impl_->modern)
+                impl_->modern = std::make_unique<Vk::Scene3DRenderer>(state);
+            std::string error;
+            impl_->modern->Render(impl_->sceneCamera, impl_->settings, impl_->exposure,
+                                  impl_->draws, error);
+            impl_->Report("render3D", error);
+        }
+        impl_->draws.clear();
+    }
     if (auto lockedState = impl_->LockValidState()) {
         const std::span<const RenderVertex> all(impl_->vertices);
         for (size_t first = 0; first < all.size(); first += MaxSubmitVertices) {
@@ -404,7 +430,7 @@ void Renderer3D::Context::DrawMesh(std::span<const Vec3> positions, std::span<co
 }
 
 void Renderer3D::Context::DrawMesh(const Mat4& transform, const Material3D& material) {
-    if (!material.baseColorTexture.empty())
+    if (impl_->pbr || !material.baseColorTexture.empty())
         DrawMeshAsset({}, transform, material);
     else
         DrawMesh(CubePositions, CubeIndices, transform, material);
@@ -422,6 +448,22 @@ void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
     auto lockedState = impl_->LockValidState();
     if (!lockedState)
         return;
+    if (impl_->pbr) {
+        const auto* vertex = lockedState->buffers.Get(mesh.vertices_.handle_);
+        const auto* index = lockedState->buffers.Get(mesh.indices_.handle_);
+        if (texture && !texture->BelongsTo(*impl_->device))
+            return;
+        const auto* image =
+            lockedState->textures.Get(texture ? texture->handle_ : lockedState->whiteTexture);
+        if (!vertex || !index || !image || impl_->draws.size() >= 65536)
+            return;
+        impl_->draws.push_back({vertex->buffer, index->buffer, image->set, mesh.indexCount_,
+                                transform, material.albedoColor, material.metallic,
+                                material.roughness});
+        ++impl_->stats.meshCount;
+        ++impl_->stats.drawCalls;
+        return;
+    }
     if (impl_->device->DrawIndexed(mesh.vertices_, mesh.indices_, mesh.indexCount_,
                                    impl_->viewProjection, transform, material.albedoColor, texture,
                                    material.metallic, material.roughness, impl_->pbr))
@@ -697,7 +739,7 @@ void Renderer3D::BeginScene(const PerspectiveCamera& camera, const DirectionalLi
 }
 
 void Renderer3D::BeginScene(const PerspectiveCamera& camera, const Render3DSettings& settings,
-                           float exposure, std::span<const PointLight> points) {
+                            float exposure, std::span<const PointLight> points) {
     if (t_ActiveContext3D) {
         t_ActiveContext3D->BeginScene(camera, settings, exposure, points);
         return;

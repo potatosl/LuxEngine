@@ -433,8 +433,11 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
     s.context3D.Init(&s.gpu);
     LuxEngine::Renderer3D::ScopedContext scope3D(s.context3D);
     try {
+        auto renderSettings = scene.GetSettings().render3D;
+        if (!renderSettings.environmentPath.empty())
+            renderSettings.environmentPath = scene.ResolveAssetPath(renderSettings.environmentPath);
         if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Pbr)
-            LuxEngine::Renderer3D::BeginScene(camera, scene.GetSettings().render3D, scene.GetSettings().exposure);
+            LuxEngine::Renderer3D::BeginScene(camera, renderSettings, scene.GetSettings().exposure);
         else
             LuxEngine::Renderer3D::BeginScene(camera, sun);
         for (LuxEngine::Entity entity : scene.GetEntities()) {

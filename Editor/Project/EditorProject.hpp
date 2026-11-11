@@ -12,7 +12,7 @@ class Scene;
 
 namespace LuxEditor {
 
-enum class ProjectTemplate { Empty, Platformer, TopDown, Rpg, Puzzle };
+enum class ProjectTemplate { Empty, Platformer, TopDown, Rpg, Puzzle, Pbr3D };
 
 struct ProjectDependency {
     std::string package;

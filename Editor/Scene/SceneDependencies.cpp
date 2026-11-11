@@ -1,5 +1,6 @@
 #include "SceneDependencies.hpp"
 #include "Engine/Assets/AssetManager.hpp"
+#include "Engine/Assets/EnvironmentMap.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/SceneManager.hpp"
 #include "Project/EditorProject.hpp"
@@ -108,6 +109,24 @@ private:
     }
     void Inspect(LuxEngine::Scene& scene, const fs::path& owner, size_t depth) {
         CheckDepth(depth);
+        const auto& environment = scene.GetSettings().render3D.environmentPath;
+        if (!environment.empty()) {
+            const auto input = PathFromUtf8(environment);
+            std::error_code ec;
+            const auto file =
+                fs::canonical(input.is_absolute() ? input : owner.parent_path() / input, ec);
+            const auto relative = file.lexically_relative(root);
+            if (ec || relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||
+                Ignored(relative))
+                throw std::runtime_error("Environment image must be inside the project: " +
+                                         environment);
+            if (textureFiles_.insert(file).second) {
+                Charge(fs::file_size(file));
+                std::string error;
+                if (!LuxEngine::EnvironmentData::ValidateFile(GenericPathUtf8(file), error))
+                    throw std::runtime_error(error);
+            }
+        }
         for (const auto& entity : scene.GetEntities()) {
             if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
                 mesh && !mesh->meshPath.empty()) {

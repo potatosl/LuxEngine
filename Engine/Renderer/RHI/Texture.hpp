@@ -50,6 +50,7 @@ public:
 private:
     friend class GpuDevice;
     friend class Renderer2D;
+    friend class Renderer3D;
     std::weak_ptr<Vk::DeviceState> owner_;
     uint64 handle_ = 0;
     uint32 width_ = 0;

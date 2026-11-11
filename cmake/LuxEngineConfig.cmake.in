@@ -70,7 +70,8 @@ function(lux_copy_runtime target)
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[jJ][pP][gG]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[jJ][pP][eE][gG]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[bB][mM][pP]"
-            "${CMAKE_CURRENT_SOURCE_DIR}/*.[tT][gG][aA]")
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[tT][gG][aA]"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[hH][dD][rR]")
         add_custom_target(${target}_LuxMeshContent)
         foreach(_mesh IN LISTS _lux_mesh_files)
             if(_mesh MATCHES "(^|/)(\\.git|\\.lux)(/|$)" OR

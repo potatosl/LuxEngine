@@ -25,6 +25,19 @@ void RebaseSceneReferences(LuxEngine::Scene& scene, const fs::path& owner,
                            size_t depth = 0) {
     if (depth > 16)
         throw std::runtime_error("씬 참조 스냅샷의 중첩 한도를 넘었습니다.");
+    auto settings = scene.GetSettings();
+    if (!settings.render3D.environmentPath.empty()) {
+        auto path = PathFromUtf8(settings.render3D.environmentPath);
+        if (path.is_relative())
+            path = owner.parent_path() / path;
+        const auto absolute = CanonicalPath(path);
+        const auto relative =
+            destination ? absolute.lexically_relative(destination->parent_path()) : fs::path{};
+        settings.render3D.environmentPath =
+            GenericPathUtf8(destination && !relative.empty() ? relative : absolute);
+        if (!scene.SetSettings(settings))
+            throw std::runtime_error("Invalid rebased environment path");
+    }
     for (auto entity : scene.GetEntities()) {
         if (auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>())
             for (auto* resource : {&mesh->meshPath, &mesh->material.baseColorTexture}) {

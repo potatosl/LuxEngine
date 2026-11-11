@@ -601,7 +601,8 @@ void EditorWindow::SetStartupScene() {
 void EditorWindow::EditSceneSettings() {
     if (previewActive_)
         return;
-    const auto settings = ShowSceneSettingsDialog(this, document_.GetScene().GetSettings());
+    const auto settings = ShowSceneSettingsDialog(this, document_.GetScene().GetSettings(),
+                                                  document_.GetScene().GetSourcePath());
     if (!settings)
         return;
     RecordEdit(QStringLiteral("씬 설정"), [this, &settings] {

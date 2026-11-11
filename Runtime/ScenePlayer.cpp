@@ -325,8 +325,12 @@ void ScenePlayer::OnRender(float) {
         sun.direction = Vec3(0.5f, -1.0f, 0.5f).Normalized();
         sun.color = {1.0f, 0.98f, 0.95f};
         sun.intensity = 1.0f;
+        auto renderSettings = scene_->GetSettings().render3D;
+        if (!renderSettings.environmentPath.empty())
+            renderSettings.environmentPath =
+                scene_->ResolveAssetPath(renderSettings.environmentPath);
         if (scene_->GetSettings().render3D.mode == Render3DMode::Pbr)
-            Renderer3D::BeginScene(camera3D_, scene_->GetSettings().render3D, scene_->GetSettings().exposure);
+            Renderer3D::BeginScene(camera3D_, renderSettings, scene_->GetSettings().exposure);
         else
             Renderer3D::BeginScene(camera3D_, sun);
         scene_->OnRender3D();
