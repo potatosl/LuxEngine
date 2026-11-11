@@ -3535,6 +3535,76 @@ void Security() {
     Check(AssetManager::GetTotalCacheMemoryBytes() == 0, "cache memory 0 after shutdown");
 }
 
+void Pbr() {
+    Scene legacy;
+    std::string serialized;
+    Check(legacy.SerializeToString(serialized) && serialized.starts_with("LuxEngineScene 3 "),
+          "unchanged scenes retain legacy version");
+    auto settings = legacy.GetSettings();
+    settings.render3D.mode = Render3DMode::Pbr;
+    settings.render3D.shadows = false;
+    settings.render3D.imageBasedLighting = false;
+    Check(legacy.SetSettings(settings), "PBR settings accepted");
+    legacy.CreateEntity("PBR").AddComponent<MeshRendererComponent>();
+    Check(legacy.SerializeToString(serialized) && serialized.starts_with("LuxEngineScene 6 "),
+          "PBR scenes select v6");
+    Scene restored;
+    Check(restored.DeserializeFromString(serialized) &&
+          restored.GetSettings().render3D.mode == Render3DMode::Pbr,
+          "v6 scene and default mesh roundtrip");
+    settings.render3D.shadowResolution = 17;
+    Check(!legacy.SetSettings(settings), "invalid shadow resolution rejected transactionally");
+    settings = legacy.GetSettings();
+    settings.render3D.environmentIntensity = std::numeric_limits<float>::quiet_NaN();
+    Check(!legacy.SetSettings(settings), "nonfinite environment rejected");
+    Graphics graphics({}, 128, 128);
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(60), 1, .1f, 10);
+    camera.SetPosition({0, 0, 3});
+    camera.SetTarget({0, 0, 0});
+    const std::array<Vertex3D, 4> vertices{{{{-1,-1,0},{0,0,1},{0,0}},
+                                           {{1,-1,0},{0,0,1},{1,0}},
+                                           {{1,1,0},{0,0,1},{1,1}},
+                                           {{-1,1,0},{0,0,1},{0,1}}}};
+    const std::array<uint32, 6> indices{0,1,2,0,2,3};
+    Mesh3D plane;
+    Check(plane.Upload(&graphics.gpu, vertices, indices), "PBR test plane uploads");
+    auto render = [&](float metallic, float roughness, bool modern) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0,0,0,1);
+            Render3DSettings r;
+            r.mode = modern ? Render3DMode::Pbr : Render3DMode::Legacy;
+            r.sun.direction = {0,0,-1};
+            r.shadows = false;
+            r.imageBasedLighting = false;
+            Renderer3D::BeginScene(camera, r, 1);
+            Material3D material;
+            material.albedoColor = {.3f,.1f,.03f,1};
+            material.metallic = metallic;
+            material.roughness = roughness;
+            Renderer3D::DrawMesh(plane, Mat4{}, material);
+            Renderer3D::EndScene();
+        });
+    };
+    const auto pixel = [](const GpuFrameCapture& f) {
+        const size_t offset = (static_cast<size_t>(f.height/2)*f.width+f.width/2)*4;
+        return std::array<int,3>{f.rgba[offset],f.rgba[offset+1],f.rgba[offset+2]};
+    };
+    const auto dielectric = pixel(render(0,.65f,true));
+    const auto metal = pixel(render(1,.65f,true));
+    const auto glossy = pixel(render(0,.2f,true));
+    std::cout << "PBR dielectric=" << dielectric[0] << ',' << dielectric[1]
+              << " metal=" << metal[0] << ',' << metal[1] << " glossy=" << glossy[0] << '\n';
+    Check(dielectric != metal, "metallicity changes actual GPU output");
+    Check(glossy[0] > dielectric[0] + 10, "roughness changes specular highlight");
+    Check(pixel(render(0,.1f,false)) == pixel(render(1,.9f,false)),
+          "legacy metallic and roughness preserve old appearance");
+    render(1,0,true);
+    render(0,1,true);
+    graphics.ValidationClean("PBR material boundaries");
+}
+
 int vulkanValidationMessages = 0;
 SDL_LogOutputFunction defaultLogOutput = nullptr;
 void* defaultLogData = nullptr;
@@ -3567,6 +3637,8 @@ int main(int argc, char** argv) {
             WindowEvents();
         else if (suite == "gpu")
             Gpu();
+        else if (suite == "pbr")
+            Pbr();
         else if (suite == "texture_filter")
             TextureFiltering();
         else if (suite == "lifecycle")

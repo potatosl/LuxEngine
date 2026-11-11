@@ -16,7 +16,7 @@ namespace LuxEngine::Vk {
 constexpr uint32 MaxFramesInFlight = 3;
 constexpr uint32 MaxPointLights = 16;
 constexpr VkDeviceSize UniformObjectBytes = 96;
-constexpr VkDeviceSize UniformLightBytes = 48 + 32 * MaxPointLights;
+constexpr VkDeviceSize UniformLightBytes = 64 + 32 * MaxPointLights;
 
 const char* ResultString(VkResult result);
 

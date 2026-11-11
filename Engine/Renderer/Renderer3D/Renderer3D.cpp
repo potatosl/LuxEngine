@@ -58,6 +58,10 @@ struct Renderer3D::Context::Impl {
     std::vector<RenderVertex> vertices;
     Renderer3D::Statistics stats;
     bool active = false;
+    bool pbr = false;
+    Vec3 camera;
+    Render3DSettings settings;
+    float exposure = 1;
     struct CachedMesh {
         Ref<Mesh3D> mesh;
         uint64 used = 0;
@@ -223,6 +227,7 @@ void Renderer3D::Context::Shutdown() {
     impl_->meshes.clear();
     impl_->textures.clear();
     impl_->warnings.clear();
+    impl_->pbr = false;
     impl_->lastError.clear();
     impl_->textureBytes = 0;
     impl_->meshBytes = 0;
@@ -260,6 +265,8 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
         impl_ = std::make_unique<Impl>();
     if (impl_->active)
         throw std::logic_error("3D scene already active");
+    impl_->pbr = false;
+    impl_->camera = camera.GetPosition();
     impl_->lastError.clear();
     impl_->viewProjection = camera.GetViewProjectionMatrix();
     const float sunIntensity = std::isfinite(sun.intensity) ? std::max(0.0f, sun.intensity) : 0.0f;
@@ -295,11 +302,33 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
         }
         impl_->device->SetLighting({impl_->light.direction, impl_->light.color,
                                     impl_->light.intensity,
-                                    std::span(gpuPoints.data(), impl_->pointLights.size())});
+                                    std::span(gpuPoints.data(), impl_->pointLights.size()),
+                                    camera.GetPosition(), false});
     }
     impl_->vertices.clear();
     impl_->stats = {};
     impl_->active = true;
+}
+
+void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera,
+                                     const Render3DSettings& settings, float exposure,
+                                     std::span<const PointLight> points) {
+    if (!ValidateRender3DSettings(settings) || !std::isfinite(exposure) || exposure < 0 || exposure > 16)
+        throw std::invalid_argument("Invalid 3D rendering settings");
+    BeginScene(camera, settings.sun, points);
+    impl_->settings = settings;
+    impl_->exposure = exposure;
+    impl_->pbr = settings.mode == Render3DMode::Pbr;
+    if (impl_->pbr && impl_->LockValidState()) {
+        std::array<GpuPointLight, MaxPointLights> gpuPoints{};
+        for (size_t i = 0; i < impl_->pointLights.size(); ++i) {
+            const auto& p = impl_->pointLights[i];
+            gpuPoints[i] = {p.position, p.radius, p.color, p.intensity};
+        }
+        impl_->device->SetLighting({impl_->light.direction, impl_->light.color, impl_->light.intensity,
+                                    std::span(gpuPoints.data(), impl_->pointLights.size()),
+                                    camera.GetPosition(), true});
+    }
 }
 
 void Renderer3D::Context::EndScene() {
@@ -336,6 +365,12 @@ void Renderer3D::Context::DrawMesh(std::span<const Vec3> positions, std::span<co
     for (auto index : indices)
         if (index >= positions.size())
             return;
+    if (impl_->pbr) {
+        Mesh3D mesh;
+        if (mesh.Upload(impl_->device, positions, indices))
+            DrawMesh(mesh, transform, material);
+        return;
+    }
     for (size_t i = 0; i < indices.size(); i += 3) {
         std::array<Vec3, 3> triangle;
         for (size_t j = 0; j < 3; ++j)
@@ -388,7 +423,8 @@ void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
     if (!lockedState)
         return;
     if (impl_->device->DrawIndexed(mesh.vertices_, mesh.indices_, mesh.indexCount_,
-                                   impl_->viewProjection, transform, material.albedoColor, texture))
+                                   impl_->viewProjection, transform, material.albedoColor, texture,
+                                   material.metallic, material.roughness, impl_->pbr))
         ++impl_->stats.drawCalls;
     ++impl_->stats.meshCount;
 }
@@ -658,6 +694,16 @@ void Renderer3D::BeginScene(const PerspectiveCamera& camera, const DirectionalLi
     }
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
     DefaultContext3D().BeginScene(camera, sun, points);
+}
+
+void Renderer3D::BeginScene(const PerspectiveCamera& camera, const Render3DSettings& settings,
+                           float exposure, std::span<const PointLight> points) {
+    if (t_ActiveContext3D) {
+        t_ActiveContext3D->BeginScene(camera, settings, exposure, points);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
+    DefaultContext3D().BeginScene(camera, settings, exposure, points);
 }
 
 void Renderer3D::EndScene() {

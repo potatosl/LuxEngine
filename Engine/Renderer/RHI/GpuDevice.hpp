@@ -106,6 +106,8 @@ struct GpuLighting {
     Vec3 color;
     float intensity = 0.0f;
     std::span<const GpuPointLight> points;
+    Vec3 camera;
+    bool pbr = false;
 };
 
 struct GpuFrameCapture {
@@ -156,7 +158,8 @@ private:
     bool SetLighting(const GpuLighting& lighting);
     bool DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices, uint32 indexCount,
                      const Mat4& viewProjection, const Mat4& model, const Vec4& albedo,
-                     GpuTexture* texture = nullptr);
+                     GpuTexture* texture = nullptr, float metallic = 0, float roughness = .5f,
+                     bool pbr = false);
     bool DrawTexturedTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection,
                                uint64 textureHandle, bool depth);
     Ref<Vk::DeviceState> state_;

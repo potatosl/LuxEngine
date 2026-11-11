@@ -1,5 +1,6 @@
 #include "SceneSettingsDialog.hpp"
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -43,6 +44,12 @@ ShowSceneSettingsDialog(QWidget* parent, const LuxEngine::SceneSettings& setting
         clear[index] = number(environment, labels[index], colors[index], 0, 1);
     auto* rendering = group(QStringLiteral("렌더링"));
     auto* exposure = number(rendering, QStringLiteral("노출 배율"), settings.exposure, .05, 16);
+    auto* mode = new QComboBox(&dialog);
+    mode->setObjectName(QStringLiteral("render3DMode"));
+    mode->addItem(QStringLiteral("Legacy"));
+    mode->addItem(QStringLiteral("PBR"));
+    mode->setCurrentIndex(static_cast<int>(settings.render3D.mode));
+    rendering->addRow(QStringLiteral("3D"), mode);
     auto* physics = group(QStringLiteral("물리"));
     auto* overrideGravity = new QCheckBox(QStringLiteral("씬 중력 사용"), &dialog);
     overrideGravity->setChecked(settings.overrideGravity);
@@ -79,6 +86,7 @@ ShowSceneSettingsDialog(QWidget* parent, const LuxEngine::SceneSettings& setting
         value(clear[0], settings.clearColor.x), value(clear[1], settings.clearColor.y),
         value(clear[2], settings.clearColor.z), value(clear[3], settings.clearColor.w)};
     result.exposure = value(exposure, settings.exposure);
+    result.render3D.mode = static_cast<LuxEngine::Render3DMode>(mode->currentIndex());
     result.overrideGravity = overrideGravity->isChecked();
     result.gravity = {value(gx, settings.gravity.x), value(gy, settings.gravity.y)};
     result.gravity3D = {value(gravity3D[0], settings.gravity3D.x),

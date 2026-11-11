@@ -6,6 +6,7 @@
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -28,6 +29,7 @@ struct LightUniform {
     float direction[4];
     float colorIntensity[4];
     uint32 count[4];
+    float camera[4];
     struct {
         float positionRadius[4];
         float colorIntensity[4];
@@ -443,6 +445,10 @@ bool GpuDevice::SetLighting(const GpuLighting& lighting) {
     if (!state_ || !state_->frameActive || !state_->commandsOpen)
         return false;
     LightUniform lights{};
+    lights.camera[0] = lighting.camera.x;
+    lights.camera[1] = lighting.camera.y;
+    lights.camera[2] = lighting.camera.z;
+    lights.camera[3] = lighting.pbr ? 1.f : 0.f;
     const Vec3 direction = lighting.direction.Normalized();
     lights.direction[0] = direction.x;
     lights.direction[1] = direction.y;
@@ -470,7 +476,7 @@ bool GpuDevice::SetLighting(const GpuLighting& lighting) {
 
 bool GpuDevice::DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices, uint32 indexCount,
                             const Mat4& viewProjection, const Mat4& model, const Vec4& albedo,
-                            GpuTexture* texture) {
+                            GpuTexture* texture, float metallic, float roughness, bool pbr) {
     if (!state_ || !state_->frameActive || !state_->commandsOpen || indexCount == 0 ||
         indexCount % 3 != 0 || vertices.type_ != BufferType::Vertex ||
         indices.type_ != BufferType::Index || !vertices.BelongsTo(*this) ||
@@ -493,6 +499,9 @@ bool GpuDevice::DrawIndexed(const GpuBuffer& vertices, const GpuBuffer& indices,
     object.albedo[3] = albedo.w;
     object.colorOptions[0] =
         texture && texture->GetColorSpace() == TextureColorSpace::Srgb ? 1.f : 0.f;
+    object.colorOptions[1] = std::isfinite(metallic) ? std::clamp(metallic, 0.f, 1.f) : 0.f;
+    object.colorOptions[2] = std::isfinite(roughness) ? std::clamp(roughness, .045f, 1.f) : .5f;
+    object.colorOptions[3] = pbr ? 1.f : 0.f;
     uint32 objectOffset = 0;
     if (!s.PushUniform(&object, sizeof(object), objectOffset))
         return false;

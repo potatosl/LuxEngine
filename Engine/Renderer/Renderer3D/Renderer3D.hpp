@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Core.hpp"
 #include "Engine/Core/Math.hpp"
+#include "Engine/Renderer/Renderer3D/Render3DSettings.hpp"
 #include "Engine/Renderer/RHI/GpuDevice.hpp"
 #include <memory>
 #include <vector>
@@ -19,12 +20,6 @@ struct Material3D {
     float metallic = 0.0f;
     float roughness = 0.5f;
     std::string baseColorTexture;
-};
-
-struct DirectionalLight {
-    Vec3 direction{0.0f, -1.0f, 0.0f};
-    Vec3 color{1.0f, 1.0f, 1.0f};
-    float intensity = 1.0f;
 };
 
 struct PointLight {
@@ -124,6 +119,8 @@ public:
         void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light);
         void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light,
                         std::span<const PointLight> pointLights);
+        void BeginScene(const PerspectiveCamera& camera, const Render3DSettings& settings,
+                        float exposure, std::span<const PointLight> pointLights = {});
         void EndScene();
         void AbortScene();
 
@@ -167,6 +164,8 @@ public:
     static void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light);
     static void BeginScene(const PerspectiveCamera& camera, const DirectionalLight& light,
                            std::span<const PointLight> pointLights);
+    static void BeginScene(const PerspectiveCamera& camera, const Render3DSettings& settings,
+                           float exposure, std::span<const PointLight> pointLights = {});
     static void EndScene();
 
     static void DrawMesh(const Mat4& transform, const Material3D& material);

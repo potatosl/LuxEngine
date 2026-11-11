@@ -20,7 +20,7 @@ struct Output {
     [[vk::location(1)]] float2 uv : TEXCOORD0;
     [[vk::location(2)]] float3 world : TEXCOORD1;
     [[vk::location(3)]] float3 normal : TEXCOORD2;
-    [[vk::location(4)]] nointerpolation float encodeSrgb : TEXCOORD3;
+    [[vk::location(4)]] nointerpolation float4 options : TEXCOORD3;
 };
 Output main(Input input) {
     Output output;
@@ -29,7 +29,7 @@ Output main(Input input) {
     output.color = input.color * object.albedo;
     output.uv = input.uv;
     output.world = world.xyz;
-    output.encodeSrgb = object.colorOptions.x;
+    output.options = object.colorOptions;
     const float3x3 model = (float3x3)object.model;
     const float3x3 cofactors = float3x3(cross(model[1], model[2]), cross(model[2], model[0]),
                                       cross(model[0], model[1]));

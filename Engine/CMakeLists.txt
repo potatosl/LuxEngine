@@ -44,6 +44,7 @@ set(LUXENGINE_SOURCES
     Renderer/Vulkan/VulkanResources.cpp
     Renderer/Renderer2D/Renderer2D.cpp
     Renderer/Renderer3D/Renderer3D.cpp
+    Renderer/Renderer3D/Render3DSettings.cpp
     Scene/Scene.cpp
     Scene/SceneHierarchy.cpp
     Scene/SceneManager.cpp

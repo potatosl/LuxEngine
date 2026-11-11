@@ -433,7 +433,10 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
     s.context3D.Init(&s.gpu);
     LuxEngine::Renderer3D::ScopedContext scope3D(s.context3D);
     try {
-        LuxEngine::Renderer3D::BeginScene(camera, sun);
+        if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Pbr)
+            LuxEngine::Renderer3D::BeginScene(camera, scene.GetSettings().render3D, scene.GetSettings().exposure);
+        else
+            LuxEngine::Renderer3D::BeginScene(camera, sun);
         for (LuxEngine::Entity entity : scene.GetEntities()) {
             if (!entity.HasComponent<LuxEngine::TransformComponent>())
                 continue;
@@ -446,7 +449,8 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
             };
             if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>()) {
                 auto material = mesh->material;
-                material.albedoColor = expose(material.albedoColor);
+                if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Legacy)
+                    material.albedoColor = expose(material.albedoColor);
                 if (!material.baseColorTexture.empty())
                     material.baseColorTexture = scene.ResolveAssetPath(material.baseColorTexture);
                 if (mesh->meshPath.empty())
