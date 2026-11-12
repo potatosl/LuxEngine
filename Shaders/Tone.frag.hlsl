@@ -17,6 +17,8 @@ struct Input {
 };
 float4 main(Input input) : SV_Target0 {
     float4 color = hdrImage.SampleLevel(hdrSampler, float2(input.uv.x, 1 - input.uv.y), 0);
+    if (color.a <= 0.0)
+        discard;
     color.rgb = max(color.rgb * scene.camera.w, 0);
     if (scene.options.z > 0.5)
         color.rgb = saturate((color.rgb * (2.51 * color.rgb + 0.03)) /

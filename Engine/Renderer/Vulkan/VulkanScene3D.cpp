@@ -472,7 +472,7 @@ struct Scene3DRenderer::Impl {
         pass.pDependencies = dependencies;
         Check(vkCreateRenderPass(s.device, &pass, nullptr, &hdrPass));
         attachments[0].format = s.swapchain.format;
-        attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         attachments[0].initialLayout = attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -483,8 +483,9 @@ struct Scene3DRenderer::Impl {
                            0,
                            static_cast<VkPipelineStageFlags>(stages),
                            static_cast<VkPipelineStageFlags>(stages),
-                           VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                           VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                            0};
@@ -831,7 +832,9 @@ bool Scene3DRenderer::Render(const PerspectiveCamera& camera, const Render3DSett
             vkCmdEndRenderPass(cmd);
         }
         VkClearValue clears[2]{};
-        clears[0].color = s.clearColor;
+        // Alpha 0 marks pixels no 3D geometry touched; the tone pass skips them so the swapchain
+        // keeps the clear color and anything drawn earlier this frame.
+        clears[0].color = {{0, 0, 0, 0}};
         clears[1].depthStencil = {1, 0};
         VkRenderPassBeginInfo begin{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         begin.renderPass = p.hdrPass;

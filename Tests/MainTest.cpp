@@ -3720,6 +3720,26 @@ void HdrEnvironment() {
     settings.toneMapping = false;
     Check(std::abs(Pixel(frame(), .5f, .5f)[0] - 137) <= 3,
           "tone mapping toggle retains linear exposure pipeline");
+    settings.toneMapping = true;
+    const auto backdrop = graphics.Capture([&] {
+        graphics.gpu.Clear(.2f, .3f, .5f, 1);
+        Renderer3D::BeginScene(camera, settings, 1);
+        Renderer3D::EndScene();
+    });
+    Check(IsColor(Pixel(backdrop, 0, 0), 51, 76, 127, 2),
+          "PBR background keeps the exact clear color instead of passing through tone mapping");
+    material.albedoColor = {1, 1, 1, 1};
+    const auto twoScenes = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        Renderer3D::BeginScene(camera, settings, 1);
+        Renderer3D::DrawCube({-.8f, 0, 0}, {.6f, .6f, .1f}, material);
+        Renderer3D::EndScene();
+        Renderer3D::BeginScene(camera, settings, 1);
+        Renderer3D::DrawCube({.8f, 0, 0}, {.6f, .6f, .1f}, material);
+        Renderer3D::EndScene();
+    });
+    Check(Pixel(twoScenes, .27f, .5f)[0] > 100 && Pixel(twoScenes, .73f, .5f)[0] > 100,
+          "a later PBR scene keeps output from an earlier PBR scene in the same frame");
     const auto profiling = graphics.gpu.GetFrameStats();
     Check(profiling.pipelineBinds >= 2 && profiling.uniformBinds > 0 &&
               profiling.descriptorBinds > 0,
