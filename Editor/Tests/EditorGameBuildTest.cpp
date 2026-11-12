@@ -1,20 +1,25 @@
 // End-to-end check of what the editor's Build menu does: create a template game, configure and
 // build it against the installed engine SDK, run it, and zip it. Skips (exit 77) when no SDK or
 // cmake is available, because nothing here is downloaded.
+#include "Build/BuildOutput.hpp"
 #include "Build/ProjectBuild.hpp"
 #include "Engine/Scene/Entity.hpp"
 #include "Project/EditorProject.hpp"
 #include "Project/PathEncoding.hpp"
 
+#include <QColor>
 #include <QCoreApplication>
+#include <QImage>
 #include <QProcess>
 #include <QString>
 #include <QStringList>
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
+#include <zip.h>
 
 namespace fs = std::filesystem;
 using namespace LuxEditor;
@@ -42,6 +47,7 @@ std::string Env(const char* name) {
 bool Run(const fs::path& program, const QStringList& arguments, const fs::path& workingDirectory,
          int timeoutMs, std::string& output) {
     QProcess process;
+    process.setProcessEnvironment(Utf8BuildEnvironment());
     process.setProcessChannelMode(QProcess::MergedChannels);
     process.setWorkingDirectory(ToQString(workingDirectory));
     process.start(ToQString(program), arguments);
@@ -50,7 +56,7 @@ bool Run(const fs::path& program, const QStringList& arguments, const fs::path& 
         return false;
     }
     const bool finished = process.waitForFinished(timeoutMs);
-    output = QString::fromLocal8Bit(process.readAll()).toStdString();
+    output = DecodeBuildOutput(process.readAll()).toUtf8().toStdString();
     if (!finished) {
         process.kill();
         process.waitForFinished(5000);
@@ -96,9 +102,18 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
         return false;
     }
     std::cout << "-- run " << PathUtf8(*executable) << " --smoke-test\n";
+    const auto packagedMesh =
+        executable->parent_path() / "Content/Assets" / PathFromUtf8("한글 메시.obj");
+    const auto packagedTexture =
+        executable->parent_path() / "Content/Assets" / PathFromUtf8("한글 기본색상.PnG");
+    if (!fs::is_regular_file(packagedMesh) || !fs::is_regular_file(packagedTexture)) {
+        std::cerr << "packaged OBJ mesh is missing\n";
+        return false;
+    }
     std::string output;
     if (!Run(*executable, {QStringLiteral("--smoke-test")}, executable->parent_path(), 120000,
-             output)) {
+             output) ||
+        output.find("[LuxEngine WARN]") != std::string::npos) {
         std::cerr << "game failed to run (" << config << "):\n";
         PrintTail(output);
         return false;
@@ -109,6 +124,61 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
         std::cerr << "packaging failed: " << error << '\n';
         return false;
     }
+    int zipError = 0;
+    zip_t* packaged = zip_open(PathUtf8(archive).c_str(), ZIP_RDONLY, &zipError);
+    const bool hasMesh =
+        packaged &&
+        zip_name_locate(packaged, "LuxGame/Content/Assets/한글 메시.obj", ZIP_FL_ENC_UTF_8) >= 0;
+    const bool hasTexture =
+        packaged && zip_name_locate(packaged, "LuxGame/Content/Assets/한글 기본색상.PnG",
+                                    ZIP_FL_ENC_UTF_8) >= 0;
+    const bool hasEnvironment =
+        packaged &&
+        zip_name_locate(packaged, "LuxGame/Content/Assets/한글 환경.HdR", ZIP_FL_ENC_UTF_8) >= 0;
+    if (packaged)
+        zip_close(packaged);
+    if (!hasMesh || !hasTexture || !hasEnvironment) {
+        std::cerr << "distribution ZIP is missing its OBJ mesh\n";
+        return false;
+    }
+    const auto unpack = projectDir / ".lux" / (std::string("package-check-") + config);
+    fs::create_directories(unpack);
+    if (!Run(
+            tools.cmake,
+            {QStringLiteral("-E"), QStringLiteral("tar"), QStringLiteral("xf"), ToQString(archive)},
+            unpack, 120000, output)) {
+        PrintTail(output);
+        return false;
+    }
+    const auto unpackedExecutable = unpack / "LuxGame" / executable->filename();
+    const auto unpackedScene = unpack / "LuxGame/Content/Levels" / PathFromUtf8("새 시작 씬.lux");
+    LuxEngine::Scene portable;
+    if (!portable.Deserialize(PathUtf8(unpackedScene))) {
+        std::cerr << "packaged scene did not reopen\n";
+        return false;
+    }
+    const auto environment = portable.GetSettings().render3D.environmentPath;
+    if (environment.empty() || PathFromUtf8(environment).is_absolute() ||
+        !fs::is_regular_file(PathFromUtf8(portable.ResolveAssetPath(environment)))) {
+        std::cerr << "packaged environment path is not portable\n";
+        return false;
+    }
+    for (auto entity : portable.GetEntities())
+        if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>())
+            for (const auto* resource : {&mesh->meshPath, &mesh->material.baseColorTexture})
+                if (!resource->empty() &&
+                    (PathFromUtf8(*resource).is_absolute() ||
+                     !fs::is_regular_file(PathFromUtf8(portable.ResolveAssetPath(*resource))))) {
+                    std::cerr << "packaged resource paths are not portable\n";
+                    return false;
+                }
+    if (!Run(unpackedExecutable, {QStringLiteral("--smoke-test")}, unpackedExecutable.parent_path(),
+             120000, output) ||
+        output.find("[LuxEngine WARN]") != std::string::npos) {
+        PrintTail(output);
+        return false;
+    }
+    std::cout << "-- unpacked game runs with portable mesh and texture resources\n";
     std::cout << "-- zip " << package->fileCount << " files, " << fs::file_size(archive)
               << " bytes\n";
     return package->fileCount >= 3 && fs::file_size(archive) > 0;
@@ -141,6 +211,35 @@ int main(int argc, char* argv[]) {
     // Removing the default catches a runner that silently keeps using Scenes/Main.lux.
     LuxEngine::Scene alternate;
     alternate.CreateEntity("플레이어"); // A named player without an optional rigidbody is valid.
+    const auto meshFile = root / "Assets" / PathFromUtf8("한글 메시.obj");
+    fs::create_directories(meshFile.parent_path());
+    {
+        std::ofstream mesh(meshFile);
+        mesh << "v -1 0 0\nv 1 0 0\nv 0 2 0\nvt 0 0\nvt 1 0\nvt .5 1\nvn 0 0 1\nf 1/1/1 2/2/1 "
+                "3/3/1\n";
+    }
+    const auto textureFile = root / "Assets" / PathFromUtf8("한글 기본색상.PnG");
+    QImage baseColor(4, 4, QImage::Format_RGBA8888);
+    baseColor.fill(QColor(160, 90, 40));
+    if (!baseColor.save(ToQString(textureFile), "PNG"))
+        return 1;
+    const auto environmentFile = root / "Assets" / PathFromUtf8("한글 환경.HdR");
+    {
+        std::ofstream stream(environmentFile, std::ios::binary);
+        stream << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n";
+        const unsigned char pixels[8] = {128, 128, 128, 129, 64, 64, 64, 129};
+        stream.write(reinterpret_cast<const char*>(pixels), 8);
+    }
+    auto rendering = alternate.GetSettings();
+    rendering.render3D.mode = LuxEngine::Render3DMode::Pbr;
+    rendering.render3D.environmentPath = "../Assets/한글 환경.HdR";
+    rendering.render3D.showSkybox = true;
+    if (!alternate.SetSettings(rendering))
+        return 1;
+    auto& meshComponent =
+        alternate.CreateEntity("Mesh").AddComponent<LuxEngine::MeshRendererComponent>();
+    meshComponent.meshPath = "../Assets/한글 메시.obj";
+    meshComponent.material.baseColorTexture = "../Assets/한글 기본색상.PnG";
     const auto start = root / PathFromUtf8("Levels/새 시작 씬.lux");
     fs::create_directories(start.parent_path(), ec);
     if (ec || !alternate.Serialize(PathUtf8(start)) || !project->SetStartScene(start, error)) {

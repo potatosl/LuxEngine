@@ -3,6 +3,7 @@ param(
     [string]$ArchivePath = ""
 )
 
+. (Join-Path $PSScriptRoot "Utf8.ps1")
 $ErrorActionPreference = "Stop"
 $dxcUrl = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip"
 $expected = "ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1"

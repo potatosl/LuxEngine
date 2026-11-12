@@ -10,10 +10,11 @@ GpuTexture::~GpuTexture() {
 
 GpuTexture::GpuTexture(GpuTexture&& other) noexcept
     : owner_(std::move(other.owner_)), handle_(other.handle_), width_(other.width_),
-      height_(other.height_) {
+      height_(other.height_), colorSpace_(other.colorSpace_) {
     other.owner_.reset();
     other.handle_ = 0;
     other.width_ = other.height_ = 0;
+    other.colorSpace_ = TextureColorSpace::Linear;
 }
 
 GpuTexture& GpuTexture::operator=(GpuTexture&& other) noexcept {
@@ -23,25 +24,29 @@ GpuTexture& GpuTexture::operator=(GpuTexture&& other) noexcept {
         handle_ = other.handle_;
         width_ = other.width_;
         height_ = other.height_;
+        colorSpace_ = other.colorSpace_;
         other.owner_.reset();
         other.handle_ = 0;
         other.width_ = other.height_ = 0;
+        other.colorSpace_ = TextureColorSpace::Linear;
     }
     return *this;
 }
 
 bool GpuTexture::Initialize(GpuDevice* device, uint32 width, uint32 height, const void* pixelData,
-                            TextureFilter filter) {
+                            TextureFilter filter, TextureColorSpace colorSpace) {
     Release();
     if (!device || !device->IsReady())
         return false;
     Vk::TextureRecord record;
-    if (!device->state_->CreateTextureResource(width, height, pixelData, record, filter))
+    if (!device->state_->CreateTextureResource(width, height, pixelData, record, filter,
+                                               colorSpace))
         return false;
     handle_ = device->state_->textures.Insert(record);
     owner_ = device->state_;
     width_ = width;
     height_ = height;
+    colorSpace_ = colorSpace;
     return true;
 }
 
@@ -55,6 +60,7 @@ void GpuTexture::Release() {
     owner_.reset();
     handle_ = 0;
     width_ = height_ = 0;
+    colorSpace_ = TextureColorSpace::Linear;
 }
 
 bool GpuTexture::IsValid() const {

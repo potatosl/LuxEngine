@@ -5,6 +5,7 @@ param(
     [string]$Version = "0.1.0"
 )
 
+. (Join-Path $PSScriptRoot "Utf8.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root

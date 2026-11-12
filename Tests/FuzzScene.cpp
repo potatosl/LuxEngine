@@ -82,6 +82,19 @@ int main(int argc, char** argv) {
         if (validScene.SerializeToString(serialized)) {
             seeds.push_back(std::vector<uint8_t>(serialized.begin(), serialized.end()));
         }
+        auto& mesh = e.AddComponent<LuxEngine::MeshRendererComponent>();
+        mesh.meshPath = "Assets/seed.obj";
+        if (validScene.SerializeToString(serialized))
+            seeds.push_back(MakeBytes(serialized));
+        mesh.material.baseColorTexture = "Assets/기본 색상.PnG";
+        if (validScene.SerializeToString(serialized))
+            seeds.push_back(MakeBytes(serialized));
+        auto settings = validScene.GetSettings();
+        settings.render3D.mode = LuxEngine::Render3DMode::Pbr;
+        settings.render3D.environmentPath = "Assets/environment.hdr";
+        validScene.SetSettings(settings);
+        if (validScene.SerializeToString(serialized))
+            seeds.push_back(MakeBytes(serialized));
     }
 
     size_t targetRuns = 0;

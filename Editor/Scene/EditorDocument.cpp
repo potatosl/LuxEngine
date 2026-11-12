@@ -12,7 +12,7 @@
 namespace LuxEditor {
 namespace {
 std::string AnchoredPath(const std::string& path) {
-    if (path.empty())
+    if (path.empty() || path.find('\0') != std::string::npos)
         return {};
     const auto input = PathFromUtf8(path);
     if (input.is_absolute())
@@ -22,14 +22,15 @@ std::string AnchoredPath(const std::string& path) {
     return error ? path : PathUtf8(absolute);
 }
 std::string SourcePath(const std::string& path) {
-    if (path.empty())
+    if (path.empty() || path.find('\0') != std::string::npos)
         return {};
     std::error_code error;
     const auto canonical = std::filesystem::weakly_canonical(PathFromUtf8(path), error);
     return error ? path : GenericPathUtf8(canonical);
 }
 bool SameFile(const std::string& first, const std::string& second) {
-    if (first.empty() || second.empty())
+    if (first.empty() || second.empty() || first.find('\0') != std::string::npos ||
+        second.find('\0') != std::string::npos)
         return false;
     const auto a = PathFromUtf8(first), b = PathFromUtf8(second);
     std::error_code error;
@@ -47,7 +48,7 @@ std::shared_ptr<LuxEngine::Scene> ReadScene(const std::string& path, std::string
                                             std::string& warning) {
     error.clear();
     warning.clear();
-    if (path.empty()) {
+    if (path.empty() || path.find('\0') != std::string::npos) {
         error = "씬 파일 경로가 비어 있습니다.";
         return {};
     }
@@ -122,8 +123,9 @@ bool EditorDocument::Open(const std::string& path) {
 
 bool EditorDocument::Recover(const std::string& originalPath, const std::string& autosavePath) {
     error_.clear();
-    if (originalPath.empty() || ConflictsWithOpenTab(originalPath, GetActiveTabId())) {
-        error_ = "복구할 씬 경로가 비어 있거나 다른 탭에서 열려 있습니다.";
+    if (originalPath.empty() || originalPath.find('\0') != std::string::npos ||
+        ConflictsWithOpenTab(originalPath, GetActiveTabId())) {
+        error_ = "복구할 씬 경로가 올바르지 않거나 다른 탭에서 열려 있습니다.";
         return false;
     }
     std::string warning;
@@ -245,8 +247,8 @@ EditorDocument::TabId EditorDocument::OpenTab(const std::string& path) {
 EditorDocument::TabId EditorDocument::AdoptTab(const std::string& path,
                                                std::shared_ptr<LuxEngine::Scene> scene, bool dirty,
                                                std::string warning) {
-    if (!scene) {
-        error_ = "불러온 씬이 비어 있습니다.";
+    if (!scene || path.find('\0') != std::string::npos) {
+        error_ = "불러온 씬 또는 파일 경로가 올바르지 않습니다.";
         return 0;
     }
     if (const auto existing = FindTabByPath(path)) {
@@ -351,7 +353,7 @@ EditorDocument::TabId EditorDocument::GetActiveTabId() const noexcept {
 }
 
 EditorDocument::TabId EditorDocument::FindTabByPath(const std::string& path) const {
-    if (path.empty())
+    if (path.empty() || path.find('\0') != std::string::npos)
         return 0;
     const auto requested = PathFromUtf8(AnchoredPath(path));
     for (const auto& tab : tabs_)

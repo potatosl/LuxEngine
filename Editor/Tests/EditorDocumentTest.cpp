@@ -2,6 +2,7 @@
 #include "Project/EditorProject.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Project/ProjectArchive.hpp"
+#include "Project/ProjectFileOperations.hpp"
 
 #include <QImage>
 #include <QString>
@@ -13,7 +14,17 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <zip.h>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -914,6 +925,38 @@ void TestBackupRetentionAfterRestore() {
 
 } // namespace
 
+void TestProjectSharingLocks() {
+#ifdef _WIN32
+    TempDirectory files;
+    const auto source = files.path / "sharing-source", target = files.path / "sharing-target";
+    std::filesystem::create_directory(source);
+    const auto child = source / "data.txt";
+    std::ofstream(child) << "preserved";
+    HANDLE locked = CreateFileW(child.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Check(locked != INVALID_HANDLE_VALUE, "sharing-lock fixture opens");
+    std::error_code error;
+    {
+        std::jthread release([locked] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(80));
+            CloseHandle(locked);
+        });
+        LuxEditor::RenameProjectPath(source, target, error);
+    }
+    Check(!error && std::filesystem::is_regular_file(target / "data.txt"),
+          "project folder rename recovers from a temporary Windows sharing lock");
+    locked =
+        CreateFileW((target / "data.txt").c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Check(locked != INVALID_HANDLE_VALUE, "persistent sharing-lock fixture opens");
+    LuxEditor::RenameProjectPath(target, source, error);
+    CloseHandle(locked);
+    Check(error && std::filesystem::is_regular_file(target / "data.txt") &&
+              !std::filesystem::exists(source),
+          "persistent sharing locks fail safely and preserve the project folder");
+#endif
+}
+
 int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "archive-limits") {
@@ -928,6 +971,7 @@ int main(int argc, char** argv) {
         TestProjectManagement();
         TestProjectOperations();
         TestBackupRetentionAfterRestore();
+        TestProjectSharingLocks();
         TestUnicodeProjectPaths();
         TestArchiveSecurityAndFuzzing();
         TestEmptyProjectDirectories();

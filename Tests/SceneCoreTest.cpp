@@ -2,10 +2,12 @@
 #include "Engine/Platform/Window.hpp"
 #include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
 #include "Engine/Scene/Entity.hpp"
+#include "Engine/Scene/SceneManager.hpp"
 #include <SDL3/SDL.h>
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <locale>
@@ -34,6 +36,99 @@ void Replace(std::string& data, const std::string& before, const std::string& af
     Check(position != std::string::npos, "malformed fixture marker exists");
     data.replace(position, before.size(), after);
 }
+void SavePathSafety() {
+    namespace fs = std::filesystem;
+    struct Files {
+        fs::path root =
+            fs::temp_directory_path() /
+            ("lux-scene-path-audit-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        Files() {
+            fs::create_directories(root);
+        }
+        ~Files() {
+            std::error_code error;
+            fs::remove_all(root, error);
+        }
+    } files;
+    const auto file = files.root / "original.lux";
+    const auto encoded = file.u8string();
+    const std::string path(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+    const auto bytes = [&] {
+        std::ifstream input(file, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(input), {});
+    };
+    Scene scene;
+    auto original = scene.CreateEntity("Saved");
+    Check(scene.Serialize(path), "path safety fixture saves");
+    const auto saved = bytes();
+    scene.CreateEntity("Unsaved");
+    for (const auto& invalid :
+         {path + std::string(1, '\0') + "suffix", path + "\xff", path + "\xf5\x80\x80\x80"}) {
+        const bool refused = !scene.Serialize(invalid);
+        const bool preserved = fs::is_regular_file(file) && bytes() == saved;
+        std::cout << "invalid path rejected=" << refused << " original preserved=" << preserved
+                  << '\n';
+        Check(refused && preserved,
+              "invalid save paths cannot overwrite or delete the original scene");
+        Check(!scene.Deserialize(invalid) && original.IsValid() && scene.GetEntityCount() == 2,
+              "invalid read paths preserve the existing scene");
+    }
+    const std::string invalid = path + std::string(1, '\0') + "suffix";
+    const fs::path invalidPath(
+        std::u8string(reinterpret_cast<const char8_t*>(invalid.data()), invalid.size()));
+    SceneManager manager;
+    std::string error;
+    Check(!SceneManager::Save(scene, invalidPath, file, error) && !error.empty() &&
+              bytes() == saved,
+          "composed scene saves reject embedded NUL before path normalization");
+    Check(!manager.Load(invalidPath) && !manager.LoadAsync(invalidPath).get() &&
+              !manager.PreloadAsync(invalidPath).get(),
+          "synchronous and asynchronous loading reject embedded NUL paths");
+}
+void MeshAssetMetadata() {
+    Scene scene;
+    auto entity = scene.CreateEntity("메시 객체");
+    auto& mesh = entity.AddComponent<MeshRendererComponent>();
+    std::string data;
+    Check(scene.SerializeToString(data) && data.starts_with("LuxEngineScene 3 "),
+          "scenes without mesh assets retain the existing version 3 format");
+    mesh.meshPath = "../Meshes/곡면.obj";
+    Check(scene.SerializeToString(data) && data.starts_with("LuxEngineScene 4 "),
+          "mesh assets use an explicit version 4 field");
+    Scene loaded;
+    Check(loaded.DeserializeFromString(data) &&
+              loaded.GetComponent<MeshRendererComponent>(entity.GetId()).meshPath == mesh.meshPath,
+          "mesh paths survive scene serialization and preserve Unicode");
+    Entity retained(entity.GetId(), &loaded);
+    auto broken = data;
+    const auto marker = broken.find("곡면.obj");
+    Check(marker != std::string::npos, "mesh path fixture exists");
+    broken.insert(marker, 1, '\0');
+    Check(!loaded.DeserializeFromString(broken) && retained.IsValid() &&
+              loaded.GetEntityCount() == 1,
+          "invalid version 4 paths preserve the live scene and entity handles");
+    mesh.material.baseColorTexture = "../Textures/한글 색상.PnG";
+    Check(
+        scene.SerializeToString(data) && data.starts_with("LuxEngineScene 5 ") &&
+            loaded.DeserializeFromString(data) &&
+            loaded.GetComponent<MeshRendererComponent>(entity.GetId()).material.baseColorTexture ==
+                mesh.material.baseColorTexture,
+        "base color texture references use version 5 and retain Unicode paths");
+    const auto valid = data;
+    mesh.material.baseColorTexture += std::string(1, '\0');
+    Check(!scene.SerializeToString(data), "NUL texture paths are rejected before scene saving");
+    mesh.material.baseColorTexture = "../Textures/한글 색상.PnG";
+    auto invalidTexture = valid;
+    const auto textureMarker = invalidTexture.find("한글 색상");
+    Check(textureMarker != std::string::npos, "texture fixture path exists");
+    invalidTexture.insert(textureMarker, 1, '\0');
+    Check(!loaded.DeserializeFromString(invalidTexture) && loaded.GetEntityCount() == 1,
+          "invalid texture paths never replace live scene data");
+    mesh.meshPath += std::string(1, '\0');
+    Check(!scene.SerializeToString(data), "invalid in-memory mesh paths cannot be saved");
+}
+
 void Hierarchy() {
     Scene scene;
     auto parent = scene.CreateEntity("부모"), child = scene.CreateEntity("자식"),
@@ -438,6 +533,8 @@ int RenderHierarchy() {
 int RunSceneCoreChecks(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--gpu")
         return RenderHierarchy();
+    SavePathSafety();
+    MeshAssetMetadata();
     Hierarchy();
     HierarchyCodecAndImport();
     ReferenceMetadata();

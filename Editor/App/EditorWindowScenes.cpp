@@ -1,4 +1,5 @@
 #include "EditorWindow.hpp"
+#include "Project/ErrorEncoding.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Scene/SceneAuthoringIO.hpp"
 #include "Scene/SceneDependencies.hpp"
@@ -53,6 +54,18 @@ bool SameFile(const std::filesystem::path& left, const std::filesystem::path& ri
         return false;
     const auto b = std::filesystem::weakly_canonical(right, ec);
     return !ec && a == b;
+}
+bool OwnsLoadedScene(const EditorProject& project, const LuxEngine::Scene& scene) {
+    const auto source = PathFromUtf8(scene.GetSourcePath());
+    if (!source.is_absolute())
+        return false;
+    std::error_code error;
+    const auto root = std::filesystem::weakly_canonical(project.GetFile().parent_path(), error);
+    if (error)
+        return false;
+    const auto relative = source.lexically_relative(root);
+    return !relative.empty() && !relative.is_absolute() && *relative.begin() != ".." &&
+           relative.extension() == ".lux";
 }
 QString SceneName(const EditorDocument::TabInfo& tab) {
     return tab.path.empty() ? QStringLiteral("새 씬 %1").arg(tab.id)
@@ -317,7 +330,7 @@ void EditorWindow::LoadSceneAsync(const std::filesystem::path& path, bool preloa
     }
     PendingSceneLoad request;
     request.path = path;
-    request.project = project_ && project_->ContainsScene(path) ? project_ : std::nullopt;
+    request.project = project_;
     request.generation = sceneLoadGeneration_;
     request.origin = document_.GetActiveTabId();
     request.preload = preload;
@@ -366,6 +379,21 @@ void EditorWindow::PollSceneLoads() {
         }
         if (request.preload)
             continue;
+        if (request.project) {
+            if (!OwnsLoadedScene(*request.project, *result.scene)) {
+                request.project.reset();
+            } else if (project_ && project_->GetFile() == request.project->GetFile()) {
+                request.project = project_;
+            } else {
+                for (const auto& [tab, context] : sceneProjects_) {
+                    (void)tab;
+                    if (context && context->GetFile() == request.project->GetFile()) {
+                        request.project = context;
+                        break;
+                    }
+                }
+            }
+        }
         if (const auto existing = document_.FindTabByPath(PathUtf8(request.path))) {
             if (document_.GetActiveTabId() == request.origin && !QApplication::activeModalWidget())
                 SwitchSceneDocument(existing);
@@ -540,7 +568,7 @@ void EditorWindow::DeleteSceneFile() {
     std::error_code error;
     if (!std::filesystem::remove(path, error)) {
         ShowError(QStringLiteral("씬 삭제 실패"),
-                  Q(error ? error.message() : "씬 파일을 찾을 수 없습니다."));
+                  Q(error ? ErrorMessageUtf8(error) : "씬 파일을 찾을 수 없습니다."));
         return;
     }
     project_->ClearAutosave(path);
@@ -573,7 +601,8 @@ void EditorWindow::SetStartupScene() {
 void EditorWindow::EditSceneSettings() {
     if (previewActive_)
         return;
-    const auto settings = ShowSceneSettingsDialog(this, document_.GetScene().GetSettings());
+    const auto settings = ShowSceneSettingsDialog(this, document_.GetScene().GetSettings(),
+                                                  document_.GetScene().GetSourcePath());
     if (!settings)
         return;
     RecordEdit(QStringLiteral("씬 설정"), [this, &settings] {

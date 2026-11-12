@@ -14,14 +14,16 @@ if(NOT LUX_DXC AND NOT LUX_GLSLC)
 endif()
 find_program(LUX_SPIRV_VAL NAMES spirv-val HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
 
-foreach(stage vert frag)
+foreach(shader Basic.vert Basic.frag Modern.frag Tone.vert Tone.frag Sky.frag Shadow.vert Shadow.frag)
+    get_filename_component(stage "${shader}" LAST_EXT)
+    string(SUBSTRING "${stage}" 1 -1 stage)
     if(stage STREQUAL "vert")
         set(profile vs_6_0)
     else()
         set(profile ps_6_0)
     endif()
-    set(source "${CMAKE_SOURCE_DIR}/Shaders/Basic.${stage}.hlsl")
-    set(output "${CMAKE_BINARY_DIR}/shaders/Basic.${stage}.spv")
+    set(source "${CMAKE_SOURCE_DIR}/Shaders/${shader}.hlsl")
+    set(output "${CMAKE_BINARY_DIR}/shaders/${shader}.spv")
     if(LUX_DXC)
         set(compile_command "${LUX_DXC}" -spirv -fspv-target-env=vulkan1.1 -T ${profile} -E main
             -Fo "${output}" "${source}")
@@ -37,7 +39,7 @@ foreach(stage vert frag)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/shaders"
         COMMAND ${compile_command}
         ${validate_command}
-        DEPENDS "${source}"
+        DEPENDS "${source}" "${CMAKE_SOURCE_DIR}/Shaders/Basic.frag.hlsl" "${CMAKE_SOURCE_DIR}/Shaders/Scene3D.hlsli"
         VERBATIM)
     list(APPEND LUX_SHADER_OUTPUTS "${output}")
 endforeach()

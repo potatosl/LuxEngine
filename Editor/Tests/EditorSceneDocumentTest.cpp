@@ -3,6 +3,8 @@
 #include "Project/EditorProject.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Scene/EditorDocument.hpp"
+#include <QColor>
+#include <QImage>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -125,6 +127,162 @@ void TestTabsAndHistory() {
     Check(document.ListTabs().size() == 1 && document.GetActiveTabId() != previous &&
               !document.GetScene(previous),
           "project reset retires all tab IDs rather than reusing them");
+}
+
+void TestInvalidFilePaths() {
+    Files files;
+    struct WorkingDirectory {
+        fs::path previous = fs::current_path();
+        explicit WorkingDirectory(const fs::path& root) {
+            fs::current_path(root);
+        }
+        ~WorkingDirectory() {
+            std::error_code error;
+            fs::current_path(previous, error);
+        }
+    } directory(files.root);
+    EditorDocument document;
+    document.CreateEntity("Saved");
+    const auto file = files.root / "original.lux";
+    Check(document.SaveAs(PathUtf8(file)), "invalid-path document fixture saves");
+    const auto saved = Bytes(file);
+    const auto active = document.GetActiveTabId();
+    document.CreateEntity("Unsaved");
+    const auto snapshot = Snapshot(document.GetScene(active));
+    const auto selected = document.GetSelectedId(active);
+    const auto warning = document.GetLoadWarning();
+    const auto count = document.ListTabs().size();
+    const std::string invalid = std::string("original.lux") + '\0' + "suffix";
+    Check(!document.SaveAs(invalid) && Bytes(file) == saved && document.IsDirty() &&
+              document.GetPath() == PathUtf8(file),
+          "relative NUL save paths preserve the file, document path and dirty state");
+    Check(!document.OpenTab(invalid) && document.GetActiveTabId() == active &&
+              document.GetScene().GetEntityCount() == 2,
+          "invalid open paths preserve all existing document state");
+    const auto preserved = [&] {
+        return document.GetActiveTabId() == active && document.ListTabs().size() == count &&
+               document.GetPath() == PathUtf8(file) && document.IsDirty() &&
+               document.GetSelectedId(active) == selected && document.GetLoadWarning() == warning &&
+               Snapshot(document.GetScene(active)) == snapshot && Bytes(file) == saved;
+    };
+    const auto candidate = std::make_shared<Scene>();
+    candidate->CreateEntity("Pending");
+    candidate->SetSourcePath(PathUtf8(file));
+    const auto candidateSnapshot = Snapshot(candidate.get());
+    const bool adoptionRejected = !document.AdoptTab(invalid, candidate) && preserved() &&
+                                  candidate->GetSourcePath() == PathUtf8(file) &&
+                                  Snapshot(candidate.get()) == candidateSnapshot;
+    const bool recoveryRejected = !document.Recover(invalid, PathUtf8(file)) && preserved();
+    std::cout << "invalid adoption rejected=" << adoptionRejected
+              << " invalid recovery rejected=" << recoveryRejected << '\n';
+    Check(adoptionRejected && recoveryRejected,
+          "NUL adoption and recovery paths reject requests without replacing document state");
+    Check(!document.Recover(PathUtf8(file), invalid) && preserved(),
+          "invalid autosave paths preserve all existing document state");
+    Check(document.AdoptTab("", candidate) && document.GetPath().empty() &&
+              document.ListTabs().size() == count + 1 &&
+              candidate->GetSourcePath() == PathUtf8(file),
+          "valid scenes can still be adopted without a file path");
+}
+
+void TestMeshAssetPaths() {
+    Files files;
+    const auto model = files.root / PathFromUtf8("곡면 모델.obj");
+    std::ofstream(model) << "v -1 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\nf 1//1 2//1 3//1\n";
+    const auto first = files.root / "Scenes" / "First.lux";
+    const auto second = files.root / "Moved" / "Scenes" / "Second.lux";
+    fs::create_directories(first.parent_path());
+    fs::create_directories(second.parent_path());
+    EditorDocument document;
+    auto entity = document.CreateEntity("Mesh");
+    entity.AddComponent<MeshRendererComponent>().meshPath = PathUtf8(model);
+    Check(document.SaveAs(PathUtf8(first)), "mesh scene saves with a relative on-disk asset path");
+    Scene disk;
+    Check(
+        disk.Deserialize(PathUtf8(first)) &&
+            fs::equivalent(PathFromUtf8(disk.ResolveAssetPath(
+                               disk.GetComponent<MeshRendererComponent>(entity.GetId()).meshPath)),
+                           model),
+        "direct scene loading resolves asset paths against the source scene");
+    Check(
+        document.SaveAs(PathUtf8(second)) && disk.Deserialize(PathUtf8(second)) &&
+            fs::equivalent(PathFromUtf8(disk.ResolveAssetPath(
+                               disk.GetComponent<MeshRendererComponent>(entity.GetId()).meshPath)),
+                           model),
+        "Save As rebases mesh paths without changing the referenced model");
+    EditorDocument reopened;
+    Check(reopened.Open(PathUtf8(second)) &&
+              fs::equivalent(PathFromUtf8(reopened.GetScene().ResolveAssetPath(
+                                 reopened.GetScene()
+                                     .GetComponent<MeshRendererComponent>(entity.GetId())
+                                     .meshPath)),
+                             model),
+          "composed editor scenes retain the same mesh resource after reopening");
+    Scene owner;
+    std::string error;
+    SceneManager manager;
+    Check(manager.AddSceneInstance(owner, second, SceneReferenceMode::Nested, error) != 0,
+          "mesh scene can be instanced from another directory");
+    bool found = false;
+    for (auto object : owner.GetEntities())
+        if (const auto* mesh = object.TryGetComponent<MeshRendererComponent>())
+            found |= fs::equivalent(PathFromUtf8(owner.ResolveAssetPath(mesh->meshPath)), model);
+    Check(found, "instanced mesh paths preserve their original owning scene");
+}
+
+void TestBaseColorPaths() {
+    Files files;
+    const auto texture = files.root / PathFromUtf8("기본 색상.PnG");
+    QImage image(2, 2, QImage::Format_RGBA8888);
+    image.fill(QColor(128, 70, 20));
+    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"), "texture fixture writes");
+    const auto first = files.root / "Scenes/First.lux";
+    const auto second = files.root / "Moved/Scenes/Second.lux";
+    fs::create_directories(first.parent_path());
+    fs::create_directories(second.parent_path());
+    EditorDocument document;
+    const auto entity = document.CreateEntity("Textured cube");
+    document.GetScene()
+        .AddComponent<MeshRendererComponent>(entity.GetId())
+        .material.baseColorTexture = PathUtf8(texture);
+    const auto environment = files.root / "Assets" / PathFromUtf8("환경.HDR");
+    fs::create_directories(environment.parent_path());
+    {
+        std::ofstream output(environment, std::ios::binary);
+        output << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n";
+        const unsigned char pixels[8] = {128, 128, 128, 129, 64, 64, 64, 129};
+        output.write(reinterpret_cast<const char*>(pixels), 8);
+    }
+    auto settings = document.GetScene().GetSettings();
+    settings.render3D.mode = Render3DMode::Pbr;
+    settings.render3D.environmentPath = PathUtf8(environment);
+    Check(document.GetScene().SetSettings(settings), "environment fixture settings apply");
+    Check(document.SaveAs(PathUtf8(first)) && document.SaveAs(PathUtf8(second)),
+          "textured default cubes can be saved and moved without an OBJ path");
+    Scene disk;
+    Check(disk.Deserialize(PathUtf8(second)), "version 6 textured environment scene reopens");
+    const auto path =
+        disk.GetComponent<MeshRendererComponent>(entity.GetId()).material.baseColorTexture;
+    Check(PathFromUtf8(path).is_relative() &&
+              fs::equivalent(PathFromUtf8(disk.ResolveAssetPath(path)), texture),
+          "Save As preserves portable texture paths against the new scene owner");
+    const auto& envPath = disk.GetSettings().render3D.environmentPath;
+    Check(PathFromUtf8(envPath).is_relative() &&
+              fs::equivalent(PathFromUtf8(disk.ResolveAssetPath(envPath)), environment),
+          "v6 Save As preserves environment path against new scene owner");
+    EditorDocument reopened;
+    Check(reopened.Open(PathUtf8(second)), "textured editor scene opens");
+    Scene owner;
+    SceneManager manager;
+    std::string error;
+    Check(manager.AddSceneInstance(owner, second, SceneReferenceMode::Nested, error) != 0,
+          "textured scenes can be instanced");
+    bool found = false;
+    for (auto object : owner.GetEntities())
+        if (const auto* mesh = object.TryGetComponent<MeshRendererComponent>())
+            found |= fs::equivalent(
+                PathFromUtf8(owner.ResolveAssetPath(mesh->material.baseColorTexture)), texture);
+    Check(found, "nested texture paths retain their original source owner");
 }
 
 void TestAdoptionAndDuplication() {
@@ -316,12 +474,14 @@ void TestAutosavePreservation() {
     Check(!rejectedReplacement && Bytes(target) == missingRecovery,
           "failed authored autosave retains the previous recovery file");
     EditorDocument recovered;
-    Check(recovered.Recover(PathUtf8(source), PathUtf8(target)) && recovered.IsDirty() &&
-              !recovered.GetLoadWarning().empty() &&
-              recovered.GetScene().GetEntityCount() == scene.GetEntityCount() &&
-              recovered.GetScene().GetComponent<SceneReferenceComponent>(reference.GetId()).path ==
-                  PathUtf8(missing),
-          "authored autosave recovers cached content and missing reference paths");
+    Check(
+        recovered.Recover(PathUtf8(source), PathUtf8(target)) && recovered.IsDirty() &&
+            !recovered.GetLoadWarning().empty() &&
+            recovered.GetScene().GetEntityCount() == scene.GetEntityCount() &&
+            PathFromUtf8(
+                recovered.GetScene().GetComponent<SceneReferenceComponent>(reference.GetId()).path)
+                    .lexically_normal() == missing.lexically_normal(),
+        "authored autosave recovers cached content and missing reference paths");
     Check(!SceneManager().Load(target, error),
           "authored autosave does not relax missing-reference runtime validation");
 
@@ -445,6 +605,9 @@ void TestBrokenReferenceRepair() {
 int RunDocumentChecks(int, char**) {
     try {
         TestTabsAndHistory();
+        TestInvalidFilePaths();
+        TestMeshAssetPaths();
+        TestBaseColorPaths();
         TestAdoptionAndDuplication();
         TestExternalAliasesAndNativePaths();
         TestStartScene();

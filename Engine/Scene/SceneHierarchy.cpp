@@ -102,6 +102,8 @@ bool Scene::SetSettings(const SceneSettings& value) {
         !std::isfinite(value.fixedStep) || value.fixedStep < 1.0f / 240 || value.fixedStep > .25f ||
         value.physicsSubsteps < 1 || value.physicsSubsteps > 16)
         return false;
+    if (!ValidateRender3DSettings(value.render3D))
+        return false;
     settings_ = value;
     physicsAccumulator_ = 0;
     return true;

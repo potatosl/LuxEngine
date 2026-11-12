@@ -1,9 +1,11 @@
+#include "Engine/Assets/EnvironmentMap.hpp"
 #include "Engine/LuxEngine.hpp"
 #include "Engine/Platform/Branding.hpp"
 #include "Engine/Renderer/Vulkan/VulkanFault.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <stb_image.h>
 #include <stdexcept>
 #include <string_view>
@@ -31,6 +34,7 @@
 
 namespace {
 int checks = 0;
+std::atomic<uint64_t> warningMessages{0};
 void Check(bool ok, const char* message) {
     ++checks;
     if (!ok)
@@ -180,10 +184,23 @@ std::string Sha256Hex(const std::string& input) {
     return out;
 }
 struct Files {
-    std::filesystem::path root = std::filesystem::temp_directory_path() /
-                                 ("luxengine-tests-" + std::to_string(SDL_GetTicksNS()));
+    std::filesystem::path root;
     Files() {
-        std::filesystem::create_directories(root);
+        const auto temporary = std::filesystem::temp_directory_path();
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        for (unsigned attempt = 0; attempt < 128; ++attempt) {
+            const auto candidate = temporary / ("luxengine-tests-" + std::to_string(stamp) + "-" +
+                                                std::to_string(attempt));
+            std::error_code error;
+            if (std::filesystem::create_directory(candidate, error)) {
+                root = candidate;
+                return;
+            }
+            if (error && error != std::errc::file_exists)
+                throw std::filesystem::filesystem_error("Cannot create test directory", candidate,
+                                                        error);
+        }
+        throw std::runtime_error("Cannot reserve a unique test directory");
     }
     ~Files() {
         std::error_code ec;
@@ -1065,6 +1082,80 @@ void Assets() {
     files.Text("quad.obj", "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf -4 -3 -2 -1\n");
     Check(AssetManager::LoadMesh(files.Path("quad.obj"), mesh), "OBJ load");
     Check(mesh.vertices.size() == 12 && mesh.indices.size() == 6, "OBJ triangulation");
+    Check(mesh.normals.size() == mesh.vertices.size() && mesh.texCoords.size() == 8 &&
+              Near(mesh.normals[2], 1) && !mesh.hasTexCoords,
+          "missing OBJ attributes receive generated normals and UVs");
+    files.Text("attributes.obj", "v -2 0 0\nv 2 0 0\nv 0 2 0\n"
+                                 "vt 0 0\nvt 1 0\nvt .5 1\nvn 0 1 1\n"
+                                 "f -3/-3/-1 -2/-2/-1 -1/-1/-1\n");
+    Check(AssetManager::LoadMesh(files.Path("attributes.obj"), mesh) && mesh.vertices.size() == 9 &&
+              mesh.normals.size() == 9 && mesh.texCoords.size() == 6 &&
+              Near(mesh.texCoords[2], 1) && Near(mesh.texCoords[5], 1) &&
+              Near(mesh.normals[1], std::sqrt(.5f)) && Near(mesh.normals[2], std::sqrt(.5f)) &&
+              Near(mesh.boundsMin.x, -2) && Near(mesh.boundsMax.y, 2) && mesh.hasTexCoords,
+          "OBJ negative indices preserve normalized authored normals, UVs and bounds");
+    files.Text("seams.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 1\nvn 0 0 1\n"
+                            "f 1/1/1 2/1/1 3/1/1\nf 1/2/1 3/1/1 2/1/1\n");
+    Check(AssetManager::LoadMesh(files.Path("seams.obj"), mesh) && mesh.vertices.size() == 12 &&
+              mesh.indices[0] != mesh.indices[3],
+          "UV seams split a shared position without losing attributes");
+    files.Text("bad-normal.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\nf 1//2 2//1 3//1\n");
+    Check(!AssetManager::LoadMesh(files.Path("bad-normal.obj"), mesh) && mesh.normals.empty(),
+          "out-of-range normal indices fail without publishing partial geometry");
+    files.Text("smooth.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\ns 1\nf 1 2 3\nf 1 4 2\n");
+    Check(AssetManager::LoadMesh(files.Path("smooth.obj"), mesh) && mesh.vertices.size() == 12 &&
+              mesh.normals[1] > .6f && mesh.normals[2] > .6f,
+          "smoothing groups generate shared vertex normals across adjacent faces");
+    files.Text("reload.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    RawMeshData original, updated;
+    Check(AssetManager::LoadMesh(files.Path("reload.obj"), original), "mesh reload fixture loads");
+    const auto stamp = std::filesystem::last_write_time(files.Path("reload.obj"));
+    files.Text("reload.obj", "v 0 0 0\nv 2 0 0\nv 0 1 0\nf 1 2 3\n");
+    std::filesystem::last_write_time(files.Path("reload.obj"), stamp);
+    std::string reloadError;
+    Check(AssetManager::ReloadMesh(files.Path("reload.obj"), reloadError) && reloadError.empty() &&
+              AssetManager::LoadMesh(files.Path("reload.obj"), updated) &&
+              updated.revision > original.revision && Near(updated.boundsMax.x, 2),
+          "explicit mesh reload detects edits even when file size and timestamp are unchanged");
+    const auto acceptedRevision = updated.revision;
+    files.Text("reload.obj", "invalid OBJ");
+    Check(!AssetManager::ReloadMesh(files.Path("reload.obj"), reloadError) &&
+              !reloadError.empty() &&
+              AssetManager::GetMeshRevision(files.Path("reload.obj")) == acceptedRevision &&
+              AssetManager::LoadMesh(files.Path("reload.obj"), updated) &&
+              Near(updated.boundsMax.x, 2),
+          "failed reload preserves immutable geometry and its published revision");
+    std::filesystem::remove(files.Path("reload.obj"));
+    Check(!AssetManager::ReloadMesh(files.Path("reload.obj"), reloadError) &&
+              AssetManager::LoadMesh(files.Path("reload.obj"), updated) &&
+              Near(updated.boundsMax.x, 2),
+          "deleted source files do not discard the last valid mesh");
+    files.Text("concurrent.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    std::atomic<bool> consistent{true};
+    std::vector<std::thread> reloading;
+    for (int worker = 0; worker < 4; ++worker)
+        reloading.emplace_back([&] {
+            for (int iteration = 0; iteration < 25; ++iteration) {
+                RawMeshData candidate;
+                if (AssetManager::LoadMesh(files.Path("concurrent.obj"), candidate, true)) {
+                    if (candidate.vertices.size() != 9 || candidate.normals.size() != 9 ||
+                        candidate.texCoords.size() != 6 || candidate.indices.size() != 3 ||
+                        candidate.revision == 0)
+                        consistent = false;
+                } else if (!candidate.vertices.empty() || !candidate.normals.empty()) {
+                    consistent = false;
+                }
+            }
+        });
+    for (auto& worker : reloading)
+        worker.join();
+    Check(consistent && AssetManager::LoadMesh(files.Path("concurrent.obj"), updated),
+          "concurrent reloads publish complete immutable snapshots or fail without partial output");
+    const auto previousBudget = AssetManager::GetCacheMemoryBudget();
+    AssetManager::SetCacheMemoryBudget(1);
+    Check(AssetManager::GetCachedMeshCount() == 0 && AssetManager::GetMeshCacheMemoryBytes() == 0,
+          "CPU mesh caches obey an explicitly reduced budget");
+    AssetManager::SetCacheMemoryBudget(previousBudget);
     files.Text("bad.obj", "v 0 0 0\nf 0 1 2\n");
     Check(!AssetManager::LoadMesh(files.Path("bad.obj"), mesh) && mesh.vertices.empty(),
           "invalid mesh fails");
@@ -1838,6 +1929,217 @@ void Lifecycle() {
     }
     SDL_Quit();
 }
+void MaterialAssetReloading(Graphics& graphics) {
+    Files files;
+    const auto modelPath = files.Path("reload-plane.obj");
+    const auto imagePath = files.Path("reload-color.BmP");
+    const auto writeMesh = [&](float offset) {
+        std::ofstream file(modelPath, std::ios::binary | std::ios::trunc);
+        file << "v " << -1 + offset << " -1 0\nv " << 1 + offset << " -1 0\nv " << 1 + offset
+             << " 1 0\nv " << -1 + offset << " 1 0\n"
+             << "vt 0 1\nvt 1 1\nvt 1 0\nvt 0 0\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1 4/4/1\n";
+        Check(static_cast<bool>(file), "reload OBJ writes completely");
+    };
+    const auto writeImage = [&](uint8 r, uint8 g, uint8 b) {
+        std::array<uint8, 16> pixels{r, g, b, 255, r, g, b, 255, r, g, b, 255, r, g, b, 255};
+        auto* surface = SDL_CreateSurfaceFrom(2, 2, SDL_PIXELFORMAT_RGBA32, pixels.data(), 8);
+        Check(surface && SDL_SaveBMP(surface, imagePath.c_str()), "reload BMP writes");
+        SDL_DestroySurface(surface);
+    };
+    writeMesh(0);
+    writeImage(128, 128, 128);
+    Check(graphics.gpu.WaitIdle(), "reload baseline drains");
+    const auto baseline = graphics.gpu.GetMemoryStats();
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scope(context);
+    Scene scene;
+    auto entity = scene.CreateEntity("Textured OBJ");
+    auto& component = entity.AddComponent<MeshRendererComponent>();
+    component.meshPath = modelPath;
+    component.material.baseColorTexture = imagePath;
+    const auto draw = [&] {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            PerspectiveCamera camera(ToRadians(60), 4.f / 3, .1f, 100);
+            camera.SetPosition({0, 0, 5});
+            DirectionalLight sun;
+            sun.direction = {0, 0, -1};
+            sun.intensity = .35f;
+            Renderer3D::BeginScene(camera, sun);
+            scene.OnRender3D();
+            Renderer3D::EndScene();
+        });
+    };
+    auto frame = draw();
+    Check(IsColor(Pixel(frame, .5f, .5f), 92, 92, 92, 4) && context.GetLastAssetError().empty(),
+          "sRGB base color is decoded before lighting and encoded for the display");
+    const auto oldTime = std::filesystem::last_write_time(imagePath);
+    writeImage(255, 0, 0);
+    std::filesystem::last_write_time(imagePath, oldTime);
+    Check(IsColor(Pixel(draw(), .5f, .5f), 92, 92, 92, 4),
+          "external edits remain stable until explicit reload");
+    std::string error;
+    Check(AssetManager::ReloadTexture(imagePath, error), "texture CPU reload succeeds");
+    Check(IsColor(Pixel(draw(), .5f, .5f), 188, 0, 0, 4),
+          "explicit texture reload updates pixels even with an unchanged timestamp and size");
+    const auto imageRevision = AssetManager::GetTextureRevision(imagePath);
+    files.Text("reload-color.BmP", "broken image");
+    Check(!AssetManager::ReloadTexture(imagePath, error) && !error.empty() &&
+              AssetManager::GetTextureRevision(imagePath) == imageRevision,
+          "corrupt image reload does not publish a new revision");
+    Check(IsColor(Pixel(draw(), .5f, .5f), 188, 0, 0, 4) && !context.GetLastAssetError().empty(),
+          "corrupt image reload retains the previous GPU texture and reports the error");
+    std::filesystem::remove(imagePath);
+    Check(!AssetManager::ReloadTexture(imagePath, error) &&
+              IsColor(Pixel(draw(), .5f, .5f), 188, 0, 0, 4),
+          "deleted image sources retain the previous GPU texture");
+    writeImage(0, 0, 255);
+    Check(AssetManager::ReloadTexture(imagePath, error) &&
+              IsColor(Pixel(draw(), .5f, .5f), 0, 0, 188, 4) && context.GetLastAssetError().empty(),
+          "restoring an image clears the error and publishes its replacement");
+    const auto middleFrame = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        PerspectiveCamera camera(ToRadians(60), 4.f / 3, .1f, 100);
+        camera.SetPosition({0, 0, 5});
+        DirectionalLight sun;
+        sun.direction = {0, 0, -1};
+        sun.intensity = .35f;
+        Renderer3D::BeginScene(camera, sun);
+        Material3D material;
+        material.baseColorTexture = imagePath;
+        Renderer3D::DrawMeshAsset(
+            modelPath, Mat4::Translate({-1.2f, 0, 0}) * Mat4::Scale({.7f, .7f, .7f}), material);
+        writeImage(0, 255, 0);
+        Check(AssetManager::ReloadTexture(imagePath, error),
+              "mid-frame texture replacement validates");
+        Renderer3D::DrawMeshAsset(
+            modelPath, Mat4::Translate({1.2f, 0, 0}) * Mat4::Scale({.7f, .7f, .7f}), material);
+        Renderer3D::EndScene();
+    });
+    Check(IsColor(Pixel(middleFrame, .35f, .5f), 0, 0, 188, 4) &&
+              IsColor(Pixel(middleFrame, .65f, .5f), 0, 188, 0, 4),
+          "mid-frame texture replacement preserves descriptors referenced by earlier draws");
+    writeImage(0, 0, 255);
+    Check(AssetManager::ReloadTexture(imagePath, error) && Pixel(draw(), .5f, .5f)[2] > 100,
+          "the allocation failure fixture restores its blue texture");
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    writeImage(0, 255, 0);
+    Check(AssetManager::ReloadTexture(imagePath, error), "GPU failure texture candidate validates");
+    Vk::InjectFault(Vk::Fault::ImageAllocation);
+    Check(IsColor(Pixel(draw(), .5f, .5f), 0, 0, 188, 4) && !context.GetLastAssetError().empty(),
+          "failed GPU texture uploads retain the old image without invalidating the device");
+    Vk::ClearFaults();
+    Check(IsColor(Pixel(draw(), .5f, .5f), 0, 0, 188, 4),
+          "failed GPU uploads are not retried every frame");
+    Check(AssetManager::ReloadTexture(imagePath, error) &&
+              IsColor(Pixel(draw(), .5f, .5f), 0, 188, 0, 4),
+          "a new reload retries a failed upload");
+#endif
+    writeImage(0, 255, 0);
+    Check(AssetManager::ReloadTexture(imagePath, error) && Pixel(draw(), .5f, .5f)[1] > 100,
+          "the mesh reload fixture has a valid green material");
+    writeImage(255, 255, 0);
+    AssetManager::Clear();
+    Check(IsColor(Pixel(draw(), .5f, .5f), 188, 188, 0, 4),
+          "global cache clearing invalidates already resident mesh and texture generations");
+    writeImage(0, 255, 0);
+    Check(AssetManager::ReloadTexture(imagePath, error) && Pixel(draw(), .5f, .5f)[1] > 100,
+          "the mesh fixture restores its green texture after cache invalidation");
+    Check(graphics.gpu.WaitIdle(), "texture stress baseline drains");
+    const auto stableTextureMemory = graphics.gpu.GetMemoryStats();
+    for (int reload = 0; reload < 50; ++reload) {
+        writeImage(0, reload % 2 ? 255 : 0, reload % 2 ? 0 : 255);
+        Check(AssetManager::ReloadTexture(imagePath, error), "repeated texture reload validates");
+        draw();
+    }
+    writeImage(0, 255, 0);
+    Check(AssetManager::ReloadTexture(imagePath, error), "stress fixture restores green");
+    for (int drain = 0; drain < 3; ++drain)
+        draw();
+    Check(graphics.gpu.WaitIdle(), "texture stress drains deferred releases");
+    const auto reloadedMemory = graphics.gpu.GetMemoryStats();
+    Check(reloadedMemory.allocationCount == stableTextureMemory.allocationCount &&
+              reloadedMemory.allocationBytes == stableTextureMemory.allocationBytes,
+          "50 texture replacements return to the same actual GPU allocation count and bytes");
+    const auto uvRevision = AssetManager::GetMeshRevision(modelPath);
+    files.Text("reload-plane.obj", "v 2 -1 0\nv 4 -1 0\nv 3 1 0\nf 1 2 3\n");
+    Check(
+        !AssetManager::ReloadMesh(modelPath, error, true) && !error.empty() &&
+            AssetManager::GetMeshRevision(modelPath) == uvRevision &&
+            Pixel(draw(), .5f, .5f)[1] > 100,
+        "a textured mesh reload rejects missing UVs without discarding the previous mapped model");
+    writeMesh(0);
+    Check(AssetManager::ReloadMesh(modelPath, error, true),
+          "a UV-compatible mesh restores normal reload state");
+    draw();
+    files.Text("reload-plane.obj", "broken mesh");
+    Check(!AssetManager::ReloadMesh(modelPath, error) && Pixel(draw(), .5f, .5f)[1] > 100,
+          "corrupt mesh reload retains previously uploaded geometry");
+    writeMesh(3);
+    Check(AssetManager::ReloadMesh(modelPath, error), "replacement mesh validates");
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
+    Vk::InjectFault(Vk::Fault::BufferAllocation);
+    Check(Pixel(draw(), .5f, .5f)[1] > 100,
+          "GPU mesh allocation failure keeps the original silhouette");
+    Vk::ClearFaults();
+    Vec3 minimum, maximum;
+    Check(context.GetMeshBounds(scene.ResolveAssetPath(modelPath), minimum, maximum) &&
+              Near(minimum.x, -1) && Near(maximum.x, 1),
+          "failed GPU mesh replacement retains the displayed model's picking bounds");
+    Check(AssetManager::ReloadMesh(modelPath, error), "a new reload retries mesh allocation");
+#endif
+    Check(IsColor(Pixel(draw(), .5f, .5f), 0, 0, 0, 2),
+          "successful mesh reload changes its silhouette");
+    auto missing = scene.CreateEntity("Missing OBJ");
+    missing.AddComponent<MeshRendererComponent>().meshPath = files.Path("missing.obj");
+    const auto missingFrame = draw();
+    Check(!context.GetLastAssetError().empty() && Pixel(missingFrame, .5f, .5f)[0] > 50 &&
+              Pixel(missingFrame, .85f, .5f)[1] > 100 && graphics.gpu.IsReady(),
+          "missing meshes show a placeholder while valid neighboring geometry keeps rendering");
+    const auto reports = warningMessages.load();
+    for (int repeat = 0; repeat < 8; ++repeat)
+        draw();
+    Check(warningMessages.load() == reports, "unchanged asset errors are not logged every frame");
+    std::array<uint8, 34> transparent{};
+    transparent[2] = 2;
+    transparent[12] = transparent[14] = 2;
+    transparent[16] = 32;
+    transparent[17] = 0x28;
+    files.Binary("transparent.tga", transparent.data(), transparent.size());
+    Material3D cutout;
+    cutout.baseColorTexture = files.Path("transparent.tga");
+    writeMesh(0);
+    Check(AssetManager::ReloadMesh(modelPath, error), "cutout mesh returns to the foreground");
+    const auto cutoutFrame = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        PerspectiveCamera camera(ToRadians(60), 4.f / 3, .1f, 100);
+        camera.SetPosition({0, 0, 5});
+        DirectionalLight sun;
+        sun.direction = {0, 0, -1};
+        sun.intensity = .35f;
+        Renderer3D::BeginScene(camera, sun);
+        Renderer3D::DrawMeshAsset(modelPath, Mat4::Identity(), cutout);
+        Material3D blue;
+        blue.albedoColor = {0, 0, 1, 1};
+        Renderer3D::DrawCube({0, 0, -2}, {4, 4, 1}, blue);
+        Renderer3D::EndScene();
+    });
+    const auto transparentPixel = Pixel(cutoutFrame, .5f, .5f);
+    Check(transparentPixel[2] > 90 && transparentPixel[0] < 10,
+          "fully transparent base-color pixels never occlude geometry through depth writes");
+    context.Shutdown();
+    for (int i = 0; i < 3; ++i)
+        graphics.Capture([&] { graphics.gpu.Clear(0, 0, 0, 1); });
+    Check(graphics.gpu.WaitIdle(), "reload resources drain");
+    const auto final = graphics.gpu.GetMemoryStats();
+    Check(final.liveTextures == baseline.liveTextures &&
+              final.liveBuffers == baseline.liveBuffers &&
+              final.allocationCount == baseline.allocationCount &&
+              final.allocationBytes == baseline.allocationBytes,
+          "reloaded meshes and textures release all GPU allocations after context shutdown");
+    graphics.ValidationClean("material reload lifetime and failure preservation");
+}
+
 void RenderOutput(Graphics& graphics) {
     const Mat4 identity;
     auto capture = graphics.Capture([&] { Check(graphics.gpu.Clear(1, 0, 0, 1), "clear red"); });
@@ -2058,8 +2360,67 @@ void RenderOutput(Graphics& graphics) {
     });
     Check(Pixel(released, 0.5f, 0.5f)[0] > 0,
           "mesh released mid-frame stays alive until the frame finishes");
+    std::array<Vertex3D, 4> attributed{{{{-1, -1, 0}, {0, 0, 1}, {0, 1}},
+                                        {{1, -1, 0}, {0, 0, 1}, {1, 1}},
+                                        {{1, 1, 0}, {0, 0, 1}, {1, 0}},
+                                        {{-1, 1, 0}, {0, 0, 1}, {0, 0}}}};
+    const std::array<uint32, 6> quadIndices{0, 1, 2, 0, 2, 3};
+    Mesh3D attributedMesh;
+    Check(attributedMesh.Upload(&graphics.gpu, attributed, quadIndices),
+          "attributed GPU mesh uploads");
+    const std::array<uint8, 16> checkerPixels{255, 0, 0,   255, 0,   255, 0,   255,
+                                              0,   0, 255, 255, 255, 255, 255, 255};
+    GpuTexture checker;
+    Check(checker.Initialize(&graphics.gpu, 2, 2, checkerPixels.data(), TextureFilter::Nearest),
+          "mesh UV test texture uploads");
+    const auto drawAttributed = [&](const Mat4& model, GpuTexture* image, DirectionalLight light) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            PerspectiveCamera camera(ToRadians(60), 4.0f / 3, .1f, 100);
+            camera.SetPosition({0, 0, 5});
+            Renderer3D::BeginScene(camera, light);
+            Renderer3D::DrawMesh(attributedMesh, model, {}, image);
+            Renderer3D::EndScene();
+        });
+    };
+    DirectionalLight facing;
+    facing.direction = {0, 0, -1};
+    facing.intensity = .85f;
+    const auto uvFrame = drawAttributed(Mat4::Identity(), &checker, facing);
+    Check(IsColor(Pixel(uvFrame, .44f, .44f), 255, 0, 0, 3) &&
+              IsColor(Pixel(uvFrame, .56f, .44f), 0, 255, 0, 3) &&
+              IsColor(Pixel(uvFrame, .44f, .56f), 0, 0, 255, 3),
+          "indexed 3D vertex UVs reach the shader and sample separate texture quadrants");
+    for (auto& vertex : attributed)
+        vertex.normal = Vec3{1, 0, 1}.Normalized();
+    Check(attributedMesh.Upload(&graphics.gpu, attributed, quadIndices), "authored normals upload");
+    facing.direction = {-1, 0, 0};
+    facing.intensity = 1;
+    const auto normalFrame = drawAttributed(Mat4::Scale({2, 1, .5f}), nullptr, facing);
+    Check(IsColor(Pixel(normalFrame, .5f, .5f), 100, 100, 100, 5),
+          "authored vertex normals use inverse transpose under nonuniform scale");
+    Files assetFiles;
+    assetFiles.Text("scene-mesh.obj", "v -1 -1 0\nv 1 -1 0\nv 0 1 0\nvn 0 0 1\nf 1//1 2//1 3//1\n");
+    Scene meshScene;
+    auto meshEntity = meshScene.CreateEntity("OBJ triangle");
+    meshEntity.AddComponent<MeshRendererComponent>().meshPath = assetFiles.Path("scene-mesh.obj");
+    const auto assetFrame = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        PerspectiveCamera camera(ToRadians(60), 4.0f / 3, .1f, 100);
+        camera.SetPosition({0, 0, 5});
+        facing.direction = {0, 0, -1};
+        Renderer3D::BeginScene(camera, facing);
+        meshScene.OnRender3D();
+        Renderer3D::EndScene();
+        Check(Renderer3D::GetStats().drawCalls == 1, "scene mesh paths submit resident geometry");
+    });
+    Check(Pixel(assetFrame, .5f, .5f)[0] > 240 && Pixel(assetFrame, .38f, .38f)[0] == 0,
+          "scene rendering uses the OBJ triangle silhouette rather than a default cube");
+    attributedMesh.Release();
+    checker.Release();
     texture.Release();
     empty.Release();
+    MaterialAssetReloading(graphics);
     graphics.ValidationClean("render output checks");
 }
 void TextureFiltering() {
@@ -2583,7 +2944,9 @@ void Failures() {
         for (int cube = 0; cube < 3300; ++cube)
             Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
         Renderer3D::EndScene();
-        Check(Renderer3D::GetStats().drawCalls == 2 && gpu.IsReady(),
+        Check(Renderer3D::GetStats().drawCalls > 0 && gpu.IsReady() &&
+                  gpu.GetFrameStats().vertexBytes <= medium.maxFrameVertexBytes &&
+                  gpu.GetLastFailure() == GpuStatus::OutOfMemory,
               "3D scene over the vertex budget keeps the chunks that fit");
         Check(gpu.EndFrame(), "over-budget 3D frame submitted");
 
@@ -3174,11 +3537,456 @@ void Security() {
     Check(AssetManager::GetTotalCacheMemoryBytes() == 0, "cache memory 0 after shutdown");
 }
 
+void Pbr() {
+    Scene legacy;
+    std::string serialized;
+    Check(legacy.SerializeToString(serialized) && serialized.starts_with("LuxEngineScene 3 "),
+          "unchanged scenes retain legacy version");
+    auto settings = legacy.GetSettings();
+    settings.render3D.mode = Render3DMode::Pbr;
+    settings.render3D.shadows = false;
+    settings.render3D.imageBasedLighting = false;
+    Check(legacy.SetSettings(settings), "PBR settings accepted");
+    legacy.CreateEntity("PBR").AddComponent<MeshRendererComponent>();
+    Check(legacy.SerializeToString(serialized) && serialized.starts_with("LuxEngineScene 6 "),
+          "PBR scenes select v6");
+    Scene restored;
+    Check(restored.DeserializeFromString(serialized) &&
+              restored.GetSettings().render3D.mode == Render3DMode::Pbr,
+          "v6 scene and default mesh roundtrip");
+    settings.render3D.shadowResolution = 17;
+    Check(!legacy.SetSettings(settings), "invalid shadow resolution rejected transactionally");
+    settings = legacy.GetSettings();
+    settings.render3D.environmentIntensity = std::numeric_limits<float>::quiet_NaN();
+    Check(!legacy.SetSettings(settings), "nonfinite environment rejected");
+    Graphics graphics({}, 128, 128);
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(60), 1, .1f, 10);
+    camera.SetPosition({0, 0, 3});
+    camera.SetTarget({0, 0, 0});
+    const std::array<Vertex3D, 4> vertices{{{{-1, -1, 0}, {0, 0, 1}, {0, 0}},
+                                            {{1, -1, 0}, {0, 0, 1}, {1, 0}},
+                                            {{1, 1, 0}, {0, 0, 1}, {1, 1}},
+                                            {{-1, 1, 0}, {0, 0, 1}, {0, 1}}}};
+    const std::array<uint32, 6> indices{0, 1, 2, 0, 2, 3};
+    Mesh3D plane;
+    Check(plane.Upload(&graphics.gpu, vertices, indices), "PBR test plane uploads");
+    auto render = [&](float metallic, float roughness, bool modern) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            Render3DSettings r;
+            r.mode = modern ? Render3DMode::Pbr : Render3DMode::Legacy;
+            r.sun.direction = {0, 0, -1};
+            r.shadows = false;
+            r.imageBasedLighting = false;
+            Renderer3D::BeginScene(camera, r, 1);
+            Material3D material;
+            material.albedoColor = {.3f, .1f, .03f, 1};
+            material.metallic = metallic;
+            material.roughness = roughness;
+            Renderer3D::DrawMesh(plane, Mat4{}, material);
+            Renderer3D::EndScene();
+        });
+    };
+    const auto pixel = [](const GpuFrameCapture& f) {
+        const size_t offset = (static_cast<size_t>(f.height / 2) * f.width + f.width / 2) * 4;
+        return std::array<int, 3>{f.rgba[offset], f.rgba[offset + 1], f.rgba[offset + 2]};
+    };
+    const auto dielectric = pixel(render(0, .65f, true));
+    const auto metal = pixel(render(1, .65f, true));
+    const auto glossy = pixel(render(0, .2f, true));
+    std::cout << "PBR dielectric=" << dielectric[0] << ',' << dielectric[1] << " metal=" << metal[0]
+              << ',' << metal[1] << " glossy=" << glossy[0] << '\n';
+    Check(dielectric != metal, "metallicity changes actual GPU output");
+    Check(glossy[0] > dielectric[0] + 10, "roughness changes specular highlight");
+    Check(pixel(render(0, .1f, false)) == pixel(render(1, .9f, false)),
+          "legacy metallic and roughness preserve old appearance");
+    render(1, 0, true);
+    render(0, 1, true);
+    const auto mixed = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        Render3DSettings r;
+        r.mode = Render3DMode::Pbr;
+        r.imageBasedLighting = false;
+        r.shadows = false;
+        Renderer3D::BeginScene(camera, r, 1);
+        Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+        Renderer3D::EndScene();
+        const std::array<RenderVertex, 3> overlay{{{{-1, -1, 0}, {0, 1, 0, 1}, {0, 0}},
+                                                   {{1, -1, 0}, {0, 1, 0, 1}, {0, 0}},
+                                                   {{0, 1, 0}, {0, 1, 0, 1}, {0, 0}}}};
+        Check(graphics.gpu.DrawTriangles(overlay, Mat4{}),
+              "2D overlay draws after HDR tone mapping");
+    });
+    Check(IsColor(Pixel(mixed, .5f, .5f), 0, 255, 0),
+          "2D overlay retains legacy color after modern scene");
+    graphics.ValidationClean("PBR material boundaries");
+}
+
+void HdrEnvironment() {
+    Files files;
+    std::string hdr = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n";
+    const unsigned char samples[8] = {128, 16, 0, 130, 0, 32, 128, 130};
+    hdr.append(reinterpret_cast<const char*>(samples), 8);
+    files.Binary("environment.HDR", hdr.data(), hdr.size());
+    const auto path = files.Path("environment.HDR");
+    std::string error;
+    Check(EnvironmentData::ValidateFile(path, error), "valid bounded HDR accepted");
+    const auto originalRevision = EnvironmentData::Revision(path);
+    files.Text("broken.hdr", "invalid");
+    Check(!EnvironmentData::ValidateFile(files.Path("broken.hdr"), error), "invalid HDR rejected");
+    Graphics graphics({}, 128, 128);
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(60), 1, .1f, 20);
+    camera.SetPosition({0, 0, 3});
+    camera.SetTarget({0, 0, 0});
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.shadows = false;
+    settings.sun.intensity = 0;
+    settings.environmentPath = path;
+    Material3D material;
+    material.albedoColor = {.8f, .8f, .8f, 1};
+    material.metallic = 1;
+    material.roughness = .1f;
+    auto frame = [&] {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 0);
+            Renderer3D::BeginScene(camera, settings, 1);
+            Renderer3D::DrawCube({0, 0, 0}, {2, 2, .1f}, material);
+            Renderer3D::EndScene();
+        });
+    };
+    auto wait = [&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(100);
+        do {
+            frame();
+            if (context.IsEnvironmentReady())
+                return;
+        } while (std::chrono::steady_clock::now() < deadline);
+        throw std::runtime_error("Environment prefilter timed out: " + context.GetLastAssetError());
+    };
+    wait();
+    const auto initial = Pixel(frame(), .5f, .5f);
+    settings.environmentRotation = 180;
+    const auto rotated = Pixel(frame(), .5f, .5f);
+    std::cout << "IBL first=" << initial[0] << ',' << initial[2] << " rotated=" << rotated[0] << ','
+              << rotated[2] << " preparation_ms=" << context.GetEnvironmentPreparationMs() << '\n';
+    Check(initial != rotated, "HDR environment rotation changes real reflected pixels");
+    const auto stable = graphics.gpu.GetMemoryStats().allocationBytes;
+    files.Text("environment.HDR", "corrupt");
+    Check(!EnvironmentData::Reload(path, error) &&
+              EnvironmentData::Revision(path) == originalRevision,
+          "corrupt reload does not replace revision");
+    Check(Pixel(frame(), .5f, .5f) == rotated, "corrupt environment preserves previous GPU image");
+    for (int i = 0; i < 12; ++i)
+        frame();
+    Check(graphics.gpu.GetMemoryStats().allocationBytes == stable,
+          "steady HDR frames do not grow allocations");
+    std::string replacement = hdr;
+    const unsigned char green[8] = {0, 128, 0, 130, 0, 128, 0, 130};
+    replacement.replace(replacement.size() - 8, 8, reinterpret_cast<const char*>(green), 8);
+    files.Binary("environment.HDR", replacement.data(), replacement.size());
+    Check(EnvironmentData::Reload(path, error), "valid HDR reload starts new generation");
+    frame();
+    const auto uploadDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(100);
+    do {
+        Vk::InjectFault(Vk::Fault::ImageAllocation);
+        frame();
+        Vk::ClearFaults();
+        if (!context.GetLastAssetError().empty())
+            break;
+    } while (std::chrono::steady_clock::now() < uploadDeadline);
+    Check(!context.GetLastAssetError().empty(), "environment GPU allocation failure is reported");
+    Check(Pixel(frame(), .5f, .5f) == rotated,
+          "failed environment upload keeps the last complete GPU resource");
+    Check(EnvironmentData::Reload(path, error), "environment upload can be retried explicitly");
+    wait();
+    Check(Pixel(frame(), .5f, .5f) != rotated, "successful retry atomically replaces environment");
+    settings.showSkybox = true;
+    Check(Pixel(frame(), 0, 0)[3] == 255, "ready environment draws skybox into background");
+    settings.showSkybox = false;
+    settings.imageBasedLighting = false;
+    settings.environmentIntensity = 1;
+    settings.environmentColor = {.25f, .25f, .25f};
+    material.metallic = 0;
+    material.albedoColor = {1, 1, 1, 1};
+    const auto gray = Pixel(frame(), .5f, .5f);
+    Check(std::abs(gray[0] - 165) <= 3, "linear gray receives ACES and one sRGB conversion");
+    const auto clear = Pixel(frame(), 0, 0);
+    Check(clear[3] == 0, "HDR post process preserves transparent editor background");
+    settings.toneMapping = false;
+    Check(std::abs(Pixel(frame(), .5f, .5f)[0] - 137) <= 3,
+          "tone mapping toggle retains linear exposure pipeline");
+    settings.toneMapping = true;
+    const auto backdrop = graphics.Capture([&] {
+        graphics.gpu.Clear(.2f, .3f, .5f, 1);
+        Renderer3D::BeginScene(camera, settings, 1);
+        Renderer3D::EndScene();
+    });
+    Check(IsColor(Pixel(backdrop, 0, 0), 51, 76, 127, 2),
+          "PBR background keeps the exact clear color instead of passing through tone mapping");
+    material.albedoColor = {1, 1, 1, 1};
+    const auto twoScenes = graphics.Capture([&] {
+        graphics.gpu.Clear(0, 0, 0, 1);
+        Renderer3D::BeginScene(camera, settings, 1);
+        Renderer3D::DrawCube({-.8f, 0, 0}, {.6f, .6f, .1f}, material);
+        Renderer3D::EndScene();
+        Renderer3D::BeginScene(camera, settings, 1);
+        Renderer3D::DrawCube({.8f, 0, 0}, {.6f, .6f, .1f}, material);
+        Renderer3D::EndScene();
+    });
+    Check(Pixel(twoScenes, .27f, .5f)[0] > 100 && Pixel(twoScenes, .73f, .5f)[0] > 100,
+          "a later PBR scene keeps output from an earlier PBR scene in the same frame");
+    const auto profiling = graphics.gpu.GetFrameStats();
+    Check(profiling.pipelineBinds >= 2 && profiling.uniformBinds > 0 &&
+              profiling.descriptorBinds > 0,
+          "modern passes report pipeline and descriptor profiling counters");
+    graphics.ValidationClean("HDR and IBL");
+}
+
+void Shadows() {
+    GpuDeviceConfig config;
+    config.framesInFlight = 3;
+    Graphics graphics(config, 256, 192);
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(55), 256.f / 192, .1f, 100);
+    camera.SetPosition({6, 7, 9});
+    camera.SetTarget({0, 1, 0});
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.imageBasedLighting = false;
+    settings.environmentColor = {.04f, .04f, .04f};
+    settings.sun.direction = {.7f, -1, .3f};
+    settings.sun.intensity = 3;
+    settings.shadows = false;
+    Material3D ground;
+    ground.albedoColor = {.5f, .5f, .5f, 1};
+    ground.roughness = .7f;
+    Material3D object;
+    object.albedoColor = {.6f, .15f, .04f, 1};
+    object.roughness = .4f;
+    auto frame = [&](float shift = 0) {
+        return graphics.Capture([&] {
+            graphics.gpu.Clear(.03f, .04f, .05f, 1);
+            Renderer3D::BeginScene(camera, settings, 1);
+            Renderer3D::DrawCube({0, -.1f, 0}, {10, .2f, 10}, ground);
+            Renderer3D::DrawCube({shift, 1, 0}, {1, 2, 1}, object);
+            Renderer3D::EndScene();
+        });
+    };
+    auto original = frame();
+    frame();
+    frame();
+    settings.shadows = true;
+    Vk::InjectFault(Vk::Fault::ImageAllocation);
+    const auto fallback = frame();
+    Vk::ClearFaults();
+    Check(!context.GetLastAssetError().empty(), "shadow allocation failure is reported");
+    Check(fallback.rgba == original.rgba, "shadow failure preserves unshadowed HDR rendering");
+    const auto shadowed = frame();
+    size_t darker = 0;
+    for (size_t i = 0; i < original.rgba.size(); i += 4)
+        if (original.rgba[i] > shadowed.rgba[i] + 20)
+            ++darker;
+    std::cout << "Shadow darkened_pixels=" << darker << '\n';
+    Check(darker > 50, "directional shadow darkens actual receiver pixels");
+    Check(frame(2).rgba != shadowed.rgba, "moving caster updates shadow");
+    for (int resolution : {1024, 2048, 4096}) {
+        settings.shadowResolution = resolution;
+        frame();
+    }
+    settings.shadowResolution = 2048;
+    frame();
+    frame();
+    frame();
+    const auto baseline = graphics.gpu.GetMemoryStats().allocationBytes;
+    for (int i = 0; i < 100; ++i) {
+        settings.shadows = (i % 2) == 0;
+        settings.shadowNormalBias = .02f;
+        frame();
+    }
+    settings.shadows = true;
+    frame();
+    frame();
+    frame();
+    Check(graphics.gpu.GetMemoryStats().allocationBytes == baseline,
+          "100 shadow toggles retain stable GPU allocation bytes");
+    settings.shadowRange = 1;
+    frame();
+    graphics.ValidationClean("directional shadows and failure fallback");
+}
+
+void ModernFailures() {
+    Graphics graphics({}, 128, 96);
+    PerspectiveCamera camera(ToRadians(60), 128.f / 96, .1f, 20);
+    camera.SetPosition({0, 0, 3});
+    camera.SetTarget({0, 0, 0});
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.imageBasedLighting = false;
+    settings.shadows = false;
+    for (auto fault :
+         {Vk::Fault::ShaderModule, Vk::Fault::PipelineCreation, Vk::Fault::ImageAllocation}) {
+        Renderer3D::Context context(&graphics.gpu);
+        Renderer3D::ScopedContext scoped(context);
+        const auto capture = graphics.Capture([&] {
+            graphics.gpu.Clear(0, 0, 0, 1);
+            Renderer3D::BeginScene(camera, settings, 1);
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+            Vk::InjectFault(fault);
+            Renderer3D::EndScene();
+            Vk::ClearFaults();
+        });
+        Check(!context.GetLastAssetError().empty(),
+              "HDR initialization failure reports fallback reason");
+        const auto center = Pixel(capture, .5f, .5f);
+        Check(center[0] > 10 && center[1] > 10, "HDR failure still draws legacy mesh pixels");
+    }
+    graphics.ValidationClean("HDR resource failure fallback");
+}
+
+void ModernLifetimes() {
+    GpuDeviceConfig config;
+    config.framesInFlight = 3;
+    Graphics graphics(config, 128, 96);
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.imageBasedLighting = false;
+    settings.shadows = true;
+    settings.shadowResolution = 1024;
+    PerspectiveCamera camera(ToRadians(60), 128.f / 96, .1f, 20);
+    camera.SetPosition({2, 2, 4});
+    camera.SetTarget({0, 0, 0});
+    auto empty = [&] { graphics.Capture([&] { graphics.gpu.Clear(0, 0, 0, 1); }); };
+    empty();
+    empty();
+    empty();
+    const auto baseline = graphics.gpu.GetMemoryStats().allocationBytes;
+    for (int i = 0; i < 100; ++i) {
+        Check(graphics.Begin(), "lifetime frame begins");
+        graphics.gpu.Clear(0, 0, 0, 1);
+        {
+            Renderer3D::Context local(&graphics.gpu);
+            Renderer3D::ScopedContext scoped(local);
+            Renderer3D::BeginScene(camera, settings, 1);
+            Renderer3D::DrawCube({0, 0, 0}, {1, 1, 1}, {});
+            Renderer3D::EndScene();
+            local.Shutdown();
+        }
+        Check(graphics.gpu.EndFrame(),
+              "destroyed CPU context still submits retained GPU resources");
+    }
+    empty();
+    empty();
+    empty();
+    empty();
+    graphics.gpu.WaitIdle();
+    const auto after = graphics.gpu.GetMemoryStats().allocationBytes;
+    std::cout << "Modern lifetime baseline=" << baseline << " after=" << after << '\n';
+    Check(after == baseline, "100 mid-frame context shutdowns return GPU allocations to baseline");
+    graphics.ValidationClean("mid-frame PBR context destruction");
+}
+
+void RenderingBenchmark() {
+    GpuDeviceConfig config;
+    config.validation = GpuValidation::Off;
+    config.vsync = false;
+    Graphics graphics(config, 1920, 1080);
+    Renderer3D::Context context(&graphics.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(55), 1920.f / 1080, .1f, 150);
+    camera.SetPosition({22, 24, 32});
+    camera.SetTarget({0, 1, 0});
+    const auto file = std::filesystem::path(__FILE__).parent_path().parent_path() /
+                      "examples/MeshFoundation/Assets/SmoothSphere.obj";
+    const auto bytes = file.u8string();
+    const std::string mesh(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.showSkybox = true;
+    settings.shadows = false;
+    Material3D ground;
+    ground.albedoColor = {.25f, .25f, .25f, 1};
+    ground.roughness = .7f;
+    auto frame = [&] {
+        Check(graphics.Begin(), "benchmark frame begins");
+        graphics.gpu.Clear(.04f, .05f, .07f, 1);
+        Renderer3D::BeginScene(camera, settings, 1);
+        for (int i = 0; i < 100; ++i) {
+            Material3D material;
+            material.albedoColor = {.7f, .35f, .12f, 1};
+            material.metallic = i < 50 ? 0.f : 1.f;
+            material.roughness = .1f + .8f * (i % 10) / 9;
+            Renderer3D::DrawMeshAsset(
+                mesh, Mat4::Translate({(i % 10 - 4.5f) * 2, 1, (i / 10 - 4.5f) * 2}), material);
+        }
+        Renderer3D::DrawCube({0, -.2f, 0}, {24, .4f, 24}, ground);
+        Renderer3D::EndScene();
+        Check(context.GetLastAssetError().empty(), "benchmark has no renderer errors");
+        Check(graphics.gpu.EndFrame(), "benchmark frame submits");
+    };
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(100);
+    do {
+        frame();
+    } while (!context.IsEnvironmentReady() && std::chrono::steady_clock::now() < deadline);
+    Check(context.IsEnvironmentReady(), "benchmark environment ready");
+    uint32 actualWidth = 0, actualHeight = 0;
+    Check(graphics.window.GetFramebufferSize(actualWidth, actualHeight) && actualWidth == 1920 &&
+              actualHeight == 1080,
+          "benchmark uses actual 1920x1080 framebuffer");
+    std::ofstream output("build/rendering-benchmark.json");
+    output << "{\"width\":1920,\"height\":1080,\"spheres\":100,\"frames_per_case\":600,"
+              "\"environment_preparation_ms\":"
+           << context.GetEnvironmentPreparationMs() << ",\"cases\":[";
+    bool first = true;
+    for (int resolution : {0, 1024, 2048, 4096}) {
+        settings.shadows = resolution != 0;
+        if (resolution)
+            settings.shadowResolution = resolution;
+        for (int i = 0; i < 60; ++i)
+            frame();
+        std::vector<double> cpu, gpu;
+        for (int i = 0; i < 600; ++i) {
+            const auto start = std::chrono::steady_clock::now();
+            frame();
+            cpu.push_back(
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                    .count());
+            const auto stats = graphics.gpu.GetFrameStats();
+            if (stats.gpuTimeMs >= 0)
+                gpu.push_back(stats.gpuTimeMs);
+        }
+        std::sort(cpu.begin(), cpu.end());
+        std::sort(gpu.begin(), gpu.end());
+        Check(!gpu.empty(), "benchmark GPU timestamps available");
+        const auto memory = graphics.gpu.GetMemoryStats();
+        const double mean = std::accumulate(gpu.begin(), gpu.end(), 0.0) / gpu.size();
+        if (!first)
+            output << ',';
+        first = false;
+        output << "{\"shadow_resolution\":" << resolution << ",\"cpu_median_ms\":" << cpu[300]
+               << ",\"cpu_p95_ms\":" << cpu[570] << ",\"gpu_mean_ms\":" << mean
+               << ",\"gpu_p95_ms\":" << gpu[gpu.size() * 95 / 100]
+               << ",\"allocation_bytes\":" << memory.allocationBytes << '}';
+        output.flush();
+        std::cout << "BENCH shadow=" << resolution << " cpu_median_ms=" << cpu[300]
+                  << " gpu_mean_ms=" << mean << " allocation_bytes=" << memory.allocationBytes
+                  << std::endl;
+    }
+    output << "]}\n";
+}
+
 int vulkanValidationMessages = 0;
 SDL_LogOutputFunction defaultLogOutput = nullptr;
 void* defaultLogData = nullptr;
 void SDLCALL CountValidation(void* data, int category, SDL_LogPriority priority,
                              const char* message) {
+    if (priority == SDL_LOG_PRIORITY_WARN)
+        ++warningMessages;
     if (priority >= SDL_LOG_PRIORITY_ERROR && message && std::strstr(message, "[Vulkan]"))
         ++vulkanValidationMessages;
     if (defaultLogOutput)
@@ -3204,6 +4012,18 @@ int main(int argc, char** argv) {
             WindowEvents();
         else if (suite == "gpu")
             Gpu();
+        else if (suite == "render_failures")
+            ModernFailures();
+        else if (suite == "render_lifetime")
+            ModernLifetimes();
+        else if (suite == "render_bench")
+            RenderingBenchmark();
+        else if (suite == "shadows")
+            Shadows();
+        else if (suite == "hdr")
+            HdrEnvironment();
+        else if (suite == "pbr")
+            Pbr();
         else if (suite == "texture_filter")
             TextureFiltering();
         else if (suite == "lifecycle")

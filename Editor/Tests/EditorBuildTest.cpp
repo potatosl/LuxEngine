@@ -1,4 +1,5 @@
 #include "Build/ProjectBuild.hpp"
+#include "Project/ErrorEncoding.hpp"
 #include "Project/PathEncoding.hpp"
 
 #include <algorithm>
@@ -41,6 +42,19 @@ void Write(const fs::path& file, const std::string& text = "x") {
 }
 
 void TestDiagnostics() {
+#ifdef _WIN32
+    wchar_t wideError[512]{};
+    const auto size = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                     nullptr, ERROR_PATH_NOT_FOUND, 0, wideError, 512, nullptr);
+    auto expectedError = PathUtf8(fs::path(std::wstring(wideError, size)));
+    auto actualError =
+        ErrorMessageUtf8(std::error_code(ERROR_PATH_NOT_FOUND, std::system_category()));
+    for (auto* text : {&expectedError, &actualError})
+        while (!text->empty() && (text->back() == '\r' || text->back() == '\n'))
+            text->pop_back();
+    Check(size > 0 && !actualError.empty() && actualError == expectedError,
+          "Windows system diagnostics are converted to UTF-8 before concatenation");
+#endif
     auto d = ParseBuildLine(
         R"(C:\proj\Source\Main.cpp(42,17): error C2065: 'x': undeclared identifier [C:\p.vcxproj])");
     Check(d && d->severity == DiagnosticSeverity::Error &&
@@ -348,6 +362,28 @@ void TestPackage() {
     Check(!CreateDistributionArchive(out / exe, archive, "bad/name", error) && !error.empty(),
           "bad root name is an error");
 }
+void TestMeshPackaging() {
+    TempDirectory files;
+    const auto out = files.path / "out";
+    const auto executable = out / "game.exe";
+    Write(executable, "binary");
+    Write(out / "Content/Assets" / PathFromUtf8("한글 모델.OBJ"), "model");
+    Write(out / "compiler.obj", "skip");
+    Write(out / "Content/CMakeFiles/compiler.obj", "skip");
+    const auto archive = files.path / "mesh.zip";
+    std::string error;
+    const auto result = CreateDistributionArchive(executable, archive, "Game", error);
+    Check(result && result->fileCount == 2,
+          "OBJ content is included while compiler objects remain excluded");
+    int code = 0;
+    zip_t* zip = zip_open(PathUtf8(archive).c_str(), ZIP_RDONLY, &code);
+    Check(zip != nullptr, "mesh package opens");
+    const bool mesh =
+        zip_name_locate(zip, "Game/Content/Assets/한글 모델.OBJ", ZIP_FL_ENC_UTF_8) >= 0;
+    const bool compiler = zip_name_locate(zip, "Game/compiler.obj", 0) >= 0;
+    zip_close(zip);
+    Check(mesh && !compiler, "distribution ZIP distinguishes meshes from build artifacts");
+}
 } // namespace
 
 int main() {
@@ -356,6 +392,7 @@ int main() {
         TestDetection();
         TestPlan();
         TestPackage();
+        TestMeshPackaging();
         std::cout << "Editor build checks passed\n";
         return 0;
     } catch (const std::exception& error) {

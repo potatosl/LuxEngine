@@ -1,4 +1,5 @@
 # LuxEngine integration verify: engine build + tests, then editor build. Logs to build/verify-log.txt
+. (Join-Path $PSScriptRoot "Utf8.ps1")
 $ErrorActionPreference = "Continue"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 $logDir = Join-Path $root "build"
@@ -11,6 +12,14 @@ function Run($name, [scriptblock]$cmd) {
   L "`n=== STEP: $name ==="
   & $cmd 2>&1 | ForEach-Object { "$_" } | Out-File $log -Append -Encoding utf8
   $code = $LASTEXITCODE
+  if ($name -like "ctest*") {
+    foreach ($testBuild in @($b, $eb)) {
+      if ($testBuild) {
+        $nativeLog = Join-Path $testBuild "Testing/Temporary/LastTest.log"
+        if (Test-Path -LiteralPath $nativeLog) { ConvertTo-LuxUtf8Log -Path $nativeLog }
+      }
+    }
+  }
   if ($null -eq $code) { $code = 0 }
   L "=== EXIT [$name]: $code ==="
   if ($code -ne 0) {

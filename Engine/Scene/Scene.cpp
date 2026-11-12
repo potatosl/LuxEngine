@@ -247,8 +247,15 @@ void Scene::OnRender3D() {
         if (Finite(meshComp.material.albedoColor) && Finite(meshComp.material.metallic) &&
             Finite(meshComp.material.roughness)) {
             auto material = meshComp.material;
-            material.albedoColor = Exposed(material.albedoColor, settings_.exposure);
-            Renderer3D::DrawMesh(GetWorldMatrix(entity.GetId()), material);
+            if (settings_.render3D.mode == Render3DMode::Legacy)
+                material.albedoColor = Exposed(material.albedoColor, settings_.exposure);
+            if (!material.baseColorTexture.empty())
+                material.baseColorTexture = ResolveAssetPath(material.baseColorTexture);
+            if (meshComp.meshPath.empty())
+                Renderer3D::DrawMesh(GetWorldMatrix(entity.GetId()), material);
+            else
+                Renderer3D::DrawMeshAsset(ResolveAssetPath(meshComp.meshPath),
+                                          GetWorldMatrix(entity.GetId()), material);
         }
     }
 }
@@ -257,6 +264,23 @@ std::filesystem::path Utf8Path(const std::string& text) {
     return std::filesystem::path(
         std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
 }
+} // namespace
+
+std::string Scene::ResolveAssetPath(const std::string& path) const {
+    if (path.empty() || path.find('\0') != std::string::npos)
+        return {};
+    try {
+        auto resolved = Utf8Path(path);
+        if (resolved.is_relative() && !sourcePath_.empty())
+            resolved = Utf8Path(sourcePath_).parent_path() / resolved;
+        const auto bytes = std::filesystem::absolute(resolved).lexically_normal().u8string();
+        return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+namespace {
 
 std::string PathToUtf8(const std::filesystem::path& p) {
     const auto u8 = p.u8string();
@@ -719,7 +743,11 @@ bool Scene::SerializeToString(std::string& output) {
         }
         if (const auto* mesh = TryGetComponent<MeshRendererComponent>(id)) {
             if (!Finite(mesh->material.albedoColor) || !Finite(mesh->material.metallic) ||
-                !Finite(mesh->material.roughness))
+                !Finite(mesh->material.roughness) || mesh->meshPath.size() > 4096 ||
+                mesh->meshPath.find('\0') != std::string::npos || !IsValidUtf8(mesh->meshPath) ||
+                mesh->material.baseColorTexture.size() > 4096 ||
+                mesh->material.baseColorTexture.find('\0') != std::string::npos ||
+                !IsValidUtf8(mesh->material.baseColorTexture))
                 return false;
         }
         if (const auto* camera = TryGetComponent<CameraComponent>(id)) {
@@ -768,13 +796,34 @@ bool Scene::SerializeToString(std::string& output) {
                     return false;
         }
     }
+    const bool meshAssets = std::any_of(entities_.begin(), entities_.end(), [this](uint32 id) {
+        const auto* mesh = TryGetComponent<MeshRendererComponent>(id);
+        return mesh && (!mesh->meshPath.empty() || !mesh->material.baseColorTexture.empty());
+    });
+    const bool textureAssets = std::any_of(entities_.begin(), entities_.end(), [this](uint32 id) {
+        const auto* mesh = TryGetComponent<MeshRendererComponent>(id);
+        return mesh && !mesh->material.baseColorTexture.empty();
+    });
     std::ostringstream out;
     out.imbue(std::locale::classic());
-    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene 3 "
-        << entities_.size() << '\n';
+    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene "
+        << (!IsDefaultRender3DSettings(settings_.render3D) ? 6
+            : textureAssets                                ? 5
+            : meshAssets                                   ? 4
+                                                           : 3)
+        << ' ' << entities_.size() << '\n';
     out << "Settings " << settings_.clearColor << settings_.exposure << ' ' << settings_.gravity
         << settings_.gravity3D << settings_.overrideGravity << ' ' << settings_.fixedStep << ' '
         << settings_.physicsSubsteps << '\n';
+    if (!IsDefaultRender3DSettings(settings_.render3D)) {
+        const auto& r = settings_.render3D;
+        out << "Render3D " << static_cast<int>(r.mode) << ' ' << r.sun.direction << r.sun.color
+            << r.sun.intensity << ' ' << r.environmentColor << r.environmentIntensity << ' '
+            << r.environmentRotation << ' ' << std::quoted(r.environmentPath) << ' '
+            << r.imageBasedLighting << ' ' << r.showSkybox << ' ' << r.toneMapping << ' '
+            << r.shadows << ' ' << r.shadowResolution << ' ' << r.shadowRange << ' '
+            << r.shadowDepthBias << ' ' << r.shadowNormalBias << '\n';
+    }
     std::vector<uint32> ids(entities_.begin(), entities_.end());
     std::sort(ids.begin(), ids.end());
     for (auto id : ids) {
@@ -792,6 +841,10 @@ bool Scene::SerializeToString(std::string& output) {
         save.operator()<SpriteRendererComponent>([&](const auto& c) { out << c.color; });
         save.operator()<MeshRendererComponent>([&](const auto& c) {
             out << c.material.albedoColor << c.material.metallic << ' ' << c.material.roughness;
+            if (meshAssets || !IsDefaultRender3DSettings(settings_.render3D))
+                out << ' ' << std::quoted(c.meshPath);
+            if (textureAssets || !IsDefaultRender3DSettings(settings_.render3D))
+                out << ' ' << std::quoted(c.material.baseColorTexture);
         });
         save.operator()<CameraComponent>([&](const auto& c) {
             out << c.isPrimary << ' ' << c.isPerspective << ' ' << c.fov << ' ' << c.orthoSize;
@@ -859,8 +912,8 @@ std::string Scene::GetLastSaveError() {
 }
 
 bool Scene::Serialize(const std::string& filepath) {
-    if (filepath.empty()) {
-        SetSaveError("Scene save failed: empty filepath");
+    if (filepath.empty() || filepath.find('\0') != std::string::npos || !IsValidUtf8(filepath)) {
+        SetSaveError("Scene save failed: invalid UTF-8 or embedded NUL in filepath");
         return false;
     }
     std::string serialized;
@@ -901,7 +954,7 @@ bool Scene::DeserializeStream(std::istream& in) {
     unsigned version = 0;
     uint64 count = 0;
     if (!(in >> header >> version >> count) || header != "LuxEngineScene" ||
-        (version < 1 || version > 3) || count > MaxSceneEntities)
+        (version < 1 || version > 6) || count > MaxSceneEntities)
         return false;
     Scene parsed;
     parsed.nextEntityId_ = 1;
@@ -914,6 +967,22 @@ bool Scene::DeserializeStream(std::istream& in) {
                   settings.gravity3D >> settings.overrideGravity >> settings.fixedStep >>
                   settings.physicsSubsteps) ||
                 marker != "Settings" || !parsed.SetSettings(settings))
+                return false;
+        }
+        if (version >= 6) {
+            std::string marker;
+            int mode = -1;
+            auto settings = parsed.GetSettings();
+            auto& r = settings.render3D;
+            if (!(in >> marker >> mode >> r.sun.direction >> r.sun.color >> r.sun.intensity >>
+                  r.environmentColor >> r.environmentIntensity >> r.environmentRotation >>
+                  std::quoted(r.environmentPath) >> r.imageBasedLighting >> r.showSkybox >>
+                  r.toneMapping >> r.shadows >> r.shadowResolution >> r.shadowRange >>
+                  r.shadowDepthBias >> r.shadowNormalBias) ||
+                marker != "Render3D" || mode < 0 || mode > 1 || !IsValidUtf8(r.environmentPath))
+                return false;
+            r.mode = static_cast<Render3DMode>(mode);
+            if (!parsed.SetSettings(settings))
                 return false;
         }
         for (uint64 n = 0; n < count; ++n) {
@@ -957,6 +1026,19 @@ bool Scene::DeserializeStream(std::istream& in) {
             });
             load.operator()<MeshRendererComponent>([&](auto& c) {
                 in >> c.material.albedoColor >> c.material.metallic >> c.material.roughness;
+                if (version >= 4) {
+                    in >> std::quoted(c.meshPath);
+                    if (c.meshPath.size() > 4096 || c.meshPath.find('\0') != std::string::npos ||
+                        !IsValidUtf8(c.meshPath))
+                        in.setstate(std::ios::failbit);
+                }
+                if (version >= 5) {
+                    in >> std::quoted(c.material.baseColorTexture);
+                    if (c.material.baseColorTexture.size() > 4096 ||
+                        c.material.baseColorTexture.find('\0') != std::string::npos ||
+                        !IsValidUtf8(c.material.baseColorTexture))
+                        in.setstate(std::ios::failbit);
+                }
                 if (!Finite(c.material.albedoColor) || !Finite(c.material.metallic) ||
                     !Finite(c.material.roughness))
                     in.setstate(std::ios::failbit);
@@ -1084,7 +1166,7 @@ bool Scene::DeserializeFromString(const std::string& data) {
 }
 
 bool Scene::Deserialize(const std::string& filepath) {
-    if (filepath.empty())
+    if (filepath.empty() || filepath.find('\0') != std::string::npos || !IsValidUtf8(filepath))
         return false;
     std::error_code ec;
     const auto fileSize = std::filesystem::file_size(Utf8Path(filepath), ec);

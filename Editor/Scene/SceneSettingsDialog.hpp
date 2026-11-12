@@ -4,5 +4,6 @@
 class QWidget;
 namespace LuxEditor {
 std::optional<LuxEngine::SceneSettings>
-ShowSceneSettingsDialog(QWidget* parent, const LuxEngine::SceneSettings& settings);
+ShowSceneSettingsDialog(QWidget* parent, const LuxEngine::SceneSettings& settings,
+                        const std::string& sourcePath = {});
 }

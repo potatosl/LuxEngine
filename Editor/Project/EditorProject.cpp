@@ -1,5 +1,6 @@
 #include "EditorProject.hpp"
 #include "PathEncoding.hpp"
+#include "ProjectFileOperations.hpp"
 #include "ProjectTemplates.hpp"
 
 #include "Engine/Scene/Entity.hpp"
@@ -24,8 +25,8 @@
 
 namespace LuxEditor {
 namespace {
-constexpr std::array<const char*, 5> TemplateNames = {"empty", "platformer", "top-down", "rpg",
-                                                      "puzzle"};
+constexpr std::array<const char*, 6> TemplateNames = {"empty", "platformer", "top-down",
+                                                      "rpg",   "puzzle",     "pbr-3d"};
 
 bool ParseVersion(std::string_view text, std::array<unsigned, 3>& parts) {
     for (size_t index = 0; index < parts.size(); ++index) {
@@ -185,6 +186,27 @@ void AddSprite(LuxEngine::Scene& scene, const char* name, float x, float y, floa
 
 void PopulateTemplate(LuxEngine::Scene& scene, ProjectTemplate value) {
     switch (value) {
+    case ProjectTemplate::Pbr3D: {
+        auto settings = scene.GetSettings();
+        settings.render3D.mode = LuxEngine::Render3DMode::Pbr;
+        settings.render3D.showSkybox = true;
+        scene.SetSettings(settings);
+        for (int i = 0; i < 4; ++i) {
+            auto entity = scene.CreateEntity(i == 3 ? "Ground" : "PBR Material");
+            auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
+            transform.position = {static_cast<float>(i - 1) * 2.5f, 1, 0};
+            auto& mesh = entity.AddComponent<LuxEngine::MeshRendererComponent>();
+            mesh.material.albedoColor = {.7f, .35f, .12f, 1};
+            mesh.material.metallic = i == 0 ? 1.f : 0.f;
+            mesh.material.roughness = i == 1 ? .15f : .65f;
+            if (i == 3) {
+                transform.position = {0, -.25f, 0};
+                transform.scale = {14, .5f, 10};
+                mesh.material.albedoColor = {.3f, .3f, .3f, 1};
+            }
+        }
+        break;
+    }
     case ProjectTemplate::Empty:
         return;
     case ProjectTemplate::Platformer:
@@ -293,7 +315,7 @@ std::optional<EditorProject> EditorProject::Create(const std::filesystem::path& 
         discardStaging();
         return std::nullopt;
     }
-    std::filesystem::rename(staging, root, ec);
+    RenameProjectPath(staging, root, ec);
     if (ec) {
         error = "프로젝트 폴더를 최종 위치로 옮길 수 없습니다.";
         discardStaging();

@@ -57,5 +57,6 @@ private:
     std::shared_ptr<EngineSceneRenderer> engineRenderer_;
     bool engineFrame_ = false;
     QImage cachedFrame_;
+    QImage cachedBackground_;
 };
 } // namespace LuxEditor

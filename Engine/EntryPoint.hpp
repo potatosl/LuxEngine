@@ -12,6 +12,7 @@
 
 namespace LuxEngine {
 template <class Entry> int RunEngineMain(Entry&& entry, int argc, char** argv) {
+    Log::ConfigureUtf8Output();
     try {
         return std::invoke(std::forward<Entry>(entry), argc, argv);
     } catch (const std::exception& error) {

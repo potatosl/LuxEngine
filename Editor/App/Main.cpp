@@ -1,4 +1,5 @@
 #include "EditorWindow.hpp"
+#include "Engine/Core/Log.hpp"
 #include "Viewport/EngineSceneRenderer.hpp"
 #include <QAbstractButton>
 #include <QApplication>
@@ -37,6 +38,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
+    LuxEngine::Log::ConfigureUtf8Output();
     for (int i = 1; i < argc; ++i) {
         if (!argv[i])
             continue;

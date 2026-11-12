@@ -1,5 +1,6 @@
 #include "Debug/DebugPanel.hpp"
 #include "EditorWindow.hpp"
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/ECS/ECS.hpp"
 #include "Project/PathEncoding.hpp"
 #include "Scene/SceneHierarchy.hpp"
@@ -16,6 +17,7 @@
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFont>
@@ -413,6 +415,174 @@ void EditorWindow::BuildLayout() {
     meshEnabled_ = new QCheckBox(QStringLiteral("메시 사용"), meshGroup);
     meshEnabled_->setObjectName(QStringLiteral("editorMesh"));
     meshLayout->addRow(meshEnabled_);
+    meshPath_ = new QLineEdit(meshGroup);
+    meshPath_->setObjectName(QStringLiteral("meshAssetPath"));
+    meshPath_->setReadOnly(true);
+    meshPath_->setPlaceholderText(QStringLiteral("기본 큐브"));
+    meshLayout->addRow(QStringLiteral("OBJ 메시"), meshPath_);
+    auto* meshButtons = new QWidget(meshGroup);
+    auto* meshButtonsLayout = new QHBoxLayout(meshButtons);
+    meshButtonsLayout->setContentsMargins(0, 0, 0, 0);
+    auto* chooseMesh = new QPushButton(QStringLiteral("OBJ 선택"), meshButtons);
+    chooseMesh->setObjectName(QStringLiteral("chooseMeshAsset"));
+    auto* clearMesh = new QPushButton(QStringLiteral("기본 큐브"), meshButtons);
+    clearMesh->setObjectName(QStringLiteral("clearMeshAsset"));
+    meshButtonsLayout->addWidget(chooseMesh);
+    meshButtonsLayout->addWidget(clearMesh);
+    meshLayout->addRow(meshButtons);
+    baseColorTexturePath_ = new QLineEdit(meshGroup);
+    baseColorTexturePath_->setObjectName(QStringLiteral("baseColorTexturePath"));
+    baseColorTexturePath_->setReadOnly(true);
+    baseColorTexturePath_->setPlaceholderText(QStringLiteral("단색 재질"));
+    meshLayout->addRow(QStringLiteral("기본 색상 텍스처"), baseColorTexturePath_);
+    auto* textureButtons = new QWidget(meshGroup);
+    auto* textureButtonsLayout = new QHBoxLayout(textureButtons);
+    textureButtonsLayout->setContentsMargins(0, 0, 0, 0);
+    auto* chooseTexture = new QPushButton(QStringLiteral("이미지 선택"), textureButtons);
+    chooseTexture->setObjectName(QStringLiteral("chooseBaseColorTexture"));
+    auto* clearTexture = new QPushButton(QStringLiteral("단색 재질"), textureButtons);
+    clearTexture->setObjectName(QStringLiteral("clearBaseColorTexture"));
+    textureButtonsLayout->addWidget(chooseTexture);
+    textureButtonsLayout->addWidget(clearTexture);
+    meshLayout->addRow(textureButtons);
+    auto* reloadAssets = new QPushButton(QStringLiteral("메시·텍스처 다시 불러오기"), meshGroup);
+    reloadAssets->setObjectName(QStringLiteral("reloadMeshAssets"));
+    meshLayout->addRow(reloadAssets);
+    connect(chooseTexture, &QPushButton::clicked, this, [this] {
+        if (previewActive_ || !document_.GetSelected())
+            return;
+        const auto tab = document_.GetActiveTabId();
+        const auto entity = document_.GetSelected().GetId();
+        const auto file = QFileDialog::getOpenFileName(
+            this, QStringLiteral("기본 색상 텍스처 선택"), baseColorTexturePath_->text(),
+            QStringLiteral("이미지 (*.png *.jpg *.jpeg *.bmp *.tga)"));
+        if (file.isEmpty())
+            return;
+        if (document_.GetActiveTabId() != tab || document_.GetSelectedId(tab) != entity) {
+            Log(QStringLiteral("선택이 변경되어 텍스처 적용을 취소했습니다."), true);
+            return;
+        }
+        const auto path = file.toUtf8().toStdString();
+        std::string error;
+        if (!LuxEngine::AssetManager::ReloadTexture(path, error)) {
+            ShowError(QStringLiteral("텍스처 불러오기"), QString::fromUtf8(error));
+            return;
+        }
+        const auto selected = document_.GetSelected();
+        if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
+            const auto& model = selected.GetComponent<LuxEngine::MeshRendererComponent>().meshPath;
+            if (!model.empty()) {
+                LuxEngine::RawMeshData data;
+                if (!LuxEngine::AssetManager::LoadMesh(document_.GetScene().ResolveAssetPath(model),
+                                                       data) ||
+                    !data.hasTexCoords) {
+                    ShowError(QStringLiteral("텍스처 불러오기"),
+                              QStringLiteral("모델에 텍스처를 적용할 UV 좌표가 없습니다."));
+                    return;
+                }
+            }
+        }
+        RecordEdit(QStringLiteral("기본 색상 텍스처 변경"), [this, path] {
+            auto selected = document_.GetSelected();
+            if (!selected.HasComponent<LuxEngine::MeshRendererComponent>())
+                selected.AddComponent<LuxEngine::MeshRendererComponent>();
+            selected.GetComponent<LuxEngine::MeshRendererComponent>().material.baseColorTexture =
+                path;
+            document_.MarkDirty();
+        });
+        RefreshAll();
+    });
+    connect(clearTexture, &QPushButton::clicked, this, [this] {
+        if (previewActive_ || !document_.GetSelected() ||
+            !document_.GetSelected().HasComponent<LuxEngine::MeshRendererComponent>())
+            return;
+        RecordEdit(QStringLiteral("기본 색상 텍스처 초기화"), [this] {
+            document_.GetSelected()
+                .GetComponent<LuxEngine::MeshRendererComponent>()
+                .material.baseColorTexture.clear();
+            document_.MarkDirty();
+        });
+        RefreshAll();
+    });
+    connect(reloadAssets, &QPushButton::clicked, this, [this] {
+        const auto selected = document_.GetSelected();
+        if (previewActive_ || !selected ||
+            !selected.HasComponent<LuxEngine::MeshRendererComponent>())
+            return;
+        const auto& mesh = selected.GetComponent<LuxEngine::MeshRendererComponent>();
+        QStringList errors;
+        std::string error;
+        bool requested = false;
+        if (!mesh.meshPath.empty()) {
+            requested = true;
+            if (!LuxEngine::AssetManager::ReloadMesh(
+                    document_.GetScene().ResolveAssetPath(mesh.meshPath), error,
+                    !mesh.material.baseColorTexture.empty()))
+                errors << QString::fromUtf8(error);
+        }
+        if (!mesh.material.baseColorTexture.empty()) {
+            requested = true;
+            if (!LuxEngine::AssetManager::ReloadTexture(
+                    document_.GetScene().ResolveAssetPath(mesh.material.baseColorTexture), error))
+                errors << QString::fromUtf8(error);
+        }
+        Log(!errors.isEmpty() ? errors.join('\n')
+            : requested       ? QStringLiteral("자산 파일 검증을 마쳤습니다. 뷰포트에 갱신합니다.")
+                              : QStringLiteral("다시 불러올 자산 파일이 없습니다."),
+            !errors.isEmpty());
+        RefreshAll();
+    });
+    connect(chooseMesh, &QPushButton::clicked, this, [this] {
+        if (previewActive_ || !document_.GetSelected())
+            return;
+        const auto tab = document_.GetActiveTabId();
+        const auto entity = document_.GetSelected().GetId();
+        const auto file =
+            QFileDialog::getOpenFileName(this, QStringLiteral("OBJ 메시 선택"), meshPath_->text(),
+                                         QStringLiteral("Wavefront OBJ (*.obj);;모든 파일 (*)"));
+        if (file.isEmpty())
+            return;
+        if (document_.GetActiveTabId() != tab || document_.GetSelectedId(tab) != entity) {
+            Log(QStringLiteral("선택이 변경되어 메시 적용을 취소했습니다."), true);
+            return;
+        }
+        LuxEngine::RawMeshData data;
+        const auto path = file.toUtf8().toStdString();
+        if (!LuxEngine::AssetManager::LoadMesh(path, data, true)) {
+            ShowError(QStringLiteral("메시 불러오기"),
+                      QStringLiteral("OBJ 메시 파일을 읽을 수 없습니다."));
+            return;
+        }
+        const auto selected = document_.GetSelected();
+        if (selected.HasComponent<LuxEngine::MeshRendererComponent>() &&
+            !selected.GetComponent<LuxEngine::MeshRendererComponent>()
+                 .material.baseColorTexture.empty() &&
+            !data.hasTexCoords) {
+            ShowError(QStringLiteral("메시 불러오기"),
+                      QStringLiteral("텍스처를 유지하려면 UV 좌표가 있는 OBJ가 필요합니다."));
+            return;
+        }
+        RecordEdit(QStringLiteral("메시 파일 변경"), [this, path] {
+            auto selected = document_.GetSelected();
+            if (!selected.HasComponent<LuxEngine::MeshRendererComponent>())
+                selected.AddComponent<LuxEngine::MeshRendererComponent>();
+            selected.GetComponent<LuxEngine::MeshRendererComponent>().meshPath = path;
+            document_.MarkDirty();
+        });
+        RefreshAll();
+    });
+    connect(clearMesh, &QPushButton::clicked, this, [this] {
+        if (previewActive_ || !document_.GetSelected() ||
+            !document_.GetSelected().HasComponent<LuxEngine::MeshRendererComponent>())
+            return;
+        RecordEdit(QStringLiteral("메시 파일 초기화"), [this] {
+            document_.GetSelected()
+                .GetComponent<LuxEngine::MeshRendererComponent>()
+                .meshPath.clear();
+            document_.MarkDirty();
+        });
+        RefreshAll();
+    });
     metallic_ = Number(meshGroup, 0, 1, 0, .05);
     roughness_ = Number(meshGroup, 0, 1, 1, .05);
     meshLayout->addRow(QStringLiteral("금속성"), metallic_);

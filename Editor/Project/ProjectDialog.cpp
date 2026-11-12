@@ -60,18 +60,21 @@ std::optional<ProjectCreationRequest> ShowNewProjectDialog(QWidget* parent) {
     form->addRow(QStringLiteral("프로젝트 이름"), name);
     form->addRow(QStringLiteral("프로젝트 폴더"), row);
     auto* templates = new QComboBox(&dialog);
-    for (const char* label : {"빈 프로젝트", "플랫폼 게임", "탑다운 게임", "RPG", "퍼즐 게임"})
+    for (const char* label :
+         {"빈 프로젝트", "플랫폼 게임", "탑다운 게임", "RPG", "퍼즐 게임", "3D PBR"})
         templates->addItem(QString::fromUtf8(label));
     form->addRow(QStringLiteral("템플릿"), templates);
     layout->addLayout(form);
     auto* description = new QLabel(QStringLiteral("빈 장면과 Assets 폴더를 만듭니다."), &dialog);
     layout->addWidget(description);
     QObject::connect(templates, &QComboBox::currentIndexChanged, &dialog, [description](int index) {
-        static const char* descriptions[] = {"빈 장면과 Assets 폴더를 만듭니다.",
-                                             "바닥과 플레이어가 있는 2D 시작 장면을 만듭니다.",
-                                             "지면과 플레이어가 있는 2D 시작 장면을 만듭니다.",
-                                             "마을과 주인공, NPC가 있는 2D 시작 장면을 만듭니다.",
-                                             "보드와 블록이 있는 2D 시작 장면을 만듭니다."};
+        static const char* descriptions[] = {
+            "빈 장면과 Assets 폴더를 만듭니다.",
+            "바닥과 플레이어가 있는 2D 시작 장면을 만듭니다.",
+            "지면과 플레이어가 있는 2D 시작 장면을 만듭니다.",
+            "마을과 주인공, NPC가 있는 2D 시작 장면을 만듭니다.",
+            "보드와 블록이 있는 2D 시작 장면을 만듭니다.",
+            "PBR 재질·환경 반사·그림자를 사용하는 3D 장면을 만듭니다."};
         description->setText(QString::fromUtf8(descriptions[index]));
     });
     QObject::connect(browse, &QPushButton::clicked, &dialog, [path, name, &dialog] {

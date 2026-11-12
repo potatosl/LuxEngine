@@ -271,7 +271,13 @@ protected:
         const auto& settings = scene_->GetSettings();
         GetGpuDevice().Clear(settings.clearColor.x, settings.clearColor.y,
                              settings.clearColor.z, settings.clearColor.w);
-        le::Renderer3D::BeginScene(camera3D_, {});
+        auto renderSettings = scene_->GetSettings().render3D;
+        if (!renderSettings.environmentPath.empty())
+            renderSettings.environmentPath = scene_->ResolveAssetPath(renderSettings.environmentPath);
+        if (scene_->GetSettings().render3D.mode == le::Render3DMode::Pbr)
+            le::Renderer3D::BeginScene(camera3D_, renderSettings, scene_->GetSettings().exposure);
+        else
+            le::Renderer3D::BeginScene(camera3D_, le::DirectionalLight{});
         scene_->OnRender3D();
         le::Renderer3D::EndScene();
         le::Renderer2D::BeginScene(camera_);

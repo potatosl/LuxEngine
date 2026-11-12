@@ -20,6 +20,7 @@ class PhysicsWorld2D;
 struct SceneSettings {
     Vec4 clearColor{.12f, .14f, .16f, 1};
     float exposure = 1;
+    Render3DSettings render3D;
     Vec2 gravity{0, -9.81f};
     Vec3 gravity3D{0, -9.81f, 0};
     // Existing framework applications can continue setting PhysicsEngine's global gravity.
@@ -69,6 +70,7 @@ public:
     void OnUpdate(double dt);
     void OnRender();
     void OnRender3D();
+    std::string ResolveAssetPath(const std::string& path) const;
     // BeginContact events from the most recent 2D physics step, including sensors.
     const std::vector<Collision2DEvent>& GetCollisionEvents2D() const {
         return collisionEvents2D_;

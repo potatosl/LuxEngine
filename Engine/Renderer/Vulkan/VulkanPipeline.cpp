@@ -101,9 +101,13 @@ bool DeviceState::CreateRenderPass(VkFormat colorFormat) {
     dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                               VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                               VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    // Must match the 3D tone-mapping pass, which reloads this color attachment and so needs the
+    // color read/write dependency to stay render-pass compatible.
+    dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     dependency.dstStageMask = dependency.srcStageMask;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     VkRenderPassCreateInfo create{};
@@ -216,15 +220,16 @@ bool DeviceState::CreatePipelines() {
     }
     const VkVertexInputBindingDescription binding{0, sizeof(RenderVertex),
                                                   VK_VERTEX_INPUT_RATE_VERTEX};
-    const VkVertexInputAttributeDescription attributes[3] = {
+    const VkVertexInputAttributeDescription attributes[4] = {
         {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RenderVertex, position)},
         {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(RenderVertex, color)},
-        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(RenderVertex, uv)}};
+        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(RenderVertex, uv)},
+        {3, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RenderVertex, normal)}};
     VkPipelineVertexInputStateCreateInfo vertexInput{};
     vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInput.vertexBindingDescriptionCount = 1;
     vertexInput.pVertexBindingDescriptions = &binding;
-    vertexInput.vertexAttributeDescriptionCount = 3;
+    vertexInput.vertexAttributeDescriptionCount = 4;
     vertexInput.pVertexAttributeDescriptions = attributes;
     VkPipelineInputAssemblyStateCreateInfo assembly{};
     assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;

@@ -36,6 +36,7 @@ public:
 
 private:
     friend class GpuDevice;
+    friend class Renderer3D;
     std::weak_ptr<Vk::DeviceState> owner_;
     uint64 handle_ = 0;
     BufferType type_ = BufferType::Vertex;

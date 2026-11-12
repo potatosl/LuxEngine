@@ -1,5 +1,7 @@
 #include "ProjectArchive.hpp"
+#include "ErrorEncoding.hpp"
 #include "PathEncoding.hpp"
+#include "ProjectFileOperations.hpp"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -383,7 +385,7 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
 
         std::filesystem::create_directories(entry.isDirectory ? target : target.parent_path(), ec);
         if (ec) {
-            error = "압축 파일의 폴더를 만들 수 없습니다: " + ec.message();
+            error = "압축 파일의 폴더를 만들 수 없습니다: " + ErrorMessageUtf8(ec);
             break;
         }
         if (IsReparsePointOrSymlink(entry.isDirectory ? target : target.parent_path())) {
@@ -563,17 +565,17 @@ bool ExportProject(const EditorProject& project, const std::filesystem::path& ar
         std::filesystem::remove(temporary, ec);
         return false;
     }
-    std::filesystem::rename(temporary, archive, ec);
+    RenameProjectPath(temporary, archive, ec);
     if (ec && std::filesystem::is_regular_file(archive)) {
         const auto previous = TemporarySibling(archive);
         std::error_code moveError;
-        std::filesystem::rename(archive, previous, moveError);
+        RenameProjectPath(archive, previous, moveError);
         if (!moveError) {
             ec.clear();
-            std::filesystem::rename(temporary, archive, ec);
+            RenameProjectPath(temporary, archive, ec);
             if (ec) {
                 std::error_code rollback;
-                std::filesystem::rename(previous, archive, rollback);
+                RenameProjectPath(previous, archive, rollback);
                 if (rollback)
                     error =
                         "압축 파일 교체에 실패했습니다. 이전 파일은 임시 위치에 보존했습니다: " +
@@ -604,7 +606,7 @@ std::optional<EditorProject> ImportProject(const std::filesystem::path& archive,
     const auto staging = TemporarySibling(destination);
     if (!StageArchive(archive, staging, error))
         return std::nullopt;
-    std::filesystem::rename(staging, destination, ec);
+    RenameProjectPath(staging, destination, ec);
     if (ec) {
         error = "프로젝트 폴더를 최종 위치로 옮기지 못했습니다.";
         std::filesystem::remove_all(staging, ec);
@@ -709,16 +711,16 @@ bool RestoreProjectBackup(const EditorProject& project, const std::filesystem::p
         }
     }
     const auto previous = TemporarySibling(root);
-    std::filesystem::rename(root, previous, ec);
+    RenameProjectPath(root, previous, ec);
     if (ec) {
         error = "현재 프로젝트를 임시 위치로 옮기지 못했습니다.";
         std::filesystem::remove_all(staging, ec);
         return false;
     }
-    std::filesystem::rename(staging, root, ec);
+    RenameProjectPath(staging, root, ec);
     if (ec) {
         std::error_code rollback;
-        std::filesystem::rename(previous, root, rollback);
+        RenameProjectPath(previous, root, rollback);
         if (rollback) {
             error = "백업 복구 및 이전 프로젝트 롤백에 실패했습니다. 이전 프로젝트는 임시 위치에 "
                     "보존되었습니다: " +

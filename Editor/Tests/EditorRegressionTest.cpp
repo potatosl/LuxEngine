@@ -8,19 +8,23 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QColor>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
 #include <QTemporaryDir>
 #include <QTreeWidget>
 #include <QUndoStack>
+#include <chrono>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <numbers>
@@ -431,6 +435,113 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
           "points before the near plane are not projected");
     Check(!ProjectViewportPoint(camera, view.size(), camera.GetPosition() + forward * 1100),
           "points beyond the far plane are not projected");
+    if (gpu) {
+        QTemporaryDir files;
+        Check(files.isValid(), "alpha material fixture directory exists");
+        const auto model = PathFromUtf8(files.filePath("plane.obj").toUtf8().toStdString());
+        std::ofstream(model)
+            << "v -1 -1 0\nv 1 -1 0\nv 1 1 0\nv -1 1 0\n"
+            << "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1 4/4/1\n";
+        const auto opaque = files.filePath("opaque.png"), partial = files.filePath("partial.png");
+        QImage source(4, 4, QImage::Format_RGBA8888);
+        source.fill(QColor(0, 200, 0, 255));
+        Check(source.save(opaque), "opaque texture writes");
+        source.fill(QColor(0, 200, 0, 128));
+        Check(source.save(partial), "partial-alpha texture writes");
+        Scene materialScene;
+        auto& material =
+            materialScene.CreateEntity("Alpha plane").AddComponent<MeshRendererComponent>();
+        material.meshPath = PathUtf8(model);
+        material.material.baseColorTexture = opaque.toUtf8().toStdString();
+        QImage image;
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
+              "opaque material renders");
+        const auto full = image.pixelColor(200, 150);
+        material.material.baseColorTexture = partial.toUtf8().toStdString();
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image) &&
+                  image.format() == QImage::Format_RGBA8888,
+              "3D readback declares the opaque pipeline's straight alpha format");
+        const auto alpha = image.pixelColor(200, 150);
+        std::cout << "alpha material: opaque=" << full.red() << ',' << full.green() << ','
+                  << full.blue() << ',' << full.alpha() << " partial=" << alpha.red() << ','
+                  << alpha.green() << ',' << alpha.blue() << ',' << alpha.alpha() << '\n';
+        Check(std::abs(alpha.alpha() - 128) <= 1 && std::abs(alpha.green() - full.green()) <= 3,
+              "partial-alpha 3D textures retain their straight color when read through Qt");
+        QImage composite(400, 300, QImage::Format_RGBA8888);
+        composite.fill(Qt::white);
+        {
+            QPainter painter(&composite);
+            painter.drawImage(0, 0, image);
+        }
+        const auto expected = full.green() * (128.0 / 255) + 255 * (127.0 / 255);
+        Check(std::abs(composite.pixelColor(200, 150).green() - expected) <= 3,
+              "Qt viewport compositing never applies the material alpha twice");
+        auto settings = materialScene.GetSettings();
+        settings.render3D.mode = Render3DMode::Pbr;
+        settings.render3D.imageBasedLighting = false;
+        settings.render3D.shadows = true;
+        Check(materialScene.SetSettings(settings), "PBR Qt fixture settings apply");
+        material.material.baseColorTexture = opaque.toUtf8().toStdString();
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
+              "PBR opaque Qt image renders");
+        const auto pbrOpaque = image.pixelColor(200, 150);
+        material.material.baseColorTexture = partial.toUtf8().toStdString();
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
+              "PBR partial-alpha Qt image renders");
+        const auto pbrPartial = image.pixelColor(200, 150);
+        Check(std::abs(pbrPartial.alpha() - 128) <= 1 &&
+                  std::abs(pbrPartial.green() - pbrOpaque.green()) <= 3,
+              "HDR tone mapping preserves straight-alpha material color");
+        Check(image.pixelColor(0, 0).alpha() == 0, "HDR editor background stays transparent");
+        settings.exposure = 2.25f;
+        Check(materialScene.SetSettings(settings), "shared rendering exposure applies");
+        Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
+              "editor exposure comparison renders");
+        const auto editorPixel = image.pixelColor(200, 150);
+        auto* device = renderer->GetGpuDevice();
+        Check(device->RequestFrameCapture() && device->BeginFrame() == GpuDevice::FrameStart::Ready,
+              "runtime-path comparison frame begins");
+        device->Clear(0, 0, 0, 0);
+        {
+            Renderer3D::Context runtimeContext(device);
+            Renderer3D::ScopedContext scoped(runtimeContext);
+            const auto parityCamera = MakeViewportCamera3D(QSizeF(400, 300), {}, 0, 0, 5);
+            Renderer3D::BeginScene(parityCamera, settings.render3D, settings.exposure);
+            materialScene.OnRender3D();
+            Renderer3D::EndScene();
+        }
+        Check(device->EndFrame(), "runtime-path comparison submits after context release");
+        GpuFrameCapture runtimeCapture;
+        Check(device->ReadFrameCapture(runtimeCapture), "runtime-path comparison capture reads");
+        const size_t offset = (150 * 400 + 200) * 4;
+        Check(
+            std::abs(runtimeCapture.rgba[offset] - editorPixel.red()) <= 2 &&
+                std::abs(runtimeCapture.rgba[offset + 1] - editorPixel.green()) <= 2 &&
+                std::abs(runtimeCapture.rgba[offset + 2] - editorPixel.blue()) <= 2,
+            "editor and runtime scene path agree for identical camera and post-lighting exposure");
+        settings.render3D.showSkybox = true;
+        Check(materialScene.SetSettings(settings), "skybox composition settings apply");
+        QImage background, foreground;
+        const auto skyboxDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        do {
+            Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, foreground, &background),
+                  "editor skybox and foreground render separately");
+            if (background.pixelColor(0, 0).alpha() == 255)
+                break;
+        } while (std::chrono::steady_clock::now() < skyboxDeadline);
+        Check(background.pixelColor(0, 0).alpha() == 255 &&
+                  foreground.pixelColor(0, 0).alpha() == 0,
+              "skybox remains opaque beneath transparent object-only foreground");
+        QImage layered = background;
+        {
+            QPainter painter(&layered);
+            painter.setPen(QColor(255, 0, 0));
+            painter.drawLine(0, 0, 30, 0);
+            painter.drawImage(0, 0, foreground);
+        }
+        Check(layered.pixelColor(10, 0).red() == 255 && layered.pixelColor(10, 0).green() == 0,
+              "editor grid remains visible above skybox outside object coverage");
+    }
     if (gpu)
         Check(renderer->GetGpuDevice()->GetCounters().validationErrors == 0,
               "3D regression emits no Vulkan validation errors");

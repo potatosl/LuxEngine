@@ -5,6 +5,7 @@ param(
     [switch]$IncludeEditorDeps
 )
 
+. (Join-Path $PSScriptRoot "Utf8.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 

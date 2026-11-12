@@ -5,6 +5,7 @@ param(
     [switch]$RequireGpu = $false
 )
 
+. (Join-Path $PSScriptRoot "Utf8.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
