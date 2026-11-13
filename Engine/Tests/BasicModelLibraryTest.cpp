@@ -4,10 +4,10 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <set>
 #include <stdexcept>
-#include <thread>
 
 namespace {
 namespace fs = std::filesystem;
@@ -164,12 +164,14 @@ void ConcurrentInstallation() {
     std::array<std::string, 4> errors;
     std::array<bool, 4> installed{};
     {
-        std::array<std::jthread, 4> workers;
+        std::array<std::future<void>, 4> workers;
         for (size_t index = 0; index < workers.size(); ++index)
-            workers[index] = std::jthread([&, index] {
+            workers[index] = std::async(std::launch::async, [&, index] {
                 installed[index] = BasicModelLibrary::InstallIntoProject(
                     "shape-cube", fixture.project, installations[index], errors[index]);
             });
+        for (auto& worker : workers)
+            worker.get();
     }
     for (size_t index = 0; index < installed.size(); ++index)
         Check(installed[index] && errors[index].empty() &&
