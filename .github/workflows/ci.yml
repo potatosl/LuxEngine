@@ -48,6 +48,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python
+        id: python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -113,6 +114,7 @@ jobs:
           $prefixPath = "C:/LuxDeps;$env:QT_ROOT_DIR"
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
             -DLUX_BUILD_TESTS=ON -DLUX_BUILD_EDITOR=ON `
+            "-DPython3_EXECUTABLE=${{ steps.python.outputs.python-path }}" `
             "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows "-DCMAKE_PREFIX_PATH=$prefixPath" `
             2>&1 | Tee-Object "$env:RUNNER_TEMP/configure-windows.log"
