@@ -197,7 +197,7 @@ bool EditorWindow::OpenProjectScene(const std::filesystem::path& file) {
         return SwitchSceneDocument(existing);
     StopPreview();
     EndTimelineEdit();
-    EndViewportEdit();
+    CancelViewportEdit();
     const auto previousTab = document_.GetActiveTabId();
     sceneProjects_[previousTab] = project_;
     const bool owned = project_ && project_->ContainsScene(file);
@@ -245,6 +245,8 @@ void EditorWindow::RecoverAutosaveIfNeeded() {
 }
 
 void EditorWindow::AutoSaveScene() {
+    if (!viewportEditBefore_.isEmpty())
+        return;
     if (previewActive_)
         return;
     for (const auto& tab : document_.ListTabs()) {
@@ -273,7 +275,7 @@ void EditorWindow::AutoSaveScene() {
 bool EditorWindow::ConfirmDiscardChanges() {
     StopPreview();
     EndTimelineEdit();
-    EndViewportEdit();
+    CancelViewportEdit();
     const auto tabs = document_.ListTabs();
     const auto count =
         std::count_if(tabs.begin(), tabs.end(), [](const auto& tab) { return tab.dirty; });
@@ -289,6 +291,7 @@ bool EditorWindow::ConfirmDiscardChanges() {
 }
 
 bool EditorWindow::SaveScene(bool choosePath) {
+    CancelViewportEdit();
     StopPreview();
     const auto previous = document_.GetPath();
     bool saved = false;

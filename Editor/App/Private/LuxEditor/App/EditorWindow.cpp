@@ -27,6 +27,7 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QInputDialog>
+#include <QItemSelectionModel>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -183,6 +184,7 @@ EditorWindow::EditorWindow(QWidget* parent)
 }
 
 EditorWindow::~EditorWindow() {
+    CancelViewportEdit();
     StopAnimationPlayback();
     autosaveTimer_.stop();
     previewTimer_.stop();
@@ -255,12 +257,20 @@ void EditorWindow::BuildMenus() {
         [this] { close(); });
     BuildSceneMenus();
     QMenu* edit = menuBar()->addMenu(QStringLiteral("편집"));
-    undoAction_ = undo_->createUndoAction(this, QStringLiteral("실행 취소"));
-    undoAction_->setShortcut(QKeySequence::Undo);
-    edit->addAction(undoAction_);
-    redoAction_ = undo_->createRedoAction(this, QStringLiteral("다시 실행"));
-    redoAction_->setShortcut(QKeySequence::Redo);
-    edit->addAction(redoAction_);
+    undoAction_ = add(edit, QStringLiteral("실행 취소"), QStringLiteral("undoEdit"),
+                      QKeySequence::Undo, [this] {
+                          if (!viewportEditBefore_.isEmpty())
+                              CancelViewportEdit();
+                          else
+                              undo_->undo();
+                      });
+    redoAction_ = add(edit, QStringLiteral("다시 실행"), QStringLiteral("redoEdit"),
+                      QKeySequence::Redo, [this] {
+                          if (!viewportEditBefore_.isEmpty())
+                              CancelViewportEdit();
+                          else
+                              undo_->redo();
+                      });
     add(edit, QStringLiteral("복사"), QStringLiteral("copyEntity"), QKeySequence::Copy,
         [this] { CopyEntity(); });
     add(edit, QStringLiteral("붙여넣기"), QStringLiteral("pasteEntity"), QKeySequence::Paste,
@@ -590,6 +600,7 @@ void EditorWindow::RunWithProgress(const QString& message, const std::function<v
 }
 
 void EditorWindow::closeEvent(QCloseEvent* event) {
+    CancelViewportEdit();
     StopPreview();
     StopSceneWindow();
     CancelBuild();
@@ -786,17 +797,35 @@ void EditorWindow::RefreshHierarchy() {
             hierarchy_->addTopLevelItem(found->second);
         found->second->setExpanded(initial || expanded.contains(entity.GetId()) ||
                                    !hierarchySearch_->text().isEmpty());
-        if (selected && selected.GetId() == entity.GetId())
-            hierarchy_->setCurrentItem(found->second);
+        found->second->setSelected(document_.IsSelected(entity.GetId()));
+    }
+    if (selected) {
+        const auto active = items.find(selected.GetId());
+        if (active != items.end())
+            hierarchy_->setCurrentItem(active->second, 0, QItemSelectionModel::NoUpdate);
     }
     refreshingHierarchy_ = false;
 }
 
 void EditorWindow::RefreshInspector() {
     refreshingInspector_ = true;
+    if (auto* space = findChild<QComboBox*>(QStringLiteral("transformSpace"))) {
+        const QSignalBlocker blocker(space);
+        space->setCurrentIndex(static_cast<int>(document_.GetTransformSpace()));
+    }
+    if (auto* pivot = findChild<QComboBox*>(QStringLiteral("selectionPivot"))) {
+        const QSignalBlocker blocker(pivot);
+        pivot->setCurrentIndex(static_cast<int>(document_.GetSelectionPivotMode()));
+    }
     LuxEngine::Entity selected = document_.GetSelected();
-    selectionLabel_->setText(selected ? QStringLiteral("엔티티 #%1").arg(selected.GetId())
-                                      : QStringLiteral("선택된 엔티티 없음"));
+    const auto count = document_.GetSelection().size();
+    selectionLabel_->setText(
+        count > 1  ? QStringLiteral("%1개 선택 · 활성 #%2").arg(count).arg(selected.GetId())
+        : selected ? QStringLiteral("엔티티 #%1").arg(selected.GetId())
+                   : QStringLiteral("선택된 엔티티 없음"));
+    selectionLabel_->setToolTip(
+        QStringLiteral("표시 값은 활성 오브젝트 기준입니다. Transform 필드를 변경하면 선택된 "
+                       "오브젝트에 함께 적용합니다."));
     animationPanel_->setEnabled(
         selected && selected.HasComponent<LuxEngine::TransformComponent>() && !previewActive_);
     animationTarget_->setText(selected ? QStringLiteral("대상 · 엔티티 #%1").arg(selected.GetId())
@@ -935,6 +964,12 @@ void EditorWindow::RefreshInspector() {
 }
 
 void EditorWindow::UpdateChrome() {
+    if (undoAction_)
+        undoAction_->setEnabled(!previewActive_ &&
+                                (!viewportEditBefore_.isEmpty() || undo_->canUndo()));
+    if (redoAction_)
+        redoAction_->setEnabled(!previewActive_ &&
+                                (!viewportEditBefore_.isEmpty() || undo_->canRedo()));
     const QString name = document_.GetPath().empty() ? QStringLiteral("새 장면")
                                                      : QFileInfo(Q(document_.GetPath())).fileName();
     const QString projectName =
@@ -954,17 +989,6 @@ void EditorWindow::UpdateChrome() {
                             restoreAction_, rescanAction_})
         if (action)
             action->setEnabled(project_.has_value());
-}
-
-void EditorWindow::SelectEntity(std::optional<LuxEngine::uint32> id, bool syncHierarchy) {
-    StopAnimationPlayback();
-    document_.Select(id);
-    if (syncHierarchy)
-        RefreshHierarchy();
-    RefreshInspector();
-    canvas_->RefreshScene();
-    canvas3D_->RefreshScene();
-    overviewCanvas_->RefreshScene();
 }
 
 void EditorWindow::AddEntity() {
@@ -1020,11 +1044,7 @@ void EditorWindow::DeleteEntity() {
     const auto selected = document_.GetSelected();
     if (!selected)
         return;
-    std::vector<LuxEngine::uint32> ids;
-    for (auto* item : hierarchy_->selectedItems())
-        ids.push_back(item->data(0, Qt::UserRole).toUInt());
-    if (std::find(ids.begin(), ids.end(), selected.GetId()) == ids.end())
-        ids = {selected.GetId()};
+    const auto ids = document_.GetSelection();
     RecordEdit(QStringLiteral("엔티티 삭제"), [this, ids] {
         auto& scene = document_.GetScene();
         for (const auto id : ids)
@@ -1064,11 +1084,15 @@ void EditorWindow::OnTransformChanged(int row, int axis) {
         return;
     // Display values can be rounded or clamped; write only the field that the user edited.
     RecordEdit(QStringLiteral("변환 변경"), [this, row, axis] {
-        auto& value = document_.GetSelected().GetComponent<LuxEngine::TransformComponent>();
-        auto& vector = row == 0 ? value.position : row == 1 ? value.rotation : value.scale;
-        const std::array<float*, 3> components{&vector.x, &vector.y, &vector.z};
-        float edited = static_cast<float>(transform_[row][axis]->value());
-        *components[axis] = row == 1 ? LuxEngine::ToRadians(edited) : edited;
+        const auto edited = static_cast<float>(transform_[row][axis]->value());
+        for (const auto id : document_.GetSelection()) {
+            auto* value = document_.GetScene().TryGetComponent<LuxEngine::TransformComponent>(id);
+            if (!value)
+                continue;
+            auto& vector = row == 0 ? value->position : row == 1 ? value->rotation : value->scale;
+            const std::array<float*, 3> components{&vector.x, &vector.y, &vector.z};
+            *components[axis] = row == 1 ? LuxEngine::ToRadians(edited) : edited;
+        }
         document_.MarkDirty();
     });
     canvas_->RefreshScene();
@@ -1215,6 +1239,7 @@ void EditorWindow::OnPhysicsChanged(const QWidget* field) {
 }
 
 void EditorWindow::StartPreview() {
+    CancelViewportEdit();
     // 개발 중: 전체 게임 런타임 임베딩 대신 엔진 Scene의 물리·애니메이션만 실행합니다.
     if (previewActive_)
         return;
@@ -1334,7 +1359,7 @@ void EditorWindow::SetTool(EditorTool tool) {
         SetAnimationTool(tool);
         return;
     }
-    EndViewportEdit();
+    CancelViewportEdit();
     EndTimelineEdit();
     canvas_->CancelInteraction();
     overviewCanvas_->CancelInteraction();
@@ -1355,59 +1380,13 @@ void EditorWindow::SetTool(EditorTool tool) {
     tilePalette_->setEnabled(tool == EditorTool::TileBrush);
 }
 
-void EditorWindow::BeginViewportEdit() {
-    viewportEditBefore_ = SnapshotScene();
-    if (!document_.IsDirty() && !viewportEditBefore_.isEmpty())
-        cleanScenes_[document_.GetActiveTabId()] = viewportEditBefore_;
-    viewportEditSelected_ = SelectedId(document_);
-}
-
-void EditorWindow::ApplyViewportTransform(LuxEngine::uint32 id,
-                                          const LuxEngine::TransformComponent& value) {
-    if (previewActive_)
-        return;
-    LuxEngine::Entity selected = document_.GetSelected();
-    if (!selected || selected.GetId() != id ||
-        !selected.HasComponent<LuxEngine::TransformComponent>())
-        return;
-    if (!document_.GetScene().SetWorldTransform(id, value))
-        return;
-    document_.MarkDirty();
-    RefreshInspector();
-    canvas_->RefreshScene();
-    canvas3D_->RefreshScene();
-    overviewCanvas_->RefreshScene();
-    UpdateChrome();
-}
-
-void EditorWindow::EndViewportEdit() {
-    if (viewportEditBefore_.isEmpty())
-        return;
-    const auto after = SnapshotScene();
-    const auto next = SelectedId(document_);
-    if (!viewportEditBefore_.isEmpty() && !after.isEmpty() && viewportEditBefore_ != after) {
-        const char* names[] = {"선택", "이동", "회전", "크기", "타일 붓", "타일 지우개"};
-        const QString title =
-            QString::fromUtf8(names[static_cast<int>(tool_)]) + QStringLiteral(" 도구");
-        const auto before = viewportEditBefore_;
-        const auto previous = viewportEditSelected_;
-        const auto tab = document_.GetActiveTabId();
-        PushSceneCommand(new SceneEditCommand(
-            title, [this, tab, before, previous] { RestoreSceneAt(tab, before, previous); },
-            [this, tab, after, next] { RestoreSceneAt(tab, after, next); }, {tab},
-            SceneHistoryBytes(before) + SceneHistoryBytes(after)));
-        UpdateSceneDirty(tab, after);
-    }
-    viewportEditBefore_.clear();
-    viewportEditSelected_.reset();
-}
-
 EditorSnapshot EditorWindow::SnapshotScene() {
     std::string serialized;
     if (!document_.GetScene().SerializeToString(serialized))
         return {};
     EditorSnapshot snapshot;
     snapshot.scene = QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+    snapshot.selection = document_.GetSelection();
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities())
         if (entity.HasComponent<LuxEngine::AnimationComponent>())
             snapshot.animationTimes.emplace_back(
@@ -1424,6 +1403,7 @@ void EditorWindow::RestoreScene(const EditorSnapshot& snapshot,
     restoringHistory_ = true;
     const bool restored = document_.ReplaceSceneFromData(serialized, selected);
     if (restored) {
+        document_.SetSelection(snapshot.selection, selected);
         for (const auto& [id, time] : snapshot.animationTimes)
             if (auto* animation =
                     document_.GetScene().TryGetComponent<LuxEngine::AnimationComponent>(id))
@@ -1443,6 +1423,7 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
         return;
     }
     const auto tabId = document_.GetActiveTabId();
+    CancelViewportEdit();
     const auto before = SnapshotScene();
     if (!document_.IsDirty() && !before.isEmpty())
         cleanScenes_[document_.GetActiveTabId()] = before;
