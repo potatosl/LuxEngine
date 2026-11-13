@@ -1,5 +1,4 @@
-#include "Vulkan/VulkanDevice.hpp"
-#include "Vulkan/VulkanScene3D.hpp"
+#include "RHI/RenderBackend.hpp"
 #include <LuxEngine/Assets/AssetManager.hpp>
 #include <LuxEngine/Core/Log.hpp>
 #include <LuxEngine/Renderer/Renderer3D/Renderer3D.hpp>
@@ -18,6 +17,9 @@ namespace {
 constexpr size_t MaxSubmitVertices = 3 * 16384;
 constexpr size_t MaxPointLights = 16;
 
+// Entry cap of the mesh and texture caches. The 256 MiB byte budgets do the real limiting; a
+// small cap (it was 32) made scenes with more unique assets evict and re-upload every frame (#35).
+constexpr size_t MaxCachedAssets = 4096;
 constexpr std::array<Vec3, 8> CubePositions{{{-0.5f, -0.5f, -0.5f},
                                              {0.5f, -0.5f, -0.5f},
                                              {0.5f, 0.5f, -0.5f},
@@ -37,7 +39,8 @@ Vec3 TransformPoint(const Mat4& m, const Vec3& v) {
             e[2] * v.x + e[6] * v.y + e[10] * v.z + e[14]};
 }
 
-bool SameOwner(const std::weak_ptr<Vk::DeviceState>& a, const std::weak_ptr<Vk::DeviceState>& b) {
+bool SameOwner(const std::weak_ptr<Rhi::RenderBackend>& a,
+               const std::weak_ptr<Rhi::RenderBackend>& b) {
     return !a.owner_before(b) && !b.owner_before(a);
 }
 
@@ -52,7 +55,7 @@ Renderer3D::Context& DefaultContext3D() {
 
 struct Renderer3D::Context::Impl {
     GpuDevice* device = nullptr;
-    std::weak_ptr<Vk::DeviceState> deviceOwner;
+    std::weak_ptr<Rhi::RenderBackend> deviceOwner;
     Mat4 viewProjection;
     DirectionalLight light;
     std::vector<PointLight> pointLights;
@@ -64,8 +67,7 @@ struct Renderer3D::Context::Impl {
     Render3DSettings settings;
     float exposure = 1;
     PerspectiveCamera sceneCamera;
-    std::unique_ptr<Vk::Scene3DRenderer> modern;
-    std::vector<Vk::SceneDraw> draws;
+    std::unique_ptr<Rhi::Scene3DRenderer> modern;
 
     struct CachedMesh {
         Ref<Mesh3D> mesh;
@@ -110,7 +112,7 @@ struct Renderer3D::Context::Impl {
     uint64 sequence = 0;
     size_t meshBytes = 0;
 
-    std::shared_ptr<Vk::DeviceState> LockValidState() {
+    std::shared_ptr<Rhi::RenderBackend> LockValidState() {
         if (!device)
             return nullptr;
         auto locked = deviceOwner.lock();
@@ -223,8 +225,9 @@ Renderer3D::Context& Renderer3D::Context::operator=(Context&& other) noexcept = 
 void Renderer3D::Context::Init(GpuDevice* gpu) {
     if (!impl_)
         impl_ = std::make_unique<Impl>();
-    const std::weak_ptr<Vk::DeviceState> nextOwner =
-        gpu ? std::weak_ptr<Vk::DeviceState>(gpu->state_) : std::weak_ptr<Vk::DeviceState>{};
+    const std::weak_ptr<Rhi::RenderBackend> nextOwner =
+        gpu ? std::weak_ptr<Rhi::RenderBackend>(gpu->backend_)
+            : std::weak_ptr<Rhi::RenderBackend>{};
     if (impl_->device == gpu && SameOwner(impl_->deviceOwner, nextOwner) && !impl_->active) {
         impl_->vertices.clear();
         impl_->pointLights.clear();
@@ -241,7 +244,8 @@ void Renderer3D::Context::Shutdown() {
     if (!impl_)
         return;
     impl_->vertices.clear();
-    impl_->draws.clear();
+    if (impl_->modern)
+        impl_->modern->ClearDraws();
     impl_->modern.reset();
     impl_->meshes.clear();
     impl_->textures.clear();
@@ -287,7 +291,8 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
     impl_->pbr = false;
     impl_->camera = camera.GetPosition();
     impl_->sceneCamera = camera;
-    impl_->draws.clear();
+    if (impl_->modern)
+        impl_->modern->ClearDraws();
     impl_->lastError.clear();
     impl_->viewProjection = camera.GetViewProjectionMatrix();
     const float sunIntensity = std::isfinite(sun.intensity) ? std::max(0.0f, sun.intensity) : 0.0f;
@@ -365,13 +370,15 @@ void Renderer3D::Context::EndScene() {
     if (impl_->pbr) {
         if (auto state = impl_->LockValidState()) {
             if (!impl_->modern)
-                impl_->modern = std::make_unique<Vk::Scene3DRenderer>(state);
-            std::string error;
-            impl_->modern->Render(impl_->sceneCamera, impl_->settings, impl_->exposure,
-                                  impl_->draws, error);
-            impl_->Report("render3D", error);
+                impl_->modern = state->CreateScene3DRenderer();
+            if (impl_->modern) {
+                std::string error;
+                impl_->modern->Render(impl_->sceneCamera, impl_->settings, impl_->exposure, error);
+                impl_->Report("render3D", error);
+            }
         }
-        impl_->draws.clear();
+        if (impl_->modern)
+            impl_->modern->ClearDraws();
     }
     if (auto lockedState = impl_->LockValidState()) {
         const std::span<const RenderVertex> all(impl_->vertices);
@@ -461,17 +468,15 @@ void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
     if (!lockedState)
         return;
     if (impl_->pbr) {
-        const auto* vertex = lockedState->buffers.Get(mesh.vertices_.handle_);
-        const auto* index = lockedState->buffers.Get(mesh.indices_.handle_);
         if (texture && !texture->BelongsTo(*impl_->device))
             return;
-        const auto* image =
-            lockedState->textures.Get(texture ? texture->handle_ : lockedState->whiteTexture);
-        if (!vertex || !index || !image || impl_->draws.size() >= 65536)
+        if (!impl_->modern)
+            impl_->modern = lockedState->CreateScene3DRenderer();
+        if (!impl_->modern || impl_->modern->DrawCount() >= 65536 ||
+            !impl_->modern->AddDraw({mesh.vertices_.handle_, mesh.indices_.handle_,
+                                     texture ? texture->handle_ : 0, mesh.indexCount_, transform,
+                                     material.albedoColor, material.metallic, material.roughness}))
             return;
-        impl_->draws.push_back({vertex->buffer, index->buffer, image->set, mesh.indexCount_,
-                                transform, material.albedoColor, material.metallic,
-                                material.roughness});
         ++impl_->stats.meshCount;
         ++impl_->stats.drawCalls;
         return;
@@ -488,7 +493,7 @@ GpuTexture* Renderer3D::Context::ResolveBaseColorTexture(const std::string& path
         return nullptr;
     auto found = impl_->textures.find(path);
     if (found == impl_->textures.end()) {
-        if (impl_->textures.size() >= 32) {
+        if (impl_->textures.size() >= MaxCachedAssets) {
             const auto oldest = std::min_element(
                 impl_->textures.begin(), impl_->textures.end(),
                 [](const auto& a, const auto& b) { return a.second.used < b.second.used; });
@@ -559,7 +564,7 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
         return false;
     auto found = impl_->meshes.find(path);
     if (found == impl_->meshes.end()) {
-        if (impl_->meshes.size() >= 32) {
+        if (impl_->meshes.size() >= MaxCachedAssets) {
             const auto oldest = std::min_element(
                 impl_->meshes.begin(), impl_->meshes.end(),
                 [](const auto& a, const auto& b) { return a.second.used < b.second.used; });
@@ -642,7 +647,7 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
                 const auto asset = path.empty() ? std::string("기본 큐브") : path;
                 cached.error = missingUv ? "텍스처를 적용할 UV 좌표가 없는 OBJ입니다: " + asset
                                : !loaded ? "OBJ 메시를 읽지 못했습니다: " + asset
-                               : !room   ? "메시 캐시 예산을 초과했습니다: " + asset
+                               : !room ? "메시 캐시 예산을 초과했습니다: " + asset
                                        : "GPU 메시 업로드 실패: " + impl_->device->GetLastError() +
                                              " / " + asset;
             }

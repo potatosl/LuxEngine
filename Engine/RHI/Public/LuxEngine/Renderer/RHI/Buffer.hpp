@@ -6,8 +6,8 @@
 namespace LuxEngine {
 class GpuDevice;
 
-namespace Vk {
-struct DeviceState;
+namespace Rhi {
+class RenderBackend;
 }
 
 enum class BufferType { Vertex, Index, Uniform, Storage };
@@ -40,7 +40,7 @@ public:
 private:
     friend class GpuDevice;
     friend class Renderer3D;
-    std::weak_ptr<Vk::DeviceState> owner_;
+    std::weak_ptr<Rhi::RenderBackend> owner_;
     uint64 handle_ = 0;
     BufferType type_ = BufferType::Vertex;
     uint32 sizeBytes_ = 0;

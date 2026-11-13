@@ -1,0 +1,24 @@
+#include "LuxSceneResources.h"
+
+STRUCT(FullscreenOutput)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float2, uv, TEXCOORD0);
+};
+
+// Port of Shaders/Tone.frag.hlsl. The HDR image has the size of the swap chain, so the pixel is
+// read directly. Alpha 0 marks pixels no 3D geometry touched: they are discarded so the clear
+// colour and anything drawn earlier this frame stay visible.
+ROOT_SIGNATURE(DefaultRootSignature)
+float4 PS_MAIN(FullscreenOutput In)
+{
+    INIT_MAIN;
+    float4 color = LoadTex2D(gHdrImage, NO_SAMPLER, int2(In.position.xy), 0);
+    if (color.a <= 0.0f)
+        discard;
+    color.rgb = max(color.rgb * gScene.camera.w, 0.0f);
+    if (gScene.options.z > 0.5f)
+        color.rgb = saturate((color.rgb * (2.51f * color.rgb + 0.03f)) / (color.rgb * (2.43f * color.rgb + 0.59f) + 0.14f));
+    color.rgb = lerp(12.92f * color.rgb, 1.055f * pow(color.rgb, 1.0f / 2.4f) - 0.055f, step(0.0031308f, color.rgb));
+    RETURN(color);
+}

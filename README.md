@@ -20,14 +20,18 @@ Linux(Xvfb + Mesa lavapipe)에서 빌드·테스트를 검증했습니다. Windo
 | 구성 요소 | 용도 | 적용 상태 |
 |---|---|---|
 | SDL3 (3.2 이상) | 창, 입력, 오디오, 시스템 테마 감지, Vulkan 표면 생성 | 통합 |
-| Vulkan SDK / 로더 (1.1 이상) | 모든 GPU 렌더링, 검증 레이어 | 통합 |
+| Vulkan SDK / 로더 (1.1 이상) | 기본 GPU 렌더링, 검증 레이어 | 통합 |
 | Vulkan Memory Allocator | GPU 메모리 할당·예산 | 통합 (Vulkan SDK 포함) |
 | stb_image | PNG·JPEG·BMP 등 이미지 디코딩 | 고정 커밋으로 통합 |
 | DXC 또는 glslc | HLSL을 SPIR-V로 컴파일, spirv-val로 검증 | Vulkan SDK 또는 포터블 DXC |
 | 자체 ECS·수학 모듈 | 엔티티, 컴포넌트, 벡터, 행렬 | 구현 |
 | 자체 테스트 실행 파일 | 기능·오류 경로·GPU 검증 | CTest 연결 |
 
-CMake는 의존성을 내려받지 않고 설치된 SDL3·box2d·Vulkan·VMA·stb_image를 찾습니다. VMA는 `VulkanMemoryAllocator` CMake 패키지 또는 Vulkan SDK의 `vk_mem_alloc.h`를 사용합니다. 셰이더 컴파일러는 Vulkan SDK의 dxc, `Tools/SetupShaderCompiler.ps1`의 포터블 dxc, glslc 순서로 찾습니다. Windows SDK의 dxc는 SPIR-V를 생성하지 못하므로 사용하지 않습니다.
+CMake는 의존성을 내려받지 않고 설치된 SDL3·box2d·Vulkan·VMA·stb_image·nlohmann_json을 찾습니다. VMA는 `VulkanMemoryAllocator` CMake 패키지 또는 Vulkan SDK의 `vk_mem_alloc.h`를 사용합니다. 셰이더 컴파일러는 Vulkan SDK의 dxc, `tools/SetupShaderCompiler.ps1`의 포터블 dxc, glslc 순서로 찾습니다. Windows SDK의 dxc는 SPIR-V를 생성하지 못하므로 사용하지 않습니다.
+
+### 선택적 The Forge 백엔드
+
+기본 렌더러는 Native Vulkan입니다. Windows/MSVC에서는 `-DLUX_ENABLE_FORGE=ON`으로 The Forge의 Direct3D 12 경로를 `LuxForge.dll`로 추가 빌드하고, 실행 시 `LUX_RENDER_BACKEND=forge`로 선택할 수 있습니다. Forge를 켜도 Vulkan SDK와 기존 엔진 의존성은 필요합니다. 외부 소스 준비, 빌드·실행·테스트 명령과 단일 디바이스 제약은 [The Forge 백엔드](docs/TheForge.md)를 참고하세요. 기본 CI는 Forge를 끈 상태로 실행합니다.
 
 ### 설치된 의존성과 오프라인 빌드
 
@@ -42,52 +46,46 @@ LuxEngine/
 ├── CMakeLists.txt
 ├── CMakePresets.json
 ├── README.md
-├── Assets/
-│   └── Branding/              # 다크·라이트 창 로고 원본
 ├── Engine/
-│   ├── Core/                  # 기본 타입, 수학, 이벤트, 타이머, 로거
-│   ├── Platform/              # 창, 입력, 테마별 아이콘
+│   ├── Core/, ECS/, Scene/     # 기본 타입, 엔티티, 씬
+│   ├── Platform/, Application/ # 창·입력, 애플리케이션 수명
+│   ├── RHI/Public/LuxEngine/   # 공개 GPU API: 디바이스, 버퍼, 텍스처
 │   ├── Renderer/
-│   │   ├── RHI/               # 공개 GPU API: 디바이스, 버퍼, 텍스처
-│   │   ├── Vulkan/            # Native Vulkan 백엔드 (내부 구현)
-│   │   ├── Renderer2D/        # 사각형·스프라이트 배치
-│   │   └── Renderer3D/        # 메시·방향광·깊이 테스트
-│   ├── Scene/                 # 씬, 엔티티, 저장·복원
-│   ├── ECS/                   # 공통 컴포넌트
-│   ├── Physics/               # 기본 운동과 바닥 충돌
-│   ├── Audio/                 # WAV 효과음·음악
-│   ├── Animation/             # 키프레임 애니메이션
-│   ├── Assets/                # 이미지·OBJ·셰이더 로딩
-│   ├── Application.hpp/.cpp
-│   └── LuxEngine.hpp
-├── Runtime/                   # 런타임 모듈
-├── Sandbox/                   # 데모 애플리케이션
-├── Tests/                     # 회귀·통합 테스트
-├── Shaders/                   # HLSL 셰이더 (SPIR-V로 컴파일)
-├── Tools/                     # 빌드·IDE 실행·DXC 설치
+│   │   ├── Public/LuxEngine/  # 2D·3D 렌더러 공개 API
+│   │   └── Private/           # RHI 구현, Vulkan, Forge, 2D·3D 렌더러
+│   ├── Assets/, Environment/  # 메시·이미지·환경 데이터
+│   ├── Physics/, Audio/, Animation/
+│   ├── Runtime/               # 독립 씬 플레이어·런타임
+│   ├── Resources/             # 로고·캐릭터 원본
+│   ├── Shaders/               # Vulkan HLSL 셰이더
+│   └── Tests/                 # 엔진·런타임 회귀 검사
+├── Editor/                    # 별도 Qt 에디터
+├── samples/                   # 실행 가능한 게임 샘플
+├── examples/                  # SDK·3D 렌더링 예제
+├── tools/                     # 빌드·배포·셰이더 도구
 └── cmake/                     # 의존성·셰이더·로고 내장 설정
 ```
 
-`build/`는 생성 파일과 의존성 다운로드를 담고 Git에서 제외합니다. 로고 PNG는 빌드 중 엔진 바이너리에 포함됩니다.
+엔진 모듈은 `Public/LuxEngine/`의 공개 헤더와 `Private/` 구현을 분리하며, 공개 헤더는 `<LuxEngine/...>`로 포함합니다. `build/`는 생성 파일을 담고 Git에서 제외합니다. `Engine/Resources/Branding/`의 로고 PNG는 빌드 중 엔진 바이너리에 포함됩니다.
 
 ## 4. 빌드 및 실행 방법
 
 ### 방법 A: Visual Studio
 
 1. Visual Studio 2026에서 최상위 프로젝트 폴더를 엽니다.
-2. 최초 빌드 전에 `Tools/SetupShaderCompiler.ps1`을 실행합니다.
+2. 최초 빌드 전에 `tools/SetupShaderCompiler.ps1`을 실행합니다.
 3. Debug 또는 Release 프리셋을 선택합니다.
-4. `LuxEngineDemo`를 시작 대상으로 빌드하고 실행합니다.
+4. `SampleBasic2D`를 시작 대상으로 빌드하고 실행합니다.
 
 ### 방법 B: PowerShell 스크립트
 
 ```powershell
-.\Tools\SetupShaderCompiler.ps1
-.\Tools\Build.ps1 -Config Debug
-.\Tools\Build.ps1 -Config Release
+.\tools\SetupShaderCompiler.ps1
+.\tools\Build.ps1 -Config Debug
+.\tools\Build.ps1 -Config Release
 ```
 
-Ninja는 컴파일러 환경이 설정된 개발자 셸에서 `.\Tools\Build.ps1 -Ninja -Config Debug`로 빌드합니다.
+Ninja는 컴파일러 환경이 설정된 개발자 셸에서 `.\tools\Build.ps1 -Ninja -Config Debug`로 빌드합니다.
 
 ### 방법 C: CMake CLI
 
@@ -95,7 +93,7 @@ Ninja는 컴파일러 환경이 설정된 개발자 셸에서 `.\Tools\Build.ps1
 cmake --preset vs2026-x64-debug
 cmake --build --preset vs2026-debug
 ctest --test-dir build/vs2026 -C Debug --output-on-failure
-.\build\vs2026\bin\Debug\LuxEngineDemo.exe
+.\build\vs2026\bin\Debug\SampleBasic2D.exe
 ```
 
 Release 빌드는 `cmake --build --preset vs2026-release`, 검증은 `ctest --test-dir build/vs2026 -C Release --output-on-failure`를 사용합니다. `LUX_BUILD_TESTS=OFF`로 테스트 빌드를 제외할 수 있습니다.
@@ -106,15 +104,15 @@ Release 빌드는 `cmake --build --preset vs2026-release`, 검증은 `ctest --te
 - **C++ 네임스페이스**: `LuxEngine`
 - **엔진 타깃**: `LuxEngine` (`LuxEngine::Engine`)
 - **런타임 타깃**: `LuxRuntime` (`LuxEngine::Runtime`)
-- **데모 실행 파일**: `LuxEngineDemo.exe`
+- **기본 샘플 실행 파일**: `SampleBasic2D.exe`
 - **테스트 실행 파일**: `LuxEngineTests.exe`
 
 ### 시스템 테마와 로고
 
 | Windows 앱 모드 | 창에 표시되는 로고 |
 |---|---|
-| 다크 | 밝은 로고 (`Assets/Branding/dark.png`) |
-| 라이트 | 어두운 로고 (`Assets/Branding/light.png`) |
+| 다크 | 밝은 로고 (`Engine/Resources/Branding/dark.png`) |
+| 라이트 | 어두운 로고 (`Engine/Resources/Branding/light.png`) |
 
 엔진이 생성하는 창에 자동 적용됩니다. 실행 중 시스템 테마가 바뀌면 아이콘도 갱신하며, 사용 프로그램에서 별도 설정이나 이미지 배포를 할 필요가 없습니다.
 

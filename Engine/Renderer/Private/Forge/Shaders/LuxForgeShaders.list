@@ -1,0 +1,67 @@
+#include "defaults.h"
+
+// The Forge binds one graphics and one compute root signature for every pipeline
+// (Graphics/FSL/defaults.h). They are compiled here and loaded by initRootSignature.
+#rootsig default.rootsig
+#include "defaults.h"
+#end
+
+#rootsig compute.rootsig
+#include "defaults.h"
+#end
+
+#vert lux2d.vert
+#include "Lux2D.vert.fsl"
+#end
+
+#frag lux2d.frag
+#include "Lux2D.frag.fsl"
+#end
+
+// Diagnostics (LUX_FORGE_DIAG=color|texture): output only one factor of the 2D shader.
+#frag lux2d_diag_color.frag
+#define LUX_DIAG_COLOR
+#include "Lux2D.frag.fsl"
+#end
+
+#frag lux2d_diag_texture.frag
+#define LUX_DIAG_TEXTURE
+#include "Lux2D.frag.fsl"
+#end
+
+#vert luxmesh.vert
+#include "LuxMesh.vert.fsl"
+#end
+
+#frag luxmesh.frag
+#include "LuxMesh.frag.fsl"
+#end
+
+// HDR 3D scene (Scene3DRenderer): meshes, shadow map, sky and tone mapping.
+#vert luxscene.vert
+#include "LuxScene.vert.fsl"
+#end
+
+#frag luxscene.frag
+#include "LuxScene.frag.fsl"
+#end
+
+#vert luxshadow.vert
+#include "LuxShadow.vert.fsl"
+#end
+
+#frag luxshadow.frag
+#include "LuxShadow.frag.fsl"
+#end
+
+#vert luxfullscreen.vert
+#include "LuxFullscreen.vert.fsl"
+#end
+
+#frag luxsky.frag
+#include "LuxSky.frag.fsl"
+#end
+
+#frag luxtone.frag
+#include "LuxTone.frag.fsl"
+#end

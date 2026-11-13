@@ -1,0 +1,19 @@
+#include "LuxSceneResources.h"
+
+STRUCT(FullscreenOutput)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float2, uv, TEXCOORD0);
+};
+
+// Port of Shaders/Sky.frag.hlsl.
+ROOT_SIGNATURE(DefaultRootSignature)
+float4 PS_MAIN(FullscreenOutput In)
+{
+    INIT_MAIN;
+    const float2 p = In.uv * 2.0f - 1.0f;
+    const float3 direction = normalize(gScene.forward.xyz + p.x * gScene.right.xyz + p.y * gScene.up.xyz);
+    const float3 sky =
+        SampleLvlTexCube(gSkyEnv, gSamplerTrilinearClamp, RotateEnvironment(direction), 0.0f).rgb * gScene.environment.w;
+    RETURN(float4(sky, 1.0f));
+}

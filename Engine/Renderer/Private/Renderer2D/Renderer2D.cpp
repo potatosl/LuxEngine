@@ -1,4 +1,4 @@
-#include "Vulkan/VulkanDevice.hpp"
+#include "RHI/RenderBackend.hpp"
 #include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
 #include <array>
 #include <cmath>
@@ -9,12 +9,13 @@
 namespace LuxEngine {
 namespace {
 struct Batch {
-    std::weak_ptr<Vk::DeviceState> owner;
+    std::weak_ptr<Rhi::RenderBackend> owner;
     uint64 texture = 0;
     std::vector<RenderVertex> vertices;
 };
 
-bool SameOwner(const std::weak_ptr<Vk::DeviceState>& a, const std::weak_ptr<Vk::DeviceState>& b) {
+bool SameOwner(const std::weak_ptr<Rhi::RenderBackend>& a,
+               const std::weak_ptr<Rhi::RenderBackend>& b) {
     return !a.owner_before(b) && !b.owner_before(a);
 }
 
@@ -29,14 +30,14 @@ Renderer2D::Context& DefaultContext2D() {
 
 struct Renderer2D::Context::Impl {
     GpuDevice* device = nullptr;
-    std::weak_ptr<Vk::DeviceState> deviceOwner;
+    std::weak_ptr<Rhi::RenderBackend> deviceOwner;
     Mat4 viewProjection;
     std::vector<Batch> batches;
     size_t usedBatches = 0;
     Renderer2D::Statistics stats;
     bool active = false;
 
-    std::shared_ptr<Vk::DeviceState> LockValidState() {
+    std::shared_ptr<Rhi::RenderBackend> LockValidState() {
         if (!device)
             return nullptr;
         auto locked = deviceOwner.lock();
@@ -49,7 +50,7 @@ struct Renderer2D::Context::Impl {
     }
 
     void Quad(const Vec3& position, const Vec2& size, float angle,
-              const std::weak_ptr<Vk::DeviceState>& owner, uint64 texture, const Vec4& color) {
+              const std::weak_ptr<Rhi::RenderBackend>& owner, uint64 texture, const Vec4& color) {
         if (!active)
             return;
         if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
@@ -114,8 +115,9 @@ Renderer2D::Context& Renderer2D::Context::operator=(Context&& other) noexcept = 
 void Renderer2D::Context::Init(GpuDevice* gpu) {
     if (!impl_)
         impl_ = std::make_unique<Impl>();
-    const std::weak_ptr<Vk::DeviceState> nextOwner =
-        gpu ? std::weak_ptr<Vk::DeviceState>(gpu->state_) : std::weak_ptr<Vk::DeviceState>{};
+    const std::weak_ptr<Rhi::RenderBackend> nextOwner =
+        gpu ? std::weak_ptr<Rhi::RenderBackend>(gpu->backend_)
+            : std::weak_ptr<Rhi::RenderBackend>{};
     if (impl_->device == gpu && SameOwner(impl_->deviceOwner, nextOwner) && !impl_->active) {
         for (size_t i = 0; i < impl_->usedBatches; ++i)
             impl_->batches[i].owner.reset();

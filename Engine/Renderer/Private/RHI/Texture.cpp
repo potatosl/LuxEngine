@@ -1,4 +1,4 @@
-#include "Vulkan/VulkanDevice.hpp"
+#include "RHI/RenderBackend.hpp"
 #include <LuxEngine/Renderer/RHI/GpuDevice.hpp>
 #include <LuxEngine/Renderer/RHI/Texture.hpp>
 
@@ -38,12 +38,11 @@ bool GpuTexture::Initialize(GpuDevice* device, uint32 width, uint32 height, cons
     Release();
     if (!device || !device->IsReady())
         return false;
-    Vk::TextureRecord record;
-    if (!device->state_->CreateTextureResource(width, height, pixelData, record, filter,
-                                               colorSpace))
+    uint64 handle = 0;
+    if (!device->backend_->CreateTexture(width, height, pixelData, filter, colorSpace, handle))
         return false;
-    handle_ = device->state_->textures.Insert(record);
-    owner_ = device->state_;
+    handle_ = handle;
+    owner_ = device->backend_;
     width_ = width;
     height_ = height;
     colorSpace_ = colorSpace;
@@ -51,12 +50,8 @@ bool GpuTexture::Initialize(GpuDevice* device, uint32 width, uint32 height, cons
 }
 
 void GpuTexture::Release() {
-    if (auto owner = owner_.lock()) {
-        Vk::TextureRecord record;
-        if (owner->textures.Remove(handle_, record))
-            owner->Retire({0, VK_NULL_HANDLE, record.image, record.view, record.allocation,
-                           record.pool, record.set});
-    }
+    if (auto owner = owner_.lock())
+        owner->DestroyTexture(handle_);
     owner_.reset();
     handle_ = 0;
     width_ = height_ = 0;
@@ -65,12 +60,12 @@ void GpuTexture::Release() {
 
 bool GpuTexture::IsValid() const {
     auto owner = owner_.lock();
-    return owner && owner->textures.Get(handle_) != nullptr;
+    return owner && owner->HasTexture(handle_);
 }
 
 bool GpuTexture::BelongsTo(const GpuDevice& device) const {
     auto owner = owner_.lock();
-    return owner && owner == device.state_ && owner->textures.Get(handle_) != nullptr;
+    return owner && owner == device.backend_ && owner->HasTexture(handle_);
 }
 
 } // namespace LuxEngine
