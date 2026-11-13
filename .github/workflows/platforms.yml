@@ -1,0 +1,233 @@
+name: Linux and macOS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  QT_QPA_PLATFORM: offscreen
+  LUX_EDITOR_SOFTWARE_VIEWPORT: '1'
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+
+jobs:
+  desktop:
+    name: ${{ matrix.os }} ${{ matrix.configuration }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        configuration: [Debug, Release]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set dependency prefix
+        shell: bash
+        run: printf 'LUX_CI_PREFIX=%s/lux-dependencies\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Checkout pinned The Forge source
+        uses: actions/checkout@v4
+        with:
+          repository: ConfettiFX/The-Forge
+          ref: cd5046893faba2dc7869243873bf01f02a6f0df9
+          path: Engine/ThirdParty/TheForge
+          sparse-checkout: Common_3
+          persist-credentials: false
+
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
+
+      - name: Cache pinned native dependencies
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.LUX_CI_PREFIX }}
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/ci/SetupUnixDependencies.sh') }}
+
+      - name: Install native dependencies
+        shell: bash
+        run: bash tools/ci/SetupUnixDependencies.sh "$LUX_CI_PREFIX"
+
+      - name: Save prepared native dependencies
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.LUX_CI_PREFIX }}
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+
+      - name: Configure engine, editor, samples and tests
+        shell: bash
+        run: |
+          prefix_path="$LUX_CI_PREFIX;$QT_ROOT_DIR"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            prefix_path="$prefix_path;$(brew --prefix)"
+            xcrun --find metal
+          fi
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE="${{ matrix.configuration }}" \
+            -DCMAKE_PREFIX_PATH="$prefix_path" \
+            -DPython3_EXECUTABLE="${{ steps.python.outputs.python-path }}" \
+            -DLUX_BUILD_TESTS=ON -DLUX_BUILD_TOOLS=ON -DLUX_BUILD_EDITOR=ON \
+            -DSTB_IMAGE_INCLUDE_DIR="$LUX_CI_PREFIX/include/stb"
+
+      - name: Build all targets and standalone public headers
+        shell: bash
+        run: cmake --build build --parallel 4
+
+      - name: Run headless engine and editor regression tests
+        shell: bash
+        run: |
+          ctest --test-dir build --output-on-failure --no-tests=error \
+            -L headless -LE 'long|slow' --parallel 2 --timeout 180 \
+            --output-junit headless-results.xml
+
+      - name: Verify installed SDK consumer
+        shell: bash
+        run: |
+          cmake --install build --prefix "$RUNNER_TEMP/lux-sdk"
+          prefix_path="$RUNNER_TEMP/lux-sdk;$LUX_CI_PREFIX"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            prefix_path="$prefix_path;$(brew --prefix)"
+          fi
+          cmake -S samples/MinimalGame -B sdk-consumer -G Ninja \
+            -DCMAKE_BUILD_TYPE="${{ matrix.configuration }}" \
+            -DCMAKE_PREFIX_PATH="$prefix_path"
+          cmake --build sdk-consumer --parallel 2
+          test -f sdk-consumer/MinimalGame
+
+      - name: Upload test and configuration diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unix-${{ runner.os }}-${{ runner.arch }}-${{ matrix.configuration }}-diagnostics
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            build/headless-results.xml
+            build/Testing/Temporary/
+            build/CMakeFiles/CMakeConfigureLog.yaml
+            sdk-consumer/CMakeFiles/CMakeConfigureLog.yaml
+
+  sanitizers:
+    name: Linux ASan and UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set dependency prefix
+        shell: bash
+        run: printf 'LUX_CI_PREFIX=%s/lux-dependencies\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Checkout pinned The Forge source
+        uses: actions/checkout@v4
+        with:
+          repository: ConfettiFX/The-Forge
+          ref: cd5046893faba2dc7869243873bf01f02a6f0df9
+          path: Engine/ThirdParty/TheForge
+          sparse-checkout: Common_3
+          persist-credentials: false
+
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache pinned native dependencies
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.LUX_CI_PREFIX }}
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/ci/SetupUnixDependencies.sh') }}
+
+      - name: Install native dependencies
+        shell: bash
+        run: bash tools/ci/SetupUnixDependencies.sh "$LUX_CI_PREFIX"
+
+      - name: Save prepared native dependencies
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.LUX_CI_PREFIX }}
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+
+      - name: Configure instrumented engine and tests
+        shell: bash
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_PREFIX_PATH="$LUX_CI_PREFIX" \
+            -DPython3_EXECUTABLE="${{ steps.python.outputs.python-path }}" \
+            -DSTB_IMAGE_INCLUDE_DIR="$LUX_CI_PREFIX/include/stb" \
+            -DLUX_BUILD_EDITOR=OFF -DLUX_BUILD_TOOLS=ON -DLUX_BUILD_TESTS=ON \
+            -DLUX_ENABLE_SANITIZERS=ON
+
+      - name: Build instrumented engine regression targets
+        shell: bash
+        run: |
+          cmake --build build --parallel 4 --target \
+            LuxEngineTests LuxSceneCoreTests LuxSceneManagerTests LuxSceneJsonTests \
+            LuxFuzzScene LuxRuntimeTests
+
+      # The hosted CLR owns process-wide allocations; this job exercises native engine paths.
+      - name: Run native memory and undefined behavior regressions
+        shell: bash
+        run: |
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 2 \
+            -R '^(Engine_(core|physics2d|scene|assets|security|scene_management|scene_loading|scene_json|fuzz_seeds)|Runtime_(parse|fit))$' \
+            --timeout 180 --output-junit sanitizers-results.xml
+          build/bin/LuxFuzzScene --runs 10000
+
+      - name: Upload sanitizer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-sanitizers-diagnostics
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            build/sanitizers-results.xml
+            build/Testing/Temporary/
+            build/CMakeFiles/CMakeConfigureLog.yaml

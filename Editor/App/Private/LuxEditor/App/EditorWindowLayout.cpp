@@ -131,10 +131,9 @@ void EditorWindow::BuildLayout() {
     auto* sceneBarLayout = new QHBoxLayout(sceneBar);
     sceneBarLayout->setContentsMargins(8, 2, 8, 2);
     sceneBarLayout->setSpacing(8);
-    sceneBarLayout->addWidget(Caption(QStringLiteral("뷰포트"), sceneBar));
     auto* viewChoice = new QComboBox(sceneBar);
-    viewChoice->addItems({QStringLiteral("3D 원근 화면"), QStringLiteral("2D 평면 화면")});
-    viewChoice->setMinimumWidth(128);
+    viewChoice->addItems({QStringLiteral("3D"), QStringLiteral("2D")});
+    viewChoice->setMinimumWidth(60);
     sceneBarLayout->addWidget(viewChoice);
     auto* projection = new QComboBox(sceneBar);
     projection->setObjectName(QStringLiteral("viewportProjection"));
@@ -146,6 +145,33 @@ void EditorWindow::BuildLayout() {
     });
     connect(viewChoice, &QComboBox::currentIndexChanged, projection,
             [projection](int index) { projection->setVisible(index == 0); });
+    auto* space = new QComboBox(sceneBar);
+    space->setObjectName(QStringLiteral("transformSpace"));
+    space->addItems({QStringLiteral("월드"), QStringLiteral("로컬")});
+    space->setToolTip(QStringLiteral("기즈모 좌표계"));
+    sceneBarLayout->addWidget(space);
+    auto* pivot = new QComboBox(sceneBar);
+    pivot->setObjectName(QStringLiteral("selectionPivot"));
+    pivot->addItems(
+        {QStringLiteral("중앙 피벗"), QStringLiteral("활성 피벗"), QStringLiteral("개별 피벗")});
+    pivot->setToolTip(QStringLiteral("다중 선택 회전·크기 조절의 기준점"));
+    sceneBarLayout->addWidget(pivot);
+    const auto cancelGesture = [this] {
+        canvas_->CancelInteraction();
+        canvas3D_->CancelInteraction();
+        overviewCanvas_->CancelInteraction();
+        CancelViewportEdit();
+    };
+    connect(space, &QComboBox::currentIndexChanged, this, [this, cancelGesture](int index) {
+        cancelGesture();
+        document_.SetTransformSpace(static_cast<TransformSpace>(index));
+        RefreshSelection(false);
+    });
+    connect(pivot, &QComboBox::currentIndexChanged, this, [this, cancelGesture](int index) {
+        cancelGesture();
+        document_.SetSelectionPivotMode(static_cast<SelectionPivot>(index));
+        RefreshSelection(false);
+    });
     sceneBarLayout->addStretch();
     auto* gridVisibility = new QToolButton(sceneBar);
     gridVisibility->setObjectName(QStringLiteral("viewportGridToggle"));
@@ -177,6 +203,8 @@ void EditorWindow::BuildLayout() {
                                     sharedRenderer);
     canvas_ = new SceneViewport2D(viewportTabs_, document_, select, transform, paintTile, begin,
                                   end, sharedRenderer);
+    canvas_->SetCancelEditCallback([this] { CancelViewportEdit(); });
+    canvas3D_->SetCancelEditCallback([this] { CancelViewportEdit(); });
     canvas_->setObjectName(QStringLiteral("sceneViewport2D"));
     canvas3D_->setObjectName(QStringLiteral("sceneViewport3D"));
     viewportTabs_->addTab(canvas3D_, QStringLiteral("3D 장면"));
@@ -249,13 +277,10 @@ void EditorWindow::BuildLayout() {
         RefreshHierarchy();
     });
     connect(hierarchySearch_, &QLineEdit::textChanged, this, [this] { RefreshHierarchy(); });
-    connect(hierarchy_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
-        if (!refreshingHierarchy_)
-            SelectEntity(
-                item ? std::optional<LuxEngine::uint32>(item->data(0, Qt::UserRole).toUInt())
-                     : std::nullopt,
-                false);
-    });
+    connect(hierarchy_, &QTreeWidget::itemSelectionChanged, this,
+            &EditorWindow::SyncHierarchySelection);
+    connect(hierarchy_, &QTreeWidget::currentItemChanged, this,
+            [this] { SyncHierarchySelection(); });
     connect(
         hierarchy_, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& point) {
             QMenu menu(this);
@@ -801,6 +826,7 @@ void EditorWindow::BuildLayout() {
 
     overviewCanvas_ =
         new SceneViewport2D(this, document_, select, transform, paintTile, begin, end);
+    overviewCanvas_->SetCancelEditCallback([this] { CancelViewportEdit(); });
     overviewCanvas_->setObjectName(QStringLiteral("topViewport2D"));
     overviewCanvas_->SetTool(EditorTool::Select);
     consoleOutput_ = new QPlainTextEdit(this);

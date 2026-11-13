@@ -113,6 +113,7 @@ void ViewportInteraction(QApplication& app) {
           "The Z rotation ring did not follow the mouse arc");
     entity.GetComponent<TransformComponent>() = {};
     entity.GetComponent<TransformComponent>().rotation.z = ToRadians(90);
+    document.SetTransformSpace(TransformSpace::Local);
     view.SetTool(EditorTool::Scale);
     SendMouse(view, QEvent::MouseButtonPress, {320, 190}, Qt::LeftButton, Qt::LeftButton);
     SendMouse(view, QEvent::MouseMove, {320, 130}, Qt::NoButton, Qt::LeftButton);
@@ -122,6 +123,7 @@ void ViewportInteraction(QApplication& app) {
           "A rotated scale gizmo ignored its local axis or a vertical drag");
 
     entity.GetComponent<TransformComponent>() = {};
+    document.SetTransformSpace(TransformSpace::World);
     view.SetTool(EditorTool::Select);
     view.SetSnapToGrid(false);
     SendMouse(view, QEvent::MouseButtonPress, {320, 240}, Qt::LeftButton, Qt::LeftButton);

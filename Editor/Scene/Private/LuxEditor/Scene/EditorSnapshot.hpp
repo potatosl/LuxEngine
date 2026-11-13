@@ -8,6 +8,7 @@ namespace LuxEditor {
 // Editing cursors belong to undo history, not to the persisted game scene format.
 struct EditorSnapshot {
     QByteArray scene;
+    std::vector<LuxEngine::uint32> selection;
     std::vector<std::pair<LuxEngine::uint32, float>> animationTimes;
 
     bool isEmpty() const;

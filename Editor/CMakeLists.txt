@@ -141,6 +141,24 @@ if(MSVC)
 endif()
 
 if(LUX_BUILD_TESTS)
+    foreach(pair
+        "LuxSelectionCoreTests|SelectionCoreTest.cpp|Editor_selection_core"
+        "LuxInteraction2DTests|Interaction2DTest.cpp|Editor_interaction_2d"
+        "LuxInteraction3DTests|Interaction3DTest.cpp|Editor_interaction_3d"
+        "LuxEditorInteractionTests|EditorInteractionTest.cpp|Editor_interaction_integration"
+    )
+        string(REPLACE "|" ";" fields "${pair}")
+        list(GET fields 0 target)
+        list(GET fields 1 source)
+        list(GET fields 2 test)
+        add_executable(${target} "Tests/${source}")
+        target_link_libraries(${target} PRIVATE LuxEditorUi)
+        target_include_directories(${target} PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
+        lux_editor_copy_runtime(${target})
+        add_test(NAME ${test} COMMAND ${target})
+        set_tests_properties(${test} PROPERTIES LABELS "headless;editor;interaction" TIMEOUT 90
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1")
+    endforeach()
     add_executable(LuxViewportFoundationTests Tests/ViewportFoundationTest.cpp)
     target_link_libraries(LuxViewportFoundationTests PRIVATE LuxEditorUi)
     target_include_directories(LuxViewportFoundationTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})

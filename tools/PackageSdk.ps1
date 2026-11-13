@@ -6,6 +6,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Utf8.ps1")
+. (Join-Path $PSScriptRoot "WindowsRuntime.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
@@ -24,17 +25,18 @@ if (Test-Path $sdkZip) {
 New-Item -ItemType Directory -Path $sdkStaging -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path $sdkZip) -Force | Out-Null
 
-# Install Release and Debug configurations into the staging directory
-Write-Host "Installing Release SDK to staging..."
-& cmake --install $BuildDir --config Release --prefix $sdkStaging
-if ($LASTEXITCODE -ne 0) { throw "cmake --install Release failed" }
-
+# Keep both suffixed engine libraries, then leave shared runtime files in Release mode.
 Write-Host "Installing Debug SDK to staging..."
 & cmake --install $BuildDir --config Debug --prefix $sdkStaging
 if ($LASTEXITCODE -ne 0) { throw "cmake --install Debug failed" }
 
+Write-Host "Installing Release SDK to staging..."
+& cmake --install $BuildDir --config Release --prefix $sdkStaging
+if ($LASTEXITCODE -ne 0) { throw "cmake --install Release failed" }
+
 # Copy SDL3 runtime DLL into bin from Release build
-$sdlDll = Join-Path $root "$BuildDir/bin/Release/SDL3.dll"
+$buildDirResolved = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
+$sdlDll = Join-Path $buildDirResolved "bin/Release/SDL3.dll"
 if (Test-Path $sdlDll) {
     Copy-Item -Path $sdlDll -Destination "$sdkStaging/bin/SDL3.dll" -Force
     Write-Host "Copied SDL3.dll to SDK bin/"
@@ -91,8 +93,9 @@ $requiredFiles = @(
     "lib/SDL3.lib",
     "bin/SDL3.dll",
     "lib/cmake/LuxEngine/LuxEngineConfig.cmake",
-    "share/LuxEngine/shaders/Basic.vert.spv",
-    "share/LuxEngine/shaders/Basic.frag.spv",
+    "share/LuxEngine/shaders/DIRECT3D12/default.rootsig",
+    "share/LuxEngine/shaders/DIRECT3D12/lux2d.vert",
+    "share/LuxEngine/shaders/DIRECT3D12/lux2d.frag",
     "licenses/LICENSE-LuxEngine.txt",
     "licenses/LICENSE-LGPLv3.txt",
     "licenses/DEPENDENCIES.md",
@@ -106,6 +109,8 @@ foreach ($f in $requiredFiles) {
         throw "Packaging integrity failure: required SDK file missing: $f"
     }
 }
+
+Assert-LuxWindowsRuntime -Directory (Join-Path $sdkStaging "bin")
 
 # Create ZIP archive
 Write-Host "Creating SDK archive: $sdkZip"

@@ -1,88 +1,52 @@
-# Regression Test: Packaging Integrity (BUG-06 Prevention)
-# Verifies that packaging scripts strictly require the requested configuration
-# and reject packaging with debug CRT DLLs or silent fallbacks.
-
-param(
-    [string]$BuildDir = "build/local"
-)
+# Packaging must reject the wrong configuration and Debug CRTs in Release output.
+param([string]$BuildDir = "build/local")
 
 $ErrorActionPreference = "Stop"
-$root = (Get-Item $PSScriptRoot).Parent.Parent.FullName
-Set-Location $root
+$repository = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+$powerShell = (Get-Process -Id $PID).Path
+$testDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "LuxPackagingIntegrity-$([guid]::NewGuid())"
 
-if (-not (Test-Path (Join-Path $root $BuildDir))) {
-    if (Test-Path (Join-Path $root "build")) {
-        $BuildDir = "build"
+function Expect-PackagingFailure {
+    param([string]$Script, [string[]]$Arguments, [string]$Expected)
+    # Keep expected child-process errors as data, then check the actual diagnostic.
+    $ErrorActionPreference = "Continue"
+    $output = & $powerShell -NoProfile -File (Join-Path $repository "tools/$Script") @Arguments 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -or $output -notmatch $Expected) {
+        throw "Expected '$Expected' from $Script, exit $LASTEXITCODE. Output: $output"
     }
 }
 
-Write-Host "=== Running Packaging Integrity & Strict Configuration Tests ==="
-
-$psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
-
-# Test 1: Verify PackageRuntime fails when given a non-existent configuration (No silent Debug fallback)
-Write-Host "1. Testing PackageRuntime rejects invalid/missing configuration..."
-$threw = $false
 try {
-    & $psExe -ExecutionPolicy Bypass -File "$root/tools/PackageRuntime.ps1" -BuildDir $BuildDir -Configuration "NonExistentConfig_xyz"
-    if ($LASTEXITCODE -ne 0) { $threw = $true }
-} catch {
-    $threw = $true
-}
-if (-not $threw) {
-    throw "Packaging integrity failure: PackageRuntime did not fail on non-existent configuration!"
-}
-Write-Host "   PASSED: Non-existent configuration was properly rejected."
+    New-Item -ItemType Directory -Path $testDirectory -Force | Out-Null
+    $outputDirectory = Join-Path $testDirectory "packages"
+    foreach ($script in @("PackageRuntime.ps1", "PackageEditor.ps1")) {
+        Expect-PackagingFailure -Script $script -Arguments @(
+            "-BuildDir", $BuildDir, "-OutputDir", $outputDirectory,
+            "-Configuration", "NonExistentConfig_xyz"
+        ) -Expected "Unsupported configuration"
+    }
+    Expect-PackagingFailure -Script "PackageSdk.ps1" -Arguments @(
+        "-BuildDir", (Join-Path $testDirectory "missing-build"), "-OutputDir", $outputDirectory
+    ) -Expected "cmake --install (Debug|Release) failed"
 
-# Test 2: Verify PackageEditor fails when given a non-existent configuration
-Write-Host "2. Testing PackageEditor rejects invalid/missing configuration..."
-$threw = $false
-try {
-    & $psExe -ExecutionPolicy Bypass -File "$root/tools/PackageEditor.ps1" -BuildDir $BuildDir -Configuration "NonExistentConfig_xyz"
-    if ($LASTEXITCODE -ne 0) { $threw = $true }
-} catch {
-    $threw = $true
+    $mockBuild = Join-Path $testDirectory "build"
+    $mockBin = Join-Path $mockBuild "bin/Release"
+    New-Item -ItemType Directory -Path $mockBin -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $mockBin "LuxPlayer.exe"), "mock player")
+    [System.IO.File]::WriteAllText((Join-Path $mockBin "LuxEditor.exe"), "mock editor")
+    [System.IO.File]::WriteAllText((Join-Path $mockBin "ucrtbased.dll"), "mock Debug CRT")
+    foreach ($script in @("PackageRuntime.ps1", "PackageEditor.ps1")) {
+        Expect-PackagingFailure -Script $script -Arguments @(
+            "-BuildDir", $mockBuild, "-OutputDir", $outputDirectory, "-Configuration", "Release"
+        ) -Expected "Debug runtime DLLs detected"
+    }
+    Write-Host "Packaging configuration rejection, missing-build diagnostics and Debug CRT checks passed."
 }
-if (-not $threw) {
-    throw "Packaging integrity failure: PackageEditor did not fail on non-existent configuration!"
-}
-Write-Host "   PASSED: Non-existent configuration was properly rejected."
-
-# Test 3: Verify PackageSdk fails when given a non-existent build directory
-Write-Host "3. Testing PackageSdk rejects invalid/missing build directory..."
-$threw = $false
-try {
-    & $psExe -ExecutionPolicy Bypass -File "$root/tools/PackageSdk.ps1" -BuildDir "non_existent_build_dir_xyz"
-    if ($LASTEXITCODE -ne 0) { $threw = $true }
-} catch {
-    $threw = $true
-}
-if (-not $threw) {
-    throw "Packaging integrity failure: PackageSdk did not fail on non-existent build directory!"
-}
-Write-Host "   PASSED: Non-existent build directory was properly rejected."
-
-# Test 4: Verify that Debug CRT DLLs (msvcp140d.dll, ucrtbased.dll, vcruntime140d.dll) are rejected
-Write-Host "4. Testing rejection of Debug CRT DLLs in release packaging..."
-$mockDir = Join-Path ([System.IO.Path]::GetTempPath()) "LuxMockPkg_$(Get-Random)"
-$mockBin = Join-Path $mockDir "bin\Release"
-New-Item -ItemType Directory -Path $mockBin -Force | Out-Null
-Set-Content -Path (Join-Path $mockBin "LuxPlayer.exe") -Value "mock binary"
-Set-Content -Path (Join-Path $mockBin "ucrtbased.dll") -Value "mock debug crt dll"
-
-$threwDebugCrt = $false
-try {
-    & $psExe -ExecutionPolicy Bypass -File "$root/tools/PackageRuntime.ps1" -BuildDir $mockDir -Configuration "Release" -OutputDir "$mockDir/dist"
-    if ($LASTEXITCODE -ne 0) { $threwDebugCrt = $true }
-} catch {
-    $threwDebugCrt = $true
-} finally {
-    Remove-Item -Recurse -Force $mockDir -ErrorAction SilentlyContinue
+finally {
+    if (Test-Path -LiteralPath $testDirectory) {
+        Remove-Item -LiteralPath $testDirectory -Recurse -Force
+    }
 }
 
-if (-not $threwDebugCrt) {
-    throw "Packaging integrity failure: PackageRuntime did not reject the presence of ucrtbased.dll in Release packaging!"
-}
-Write-Host "   PASSED: Debug CRT DLL in Release configuration was rejected."
-
-Write-Host "`n=== Packaging Integrity Tests: ALL PASSED ==="
+# GitHub's pwsh wrapper forwards LASTEXITCODE, including expected child failures.
+exit 0

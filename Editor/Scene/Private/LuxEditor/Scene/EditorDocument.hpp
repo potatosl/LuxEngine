@@ -6,9 +6,14 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace LuxEditor {
+
+enum class SelectionMode { Replace, Add, Toggle };
+enum class TransformSpace { World, Local };
+enum class SelectionPivot { Median, Active, Individual };
 
 class EditorDocument final {
 public:
@@ -59,6 +64,19 @@ public:
     bool Save(TabId tab);
     std::optional<LuxEngine::uint32> GetSelectedId(TabId tab) const noexcept;
     void Select(TabId tab, std::optional<LuxEngine::uint32> id);
+    std::vector<LuxEngine::uint32> GetSelection() const;
+    std::vector<LuxEngine::uint32> GetSelection(TabId tab) const;
+    void SetSelection(std::vector<LuxEngine::uint32> ids,
+                      std::optional<LuxEngine::uint32> primary = {});
+    void SetSelection(TabId tab, std::vector<LuxEngine::uint32> ids,
+                      std::optional<LuxEngine::uint32> primary = {});
+    void ModifySelection(std::optional<LuxEngine::uint32> id, SelectionMode mode);
+    void ModifySelection(TabId tab, std::optional<LuxEngine::uint32> id, SelectionMode mode);
+    bool IsSelected(LuxEngine::uint32 id) const;
+    TransformSpace GetTransformSpace() const noexcept;
+    void SetTransformSpace(TransformSpace space) noexcept;
+    SelectionPivot GetSelectionPivotMode() const noexcept;
+    void SetSelectionPivotMode(SelectionPivot pivot) noexcept;
 
     const std::string& GetLastError() const noexcept;
 
@@ -87,6 +105,10 @@ private:
         std::string path;
         bool dirty = false;
         std::string loadWarning;
+        std::vector<LuxEngine::uint32> selection{};
+        std::unordered_set<LuxEngine::uint32> selectionSet{};
+        TransformSpace transformSpace = TransformSpace::World;
+        SelectionPivot selectionPivot = SelectionPivot::Median;
     };
 
     TabState& Active() noexcept;

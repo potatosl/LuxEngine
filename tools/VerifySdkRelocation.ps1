@@ -5,6 +5,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Utf8.ps1")
+. (Join-Path $PSScriptRoot "WindowsRuntime.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
@@ -41,16 +42,16 @@ $consumerTestDir = Join-Path ([System.IO.Path]::GetTempPath()) "LuxConsumerTest-
 New-Item -ItemType Directory -Path $consumerTestDir -Force | Out-Null
 
 try {
-    # 1. Install SDK to relocated directory (both Release and Debug)
+    # 1. Install both engine configurations, retaining Release shared runtime files.
     Write-Host "1. Installing SDK to relocated path..."
-    & $cmakeExe --install $BuildDir --config Release --prefix $SdkPrefix
-    if ($LASTEXITCODE -ne 0) { throw "SDK Release install failed" }
     & $cmakeExe --install $BuildDir --config Debug --prefix $SdkPrefix
     if ($LASTEXITCODE -ne 0) { throw "SDK Debug install failed" }
+    & $cmakeExe --install $BuildDir --config Release --prefix $SdkPrefix
+    if ($LASTEXITCODE -ne 0) { throw "SDK Release install failed" }
 
     # Copy SDL3 runtime DLL into SDK bin
-    $sdlDll = Join-Path $root "$BuildDir/bin/Release/SDL3.dll"
-    if (-not (Test-Path $sdlDll)) { $sdlDll = Join-Path $root "$BuildDir/bin/Debug/SDL3.dll" }
+    $buildDirResolved = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
+    $sdlDll = Join-Path $buildDirResolved "bin/Release/SDL3.dll"
     if (Test-Path $sdlDll) {
         Copy-Item -Path $sdlDll -Destination "$SdkPrefix/bin/SDL3.dll" -Force
     }
@@ -59,6 +60,7 @@ try {
     if (-not (Test-Path (Join-Path $sdkCmake "LuxEngineConfig.cmake"))) {
         throw "LuxEngineConfig.cmake missing in $sdkCmake"
     }
+    Assert-LuxWindowsRuntime -Directory (Join-Path $SdkPrefix "bin")
 
     # 2. Test MinimalGame Consumer against Relocated SDK in Release & Debug
     Copy-Item -Path "$root/samples/MinimalGame/*" -Destination $consumerTestDir -Recurse -Force
@@ -80,6 +82,7 @@ try {
     if (-not (Test-Path $releaseExe)) {
         throw "MinimalGame.exe (Release) not found in $consumerBuild"
     }
+    Assert-LuxWindowsRuntime -Directory (Split-Path $releaseExe)
     Write-Host "Running $releaseExe..."
     & $releaseExe
     if ($LASTEXITCODE -ne 0) { throw "MinimalGame.exe (Release) execution failed: exit code $LASTEXITCODE" }
@@ -96,6 +99,7 @@ try {
     if (-not (Test-Path $debugExe)) {
         throw "MinimalGame.exe (Debug) not found in $consumerBuild"
     }
+    Assert-LuxWindowsRuntime -Directory (Split-Path $debugExe)
     Write-Host "Running $debugExe..."
     & $debugExe
     if ($LASTEXITCODE -ne 0) { throw "MinimalGame.exe (Debug) execution failed: exit code $LASTEXITCODE" }

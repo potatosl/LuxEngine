@@ -211,7 +211,7 @@ void EditorWindow::RefreshSceneTabs() {
 EditorDocument::TabId EditorWindow::NewSceneDocument() {
     StopPreview();
     EndTimelineEdit();
-    EndViewportEdit();
+    CancelViewportEdit();
     sceneProjects_[document_.GetActiveTabId()] = project_;
     const auto tab = document_.NewTab();
     sceneProjects_[tab] = project_;
@@ -228,7 +228,7 @@ bool EditorWindow::SwitchSceneDocument(EditorDocument::TabId id, bool animate) {
     if (!restoringHistory_) {
         StopPreview();
         EndTimelineEdit();
-        EndViewportEdit();
+        CancelViewportEdit();
     } else {
         viewportEditBefore_.clear();
         timelineBefore_.clear();
@@ -263,7 +263,7 @@ bool EditorWindow::CloseSceneDocument(EditorDocument::TabId id, bool discardDirt
         return false;
     StopPreview();
     EndTimelineEdit();
-    EndViewportEdit();
+    CancelViewportEdit();
     const auto path = document_.GetPath(id);
     if (!document_.CloseTab(id, discardDirty))
         return false;
@@ -405,7 +405,7 @@ void EditorWindow::PollSceneLoads() {
         }
         StopPreview();
         EndTimelineEdit();
-        EndViewportEdit();
+        CancelViewportEdit();
         sceneProjects_[document_.GetActiveTabId()] = project_;
         const auto previous = document_.GetActiveTabId();
         const bool foreground = previous == request.origin && !QApplication::activeModalWidget();
@@ -457,6 +457,7 @@ EditorSnapshot EditorWindow::SnapshotScene(EditorDocument::TabId id) {
         return {};
     EditorSnapshot snapshot;
     snapshot.scene = QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+    snapshot.selection = document_.GetSelection(id);
     for (const auto& entity : scene->GetEntities())
         if (const auto* animation = entity.TryGetComponent<LuxEngine::AnimationComponent>())
             snapshot.animationTimes.emplace_back(entity.GetId(), animation->currentTime);
@@ -467,12 +468,14 @@ void EditorWindow::RestoreSceneAt(EditorDocument::TabId id, const EditorSnapshot
                                   std::optional<LuxEngine::uint32> selected, bool activate) {
     if (snapshot.isEmpty() || !document_.GetScene(id))
         return;
+    CancelViewportEdit();
     const QScopedValueRollback<bool> restoring(restoringHistory_, true);
     const std::string data(snapshot.scene.constData(), static_cast<size_t>(snapshot.scene.size()));
     if (!document_.ReplaceSceneFromData(id, data, selected)) {
         Log(QStringLiteral("씬 편집 이력을 복원하지 못했습니다."), true);
         return;
     }
+    document_.SetSelection(id, snapshot.selection, selected);
     auto* scene = document_.GetScene(id);
     for (const auto& [entity, time] : snapshot.animationTimes)
         if (auto* animation = scene->TryGetComponent<LuxEngine::AnimationComponent>(entity))
@@ -533,7 +536,7 @@ bool EditorWindow::SaveAllScenes(bool currentProjectOnly) {
 void EditorWindow::DuplicateScene() {
     StopPreview();
     EndTimelineEdit();
-    EndViewportEdit();
+    CancelViewportEdit();
     auto path = QFileDialog::getSaveFileName(this, QStringLiteral("씬 복제"), {},
                                              QStringLiteral("Lux 씬 (*.lux)"));
     if (path.isEmpty())
@@ -743,6 +746,8 @@ void EditorWindow::ConfigureSceneStreaming() {
 }
 
 void EditorWindow::TickSceneStreaming() {
+    if (!viewportEditBefore_.isEmpty() || !timelineBefore_.isEmpty())
+        return;
     if (previewActive_ || refreshingHierarchy_ || restoringHistory_)
         return;
     double x, y, height;
@@ -776,19 +781,15 @@ void EditorWindow::ReparentSelection(const std::vector<LuxEngine::uint32>& child
 }
 
 void EditorWindow::GroupSelection() {
-    std::vector<LuxEngine::uint32> selected;
-    for (auto* item : hierarchy_->selectedItems()) {
-        bool descendant = false;
-        for (auto* ancestor = item->parent(); ancestor; ancestor = ancestor->parent())
-            if (ancestor->isSelected()) {
-                descendant = true;
-                break;
-            }
-        if (!descendant)
-            selected.push_back(item->data(0, Qt::UserRole).toUInt());
-    }
-    if (selected.empty() && document_.GetSelected())
-        selected.push_back(document_.GetSelected().GetId());
+    auto selected = document_.GetSelection();
+    const auto all = selected;
+    std::erase_if(selected, [&](auto id) {
+        for (auto parent = document_.GetScene().GetParent(id); parent;
+             parent = document_.GetScene().GetParent(parent))
+            if (std::find(all.begin(), all.end(), parent) != all.end())
+                return true;
+        return false;
+    });
     if (selected.empty())
         return;
     RecordEdit(QStringLiteral("그룹 만들기"), [this, selected] {
@@ -847,13 +848,15 @@ void EditorWindow::ChooseMoveDestination() {
 }
 
 bool EditorWindow::MoveSelectionToScene(EditorDocument::TabId targetId) {
+    if (previewActive_)
+        return false;
+    CancelViewportEdit();
+    EndTimelineEdit();
     const auto sourceId = document_.GetActiveTabId();
     const auto entity = document_.GetSelected();
     auto* target = document_.GetScene(targetId);
-    if (previewActive_ || !entity || !target || sourceId == targetId)
+    if (!entity || !target || sourceId == targetId)
         return false;
-    EndViewportEdit();
-    EndTimelineEdit();
     const auto sourceBefore = SnapshotScene(sourceId), targetBefore = SnapshotScene(targetId);
     if (sourceBefore.isEmpty() || targetBefore.isEmpty())
         return false;
