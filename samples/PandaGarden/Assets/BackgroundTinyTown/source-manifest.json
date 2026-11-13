@@ -1,0 +1,42 @@
+{
+  "name": "Tiny Town",
+  "author": "Kenney",
+  "version": "1.1",
+  "source": "https://kenney.nl/assets/tiny-town",
+  "license": "CC0-1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source_archive_sha256": "9768692dccff1d706408a5aedd6ca4f6cd1409506cbc84cb2f862919764be977",
+  "files": [
+    {
+      "path": "tile_0000.png",
+      "source_path": "Tiles/tile_0000.png",
+      "sha256": "d4c692ef80ee97b3395b885ae07020d42a106683ff3650df240f8e972bd5a041"
+    },
+    {
+      "path": "tile_0001.png",
+      "source_path": "Tiles/tile_0001.png",
+      "sha256": "cf3b3df8669e621af90944fb3155b15f13adf203dda464e6149d7318f3660713"
+    },
+    {
+      "path": "tile_0002.png",
+      "source_path": "Tiles/tile_0002.png",
+      "sha256": "ea524c6974ad6203f46a3e68a360883d0d53dbbdaa237f6cd81ac6fd5be6ea7c"
+    },
+    {
+      "path": "tile_0005.png",
+      "source_path": "Tiles/tile_0005.png",
+      "sha256": "5c09569d7e0351146e194d9beb7b573e0869978334cc9e093a57dea8705e81da"
+    },
+    {
+      "path": "tile_0029.png",
+      "source_path": "Tiles/tile_0029.png",
+      "sha256": "0d55333ffe4c1d3be705978bdf1c176a871c25a6bde232dfba5c359b1a433294"
+    },
+    {
+      "path": "tile_0043.png",
+      "source_path": "Tiles/tile_0043.png",
+      "sha256": "1e4364629573e4cf27c3ce616e3003cf1a3fd5ba2928bc46b2aa47070b0a0d41"
+    }
+  ],
+  "usage": "원본 타일을 수정 없이 사용. 판다와 대나무는 사용자 제공 이미지 유지."
+}
