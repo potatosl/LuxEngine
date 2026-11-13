@@ -15,19 +15,21 @@
 #endif
 #include <windows.h>
 
-#include "Graphics/FSL/defaults.h"
-#include "Graphics/FSL/fsl_srt.h"
+// clang-format off
 #include "Graphics/GraphicsConfig.h"
 #include "Graphics/Interfaces/IGraphics.h"
-#include "OS/Interfaces/IOperatingSystem.h"
 #include "Resources/ResourceLoader/Interfaces/IResourceLoader.h"
 #include "Resources/ResourceLoader/ThirdParty/OpenSource/tinyimageformat/tinyimageformat_query.h"
-#include "Shaders/Lux2D.srt.h"
-#include "Shaders/LuxScene.srt.h"
+#include "OS/Interfaces/IOperatingSystem.h"
 #include "Utilities/Interfaces/IFileSystem.h"
 #include "Utilities/Interfaces/ILog.h"
-#include "Utilities/Interfaces/IMemory.h" // must stay last among The Forge headers
 #include "Utilities/RingBuffer.h"
+#include "Graphics/FSL/fsl_srt.h"
+#include "Graphics/FSL/defaults.h"
+#include "Shaders/Lux2D.srt.h"
+#include "Shaders/LuxScene.srt.h"
+#include "Utilities/Interfaces/IMemory.h"
+// clang-format on
 
 // IMemory.h turns new/delete into compile errors. LuxForgeDevice is our own plain object
 // (never handed to The Forge), so the normal operators are correct here.
