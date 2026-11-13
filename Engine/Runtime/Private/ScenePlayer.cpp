@@ -9,13 +9,18 @@
 #include <charconv>
 #include <cmath>
 #include <limits>
+#include <locale>
+#include <sstream>
 
 namespace LuxEngine {
 namespace {
 bool ParseNumber(const std::string& text, float& value) {
-    const auto* end = text.data() + text.size();
-    const auto result = std::from_chars(text.data(), end, value);
-    return result.ec == std::errc{} && result.ptr == end && std::isfinite(value);
+    if (text.empty() || text.front() == '+')
+        return false;
+    std::istringstream input(text);
+    input.imbue(std::locale::classic());
+    input >> std::noskipws >> value;
+    return !input.fail() && input.eof() && std::isfinite(value);
 }
 
 bool ParseNumber(const std::string& text, uint32& value) {
