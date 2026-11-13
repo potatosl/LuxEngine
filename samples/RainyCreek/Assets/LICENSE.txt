@@ -1,0 +1,28 @@
+Rainy Creek asset selection — Poly Haven
+
+License: CC0-1.0
+https://creativecommons.org/publicdomain/zero/1.0/
+https://polyhaven.com/license
+
+Poly Haven permits reuse, modification and redistribution, including commercial use.
+Independently converted from verified local Poly Haven glTF/JPEG/HDR data.
+No Atanara or Amina engine implementation, shaders or preparation code is included.
+
+forest_ground_04 — Rico Cilliers, Rob Tuytel
+https://polyhaven.com/a/forest_ground_04
+rock_moss_set_01 — Kless Gyzen
+https://polyhaven.com/a/rock_moss_set_01
+fern_02 — Rico Cilliers, Rob Tuytel
+https://polyhaven.com/a/fern_02
+dead_tree_trunk — Rob Tuytel
+https://polyhaven.com/a/dead_tree_trunk
+pine_sapling_small — Rico Cilliers, Rob Tuytel
+https://polyhaven.com/a/pine_sapling_small
+kloofendal_48d_partly_cloudy_puresky — Greg Zaal, Jarod Guest
+https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky
+qwantani_dusk_2_puresky — Greg Zaal, Jarod Guest
+https://polyhaven.com/a/qwantani_dusk_2_puresky
+
+Original download URLs and hashes, transformation settings, tool versions and output hashes
+are recorded in Provenance.json. This is an independent verification record, not a canonical
+game-dev package receipt.

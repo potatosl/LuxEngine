@@ -1,0 +1,399 @@
+{
+  "schema": "luxengine.rainy_creek.catalog.v1",
+  "coordinateSystem": {
+    "up": "Y",
+    "units": "meters",
+    "textureOrigin": "top-left"
+  },
+  "models": {
+    "rock_a": {
+      "sourceMesh": 0,
+      "sourceTriangles": 11000,
+      "removedLayoutTranslation": [
+        -2.799999952316284,
+        0,
+        -2.122781276702881
+      ],
+      "parts": [
+        {
+          "mesh": "Models/rock_a.obj",
+          "albedo": "Textures/rock.png",
+          "roughness": 0.88,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.0016554275061935186,
+          "vertices": 5064,
+          "triangles": 9000,
+          "boundsMin": [
+            -1.1140209436416626,
+            -0.6565686464309692,
+            -1.6965996026992798
+          ],
+          "boundsMax": [
+            1.1236112117767334,
+            0.8161294460296631,
+            1.6677640676498413
+          ]
+        }
+      ]
+    },
+    "rock_b": {
+      "sourceMesh": 2,
+      "sourceTriangles": 5000,
+      "removedLayoutTranslation": [
+        3,
+        0,
+        -2.122781276702881
+      ],
+      "parts": [
+        {
+          "mesh": "Models/rock_b.obj",
+          "albedo": "Textures/rock.png",
+          "roughness": 0.88,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.0,
+          "vertices": 2741,
+          "triangles": 5000,
+          "boundsMin": [
+            -1.0179996490478516,
+            -0.4108721911907196,
+            -1.0236197710037231
+          ],
+          "boundsMax": [
+            1.0905829668045044,
+            0.6888222694396973,
+            1.0559659004211426
+          ]
+        }
+      ]
+    },
+    "rock_c": {
+      "sourceMesh": 3,
+      "sourceTriangles": 10589,
+      "removedLayoutTranslation": [
+        -2.700000047683716,
+        0,
+        1.5772186517715454
+      ],
+      "parts": [
+        {
+          "mesh": "Models/rock_c.obj",
+          "albedo": "Textures/rock.png",
+          "roughness": 0.88,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.0015430140774697065,
+          "vertices": 4893,
+          "triangles": 8999,
+          "boundsMin": [
+            -0.9502788186073303,
+            -0.6609705686569214,
+            -0.8874189853668213
+          ],
+          "boundsMax": [
+            1.1773505210876465,
+            1.1073492765426636,
+            1.0773223638534546
+          ]
+        }
+      ]
+    },
+    "fern_a": {
+      "sourceMesh": 0,
+      "sourceTriangles": 2384,
+      "removedLayoutTranslation": [
+        0,
+        0,
+        0
+      ],
+      "parts": [
+        {
+          "mesh": "Models/fern_a.obj",
+          "albedo": "Textures/fern.png",
+          "roughness": 0.86,
+          "alphaMask": true,
+          "alphaCutoff": 0.5,
+          "twoSided": true,
+          "simplificationError": 0.0,
+          "vertices": 1660,
+          "triangles": 2384,
+          "boundsMin": [
+            -0.5281425714492798,
+            -0.030510280281305313,
+            -0.421874463558197
+          ],
+          "boundsMax": [
+            0.4616048336029053,
+            0.39718443155288696,
+            0.4718152582645416
+          ]
+        }
+      ]
+    },
+    "fern_b": {
+      "sourceMesh": 2,
+      "sourceTriangles": 784,
+      "removedLayoutTranslation": [
+        0,
+        0,
+        1.0000001192092896
+      ],
+      "parts": [
+        {
+          "mesh": "Models/fern_b.obj",
+          "albedo": "Textures/fern.png",
+          "roughness": 0.86,
+          "alphaMask": true,
+          "alphaCutoff": 0.5,
+          "twoSided": true,
+          "simplificationError": 0.0,
+          "vertices": 544,
+          "triangles": 784,
+          "boundsMin": [
+            -0.2976571321487427,
+            -0.028773518279194832,
+            -0.31126806139945984
+          ],
+          "boundsMax": [
+            0.25428348779678345,
+            0.2580300271511078,
+            0.3021530210971832
+          ]
+        }
+      ]
+    },
+    "trunk": {
+      "sourceMesh": 0,
+      "sourceTriangles": 101802,
+      "removedLayoutTranslation": [
+        0,
+        0,
+        0
+      ],
+      "parts": [
+        {
+          "mesh": "Models/trunk.obj",
+          "albedo": "Textures/trunk.png",
+          "roughness": 0.92,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.00040478334994986653,
+          "vertices": 13640,
+          "triangles": 25000,
+          "boundsMin": [
+            -1.5391005277633667,
+            -0.02773353084921837,
+            -0.17070038616657257
+          ],
+          "boundsMax": [
+            1.5119144916534424,
+            0.2626980245113373,
+            0.1063404530286789
+          ]
+        }
+      ],
+      "highParts": [
+        {
+          "mesh": "Models/trunk_high.obj",
+          "albedo": "Textures/trunk.png",
+          "roughness": 0.92,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.00015559775056317449,
+          "vertices": 26466,
+          "triangles": 50000,
+          "boundsMin": [
+            -1.5391005277633667,
+            -0.02773353084921837,
+            -0.17080287635326385
+          ],
+          "boundsMax": [
+            1.5119144916534424,
+            0.2626980245113373,
+            0.10661166906356812
+          ]
+        }
+      ],
+      "farParts": [
+        {
+          "mesh": "Models/trunk_far.obj",
+          "albedo": "Textures/trunk.png",
+          "roughness": 0.92,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.0010638063540682197,
+          "vertices": 4628,
+          "triangles": 7999,
+          "boundsMin": [
+            -1.5391005277633667,
+            -0.027082093060016632,
+            -0.17070038616657257
+          ],
+          "boundsMax": [
+            1.5119144916534424,
+            0.2626980245113373,
+            0.10661166906356812
+          ]
+        }
+      ]
+    },
+    "pine": {
+      "sourceMesh": 0,
+      "sourceTriangles": 122235,
+      "removedLayoutTranslation": [
+        1,
+        0,
+        0
+      ],
+      "parts": [
+        {
+          "mesh": "Models/pine_bark.obj",
+          "albedo": "Textures/pine_bark.png",
+          "roughness": 0.94,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.004220469389110804,
+          "vertices": 184,
+          "triangles": 255,
+          "boundsMin": [
+            -0.08108803629875183,
+            0.0009158244938589633,
+            -0.27830466628074646
+          ],
+          "boundsMax": [
+            0.19264821708202362,
+            0.9629227519035339,
+            0.2705112397670746
+          ]
+        },
+        {
+          "mesh": "Models/pine_needles.obj",
+          "albedo": "Textures/pine_needles.png",
+          "roughness": 0.9,
+          "alphaMask": true,
+          "alphaCutoff": 0.5,
+          "twoSided": true,
+          "simplificationError": 0.0012683471431955695,
+          "vertices": 36992,
+          "triangles": 27888,
+          "boundsMin": [
+            -0.2652446925640106,
+            0.19504235684871674,
+            -0.3313728868961334
+          ],
+          "boundsMax": [
+            0.26351654529571533,
+            1.0465238094329834,
+            0.39897364377975464
+          ]
+        }
+      ],
+      "highParts": [
+        {
+          "mesh": "Models/pine_bark_high.obj",
+          "albedo": "Textures/pine_bark.png",
+          "roughness": 0.94,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.004220469389110804,
+          "vertices": 184,
+          "triangles": 255,
+          "boundsMin": [
+            -0.08108803629875183,
+            0.0009158244938589633,
+            -0.27830466628074646
+          ],
+          "boundsMax": [
+            0.19264821708202362,
+            0.9629227519035339,
+            0.2705112397670746
+          ]
+        },
+        {
+          "mesh": "Models/pine_needles_high.obj",
+          "albedo": "Textures/pine_needles.png",
+          "roughness": 0.9,
+          "alphaMask": true,
+          "alphaCutoff": 0.5,
+          "twoSided": true,
+          "simplificationError": 0.0007719973800703883,
+          "vertices": 58600,
+          "triangles": 49801,
+          "boundsMin": [
+            -0.2652446925640106,
+            0.19504235684871674,
+            -0.3313728868961334
+          ],
+          "boundsMax": [
+            0.26351654529571533,
+            1.0465238094329834,
+            0.39897364377975464
+          ]
+        }
+      ],
+      "farParts": [
+        {
+          "mesh": "Models/pine_bark_far.obj",
+          "albedo": "Textures/pine_bark.png",
+          "roughness": 0.94,
+          "alphaMask": false,
+          "alphaCutoff": 0.0,
+          "twoSided": false,
+          "simplificationError": 0.004220469389110804,
+          "vertices": 184,
+          "triangles": 255,
+          "boundsMin": [
+            -0.08108803629875183,
+            0.0009158244938589633,
+            -0.27830466628074646
+          ],
+          "boundsMax": [
+            0.19264821708202362,
+            0.9629227519035339,
+            0.2705112397670746
+          ]
+        },
+        {
+          "mesh": "Models/pine_needles_far.obj",
+          "albedo": "Textures/pine_needles.png",
+          "roughness": 0.9,
+          "alphaMask": true,
+          "alphaCutoff": 0.5,
+          "twoSided": true,
+          "simplificationError": 0.0023920671083033085,
+          "vertices": 18901,
+          "triangles": 11952,
+          "boundsMin": [
+            -0.2652446925640106,
+            0.2030835598707199,
+            -0.3313728868961334
+          ],
+          "boundsMax": [
+            0.26351654529571533,
+            1.0465238094329834,
+            0.39699018001556396
+          ]
+        }
+      ]
+    }
+  },
+  "textures": {
+    "ground": "Textures/ground.png"
+  },
+  "environments": {
+    "dusk": "Environments/dusk.hdr",
+    "day": "Environments/day.hdr"
+  },
+  "environmentNotes": {
+    "day": "Partly-cloudy daylight source; the original solar radiance is retained."
+  }
+}

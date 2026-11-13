@@ -24,6 +24,7 @@ compile_commands.json
 *.obj
 !/Engine/Resources/Characters/**/*.obj
 !/samples/MeshFoundation/Assets/*.obj
+!/samples/RainyCreek/Assets/Models/*.obj
 *.o
 *.lib
 *.a
