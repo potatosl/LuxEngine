@@ -1216,9 +1216,11 @@ int main(int argc, char** argv) {
         Check(DecodeBuildOutput(replacementOutput.toUtf8()) == replacementOutput,
               "valid UTF-8 replacement characters do not trigger legacy decoding");
 #ifdef _WIN32
-        const QByteArray legacyOutput = koreanOutput.left(2).toLocal8Bit();
-        Check(DecodeBuildOutput(legacyOutput) == koreanOutput.left(2),
-              "legacy Windows tool output is converted without losing Korean text");
+        // An English ANSI code page cannot encode Hangul. Use fixed non-UTF-8 bytes
+        // ("한글" in CP949) and the actual system code page instead of a lossy round trip.
+        const QByteArray legacyOutput = QByteArray::fromHex("c7d1b1db");
+        Check(DecodeBuildOutput(legacyOutput) == QString::fromLocal8Bit(legacyOutput),
+              "legacy Windows tool output follows the active ANSI code page");
 #endif
         const auto capture = qEnvironmentVariable("LUX_EDITOR_SCENE_CAPTURE");
         if (!capture.isEmpty()) {
