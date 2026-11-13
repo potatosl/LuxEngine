@@ -1,0 +1,22 @@
+{
+  "name": "ufbx",
+  "version": "0.23.1",
+  "revision": "26a482ae66871d7de36eb722aa060bce95bce274",
+  "source": "https://github.com/ufbx/ufbx",
+  "license": "MIT",
+  "license_selection": "Alternative A in LICENSE",
+  "files": {
+    "ufbx.c": {
+      "sha256": "4a956c26a708e40d82ecb0aeaee54da709d5ba7c144c9642174970059bda7e1d",
+      "bytes": 1181511
+    },
+    "ufbx.h": {
+      "sha256": "f787be529af577efc04f3e3e735844a08556718dbb613d1211c2b313d72895dc",
+      "bytes": 223898
+    },
+    "LICENSE": {
+      "sha256": "0dd48ebadf52273c736256325c8f078c03c8bb4facee22a4122de0ad3f615391",
+      "bytes": 2631
+    }
+  }
+}

@@ -152,12 +152,12 @@ private:
                     Charge(size);
                     bool hasUvs = false;
                     if (!LuxEngine::AssetManager::ValidateMeshFile(GenericPathUtf8(file), &hasUvs))
-                        throw std::runtime_error("OBJ 메시 파일이 올바르지 않습니다: " +
+                        throw std::runtime_error("모델 파일이 올바르지 않습니다: " +
                                                  mesh->meshPath);
                     meshHasUvs_[file] = hasUvs;
                 }
                 if (!mesh->material.baseColorTexture.empty() && !meshHasUvs_.at(file))
-                    throw std::runtime_error("텍스처를 적용할 UV 좌표가 없는 OBJ입니다: " +
+                    throw std::runtime_error("텍스처를 적용할 UV 좌표가 없는 모델입니다: " +
                                              mesh->meshPath);
             }
             if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();

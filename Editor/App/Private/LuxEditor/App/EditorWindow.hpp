@@ -154,6 +154,10 @@ private:
     bool SaveScene(bool choosePath);
     void AddEntity();
     void AddMeshEntity();
+    void AddBasicModelMenu(QMenu* menu);
+    void AddBasicModel(const std::string& id);
+    void AddModelAsset(const std::filesystem::path& path);
+    void ChooseModelAsset();
     void AddCameraEntity();
     void BuildCameraDetails(QVBoxLayout* layout);
     void RefreshCameraDetails();
@@ -281,6 +285,7 @@ private:
     QDoubleSpinBox* cameraFov_ = nullptr;
     QDoubleSpinBox* cameraOrthoSize_ = nullptr;
     QLineEdit* meshPath_ = nullptr;
+    std::vector<QAction*> basicModelActions_;
     QLineEdit* baseColorTexturePath_ = nullptr;
     QCheckBox* tilemapEnabled_ = nullptr;
     QSpinBox* tilemapWidth_ = nullptr;

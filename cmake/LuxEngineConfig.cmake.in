@@ -6,6 +6,7 @@ set(LuxEngine_SHADER_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/shaders")
 set(LuxEngine_TEMPLATES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/templates")
 set(LuxEngine_LICENSES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/licenses")
 set(LuxEngine_EXAMPLES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/examples")
+set(LuxEngine_MODELS_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/models")
 
 include(CMakeFindDependencyMacro)
 find_dependency(Threads)
@@ -62,6 +63,12 @@ endfunction()
 
 function(lux_copy_runtime target)
     lux_copy_shaders(${target})
+    if(EXISTS "${LuxEngine_MODELS_DIR}")
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${LuxEngine_MODELS_DIR}"
+                "$<TARGET_FILE_DIR:${target}>/Resources/Models"
+            VERBATIM)
+    endif()
     if(WIN32)
         set(_lux_nethost "nethost.dll")
     elseif(APPLE)
@@ -96,6 +103,7 @@ function(lux_copy_runtime target)
        EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproj")
         file(GLOB_RECURSE _lux_mesh_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[oO][bB][jJ]"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[fF][bB][xX]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[pP][nN][gG]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[jJ][pP][gG]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[jJ][pP][eE][gG]"

@@ -141,6 +141,14 @@ if(MSVC)
 endif()
 
 if(LUX_BUILD_TESTS)
+    add_executable(LuxBasicModelUiTests Tests/BasicModelUiTest.cpp)
+    target_link_libraries(LuxBasicModelUiTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxBasicModelUiTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
+    lux_editor_copy_runtime(LuxBasicModelUiTests)
+    lux_editor_copy_qt_plugins(LuxBasicModelUiTests)
+    add_test(NAME Editor_basic_model_ui COMMAND LuxBasicModelUiTests)
+    set_tests_properties(Editor_basic_model_ui PROPERTIES LABELS "headless;editor;assets;fbx"
+        TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1")
     foreach(pair
         "LuxSelectionCoreTests|SelectionCoreTest.cpp|Editor_selection_core"
         "LuxInteraction2DTests|Interaction2DTest.cpp|Editor_interaction_2d"
