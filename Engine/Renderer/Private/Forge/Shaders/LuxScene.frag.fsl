@@ -1,0 +1,74 @@
+#include "LuxSceneResources.h"
+
+STRUCT(MeshOutput)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float4, color, COLOR);
+    DATA(float2, uv, TEXCOORD0);
+    DATA(float3, world, TEXCOORD1);
+    DATA(float3, normal, TEXCOORD2);
+    DATA(float4, options, TEXCOORD3);
+};
+
+#include "LuxBrdf.h"
+
+// Port of Shaders/Modern.frag.hlsl (Basic.frag.hlsl with lit = true and MODERN_3D): writes linear
+// HDR colour; LuxTone.frag.fsl applies exposure, tone mapping and sRGB encoding.
+ROOT_SIGNATURE(DefaultRootSignature)
+float4 PS_MAIN(MeshOutput In)
+{
+    INIT_MAIN;
+    float4 texel;
+    if (gDraw.options.x > 0.5f)
+        texel = SampleTex2D(gTexture, gSamplerPointClamp, In.uv);
+    else
+        texel = SampleTex2D(gTexture, gSamplerBilinearClamp, In.uv);
+    float4 color = In.color * texel;
+    if (In.options.x > 0.5f && color.a == 0.0f)
+        discard;
+    const float3 faceNormal = dot(In.normal, In.normal) > 1e-10f ? In.normal : cross(ddy(In.world), ddx(In.world));
+    const float lenSq = dot(faceNormal, faceNormal);
+    const float3 normal = lenSq > 1e-10f ? faceNormal * rsqrt(lenSq) : float3(0.0f, 1.0f, 0.0f);
+    const uint pointCount = min(gLights.count.x, 16u);
+    if (In.options.w > 0.5f)
+    {
+        const float3 v = SafeDirection(gLights.camera.xyz - In.world, normal);
+        const float metal = saturate(In.options.y);
+        const float rough = clamp(In.options.z, 0.045f, 1.0f);
+        float3 result = Brdf(color.rgb, metal, rough, normal, v, -gLights.direction.xyz) *
+                        gLights.colorIntensity.rgb * max(gLights.colorIntensity.w, 0.0f);
+        result *= DirectionalShadow(In.world, normal);
+        for (uint i = 0; i < pointCount; ++i)
+        {
+            const float4 source = gLights.pointPositionRadius[i];
+            const float4 sourceColor = gLights.pointColorIntensity[i];
+            const float3 delta = source.xyz - In.world;
+            const float distance = length(delta);
+            const float falloff = saturate(1.0f - distance / max(source.w, 1e-5f));
+            result += Brdf(color.rgb, metal, rough, normal, v, SafeDirection(delta, normal)) * sourceColor.rgb *
+                      max(sourceColor.w, 0.0f) * falloff * falloff;
+        }
+        result += EnvironmentLighting(color.rgb, metal, rough, normal, v);
+        color.rgb = result;
+    }
+    else
+    {
+        float3 light = gLights.colorIntensity.rgb *
+                       (max(0.0f, dot(normal, -gLights.direction.xyz)) * max(0.0f, gLights.colorIntensity.w));
+        for (uint i = 0; i < pointCount; ++i)
+        {
+            const float4 source = gLights.pointPositionRadius[i];
+            const float4 sourceColor = gLights.pointColorIntensity[i];
+            const float3 toLight = source.xyz - In.world;
+            const float distance = length(toLight);
+            if (source.w <= 0.0f || distance >= source.w)
+                continue;
+            const float facing = distance > 0.00001f ? max(0.0f, dot(normal, toLight / distance)) : 1.0f;
+            const float falloff = 1.0f - distance / source.w;
+            light += sourceColor.rgb * (facing * falloff * falloff * max(0.0f, sourceColor.w));
+        }
+        color.rgb *= 0.15f + light;
+    }
+    color.rgb = clamp(color.rgb, 0.0f, 65504.0f);
+    RETURN(color);
+}

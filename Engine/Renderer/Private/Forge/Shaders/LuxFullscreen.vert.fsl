@@ -1,0 +1,18 @@
+#include "LuxSceneResources.h"
+
+STRUCT(FullscreenOutput)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float2, uv, TEXCOORD0);
+};
+
+// Port of Shaders/Tone.vert.hlsl: one triangle covering the target, uv (0,0) at the bottom left.
+ROOT_SIGNATURE(DefaultRootSignature)
+FullscreenOutput VS_MAIN(SV_VertexID(uint) vertexID)
+{
+    INIT_MAIN;
+    FullscreenOutput Out;
+    Out.uv = float2((vertexID << 1) & 2, vertexID & 2);
+    Out.position = float4(Out.uv * 2.0f - 1.0f, 0.0f, 1.0f);
+    RETURN(Out);
+}

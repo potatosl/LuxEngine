@@ -103,6 +103,7 @@ struct TextureRecord {
     VkDescriptorSet set = VK_NULL_HANDLE;
     uint32 width = 0;
     uint32 height = 0;
+    bool srgb = false;
 };
 
 struct Retired {

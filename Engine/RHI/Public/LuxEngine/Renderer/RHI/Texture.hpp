@@ -7,8 +7,8 @@
 namespace LuxEngine {
 class GpuDevice;
 
-namespace Vk {
-struct DeviceState;
+namespace Rhi {
+class RenderBackend;
 }
 
 // Linear is the default for smooth artwork; Nearest preserves pixel-art texel edges.
@@ -57,7 +57,7 @@ private:
     friend class GpuDevice;
     friend class Renderer2D;
     friend class Renderer3D;
-    std::weak_ptr<Vk::DeviceState> owner_;
+    std::weak_ptr<Rhi::RenderBackend> owner_;
     uint64 handle_ = 0;
     uint32 width_ = 0;
     uint32 height_ = 0;

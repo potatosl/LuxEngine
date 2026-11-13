@@ -77,6 +77,9 @@ if(LUX_BUILD_TESTS)
     add_subdirectory(Engine/Tests)
 endif()
 
+# Optional The Forge backend (LuxForge.dll); off unless -DLUX_ENABLE_FORGE=ON.
+include(TheForge)
+
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/LuxEngineConfig.cmake.in"

@@ -10,8 +10,8 @@
 namespace LuxEngine {
 class Window;
 
-namespace Vk {
-struct DeviceState;
+namespace Rhi {
+class RenderBackend;
 }
 
 struct RenderVertex {
@@ -163,7 +163,7 @@ private:
                      bool pbr = false);
     bool DrawTexturedTriangles(std::span<const RenderVertex> vertices, const Mat4& viewProjection,
                                uint64 textureHandle, bool depth);
-    Ref<Vk::DeviceState> state_;
+    Ref<Rhi::RenderBackend> backend_;
 };
 
 LUX_API const char* ToString(GpuStatus status);

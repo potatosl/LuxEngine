@@ -1,4 +1,4 @@
-#include "Vulkan/VulkanDevice.hpp"
+#include "RHI/RenderBackend.hpp"
 #include <LuxEngine/Renderer/RHI/Buffer.hpp>
 #include <LuxEngine/Renderer/RHI/GpuDevice.hpp>
 
@@ -34,26 +34,11 @@ bool GpuBuffer::Initialize(GpuDevice* device, BufferType type, uint32 sizeBytes)
     Release();
     if (!device || !device->IsReady() || sizeBytes == 0)
         return false;
-    VkBufferUsageFlags usage = 0;
-    switch (type) {
-    case BufferType::Vertex:
-        usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        break;
-    case BufferType::Index:
-        usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        break;
-    case BufferType::Uniform:
-        usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        break;
-    case BufferType::Storage:
-        usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        break;
-    }
-    Vk::BufferRecord record;
-    if (!device->state_->CreateBufferResource(sizeBytes, usage, record))
+    uint64 handle = 0;
+    if (!device->backend_->CreateBuffer(type, sizeBytes, handle))
         return false;
-    handle_ = device->state_->buffers.Insert(record);
-    owner_ = device->state_;
+    handle_ = handle;
+    owner_ = device->backend_;
     type_ = type;
     sizeBytes_ = sizeBytes;
     return true;
@@ -64,16 +49,12 @@ bool GpuBuffer::SetData(const void* data, uint32 sizeBytes, uint32 offsetBytes) 
     if (!owner || !owner->Usable() || !data || sizeBytes == 0 ||
         static_cast<uint64>(offsetBytes) + sizeBytes > sizeBytes_)
         return false;
-    Vk::BufferRecord* record = owner->buffers.Get(handle_);
-    return record && owner->UploadBuffer(*record, data, sizeBytes, offsetBytes);
+    return owner->UpdateBuffer(handle_, data, sizeBytes, offsetBytes);
 }
 
 void GpuBuffer::Release() {
-    if (auto owner = owner_.lock()) {
-        Vk::BufferRecord record;
-        if (owner->buffers.Remove(handle_, record))
-            owner->Retire({0, record.buffer, VK_NULL_HANDLE, VK_NULL_HANDLE, record.allocation});
-    }
+    if (auto owner = owner_.lock())
+        owner->DestroyBuffer(handle_);
     owner_.reset();
     handle_ = 0;
     sizeBytes_ = 0;
@@ -81,12 +62,12 @@ void GpuBuffer::Release() {
 
 bool GpuBuffer::IsValid() const {
     auto owner = owner_.lock();
-    return owner && owner->buffers.Get(handle_) != nullptr;
+    return owner && owner->HasBuffer(handle_);
 }
 
 bool GpuBuffer::BelongsTo(const GpuDevice& device) const {
     auto owner = owner_.lock();
-    return owner && owner == device.state_ && owner->buffers.Get(handle_) != nullptr;
+    return owner && owner == device.backend_ && owner->HasBuffer(handle_);
 }
 
 } // namespace LuxEngine
