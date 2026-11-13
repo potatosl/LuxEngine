@@ -7,6 +7,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Utf8.ps1")
+. (Join-Path $PSScriptRoot "WindowsRuntime.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
@@ -53,13 +54,12 @@ if (Test-Path (Join-Path $binSource "LuxPlayer.exe")) {
     Copy-Item -Path (Join-Path $binSource "LuxPlayer.exe") -Destination $editorStaging -Force
 }
 
-# Copy all runtime DLLs
-Get-ChildItem -Path $binSource -Filter "*.dll" | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination $editorStaging -Force
-}
+# Copy the Forge renderer, native shaders, GPU configuration and C# host.
+Copy-LuxWindowsRuntime -Source $binSource -Destination $editorStaging
 
 # Search locations for Qt runtime and tools (vcpkg, standalone Qt, CI environment)
 $qtRoots = @()
+if ($env:QT_ROOT_DIR) { $qtRoots += $env:QT_ROOT_DIR }
 if ($env:Qt6_DIR) {
     $qtRoots += (Split-Path (Split-Path (Split-Path $env:Qt6_DIR)))
 }
@@ -87,17 +87,6 @@ if (-not (Test-Path (Join-Path $platformsDir "qoffscreen.dll"))) {
     }
 }
 
-# Copy shaders
-$shadersDir = Join-Path $editorStaging "shaders"
-New-Item -ItemType Directory -Path $shadersDir -Force | Out-Null
-$shaderSource = Join-Path $binSource "shaders"
-if (-not (Test-Path $shaderSource)) {
-    $shaderSource = Join-Path $root "$BuildDir/shaders"
-}
-if (Test-Path $shaderSource) {
-    Copy-Item -Path "$shaderSource/*" -Destination $shadersDir -Recurse -Force
-}
-
 # Copy licenses
 $licensesDir = Join-Path $editorStaging "licenses"
 New-Item -ItemType Directory -Path $licensesDir -Force | Out-Null
@@ -112,7 +101,7 @@ No external installation of Qt, CMake, or Visual Studio is required to run the e
 
 ## System Requirements
 - Windows 10 64-bit or Windows 11 64-bit
-- Vulkan 1.1+ compatible GPU and up-to-date display driver (NVIDIA GeForce, AMD Radeon, or Intel Arc/UHD)
+- Direct3D 12 compatible GPU and up-to-date display driver (NVIDIA GeForce, AMD Radeon, or Intel Arc/UHD)
 - 4 GB RAM minimum (8 GB recommended)
 
 ## How to Run
@@ -129,7 +118,8 @@ See the `licenses/` directory for full license texts and dependency details.
 - SDL3 (zlib)
 - Box2D (zlib)
 - libzip (3-clause BSD)
-- Vulkan Memory Allocator (MIT)
+- The Forge (Apache-2.0)
+- .NET 10 runtime is required to execute C# game scripts
 "@
 $editorReadme | Out-File -FilePath (Join-Path $editorStaging "README.md") -Encoding utf8
 
@@ -150,19 +140,20 @@ if (-not $windeployqt) {
 }
 if ($windeployqt -and (Test-Path $windeployqt)) {
     Write-Host "Running windeployqt ($windeployqt) to ensure all required Qt dependencies are bundled..."
-    & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw (Join-Path $editorStaging "LuxEditor.exe")
+    $deployConfiguration = if ($Configuration -eq "Debug") { "--debug" } else { "--release" }
+    & $windeployqt $deployConfiguration --no-translations --no-system-d3d-compiler --no-opengl-sw (Join-Path $editorStaging "LuxEditor.exe")
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
 }
 
 # Verify essential files strictly (throw immediately on missing file)
+$qtPostfix = if ($Configuration -eq "Debug") { "d" } else { "" }
 $requiredEditorFiles = @(
     "LuxEditor.exe",
     "SDL3.dll",
-    "Qt6Core.dll",
-    "Qt6Gui.dll",
-    "Qt6Widgets.dll",
-    "platforms/qwindows.dll",
-    "shaders/Basic.vert.spv",
-    "shaders/Basic.frag.spv",
+    "Qt6Core$qtPostfix.dll",
+    "Qt6Gui$qtPostfix.dll",
+    "Qt6Widgets$qtPostfix.dll",
+    "platforms/qwindows$qtPostfix.dll",
     "licenses/LICENSE-LuxEngine.txt",
     "licenses/LICENSE-Qt6.txt",
     "licenses/LICENSE-LGPLv3.txt",
@@ -175,6 +166,8 @@ foreach ($f in $requiredEditorFiles) {
         throw "Packaging integrity failure: required Editor file missing: $f"
     }
 }
+
+Assert-LuxWindowsRuntime -Directory $editorStaging
 
 # Verify no debug runtime DLLs are accidentally packaged in Release build
 if ($binSource -like "*Release*") {

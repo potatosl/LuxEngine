@@ -7,6 +7,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Utf8.ps1")
+. (Join-Path $PSScriptRoot "WindowsRuntime.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
@@ -51,45 +52,8 @@ if ($Configuration -eq "Release") {
 # Copy executable
 Copy-Item -Path $playerExe -Destination $playerStaging -Force
 
-# Copy SDL3 runtime DLL
-$sdlDll = Join-Path $binSource "SDL3.dll"
-if (Test-Path $sdlDll) {
-    Copy-Item -Path $sdlDll -Destination $playerStaging -Force
-} else {
-    throw "Packaging failure: SDL3.dll not found in $binSource"
-}
-
-# Copy Vulkan loader DLL strictly from verified system or official Vulkan SDK locations
-$vulkanSource = $null
-if (Test-Path "C:\Windows\System32\vulkan-1.dll") {
-    $vulkanSource = "C:\Windows\System32\vulkan-1.dll"
-} elseif ($env:VULKAN_SDK -and (Test-Path (Join-Path $env:VULKAN_SDK "bin\vulkan-1.dll"))) {
-    $vulkanSource = Join-Path $env:VULKAN_SDK "bin\vulkan-1.dll"
-} elseif ($env:VK_SDK_PATH -and (Test-Path (Join-Path $env:VK_SDK_PATH "bin\vulkan-1.dll"))) {
-    $vulkanSource = Join-Path $env:VK_SDK_PATH "bin\vulkan-1.dll"
-}
-
-if ($vulkanSource -and (Test-Path $vulkanSource)) {
-    $vulkanItem = Get-Item $vulkanSource
-    if ($vulkanItem.Length -lt 100KB) {
-        throw "Packaging failure: vulkan-1.dll at $vulkanSource is suspiciously small ($($vulkanItem.Length) bytes)"
-    }
-    Copy-Item -Path $vulkanSource -Destination $playerStaging -Force
-    Write-Host "Bundled vulkan-1.dll from verified source: $vulkanSource ($($vulkanItem.Length) bytes)"
-} else {
-    Write-Warning "vulkan-1.dll not found in System32 or VULKAN_SDK. Standalone package will rely on host system Vulkan loader."
-}
-
-# Copy shaders
-$shadersDir = Join-Path $playerStaging "shaders"
-New-Item -ItemType Directory -Path $shadersDir -Force | Out-Null
-$shaderSource = Join-Path $binSource "shaders"
-if (-not (Test-Path $shaderSource)) {
-    $shaderSource = Join-Path $root "$BuildDir/shaders"
-}
-if (Test-Path $shaderSource) {
-    Copy-Item -Path "$shaderSource/*" -Destination $shadersDir -Recurse -Force
-}
+# Copy the Forge renderer, native shaders, GPU configuration and C# host.
+Copy-LuxWindowsRuntime -Source $binSource -Destination $playerStaging
 
 # Bundle the standalone player's dedicated runtime-verification scene.
 $scenesDir = Join-Path $playerStaging "scenes"
@@ -113,7 +77,7 @@ LuxEngine standalone player for running packaged 2D/3D games without editor or d
 
 ## System Requirements
 - Windows 10 64-bit or Windows 11 64-bit
-- Vulkan 1.1+ compatible GPU and display driver
+- Direct3D 12 compatible GPU and display driver
 
 ## Usage
 - Run runtime verification scene:
@@ -125,7 +89,8 @@ LuxEngine standalone player for running packaged 2D/3D games without editor or d
 See the `licenses/` directory for full license texts and dependency details.
 - SDL3 (zlib)
 - Box2D (zlib)
-- Vulkan Memory Allocator (MIT)
+- The Forge (Apache-2.0)
+- .NET 10 runtime is required to execute C# game scripts
 "@
 $playerReadme | Out-File -FilePath (Join-Path $playerStaging "README.md") -Encoding utf8
 
@@ -133,8 +98,6 @@ $playerReadme | Out-File -FilePath (Join-Path $playerStaging "README.md") -Encod
 $requiredPlayerFiles = @(
     "LuxPlayer.exe",
     "SDL3.dll",
-    "shaders/Basic.vert.spv",
-    "shaders/Basic.frag.spv",
     "scenes/ScenePlayer.lux",
     "licenses/LICENSE-LuxEngine.txt",
     "licenses/DEPENDENCIES.md"
@@ -146,6 +109,8 @@ foreach ($f in $requiredPlayerFiles) {
         throw "Packaging integrity failure: required Runtime file missing: $f"
     }
 }
+
+Assert-LuxWindowsRuntime -Directory $playerStaging
 
 # Verify no debug runtime DLLs are packaged in Release build
 if ($binSource -like "*Release*") {

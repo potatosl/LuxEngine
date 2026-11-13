@@ -2,183 +2,184 @@ name: LuxEngine CI
 
 on:
   push:
-    branches: [ main, refactor/*, feat/*, fix/*, audit/* ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
 jobs:
   build-and-test:
     name: Windows Build, Test & SDK Consumer
-    runs-on: windows-latest
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
+      QT_QPA_PLATFORM: offscreen
+      LUX_EDITOR_SOFTWARE_VIEWPORT: '1'
+      SDL_AUDIO_DRIVER: dummy
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Configure Network & Download Retries
-        shell: pwsh
-        run: |
-          "retry = 5`nretry-connrefused`nretry-delay = 2" | Out-File -FilePath "$HOME/.curlrc" -Encoding ascii
-
-      - name: Setup Vulkan SDK
-        uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
-          vulkan-query-version: 1.3.296.0
-          vulkan-components: Vulkan-Headers, Vulkan-Loader, SPIRV-Tools
-          vulkan-use-cache: true
+          persist-credentials: false
 
-      - name: Setup Portable DXC Shader Compiler
-        shell: pwsh
-        run: |
-          & powershell -ExecutionPolicy Bypass -File tools/SetupShaderCompiler.ps1
+      # CMake consumes installed sources; dependency downloads belong to CI setup.
+      - name: Prepare Pinned The Forge Source
+        uses: actions/checkout@v4
+        with:
+          repository: ConfettiFX/The-Forge
+          ref: cd5046893faba2dc7869243873bf01f02a6f0df9
+          path: Engine/ThirdParty/TheForge
+          sparse-checkout: Common_3
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore vcpkg Binary Cache
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg-cache
+          key: windows-2022-msvc-vcpkg-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: windows-2022-msvc-vcpkg-
 
       - name: Install Dependencies via vcpkg
-        shell: pwsh
         run: |
-          vcpkg install --triplet x64-windows --clean-after-build sdl3 stb vulkan-memory-allocator libzip nlohmann-json
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Path .vcpkg-cache -Force | Out-Null
+          vcpkg install --triplet x64-windows --clean-after-build sdl3 stb libzip nlohmann-json
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
-          arch: 'win64_msvc2022_64'
+          arch: win64_msvc2022_64
+          cache: true
 
       - name: Build and Install Box2D 2.4.1
-        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Path C:/LuxDeps/src -Force | Out-Null
           git clone --depth 1 -b v2.4.1 https://github.com/erincatto/box2d C:/LuxDeps/src/box2d
-          cmake -S C:/LuxDeps/src/box2d -B C:/LuxDeps/build/box2d -A x64 -DBOX2D_BUILD_UNIT_TESTS=OFF -DBOX2D_BUILD_TESTBED=OFF -DBOX2D_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX=C:/LuxDeps -DCMAKE_DEBUG_POSTFIX=d
-          cmake --build C:/LuxDeps/build/box2d --config Debug -- /m /v:minimal
-          cmake --install C:/LuxDeps/build/box2d --config Debug
-          cmake --build C:/LuxDeps/build/box2d --config Release -- /m /v:minimal
-          cmake --install C:/LuxDeps/build/box2d --config Release
+          cmake -S C:/LuxDeps/src/box2d -B C:/LuxDeps/build/box2d -G "Visual Studio 17 2022" -A x64 -DBOX2D_BUILD_UNIT_TESTS=OFF -DBOX2D_BUILD_TESTBED=OFF -DBOX2D_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX=C:/LuxDeps -DCMAKE_DEBUG_POSTFIX=d
+          foreach ($configuration in @('Debug', 'Release')) {
+            cmake --build C:/LuxDeps/build/box2d --config $configuration --parallel 2
+            cmake --install C:/LuxDeps/build/box2d --config $configuration
+          }
 
       - name: Configure Engine, Editor & Tests
-        shell: pwsh
         run: |
-          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif (Test-Path "C:/vcpkg") { "C:/vcpkg" } else { (Split-Path (Split-Path (Get-Command vcpkg).Source)) }
-          $prefixPath = if ($env:Qt6_DIR) { "C:/LuxDeps;$env:Qt6_DIR" } else { "C:/LuxDeps" }
-          Write-Host "Configuring Engine & Editor with vcpkg root: $vcpkgRoot, prefixPath: $prefixPath"
-          $cmakeArgs = @(
-            "-S", ".",
-            "-B", "build",
-            "-A", "x64",
-            "-DLUX_BUILD_TESTS=ON",
-            "-DLUX_BUILD_EDITOR=ON",
-            "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
-            "-DVCPKG_TARGET_TRIPLET=x64-windows",
-            "-DCMAKE_PREFIX_PATH=$prefixPath"
-          )
-          & cmake @cmakeArgs
-          if ($LASTEXITCODE -ne 0) {
-            if (Test-Path build/CMakeFiles/CMakeError.log) { Get-Content build/CMakeFiles/CMakeError.log -Tail 100 }
-            exit 1
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { 'C:/vcpkg' }
+          if (-not (Test-Path "$vcpkgRoot/scripts/buildsystems/vcpkg.cmake")) {
+            throw "vcpkg toolchain not found at $vcpkgRoot"
           }
-
-      - name: Build Engine, Editor & Tests (Debug)
-        shell: pwsh
-        run: |
-          cmake --build build --config Debug -- /m /v:minimal
-          if ($env:Qt6_DIR) {
-            $qtBin = Join-Path (Split-Path (Split-Path (Split-Path $env:Qt6_DIR))) "bin"
-            $windeployqt = Join-Path $qtBin "windeployqt.exe"
-            if (Test-Path $windeployqt) {
-              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Debug/LuxEditor.exe
-              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Debug/LuxEditorUiTests.exe
-              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Debug/LuxEditorDocumentTests.exe
-            }
+          if (-not (Test-Path "$env:QT_ROOT_DIR/lib/cmake/Qt6/Qt6Config.cmake")) {
+            throw 'The installed Qt 6 CMake package is missing.'
           }
+          "$env:QT_ROOT_DIR/bin" >> $env:GITHUB_PATH
+          $prefixPath = "C:/LuxDeps;$env:QT_ROOT_DIR"
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DLUX_BUILD_TESTS=ON -DLUX_BUILD_EDITOR=ON `
+            "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows "-DCMAKE_PREFIX_PATH=$prefixPath" `
+            2>&1 | Tee-Object "$env:RUNNER_TEMP/configure-windows.log"
 
-      - name: Build Engine, Editor & Tests (Release)
-        shell: pwsh
+      - name: Build and Test Debug
         run: |
-          cmake --build build --config Release -- /m /v:minimal
-          if ($env:Qt6_DIR) {
-            $qtBin = Join-Path (Split-Path (Split-Path (Split-Path $env:Qt6_DIR))) "bin"
-            $windeployqt = Join-Path $qtBin "windeployqt.exe"
-            if (Test-Path $windeployqt) {
-              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Release/LuxEditor.exe
-              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Release/LuxEditorUiTests.exe
-              & $windeployqt --no-translations --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw build/bin/Release/LuxEditorDocumentTests.exe
-            }
-          }
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cmake --build build --config Debug --parallel 2
+          ctest --test-dir build -C Debug --no-tests=error --output-on-failure `
+            -L headless -LE 'long|slow' --timeout 180 --parallel 2 `
+            --output-junit "$env:RUNNER_TEMP/ctest-windows-debug.xml"
 
-      - name: List Registered CTest Tests
-        shell: pwsh
+      - name: Build and Test Release
         run: |
-          ctest --test-dir build -C Debug -N
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cmake --build build --config Release --parallel 2
+          ctest --test-dir build -C Release --no-tests=error --output-on-failure `
+            -L headless -LE 'long|slow' --timeout 180 --parallel 2 `
+            --output-junit "$env:RUNNER_TEMP/ctest-windows-release.xml"
 
-      - name: Run Headless Engine & Editor UI Tests (Debug)
-        shell: pwsh
+      - name: Run Scene Fuzz Seed Corpus and Mutations
         run: |
-          ctest --test-dir build -C Debug --output-on-failure -L headless -LE "long|slow" --timeout 180
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & ./build/bin/Debug/LuxFuzzScene.exe
+          & ./build/bin/Debug/LuxFuzzScene.exe --runs 10000
 
-      - name: Run Headless Engine & Editor UI Tests (Release)
-        shell: pwsh
+      - name: Verify Packaging Failure Contracts
         run: |
-          ctest --test-dir build -C Release --output-on-failure -L headless -LE "long|slow" --timeout 180
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & pwsh -NoProfile -File tools/Tests/TestPackagingIntegrity.ps1 -BuildDir build
+          & pwsh -NoProfile -File tools/Tests/TestSdkRelocationSafety.ps1
+          & pwsh -NoProfile -File tools/Tests/TestWindowsRuntimePackaging.ps1
 
-      - name: Run Editor UI Undo/Redo & Clipboard Regression Verbose
-        shell: pwsh
+      - name: Package SDK and Verify Relocated Consumer
         run: |
-          ctest --test-dir build -C Debug -R "^Editor_ui$" --output-on-failure -V
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & pwsh -NoProfile -File tools/PackageSdk.ps1 -BuildDir build -OutputDir dist
+          & pwsh -NoProfile -File tools/VerifySdkRelocation.ps1 -BuildDir build
 
-      - name: Upload CTest Logs
+      - name: Package and Verify Standalone Editor
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & pwsh -NoProfile -File tools/PackageEditor.ps1 -BuildDir build -OutputDir dist
+          & pwsh -NoProfile -File tools/VerifyEditorStandalone.ps1
+
+      - name: Package and Verify Standalone Player
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & pwsh -NoProfile -File tools/PackageRuntime.ps1 -BuildDir build -OutputDir dist
+          & pwsh -NoProfile -File tools/VerifyRuntimeStandalone.ps1
+
+      - name: Upload Diagnostics and JUnit Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ctest-logs
-          path: build/Testing/Temporary/*
+          name: windows-diagnostics
+          path: |
+            ${{ runner.temp }}/configure-windows.log
+            ${{ runner.temp }}/ctest-windows-*.xml
+            build/CMakeFiles/CMakeConfigureLog.yaml
+            build/Testing/Temporary/*
           if-no-files-found: warn
-
-      - name: Run Fuzz Seed Corpus & Mutational Fuzzer
-        shell: pwsh
-        run: |
-          & "./build/bin/Debug/LuxFuzzScene.exe"
-          & "./build/bin/Debug/LuxFuzzScene.exe" --runs 10000
-
-      - name: Package LuxEngine SDK
-        shell: pwsh
-        run: |
-          & pwsh tools/PackageSdk.ps1 -BuildDir build -OutputDir dist
-
-      - name: Verify Relocated SDK & MinimalGame Consumer
-        shell: pwsh
-        run: |
-          & pwsh tools/VerifySdkRelocation.ps1 -BuildDir build
-
-      - name: Verify SDK Relocation Safety & Data Preservation
-        shell: pwsh
-        run: |
-          & pwsh tools/Tests/TestSdkRelocationSafety.ps1
-
-      - name: Package LuxEditor Standalone Portable
-        shell: pwsh
-        run: |
-          & pwsh tools/PackageEditor.ps1 -BuildDir build -OutputDir dist
-
-      - name: Verify Standalone Editor in Isolated Environment
-        shell: pwsh
-        run: |
-          & pwsh tools/VerifyEditorStandalone.ps1
-
-      - name: Package LuxPlayer Standalone Portable
-        shell: pwsh
-        run: |
-          & pwsh tools/PackageRuntime.ps1 -BuildDir build -OutputDir dist
-
-      - name: Verify Standalone LuxPlayer in Isolated Environment
-        shell: pwsh
-        run: |
-          & pwsh tools/VerifyRuntimeStandalone.ps1
+          retention-days: 14
 
       - name: Upload Distribution Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: LuxEngine-Distributions
-          path: |
-            dist/*.zip
+          path: dist/*.zip
           if-no-files-found: error
+          retention-days: 14
