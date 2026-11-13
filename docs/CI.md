@@ -13,7 +13,7 @@
 | Code Quality | 워크플로 | actionlint 1.7.11로 Actions 표현식·잡·셸 문법 검사 |
 | Code Quality | Windows·Linux·macOS | .NET 네이티브 호스트 팩 탐색의 CMake 회귀 |
 | Code Quality | C# | .NET 10 ScriptCore와 이를 참조하는 게임 스크립트 빌드, 경고를 오류로 처리 |
-| Code Quality | Windows 배포 계약 | 잘못된 구성·Debug CRT 거부, 재배치 중 사용자 데이터 보존, Forge·C# 배포 파일 누락 거부 |
+| Code Quality | Windows 배포 계약 | 잘못된 구성·Debug CRT 거부, 재배치 중 사용자 데이터 보존, Forge·C# 배포 파일 누락 거부, PowerShell 종료 코드 전파 |
 
 총 13개 잡으로 구성했다. headless 테스트는 화면과 GPU가 필요 없는 테스트이며 `long`·`slow` 라벨은 제외한다. 실제 GPU 렌더링 검증은 이 구성에 포함하지 않는다. 호스팅 러너의 가상 디스플레이를 실제 GPU 검증 결과로 취급하지 않는다.
 
@@ -40,4 +40,4 @@ python3 tools/ci/CheckFormatting.py --base origin/main
 cmake -DTEST_ROOT=/tmp/lux-host-fixture -P cmake/tests/DotnetHostTest.cmake
 ```
 
-PowerShell 배포 회귀는 `tools/Tests/TestPackagingIntegrity.ps1`, `TestSdkRelocationSafety.ps1`, `TestWindowsRuntimePackaging.ps1`에서 실행한다.
+PowerShell 배포 회귀는 `tools/Tests/TestPackagingIntegrity.ps1`, `TestSdkRelocationSafety.ps1`, `TestWindowsRuntimePackaging.ps1`에서 실행한다. `TestPowerShellTestExitCodes.ps1`은 GitHub의 실제 `pwsh` 종료 규칙으로 성공과 실패가 올바르게 전달되는지 검사한다.

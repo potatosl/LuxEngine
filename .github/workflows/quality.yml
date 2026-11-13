@@ -122,3 +122,5 @@ jobs:
         run: ./tools/Tests/TestSdkRelocationSafety.ps1
       - name: Require Forge and Managed Runtime Package Contents
         run: ./tools/Tests/TestWindowsRuntimePackaging.ps1
+      - name: Verify Regression Test Process Exit Contracts
+        run: ./tools/Tests/TestPowerShellTestExitCodes.ps1

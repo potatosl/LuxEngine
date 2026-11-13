@@ -47,3 +47,6 @@ finally {
         Remove-Item -LiteralPath $testDirectory -Recurse -Force
     }
 }
+
+# GitHub's pwsh wrapper forwards LASTEXITCODE, including expected child failures.
+exit 0
