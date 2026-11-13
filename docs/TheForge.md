@@ -1,58 +1,59 @@
-# The Forge 백엔드
+# The Forge 렌더러
 
-LuxEngine의 기본 렌더러는 Native Vulkan입니다. 선택적 The Forge 백엔드는 Windows/MSVC에서 Direct3D 12를 사용하며, 엔진이 `LuxForge.dll`을 실행 중에 불러오는 구조입니다. `LUX_ENABLE_FORGE`의 기본값은 `OFF`이고, 현재 기본 CI도 Forge를 켜지 않습니다. 기본 CI 결과에 Forge의 빌드·GPU 검증은 포함되지 않습니다.
+엔진의 렌더링 경로를 The Forge로 통합했다. 이전 Native Vulkan 구현과 실행 시 백엔드 선택 분기는 제거했다. 엔진은 공개 RHI를 유지하고, 플랫폼별 그래픽 API와 The Forge의 전역 상태는 별도 `LuxForge` 공유 라이브러리 안에 두었다.
 
-## 준비
+| 플랫폼 | 그래픽 API | 런타임 파일 |
+| --- | --- | --- |
+| Linux | Vulkan | `libLuxForge.so` |
+| Windows / MSVC | Direct3D 12 | `LuxForge.dll` |
+| macOS | Metal | `libLuxForge.dylib` |
 
-Windows용 Visual Studio/MSVC와 일반 엔진 빌드에 필요한 Vulkan SDK, SDL3, Box2D, VMA, stb_image, nlohmann_json 3.11 이상, SPIR-V 셰이더 컴파일러를 준비합니다. Forge를 켜도 엔진의 Vulkan 소스와 셰이더를 함께 빌드하므로 Vulkan SDK는 필수입니다. 의존성을 별도 경로에 준비했다면 기존과 같이 `CMAKE_TOOLCHAIN_FILE`, `CMAKE_PREFIX_PATH` 또는 각 패키지 경로를 CMake에 전달합니다.
+세 플랫폼의 소스·셰이더·링크·배포 경로를 구성했다. Linux에서는 X11과 Wayland 각각에서 Forge 전용 GPU 회귀 6개를 통과했다. 이 변경에서 Windows·macOS의 현지 빌드 및 GPU 실행은 검증하지 못했다.
 
-The Forge 소스는 CMake가 다운로드하지 않습니다. 기준 리비전은 `cd5046893faba2dc7869243873bf01f02a6f0df9`이며, 기본 위치는 워크스페이스 안의 `external/TheForge`입니다. 이 경로는 Git에서 제외되어 있습니다. 새로 준비할 때는 저장소 루트에서 다음 명령을 사용합니다.
+## 의존성 준비
 
-```powershell
-git clone --filter=blob:none --sparse https://github.com/ConfettiFX/The-Forge.git external/TheForge
-git -C external/TheForge checkout --detach cd5046893faba2dc7869243873bf01f02a6f0df9
-git -C external/TheForge sparse-checkout set Common_3 Tools/python-3.6.0-embed-amd64
+CMake는 의존성을 다운로드하지 않는다. SDL3 3.2 이상, Box2D 2.4 계열, stb_image, nlohmann_json 3.11 이상, Python 3, .NET 10 SDK를 시스템이나 별도 개발 도구 경로에 준비한다. .NET 호스팅과 게임 스크립트 구성은 [CSharpScripting.md](CSharpScripting.md)에 정리했다.
+
+The Forge 기준 리비전은 `cd5046893faba2dc7869243873bf01f02a6f0df9`이다. 기본 소스 위치는 Git에서 제외한 `Engine/ThirdParty/TheForge`이고, 다른 설치를 사용하려면 `LUX_FORGE_ROOT`를 지정한다. 소스 준비는 사용자가 빌드 전에 수행한다.
+
+```sh
+git clone --filter=blob:none --sparse https://github.com/ConfettiFX/The-Forge.git Engine/ThirdParty/TheForge
+git -C Engine/ThirdParty/TheForge checkout --detach cd5046893faba2dc7869243873bf01f02a6f0df9
+git -C Engine/ThirdParty/TheForge sparse-checkout set Common_3
 ```
 
-이미 체크아웃이 있다면 복제 명령을 생략하고 리비전과 필요한 경로를 확인합니다. `Common_3`에는 FSL 컴파일러와 Direct3D 12용 라이브러리·DLL이, `Tools/python-3.6.0-embed-amd64`에는 FSL 실행용 포터블 Python이 필요합니다. 다른 위치를 사용하려면 `-DLUX_FORGE_ROOT=경로`를 지정합니다. 기준 리비전은 [cmake/TheForge.cmake](../cmake/TheForge.cmake)에 기록되어 있으며 CMake가 체크아웃의 Git 리비전을 자동으로 교체하거나 일치 여부를 강제하지는 않습니다.
+CMake는 외부 체크아웃의 리비전을 변경하지 않는다. 기준 리비전은 [TheForge.cmake](../cmake/TheForge.cmake)에 기록했다.
 
-## 빌드와 테스트
+Linux에는 Vulkan 드라이버·개발 헤더, `glslangValidator`, X11·Wayland 개발 패키지가 필요하다. Windows는 MSVC와 The Forge 체크아웃의 Direct3D 12 관련 라이브러리·DXC를 사용한다. macOS는 Xcode 도구의 Metal 컴파일러와 시스템 프레임워크를 사용한다.
 
-다음 명령은 저장소의 공개 Visual Studio 2026 Debug 프리셋을 사용합니다. 패키지 경로가 필요한 환경에서는 구성 명령에 해당 인자를 추가합니다.
+## 빌드
 
-```powershell
-cmake --preset vs2026-x64-debug -DLUX_ENABLE_FORGE=ON -DLUX_BUILD_TESTS=ON
-cmake --build --preset vs2026-debug --target LuxForgeProbe LuxForgeBackendTests LuxPlayer
-& .\build\vs2026\bin\Debug\LuxForgeProbe.exe
-ctest --test-dir build/vs2026 -C Debug -R "^Forge_backend_basic$" --output-on-failure
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DLUX_BUILD_EDITOR=ON
+cmake --build build --target LuxEditor LuxForgeBackendTests
+ctest --test-dir build -L forge --output-on-failure
 ```
 
-`LuxForgeProbe`는 DLL 로딩과 Direct3D 12 디바이스 초기화를 확인합니다. `Forge_backend_basic`은 프레임·텍스처·버퍼·메시·씬 렌더링 등의 회귀 검사를 실행합니다. 특정 구간만 실행하려면 테스트 실행 파일에 이름을 전달합니다.
+`LUX_ENABLE_FORGE`나 `LUX_RENDER_BACKEND`를 선택할 필요가 없다. 렌더러 파일이 없거나 엔진과 ABI가 맞지 않으면 초기화 오류를 반환한다. ABI 버전은 현재 `7`이며 엔진과 렌더러를 함께 다시 빌드해야 한다.
 
-```powershell
-& .\build\vs2026\bin\Debug\LuxForgeBackendTests.exe scene3d
-```
+## 프레임과 자원 수명
 
-테스트 실행 파일은 자체적으로 Forge를 선택합니다. GPU 테스트에는 사용 가능한 Windows 창 시스템과 Direct3D 12 장치가 필요합니다. SDL 비디오 초기화 실패에 따른 종료 코드 `77`은 CTest에서 건너뜀으로 표시하며, Forge 디바이스 초기화 실패는 검사 실패로 보고합니다. `endurance`, `stress`, `mix`, `grow` 장시간 부하 검사는 이름으로 요청할 때만 실행합니다. 세부 검사와 인자는 [Engine/Tests/ForgeBackendTest.cpp](../Engine/Tests/ForgeBackendTest.cpp)에 있습니다.
+각 창은 별도 스왑체인·명령 링·프레임 자원을 사용한다. The Forge의 렌더러·리소스 로더·정적 샘플러 루트는 프로세스 안에서 공유하며 마지막 장치가 종료될 때 해제한다. 화면 획득 세마포어는 프레임 슬롯과, 제출 완료를 기다리는 프레젠테이션 세마포어는 스왑체인 이미지와 수명을 맞췄다.
 
-## 실행과 배포 파일
+Vulkan에서도 `INIT_RS_DESC`와 `initRootSignature`를 호출해 기본 정적 샘플러 디스크립터를 생성한다. 이 초기화가 없으면 첫 파이프라인 바인딩에서 assertion이 발생했다.
 
-일반 엔진 실행 파일에서 Forge를 사용하려면 실행 전에 환경 변수를 설정합니다.
+기준 리비전의 리소스 로더는 업로드용 전송 큐에서 셰이더 접근 배리어를 실행한다. Vulkan 검증 계층과 호환되도록 Linux 빌드에서만 생성한 리소스 로더 사본의 업로드 큐를 그래픽 큐로 바꿨다. 외부 소스 체크아웃은 수정하지 않는다. 이 호환 처리는 CMake에 주석과 적용 범위를 기록했다.
 
-```powershell
-$env:LUX_RENDER_BACKEND = "forge"
-& .\build\vs2026\bin\Debug\LuxPlayer.exe .\samples\ScenePlayer\Scene.lux --frames 60
-Remove-Item Env:LUX_RENDER_BACKEND
-```
+## 실행 파일과 SDK 배포
 
-환경 변수가 없으면 Native Vulkan을 선택합니다. 빌드 옵션은 DLL 생성 여부를, 환경 변수는 실행 시 사용할 백엔드를 결정합니다. Forge를 선택한 상태에서 DLL을 불러오지 못하면 초기화 오류를 반환합니다.
+실행 파일 옆에 플랫폼별 `LuxForge` 라이브러리, `gpu.data`, `gpu.cfg`, API별 셰이더 폴더(`VULKAN/`, `DIRECT3D12/`, `MACOS/`)를 유지한다. Windows에서는 AMD AGS·DXC·PIX 런타임 DLL도 함께 배포한다. CMake 빌드와 설치 규칙이 이 파일을 복사한다.
 
-`LuxForge.dll`과 해당 빌드의 의존 DLL, `gpu.data`, `DIRECT3D12/` 셰이더 디렉터리를 실행 파일 옆에 함께 유지합니다. CMake는 Forge 빌드 출력으로 이 파일들을 복사하고 설치 대상에도 포함합니다. 의존 DLL 목록과 셰이더 생성 경로는 [cmake/TheForge.cmake](../cmake/TheForge.cmake)에 정의되어 있습니다.
+설치 SDK를 사용하는 프로젝트는 `lux_copy_runtime(게임타깃)`을 호출한다. 이 함수는 렌더러·셰이더와 C# 코어·nethost도 실행 폴더에 복사한다. .NET 런타임 전체를 게임에 묶는 self-contained 배포는 아직 구현하지 않았다.
 
-엔진과 DLL 사이의 C API 버전은 현재 `6`입니다. [LuxForgeApi.h](../Engine/Renderer/Private/Forge/LuxForgeApi.h)의 버전과 DLL이 다르면 초기화를 거부하므로 API 변경 시 엔진과 `LuxForge.dll`을 함께 다시 빌드합니다.
+## 검증과 남은 범위
 
-## 제공 경로와 제약
+Forge 전용 회귀 테스트는 초기화·캡처, 프레임 반복, 드로잉·텍스처, 메시, 3D 씬을 검사한다. 실행 환경에 창 시스템이 없으면 종료 코드 `77`을 반환하며 CTest에서 건너뜀으로 표시한다. 실제 GPU 초기화 실패와 렌더링 오류를 성공으로 처리하지 않는다.
 
-Forge 백엔드는 프레임 제출·리사이즈·캡처, 2D 텍스처 출력, 인덱스 메시와 조명, PBR/HDR 씬·톤 매핑·환경 반사·방향광 그림자 경로를 제공합니다. 외부 환경 데이터의 CPU 준비는 비동기로 진행하며 준비된 데이터를 Forge 리소스로 업로드합니다. 엔진 측 연결은 [ForgeBackend.cpp](../Engine/Renderer/Private/Forge/ForgeBackend.cpp), DLL 구현은 [LuxForge.cpp](../Engine/Renderer/Private/Forge/LuxForge.cpp), 셰이더 목록은 [LuxForgeShaders.list](../Engine/Renderer/Private/Forge/Shaders/LuxForgeShaders.list)에 있습니다.
+삭제한 Native Vulkan 구현의 오류 주입 API는 Forge의 검증 기능이 아니다. 기존 오류 주입 전용 테스트는 해당 기능이 없음을 명시하며, Forge에서 동일한 오류 복구 기능이 구현됐다고 간주하지 않는다. 렌더러 이관과 별개로 각 플랫폼의 GPU 손실 복구·메모리 계측·배포 도구 검증을 계속 확장해야 한다.
 
-현재 통합 대상은 Windows/MSVC의 Direct3D 12 경로입니다. The Forge가 다른 플랫폼과 API를 지원하더라도 이 옵션이 해당 경로까지 활성화하지는 않습니다. The Forge의 전역 렌더러 상태 때문에 한 프로세스에서 Forge 디바이스는 하나만 사용할 수 있으며, 살아 있는 디바이스가 있는 상태에서 두 번째 초기화를 요청하면 실패합니다. 기존 Vulkan의 다중 디바이스 사용 흐름을 Forge에서 그대로 사용할 수는 없습니다.
+검증 계층은 기준 The Forge의 빌드 설정(`ENABLE_GRAPHICS_VALIDATION`)에 따라 프로세스 단위로 구성한다. 현재 Debug는 검증을 켜고 Release는 끈다. 공유 렌더러를 사용하는 각 뷰포트의 `GpuValidation::Off`/`Auto` 요청으로 이 모드를 실행 중에 전환하지는 못한다. 장치 정보는 요청값 대신 실제 빌드 모드를 반환한다.

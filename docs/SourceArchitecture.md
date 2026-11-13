@@ -17,22 +17,23 @@ Engine/Scene/
 
 사용자는 `<LuxEngine/Scene/Scene.hpp>`를 include하고 `LuxEngine::Engine`을 링크한다. 런타임 API는 `<LuxEngine/Runtime/ScenePlayer.hpp>`와 `LuxEngine::Runtime`을 사용한다. 저장소 루트와 `Private/` 경로는 소비자에게 제공하지 않는다. SDK에는 각 모듈의 `Public/` 헤더만 설치한다. 구형 `Engine/...`, `Runtime/...` include 경로는 제거했다.
 
-모듈은 별도 컴파일 타깃으로 의존성을 선언하고, 배포할 때는 기존 엔진 라이브러리 하나로 합친다. 헤더만 제공하는 RHI/ECS도 의존성을 명시한다. 모든 모듈을 동적 플러그인으로 만드는 구조는 아니다.
+모듈은 별도 컴파일 타깃으로 의존성을 선언하고, 배포할 때는 기존 엔진 라이브러리 하나로 합친다. RHI와 ECS도 작은 값 객체의 구현을 별도 컴파일하고 의존성을 명시한다. 모든 모듈을 동적 플러그인으로 만드는 구조는 아니다.
 
 - Core: 공통 자료형, 수학, 로그, 시간.
 - Platform: 창과 입력. 현재 공개 입력 API에 SDL 타입이 있어 SDL 의존성을 공개했다.
-- RHI: GPU 인터페이스 헤더. 구현은 Renderer에 두었다.
+- RHI: GPU 인터페이스와 값 객체의 선언·구현. 플랫폼별 백엔드 연결은 Renderer에 두었다.
 - Assets: CPU 파일 읽기·검증·캐시와 GPU 인터페이스를 통한 업로드.
 - Environment: 환경 이미지 전처리. 렌더러 구현에 의존하지 않는다.
-- Renderer: 2D/3D 렌더링과 Vulkan 구현. Assets/RHI/Environment/Platform을 사용한다.
+- Renderer: 2D/3D 렌더링과 The Forge 연결. Assets/RHI/Environment/Platform을 사용한다.
 - ECS, Animation, Physics, Audio: 각 기능의 공개 API와 구현.
 - Scene: 씬, 계층, 직렬화, 로딩과 씬 전용 Box2D 어댑터.
+- Scripting: .NET 10 호스팅, 씬 수명과 C# 콜백 연결.
 - Application: 프레임워크 진입점과 애플리케이션 수명 관리.
 - Runtime: 실행 플레이어와 실행 설정.
 
-`PhysicsWorld2D`는 Scene을 사용하는 씬 전용 어댑터이므로 Scene 내부로 이동했다. Vulkan의 플랫폼 어댑터도 Renderer 내부로 이동했다. GPU 오류 주입은 명시적인 `<LuxEngine/Testing/GpuFault.hpp>` 테스트 API로 구분하고, Vulkan 장치·할당기 구현 헤더는 공개하지 않는다.
+`PhysicsWorld2D`는 Scene을 사용하는 씬 전용 어댑터이므로 Scene 내부로 이동했다. The Forge 연결도 Renderer 내부에 두고 별도 `LuxForge` 공유 라이브러리를 로드한다. 이전 Native Vulkan 장치·할당기 구현은 제거했다. 기존 `<LuxEngine/Testing/GpuFault.hpp>`의 Native Vulkan 오류 주입은 현재 Forge의 기능이 아니다.
 
-엔진 테스트는 `Engine/Tests/`, 셰이더는 `Engine/Shaders/`, 브랜드·기본 리소스는 `Engine/Resources/`가 소유한다.
+엔진 테스트는 `Engine/Tests/`, 활성 셰이더는 `Engine/Renderer/Private/Forge/Shaders/`, 브랜드·기본 리소스는 `Engine/Resources/`가 소유한다.
 
 ## 에디터
 
@@ -49,3 +50,9 @@ Engine/Scene/
 5. 구조 변경 시 엔진·에디터·샘플 빌드와 설치 SDK 소비자 및 독립 에디터 빌드를 검증한다.
 
 코드 포맷은 루트 `.clang-format`을 따른다. `SeparateDefinitionBlocks: Always`를 사용해 함수·타입 정의 사이에 빈 줄을 둔다. 생성 게임의 C++ 템플릿도 같은 간격으로 정리했다.
+
+## 선언과 구현
+
+일반 함수·생성자·접근자는 `.hpp`에 선언하고 `.cpp`에 구현했다. 임의 ECS 컴포넌트와 콜백 타입을 지원하는 템플릿, 컴파일 시 평가가 필요한 `constexpr` 생성자는 해당 헤더 옆의 `.inl`로 분리했다. 타입을 엔진의 내장 컴포넌트로 제한하지 않았다. 공개 `.inl`도 SDK에 설치한다.
+
+기능을 분리할 때는 새 `.cpp`를 소유 모듈의 CMake 소스 목록과 해당 기능을 독립 컴파일하는 테스트 타깃에 함께 등록한다. 구현을 옮긴 일반 함수의 `inline` 선언은 제거해서 링크 심볼이 생성되도록 한다. C#은 같은 줄 중괄호와 함수 사이 빈 줄을 사용하며 `.editorconfig`로 규칙을 관리한다.

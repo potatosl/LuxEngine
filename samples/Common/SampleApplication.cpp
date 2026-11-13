@@ -179,3 +179,13 @@ void SampleApplication::OnShutdown() {
     artwork_.reset();
 }
 } // namespace LuxSamples
+
+namespace LuxSamples {
+SampleApplication::~SampleApplication() {
+    Shutdown();
+}
+
+float SampleApplication::HalfWidth() const {
+    return halfWidth_;
+}
+} // namespace LuxSamples

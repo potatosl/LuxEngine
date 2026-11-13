@@ -69,7 +69,7 @@ float4 PS_MAIN(MeshOutput In)
     if (In.options.x > 0.5f || In.options.w > 0.5f)
     {
         const float3 linearColor = max(color.rgb, 0.0f);
-        color.rgb = lerp(12.92f * linearColor, 1.055f * pow(linearColor, 1.0f / 2.4f) - 0.055f,
+        color.rgb = lerp(12.92f * linearColor, 1.055f * pow(linearColor, float3(1.0f / 2.4f, 1.0f / 2.4f, 1.0f / 2.4f)) - 0.055f,
                          step(0.0031308f, linearColor));
     }
     RETURN(color);

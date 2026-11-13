@@ -9,7 +9,9 @@
 #include <LuxEngine/Scene/Scene.hpp>
 #include <QGuiApplication>
 #include <SDL3/SDL.h>
+#if defined(__linux__)
 #include <SDL3/SDL_vulkan.h>
+#endif
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -17,15 +19,6 @@
 #include <cstring>
 #include <exception>
 #include <mutex>
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
 
 namespace LuxEditor {
 namespace {
@@ -34,60 +27,38 @@ constexpr int kMaxSwapchainAcquireRetries = 3;
 std::atomic<bool> s_ForceAllowed{false};
 std::atomic<int> s_DefaultValidation{static_cast<int>(LuxEngine::GpuValidation::Auto)};
 
-// Keeps SDL video subsystem, vulkan-1.dll loader, and (when validation is active) the Khronos
-// validation layer module resident across repeated viewport teardown/re-initialization cycles so
-// that vkDestroyInstance / SDL_DestroyWindow do not repeatedly unload and reload the Vulkan loader
-// and validation layer DLLs into new VirtualAlloc arenas.
-struct ProcessVulkanSubsystemRetention {
+// Keep SDL video alive across viewport rebuilds. On Linux, also retain the Vulkan loader
+// used by The Forge. The D3D12 and Metal paths do not require a Vulkan installation.
+struct ProcessViewportSubsystemRetention {
     std::mutex mutex;
     bool sdlVideoRetained = false;
+#if defined(__linux__)
     bool vulkanLoaderRetained = false;
-#ifdef _WIN32
-    HMODULE validationLayerModule = nullptr;
 #endif
 
     void RetainLoaderAndVideo() {
         std::lock_guard<std::mutex> lock(mutex);
-        if (!sdlVideoRetained) {
-            if (SDL_InitSubSystem(SDL_INIT_VIDEO))
-                sdlVideoRetained = true;
-        }
-        if (sdlVideoRetained && !vulkanLoaderRetained) {
-            if (SDL_Vulkan_LoadLibrary(nullptr))
-                vulkanLoaderRetained = true;
-        }
-    }
-
-    void RetainValidationLayerIfLoaded() {
-#ifdef _WIN32
-        std::lock_guard<std::mutex> lock(mutex);
-        if (!validationLayerModule) {
-            GetModuleHandleExW(0, L"VkLayer_khronos_validation.dll", &validationLayerModule);
-        }
+        if (!sdlVideoRetained && SDL_InitSubSystem(SDL_INIT_VIDEO))
+            sdlVideoRetained = true;
+#if defined(__linux__)
+        if (sdlVideoRetained && !vulkanLoaderRetained && SDL_Vulkan_LoadLibrary(nullptr))
+            vulkanLoaderRetained = true;
 #endif
     }
 
-    ~ProcessVulkanSubsystemRetention() {
-#ifdef _WIN32
-        if (validationLayerModule) {
-            FreeLibrary(validationLayerModule);
-            validationLayerModule = nullptr;
-        }
-#endif
-        if (vulkanLoaderRetained) {
+    ~ProcessViewportSubsystemRetention() {
+#if defined(__linux__)
+        if (vulkanLoaderRetained)
             SDL_Vulkan_UnloadLibrary();
-            vulkanLoaderRetained = false;
-        }
-        if (sdlVideoRetained) {
+#endif
+        if (sdlVideoRetained)
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
-            sdlVideoRetained = false;
-        }
     }
 };
 
-ProcessVulkanSubsystemRetention& GetProcessRetention() {
-    static ProcessVulkanSubsystemRetention s_Retention;
-    return s_Retention;
+ProcessViewportSubsystemRetention& GetProcessRetention() {
+    static ProcessViewportSubsystemRetention retention;
+    return retention;
 }
 
 // Selectively drains window-specific events for the viewport SDL window without purging global
@@ -226,12 +197,9 @@ bool EngineSceneRenderer::InitializeState(LuxEngine::uint32 initialWidth,
     config.framesInFlight = 1;
     config.validation = static_cast<LuxEngine::GpuValidation>(s_DefaultValidation.load());
     if (!state->gpu.Initialize(state->window, config)) {
-        error_ = QStringLiteral("Vulkan 장치 초기화 실패: %1")
+        error_ = QStringLiteral("GPU 장치 초기화 실패: %1")
                      .arg(QString::fromStdString(state->gpu.GetLastError()));
         return false;
-    }
-    if (state->gpu.GetInfo().validation) {
-        GetProcessRetention().RetainValidationLayerIfLoaded();
     }
     state->context2D.Init(&state->gpu);
     state->context3D.Init(&state->gpu);
@@ -538,5 +506,17 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
         return false;
     }
     return ReadbackToImage(output);
+}
+
+const QString& EngineSceneRenderer::LastError() const {
+    return error_;
+}
+
+LuxEngine::uint32 EngineSceneRenderer::GetRecoveryCount() const noexcept {
+    return recoveries_;
+}
+
+void EngineSceneRenderer::SetPostSceneHookForTesting(std::function<void()> hook) {
+    postSceneHook_ = std::move(hook);
 }
 } // namespace LuxEditor

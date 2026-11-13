@@ -1,5 +1,5 @@
 lux_engine_module(Application
-    PUBLIC_DEPENDENCIES LuxModuleCore LuxModulePlatform LuxModuleRenderer LuxModuleAssets LuxModuleAudio LuxModulePhysics LuxModuleScene
+    PUBLIC_DEPENDENCIES LuxModuleCore LuxModulePlatform LuxModuleRenderer LuxModuleAssets LuxModuleAudio LuxModulePhysics LuxModuleScene LuxModuleScripting
     HEADERS
         Public/LuxEngine/Application.hpp
         Public/LuxEngine/EntryPoint.hpp

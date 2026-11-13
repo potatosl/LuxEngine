@@ -101,7 +101,7 @@ add_test(NAME Engine_scene_json COMMAND LuxSceneJsonTests)
 set_tests_properties(Engine_scene_json PROPERTIES LABELS "headless;scene" TIMEOUT 60)
 
 # Compile every public header on its own with only its module's declared public dependencies.
-foreach(module Core Platform Environment RHI Assets Renderer ECS Physics Animation Audio Scene Application)
+foreach(module Core Platform Environment RHI Assets Renderer ECS Physics Animation Audio Scene Scripting Application)
     file(GLOB_RECURSE headers CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/Engine/${module}/Public/*.hpp")
     set(sources)
     foreach(header IN LISTS headers)
@@ -113,4 +113,33 @@ foreach(module Core Platform Environment RHI Assets Renderer ECS Physics Animati
     endforeach()
     add_library(LuxHeaderCheck${module} OBJECT ${sources})
     target_link_libraries(LuxHeaderCheck${module} PRIVATE LuxModule${module})
+endforeach()
+
+add_executable(LuxScriptRuntimeTests ScriptRuntimeTest.cpp)
+target_link_libraries(LuxScriptRuntimeTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxScriptRuntimeTests)
+lux_copy_runtime(LuxScriptRuntimeTests)
+set(_lux_test_scripts "${CMAKE_BINARY_DIR}/test-scripts")
+add_custom_command(OUTPUT "${_lux_test_scripts}/Scripts.dll"
+    COMMAND "${LUX_DOTNET_EXECUTABLE}" build "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/Scripts.csproj"
+        --configuration Release --output "${_lux_test_scripts}"
+        --artifacts-path "${CMAKE_BINARY_DIR}/script-test-artifacts"
+        "-p:LuxEngineScriptCore=${LUX_MANAGED_OUTPUT}/LuxEngine.ScriptCore.dll"
+        "-p:RestoreConfigFile=${CMAKE_SOURCE_DIR}/Engine/Scripting/Managed/NuGet.Config"
+        -p:NuGetAudit=false
+    DEPENDS LuxScriptCore Scripting/Scripts.csproj Scripting/Scripts.cs VERBATIM)
+add_custom_target(LuxTestScripts DEPENDS "${_lux_test_scripts}/Scripts.dll")
+add_dependencies(LuxScriptRuntimeTests LuxTestScripts)
+add_test(NAME Engine_csharp COMMAND LuxScriptRuntimeTests "${_lux_test_scripts}/Scripts.dll")
+set_tests_properties(Engine_csharp PROPERTIES LABELS "headless;scripting" TIMEOUT 60)
+
+add_executable(LuxForgeBackendTests ForgeBackendTest.cpp)
+target_link_libraries(LuxForgeBackendTests PRIVATE LuxEngine::Engine)
+target_include_directories(LuxForgeBackendTests PRIVATE "${PROJECT_SOURCE_DIR}/Engine/Renderer/Private")
+lux_set_target_warnings(LuxForgeBackendTests)
+lux_copy_runtime(LuxForgeBackendTests)
+foreach(suite basics misuse frames drawing meshes scene3d)
+    add_test(NAME Forge_${suite} COMMAND LuxForgeBackendTests ${suite})
+    set_tests_properties(Forge_${suite} PROPERTIES LABELS "gpu;forge" TIMEOUT 180 SKIP_RETURN_CODE 77
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxForgeBackendTests>" ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
 endforeach()

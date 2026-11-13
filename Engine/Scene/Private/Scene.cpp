@@ -731,6 +731,7 @@ bool Scene::ValidateForSerialization() {
                                                         typeid(BoxCollider3DComponent),
                                                         typeid(TilemapComponent),
                                                         typeid(AnimationComponent),
+                                                        typeid(ScriptComponent),
                                                         typeid(HierarchyComponent),
                                                         typeid(SceneReferenceComponent),
                                                         typeid(InstanceSourceComponent)};
@@ -792,6 +793,11 @@ bool Scene::ValidateForSerialization() {
                 map->tiles.size() != static_cast<size_t>(map->width) * map->height ||
                 std::any_of(map->tiles.begin(), map->tiles.end(),
                             [](uint8_t tile) { return tile > 5; }))
+                return false;
+        }
+        if (const auto* script = TryGetComponent<ScriptComponent>(id)) {
+            if (script->typeName.size() > 512 || script->typeName.find('\0') != std::string::npos ||
+                !IsValidUtf8(script->typeName))
                 return false;
         }
         if (const auto* animation = TryGetComponent<AnimationComponent>(id)) {
@@ -1107,4 +1113,39 @@ bool Scene::Deserialize(const std::string& filepath) {
     sourcePath_ = filepath;
     return true;
 }
+
+const SceneSettings& Scene::GetSettings() const noexcept {
+    return settings_;
+}
+
+const std::string& Scene::GetSourcePath() const noexcept {
+    return sourcePath_;
+}
+
+void Scene::SetSourcePath(std::string path) {
+    sourcePath_ = std::move(path);
+}
+
+const std::vector<Collision2DEvent>& Scene::GetCollisionEvents2D() const {
+    return collisionEvents2D_;
+}
+
+uint32 Scene::GetEntityCount() const {
+    return static_cast<uint32>(entities_.size());
+}
+
+bool Scene::IsAlive(uint32 id) const {
+    return entities_.contains(id);
+}
+
+std::weak_ptr<int> Scene::Lifetime() const {
+    return lifetime_;
+}
+
+void Scene::RequireAlive(uint32 id) const {
+    if (!IsAlive(id))
+        throw std::out_of_range("Entity is not alive");
+}
+
+Scene::PoolBase::~PoolBase() = default;
 } // namespace LuxEngine

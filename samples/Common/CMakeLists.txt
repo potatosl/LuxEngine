@@ -5,3 +5,6 @@ lux_set_target_warnings(LuxSampleSupport)
 
 find_path(LUX_SAMPLE_STB_INCLUDE_DIR stb_truetype.h HINTS "${stb_SOURCE_DIR}" REQUIRED)
 target_include_directories(LuxSampleSupport SYSTEM PRIVATE "${LUX_SAMPLE_STB_INCLUDE_DIR}")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/Text.cmake")
+target_link_libraries(LuxSampleSupport PUBLIC LuxSampleText)

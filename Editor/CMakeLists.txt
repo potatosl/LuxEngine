@@ -132,7 +132,7 @@ if(WIN32)
     if(TARGET SDL3::SDL3-shared)
         install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
     endif()
-    install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/../shaders/" DESTINATION bin/shaders)
+    install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/../forge/shaders/bin/" DESTINATION bin)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/licenses/" DESTINATION bin/licenses)
 endif()
 
@@ -141,6 +141,19 @@ if(MSVC)
 endif()
 
 if(LUX_BUILD_TESTS)
+    add_executable(LuxViewportFoundationTests Tests/ViewportFoundationTest.cpp)
+    target_link_libraries(LuxViewportFoundationTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxViewportFoundationTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
+    lux_editor_copy_runtime(LuxViewportFoundationTests)
+    lux_editor_copy_qt_plugins(LuxViewportFoundationTests)
+    add_test(NAME Editor_viewport_foundation COMMAND LuxViewportFoundationTests)
+    set_tests_properties(Editor_viewport_foundation PROPERTIES LABELS "headless;editor;viewport"
+        TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1")
+    add_executable(LuxEditorBuildOutputTests Tests/BuildOutputTest.cpp)
+    target_link_libraries(LuxEditorBuildOutputTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxEditorBuildOutputTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
+    add_test(NAME Editor_build_output COMMAND LuxEditorBuildOutputTests)
+    set_tests_properties(Editor_build_output PROPERTIES LABELS "headless;editor" TIMEOUT 30)
     add_executable(LuxProjectFormatTests Tests/ProjectFormatTest.cpp)
     target_include_directories(LuxProjectFormatTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_link_libraries(LuxProjectFormatTests PRIVATE LuxEditorUi LuxEngine::Runtime nlohmann_json::nlohmann_json)
@@ -179,6 +192,10 @@ if(LUX_BUILD_TESTS)
         Project/Private/LuxEditor/Project/EditorProject.cpp
         Project/Private/LuxEditor/Project/ProjectSettings.cpp
         Project/Private/LuxEditor/Project/ProjectTemplates.cpp)
+    target_sources(LuxEditorSceneDocumentTests PRIVATE
+        Project/Private/LuxEditor/Project/PathEncoding.cpp
+        Project/Private/LuxEditor/Project/ErrorEncoding.cpp
+        Project/Private/LuxEditor/Project/ProjectFileOperations.cpp)
     target_include_directories(LuxEditorSceneDocumentTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_compile_definitions(LuxEditorSceneDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
     target_link_libraries(LuxEditorSceneDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui nlohmann_json::nlohmann_json)
@@ -198,6 +215,10 @@ if(LUX_BUILD_TESTS)
         Project/Private/LuxEditor/Project/ProjectTemplates.cpp
         Tests/EditorDocumentTest.cpp
     )
+    target_sources(LuxEditorDocumentTests PRIVATE
+        Project/Private/LuxEditor/Project/PathEncoding.cpp
+        Project/Private/LuxEditor/Project/ErrorEncoding.cpp
+        Project/Private/LuxEditor/Project/ProjectFileOperations.cpp)
     target_include_directories(LuxEditorDocumentTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_compile_definitions(LuxEditorDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
     target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui libzip::zip nlohmann_json::nlohmann_json)
@@ -210,6 +231,8 @@ if(LUX_BUILD_TESTS)
     set_tests_properties(Editor_archive_limits PROPERTIES TIMEOUT 180 LABELS "headless;editor")
     add_executable(LuxEditorBuildTests
         Build/Private/LuxEditor/Build/ProjectBuild.cpp
+        Project/Private/LuxEditor/Project/PathEncoding.cpp
+        Project/Private/LuxEditor/Project/ErrorEncoding.cpp
         Tests/EditorBuildTest.cpp
     )
     target_include_directories(LuxEditorBuildTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})

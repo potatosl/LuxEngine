@@ -220,6 +220,10 @@ bool Scene::SerializeToString(std::string& output) {
         std::sort(ids.begin(), ids.end());
         for (auto id : ids) {
             Json components = Json::object();
+            if (const auto* component = TryGetComponent<ScriptComponent>(id)) {
+                components["script"] = {{"type", component->typeName},
+                                        {"enabled", component->enabled}};
+            }
             if (const auto* component = TryGetComponent<TagComponent>(id)) {
                 Json value = Json::object();
                 value["name"] = ToJson(component->tag);
@@ -389,7 +393,13 @@ bool Scene::DeserializeJson(const std::string& data) {
             const auto& components = item.at("components");
             RequireValidScene(components.is_object());
             for (const auto& [name, value] : components.items()) {
-                if (name == "tag") {
+                if (name == "script") {
+                    ScriptComponent component;
+                    RequireValidScene(value.is_object());
+                    ReadJsonValue(value.at("type"), component.typeName);
+                    ReadJsonValue(value.at("enabled"), component.enabled);
+                    entity.AddComponent<ScriptComponent>(std::move(component));
+                } else if (name == "tag") {
                     TagComponent component;
                     RequireValidScene(value.is_object());
                     ReadJsonValue(value.at("name"), component.tag);

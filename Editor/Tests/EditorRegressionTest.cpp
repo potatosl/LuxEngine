@@ -442,9 +442,14 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
     const Vec3 forward = (camera.GetTarget() - camera.GetPosition()).Normalized();
     Check(!ProjectViewportPoint(camera, view.size(), camera.GetPosition() - forward),
           "points behind the camera are not projected");
-    Check(!ProjectViewportPoint(camera, view.size(), camera.GetPosition() + forward * .01f),
+    const auto& projection = camera.GetProjectionMatrix().elements;
+    const float nearClip = projection[14] / projection[10];
+    const float farClip = projection[14] / (projection[10] + 1);
+    Check(!ProjectViewportPoint(camera, view.size(),
+                                camera.GetPosition() + forward * (nearClip * .5f)),
           "points before the near plane are not projected");
-    Check(!ProjectViewportPoint(camera, view.size(), camera.GetPosition() + forward * 1100),
+    Check(!ProjectViewportPoint(camera, view.size(),
+                                camera.GetPosition() + forward * (farClip * 1.1f)),
           "points beyond the far plane are not projected");
     if (gpu) {
         QTemporaryDir files;

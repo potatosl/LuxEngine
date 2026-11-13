@@ -31,45 +31,26 @@ struct PointLight {
 
 class LUX_API PerspectiveCamera {
 public:
-    PerspectiveCamera() = default;
+    PerspectiveCamera();
     PerspectiveCamera(float fovRadians, float aspect, float nearClip, float farClip);
 
     void SetPerspective(float fovRadians, float aspect, float nearClip, float farClip);
 
-    void SetPosition(const Vec3& position) {
-        position_ = position;
-        RecalculateMatrix();
-    }
+    void SetPosition(const Vec3& position);
 
-    void SetTarget(const Vec3& target) {
-        target_ = target;
-        RecalculateMatrix();
-    }
+    void SetTarget(const Vec3& target);
 
-    void SetUp(const Vec3& up) {
-        up_ = up;
-        RecalculateMatrix();
-    }
+    void SetUp(const Vec3& up);
 
-    const Vec3& GetPosition() const {
-        return position_;
-    }
+    const Vec3& GetPosition() const;
 
-    const Vec3& GetTarget() const {
-        return target_;
-    }
+    const Vec3& GetTarget() const;
 
-    const Mat4& GetProjectionMatrix() const {
-        return projectionMatrix_;
-    }
+    const Mat4& GetProjectionMatrix() const;
 
-    const Mat4& GetViewMatrix() const {
-        return viewMatrix_;
-    }
+    const Mat4& GetViewMatrix() const;
 
-    const Mat4& GetViewProjectionMatrix() const {
-        return viewProjectionMatrix_;
-    }
+    const Mat4& GetViewProjectionMatrix() const;
 
 private:
     void RecalculateMatrix();
@@ -91,9 +72,7 @@ public:
     void Release();
     bool IsValid() const;
 
-    uint32 GetIndexCount() const {
-        return IsValid() ? indexCount_ : 0;
-    }
+    uint32 GetIndexCount() const;
 
 private:
     friend class Renderer3D;

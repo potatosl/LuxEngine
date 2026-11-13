@@ -11,9 +11,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/../Common/Text.cmake")
 add_library(SampleForestSurvivorGame STATIC Game/SurvivalGame.cpp)
 target_include_directories(SampleForestSurvivorGame PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(SampleForestSurvivorGame PUBLIC LuxEngine::Engine)
+target_link_libraries(SampleForestSurvivorGame PUBLIC LuxEngine::Engine LuxSampleText)
 add_executable(SampleForestSurvivor
     App/Main.cpp
     App/ForestSurvivorApp.cpp

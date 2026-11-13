@@ -1,0 +1,15 @@
+# Resolve headers and the discovery library from one compatible .NET 10 host pack.
+# Distribution SDKs can use a RID such as fedora.43-x64 instead of linux-x64.
+function(lux_dotnet_host_candidates output root)
+    set(candidates)
+    foreach(rid IN LISTS ARGN)
+        if(NOT rid MATCHES "^[A-Za-z0-9._-]+$")
+            continue()
+        endif()
+        file(GLOB packs "${root}/packs/Microsoft.NETCore.App.Host.${rid}/10.*/runtimes/${rid}/native")
+        list(SORT packs COMPARE NATURAL ORDER DESCENDING)
+        list(APPEND candidates ${packs})
+    endforeach()
+    list(REMOVE_DUPLICATES candidates)
+    set(${output} "${candidates}" PARENT_SCOPE)
+endfunction()

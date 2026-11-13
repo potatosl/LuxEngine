@@ -261,4 +261,49 @@ float Input::GetMouseY() {
     return GetMousePosition().second;
 }
 
+InputBinding InputBinding::Key(LuxKey key) {
+    return {InputDevice::Keyboard, static_cast<int32>(key)};
+}
+
+InputBinding InputBinding::Mouse(LuxMouseButton button) {
+    return {InputDevice::MouseButton, static_cast<int32>(button)};
+}
+
+InputBinding InputBinding::Gamepad(LuxGamepadButton button) {
+    return {InputDevice::GamepadButton, static_cast<int32>(button)};
+}
+
+bool Input::BindAction(std::string_view action, LuxKey key) {
+    return BindAction(action, InputBinding::Key(key));
+}
+
+bool Input::BindAction(std::string_view action, LuxMouseButton button) {
+    return BindAction(action, InputBinding::Mouse(button));
+}
+
+bool Input::BindAction(std::string_view action, LuxGamepadButton button) {
+    return BindAction(action, InputBinding::Gamepad(button));
+}
+
+bool Input::UnbindAction(std::string_view action, LuxKey key) {
+    return UnbindAction(action, InputBinding::Key(key));
+}
+
+bool Input::UnbindAction(std::string_view action, LuxMouseButton button) {
+    return UnbindAction(action, InputBinding::Mouse(button));
+}
+
+bool Input::UnbindAction(std::string_view action, LuxGamepadButton button) {
+    return UnbindAction(action, InputBinding::Gamepad(button));
+}
+
+bool Input::IsKeyPressed(LuxKey key) {
+    return IsKeyPressed(static_cast<int32>(key));
+}
+
+bool Input::IsMouseButtonPressed(LuxMouseButton button) {
+    return IsMouseButtonPressed(static_cast<int32>(button));
+}
+
+bool InputBinding::operator==(const InputBinding&) const = default;
 } // namespace LuxEngine

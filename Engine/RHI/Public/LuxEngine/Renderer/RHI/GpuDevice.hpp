@@ -121,7 +121,7 @@ class LUX_API GpuDevice {
 public:
     enum class FrameStart { Ready, Skipped, Error };
 
-    GpuDevice() = default;
+    GpuDevice();
     ~GpuDevice();
     GpuDevice(const GpuDevice&) = delete;
     GpuDevice& operator=(const GpuDevice&) = delete;

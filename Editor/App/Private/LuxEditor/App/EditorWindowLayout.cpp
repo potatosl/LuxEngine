@@ -41,6 +41,7 @@
 #include <QSettings>
 #include <QSlider>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
@@ -74,8 +75,8 @@ QDoubleSpinBox* Number(QWidget* parent, double low, double high, double value, d
     control->setValue(value);
     control->setButtonSymbols(QAbstractSpinBox::NoButtons);
     control->setKeyboardTracking(false);
-    control->setMinimumWidth(82);
-    control->setMaximumWidth(110);
+    control->setMinimumWidth(56);
+    control->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     control->setToolTip(control->text());
     QObject::connect(control, qOverload<double>(&QDoubleSpinBox::valueChanged), control,
                      [control] { control->setToolTip(control->text()); });
@@ -86,8 +87,8 @@ QDoubleSpinBox* Number(QWidget* parent, double low, double high, double value, d
 void EditorWindow::BuildLayout() {
     setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks |
                    QMainWindow::GroupedDragging);
-    setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
-    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+    setCorner(Qt::BottomLeftCorner, Qt::BottomDockWidgetArea);
+    setCorner(Qt::BottomRightCorner, Qt::BottomDockWidgetArea);
 
     const auto select = [this](std::optional<LuxEngine::uint32> id) { SelectEntity(id); };
     const auto transform = [this](LuxEngine::uint32 id,
@@ -130,12 +131,34 @@ void EditorWindow::BuildLayout() {
     auto* sceneBarLayout = new QHBoxLayout(sceneBar);
     sceneBarLayout->setContentsMargins(8, 2, 8, 2);
     sceneBarLayout->setSpacing(8);
-    sceneBarLayout->addWidget(Caption(QStringLiteral("LAYOUT"), sceneBar));
+    sceneBarLayout->addWidget(Caption(QStringLiteral("뷰포트"), sceneBar));
     auto* viewChoice = new QComboBox(sceneBar);
     viewChoice->addItems({QStringLiteral("3D 원근 화면"), QStringLiteral("2D 평면 화면")});
     viewChoice->setMinimumWidth(128);
     sceneBarLayout->addWidget(viewChoice);
+    auto* projection = new QComboBox(sceneBar);
+    projection->setObjectName(QStringLiteral("viewportProjection"));
+    projection->addItems({QStringLiteral("원근"), QStringLiteral("정면"), QStringLiteral("오른쪽"),
+                          QStringLiteral("상단")});
+    sceneBarLayout->addWidget(projection);
+    connect(projection, &QComboBox::currentIndexChanged, this, [this](int index) {
+        canvas3D_->SetViewPreset(static_cast<SceneViewport3D::ViewPreset>(index));
+    });
+    connect(viewChoice, &QComboBox::currentIndexChanged, projection,
+            [projection](int index) { projection->setVisible(index == 0); });
     sceneBarLayout->addStretch();
+    auto* gridVisibility = new QToolButton(sceneBar);
+    gridVisibility->setObjectName(QStringLiteral("viewportGridToggle"));
+    gridVisibility->setIcon(MakeEditorIcon(EditorIcon::Grid));
+    gridVisibility->setToolTip(QStringLiteral("격자 표시"));
+    gridVisibility->setCheckable(true);
+    gridVisibility->setChecked(true);
+    sceneBarLayout->addWidget(gridVisibility);
+    connect(gridVisibility, &QToolButton::toggled, this, [this](bool visible) {
+        canvas_->SetGridVisible(visible);
+        canvas3D_->SetGridVisible(visible);
+        overviewCanvas_->SetGridVisible(visible);
+    });
     auto* focus = new QToolButton(sceneBar);
     focus->setIcon(MakeEditorIcon(EditorIcon::Focus));
     focus->setToolTip(QStringLiteral("선택 항목에 초점 (F)"));
@@ -155,10 +178,14 @@ void EditorWindow::BuildLayout() {
     canvas_ = new SceneViewport2D(viewportTabs_, document_, select, transform, paintTile, begin,
                                   end, sharedRenderer);
     canvas_->setObjectName(QStringLiteral("sceneViewport2D"));
+    canvas3D_->setObjectName(QStringLiteral("sceneViewport3D"));
     viewportTabs_->addTab(canvas3D_, QStringLiteral("3D 장면"));
     viewportTabs_->addTab(canvas_, QStringLiteral("2D 장면"));
     sceneLayout->addWidget(viewportTabs_, 1);
-    setCentralWidget(sceneFrame);
+    workspaceStack_ = new QStackedWidget(this);
+    workspaceStack_->setObjectName(QStringLiteral("editorWorkspace"));
+    workspaceStack_->addWidget(sceneFrame);
+    setCentralWidget(workspaceStack_);
     connect(viewChoice, &QComboBox::currentIndexChanged, viewportTabs_,
             &QTabWidget::setCurrentIndex);
     connect(viewportTabs_, &QTabWidget::currentChanged, viewChoice, &QComboBox::setCurrentIndex);
@@ -177,8 +204,14 @@ void EditorWindow::BuildLayout() {
         item->setTextAlignment(1, Qt::AlignRight);
     }
     groupTree_->setCurrentItem(groupTree_->topLevelItem(0));
-    hierarchyLayout->addWidget(groupTree_);
-    hierarchyLayout->addWidget(Caption(QStringLiteral("OUTLINER"), hierarchyPanel));
+    groupTree_->hide();
+    auto* objectFilter = new QComboBox(hierarchyPanel);
+    objectFilter->setObjectName(QStringLiteral("outlinerFilter"));
+    objectFilter->addItems(
+        {QStringLiteral("모든 오브젝트"), QStringLiteral("스프라이트"), QStringLiteral("메시")});
+    connect(objectFilter, &QComboBox::currentIndexChanged, this,
+            [this](int index) { groupTree_->setCurrentItem(groupTree_->topLevelItem(index)); });
+    hierarchyLayout->addWidget(objectFilter);
     hierarchySearch_ = new QLineEdit(hierarchyPanel);
     hierarchySearch_->setPlaceholderText(QStringLiteral("엔티티 이름 검색"));
     hierarchyLayout->addWidget(hierarchySearch_);
@@ -208,6 +241,9 @@ void EditorWindow::BuildLayout() {
     entityActions->addStretch();
     entityActions->addWidget(remove);
     hierarchyLayout->addLayout(entityActions);
+    add2D->hide();
+    add3D->hide();
+    remove->hide();
     connect(groupTree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
         groupFilter_ = item ? groupTree_->indexOfTopLevelItem(item) : 0;
         RefreshHierarchy();
@@ -245,7 +281,15 @@ void EditorWindow::BuildLayout() {
     QVBoxLayout* assetsLayout;
     auto* assetsPanel = Panel(this, assetsLayout, 4);
     auto* assetHeader = new QHBoxLayout;
-    assetHeader->addWidget(Caption(QStringLiteral("ASSETS"), assetsPanel));
+    auto* rescan = new QToolButton(assetsPanel);
+    rescan->setIcon(MakeEditorIcon(EditorIcon::Folder));
+    rescan->setText(QStringLiteral("폴더 새로 고침"));
+    rescan->setToolTip(QStringLiteral("프로젝트 콘텐츠 다시 검색"));
+    connect(rescan, &QToolButton::clicked, this, [this] { RefreshProjectExplorer(); });
+    assetHeader->addWidget(rescan);
+    assetBreadcrumb_ = new QLabel(QStringLiteral("모든 콘텐츠"), assetsPanel);
+    assetBreadcrumb_->setObjectName(QStringLiteral("assetBreadcrumb"));
+    assetHeader->addWidget(assetBreadcrumb_, 1);
     assetHeader->addStretch();
     assetFilter_ = new QComboBox(assetsPanel);
     assetFilter_->addItems({QStringLiteral("전체"), QStringLiteral("장면"),
@@ -265,11 +309,23 @@ void EditorWindow::BuildLayout() {
     projectSearch_->setPlaceholderText(QStringLiteral("에셋 이름 검색"));
     assetsLayout->addWidget(projectSearch_);
     auto* assetSplit = new QSplitter(Qt::Horizontal, assetsPanel);
+    assetSplit->setObjectName(QStringLiteral("contentBrowserSplitter"));
+    assetFolders_ = new QTreeWidget(assetSplit);
+    assetFolders_->setObjectName(QStringLiteral("assetFolders"));
+    assetFolders_->setHeaderHidden(true);
+    assetFolders_->setMinimumWidth(140);
+    assetFolders_->setMaximumWidth(300);
+    connect(assetFolders_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
+        assetFolder_ =
+            item ? PathFromUtf8(item->data(0, Qt::UserRole).toString().toUtf8().toStdString())
+                 : std::filesystem::path{};
+        RefreshProjectExplorer();
+    });
     projectFiles_ = new QListWidget(assetSplit);
     projectFiles_->setObjectName(QStringLiteral("assetGrid"));
     projectFiles_->setViewMode(QListView::IconMode);
-    projectFiles_->setIconSize(QSize(94, 94));
-    projectFiles_->setGridSize(QSize(120, 118));
+    projectFiles_->setIconSize(QSize(64, 64));
+    projectFiles_->setGridSize(QSize(112, 100));
     projectFiles_->setResizeMode(QListView::Adjust);
     projectFiles_->setWordWrap(true);
     projectFiles_->setSpacing(3);
@@ -288,9 +344,14 @@ void EditorWindow::BuildLayout() {
     previewLayout->addWidget(assetDetails_);
     assetSplit->addWidget(projectFiles_);
     assetSplit->addWidget(previewPanel);
-    assetSplit->setStretchFactor(0, 4);
-    assetSplit->setStretchFactor(1, 1);
+    assetSplit->setStretchFactor(0, 0);
+    assetSplit->setStretchFactor(1, 5);
+    assetSplit->setStretchFactor(2, 1);
+    assetSplit->setSizes({180, 800, 200});
     assetsLayout->addWidget(assetSplit, 1);
+    assetCount_ = new QLabel(assetsPanel);
+    assetCount_->setObjectName(QStringLiteral("assetCount"));
+    assetsLayout->addWidget(assetCount_);
     connect(projectSearch_, &QLineEdit::textChanged, this, [this] { RefreshProjectExplorer(); });
     connect(assetFilter_, &QComboBox::currentIndexChanged, this,
             [this] { RefreshProjectExplorer(); });
@@ -333,12 +394,17 @@ void EditorWindow::BuildLayout() {
 
     auto* inspectorScroll = new QScrollArea(this);
     inspectorScroll->setObjectName(QStringLiteral("inspectorScroll"));
-    inspectorScroll->setMinimumWidth(265);
+    inspectorScroll->setMinimumWidth(290);
     inspectorScroll->setWidgetResizable(true);
     auto* inspector = new QWidget(inspectorScroll);
     auto* inspectorLayout = new QVBoxLayout(inspector);
     inspectorLayout->setContentsMargins(7, 7, 7, 7);
     inspectorLayout->setSpacing(5);
+    detailsSearch_ = new QLineEdit(inspector);
+    detailsSearch_->setObjectName(QStringLiteral("detailsSearch"));
+    detailsSearch_->setPlaceholderText(QStringLiteral("속성 검색"));
+    inspectorLayout->addWidget(detailsSearch_);
+    connect(detailsSearch_, &QLineEdit::textChanged, this, &EditorWindow::FilterDetails);
     selectionLabel_ = Caption(QStringLiteral("선택된 엔티티 없음"), inspector);
     inspectorLayout->addWidget(selectionLabel_);
     inspectorBody_ = new QWidget(inspector);
@@ -349,7 +415,7 @@ void EditorWindow::BuildLayout() {
     name_ = new QLineEdit(inspectorBody_);
     nameRow->addRow(QStringLiteral("이름"), name_);
     body->addLayout(nameRow);
-    sceneReferencePanel_ = new QGroupBox(QStringLiteral("SCENE REFERENCE"), inspectorBody_);
+    sceneReferencePanel_ = new QGroupBox(QStringLiteral("씬 참조"), inspectorBody_);
     sceneReferencePanel_->setObjectName(QStringLiteral("sceneReferencePanel"));
     auto* referenceLayout = new QVBoxLayout(sceneReferencePanel_);
     sceneReferencePath_ = new QLineEdit(sceneReferencePanel_);
@@ -372,29 +438,31 @@ void EditorWindow::BuildLayout() {
     });
     connect(relinkReference, &QPushButton::clicked, this, [this] { RelinkSceneReference(); });
     body->addWidget(sceneReferencePanel_);
-    auto* transformGroup = new QGroupBox(QStringLiteral("TRANSFORM"), inspectorBody_);
+    auto* transformGroup = new QGroupBox(QStringLiteral("Transform"), inspectorBody_);
     auto* grid = new QGridLayout(transformGroup);
     grid->setContentsMargins(6, 8, 6, 6);
     grid->setHorizontalSpacing(4);
     grid->setVerticalSpacing(3);
     const char* rows[] = {"위치", "회전 °", "크기"};
+    const char* axisColors[] = {"#c76168", "#63a979", "#6294c8"};
     for (int row = 0; row < 3; ++row) {
-        const int base = row * 3;
-        grid->addWidget(Caption(QString::fromUtf8(rows[row]), transformGroup), base, 0, 1, 4);
+        grid->addWidget(new QLabel(QString::fromUtf8(rows[row]), transformGroup), row, 0);
         for (int axis = 0; axis < 3; ++axis) {
             transform_[row][axis] =
                 Number(transformGroup, -100000, 100000, row == 2 ? 1 : 0, row == 1 ? 1 : .1);
-            const int axisRow = base + (axis == 2 ? 2 : 1);
-            const int axisCol = axis == 1 ? 2 : 0;
-            grid->addWidget(new QLabel(QString::fromLatin1("XYZ" + axis, 1), transformGroup),
-                            axisRow, axisCol);
-            grid->addWidget(transform_[row][axis], axisRow, axisCol + 1);
+            transform_[row][axis]->setToolTip(QStringLiteral("%1 · %2").arg(
+                QString::fromUtf8(rows[row]), QString::fromLatin1("XYZ" + axis, 1)));
+            transform_[row][axis]->setStyleSheet(
+                QStringLiteral("QDoubleSpinBox{border-left:3px solid %1;}")
+                    .arg(QString::fromLatin1(axisColors[axis])));
+            grid->addWidget(transform_[row][axis], row, axis + 1);
+            grid->setColumnStretch(axis + 1, 1);
             connect(transform_[row][axis], qOverload<double>(&QDoubleSpinBox::valueChanged), this,
                     [this, row, axis] { OnTransformChanged(row, axis); });
         }
     }
     body->addWidget(transformGroup);
-    auto* spriteGroup = new QGroupBox(QStringLiteral("SPRITE RENDERER"), inspectorBody_);
+    auto* spriteGroup = new QGroupBox(QStringLiteral("Sprite Renderer"), inspectorBody_);
     auto* spriteLayout = new QVBoxLayout(spriteGroup);
     spriteEnabled_ = new QCheckBox(QStringLiteral("스프라이트 사용"), spriteGroup);
     spriteEnabled_->setObjectName(QStringLiteral("editorSprite"));
@@ -412,7 +480,7 @@ void EditorWindow::BuildLayout() {
     spriteLayout->addLayout(colors);
     body->addWidget(spriteGroup);
     connect(spriteEnabled_, &QCheckBox::toggled, this, [this] { OnSpriteChanged(); });
-    auto* meshGroup = new QGroupBox(QStringLiteral("MESH RENDERER"), inspectorBody_);
+    auto* meshGroup = new QGroupBox(QStringLiteral("Mesh Renderer"), inspectorBody_);
     auto* meshLayout = new QFormLayout(meshGroup);
     meshEnabled_ = new QCheckBox(QStringLiteral("메시 사용"), meshGroup);
     meshEnabled_->setObjectName(QStringLiteral("editorMesh"));
@@ -595,7 +663,7 @@ void EditorWindow::BuildLayout() {
             [this] { OnMeshChanged(metallic_); });
     connect(roughness_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
             [this] { OnMeshChanged(roughness_); });
-    auto* tileGroup = new QGroupBox(QStringLiteral("TILEMAP"), inspectorBody_);
+    auto* tileGroup = new QGroupBox(QStringLiteral("Tilemap"), inspectorBody_);
     auto* tileLayout = new QFormLayout(tileGroup);
     tilemapEnabled_ = new QCheckBox(QStringLiteral("타일맵 사용"), tileGroup);
     tilemapEnabled_->setObjectName(QStringLiteral("editorTilemap"));
@@ -618,7 +686,7 @@ void EditorWindow::BuildLayout() {
     connect(tilemapSize_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
             [this] { OnTilemapChanged(tilemapSize_); });
     // 개발 중: 엔진에 아직 없는 원형·다각형 충돌체와 조인트는 편집 도구를 노출하지 않습니다.
-    auto* physicsGroup = new QGroupBox(QStringLiteral("2D PHYSICS"), inspectorBody_);
+    auto* physicsGroup = new QGroupBox(QStringLiteral("Physics 2D"), inspectorBody_);
     auto* physicsLayout = new QFormLayout(physicsGroup);
     bodyEnabled_ = new QCheckBox(QStringLiteral("물리 몸체 사용"), physicsGroup);
     bodyEnabled_->setObjectName(QStringLiteral("editorBody2D"));
@@ -660,6 +728,7 @@ void EditorWindow::BuildLayout() {
                 [this, field] { OnPhysicsChanged(field); });
 
     connect(name_, &QLineEdit::editingFinished, this, [this] { OnNameChanged(); });
+    BuildCameraDetails(body);
     inspectorLayout->addWidget(inspectorBody_);
     inspectorLayout->addStretch();
     inspectorScroll->setWidget(inspector);
@@ -710,7 +779,7 @@ void EditorWindow::BuildLayout() {
     auto* toolProperties = new QWidget(toolsPanel);
     auto* propertiesLayout = new QVBoxLayout(toolProperties);
     propertiesLayout->setContentsMargins(7, 7, 7, 7);
-    propertiesLayout->addWidget(Caption(QStringLiteral("TOOL PROPERTIES"), toolProperties));
+    propertiesLayout->addWidget(Caption(QStringLiteral("배치 도구"), toolProperties));
     propertiesLayout->addWidget(new QLabel(QStringLiteral("오브젝트 편집"), toolProperties));
     toolHint_ = new QLabel(QStringLiteral("선택"), toolProperties);
     toolHint_->setObjectName(QStringLiteral("toolHelp"));
@@ -746,11 +815,11 @@ void EditorWindow::BuildLayout() {
 
     const std::array<std::pair<QString, QWidget*>, 8> panels{
         {{QStringLiteral("Outliner"), hierarchyPanel},
-         {QStringLiteral("Asset Browser"), assetsPanel},
-         {QStringLiteral("Object Properties"), inspectorScroll},
+         {QStringLiteral("Content Browser"), assetsPanel},
+         {QStringLiteral("Details"), inspectorScroll},
          {QStringLiteral("Console"), consoleOutput_},
          {QStringLiteral("Problems"), issuesOutput_},
-         {QStringLiteral("Tool Properties"), toolsPanel},
+         {QStringLiteral("Place Actors"), toolsPanel},
          {QStringLiteral("Top View"), overviewCanvas_},
          {QStringLiteral("Debugger"), debugPanel_}}};
     for (size_t index = 0; index < panels.size(); ++index) {
@@ -767,14 +836,12 @@ void EditorWindow::BuildLayout() {
         addDockWidget(area, dock);
     }
     splitDockWidget(docks_[0], docks_[2], Qt::Vertical);
-    splitDockWidget(docks_[6], docks_[1], Qt::Horizontal);
-    tabifyDockWidget(docks_[3], docks_[4]);
-    tabifyDockWidget(docks_[3], docks_[7]);
-    docks_[3]->hide();
-    docks_[4]->hide();
-    resizeDocks({docks_[5], docks_[0]}, {215, 320}, Qt::Horizontal);
-    resizeDocks({docks_[6], docks_[1]}, {440, 480}, Qt::Horizontal);
-    resizeDocks({docks_[6]}, {235}, Qt::Vertical);
+    for (size_t index : {size_t{3}, size_t{4}, size_t{7}})
+        tabifyDockWidget(docks_[1], docks_[index]);
+    for (size_t index : {size_t{1}, size_t{3}, size_t{4}, size_t{5}, size_t{6}, size_t{7}})
+        docks_[index]->hide();
+    resizeDocks({docks_[0], docks_[2]}, {230, 520}, Qt::Vertical);
+    resizeDocks({docks_[0]}, {360}, Qt::Horizontal);
     BuildAnimationPanel();
 
     auto* toolbar = addToolBar(QStringLiteral("편집 도구"));
@@ -789,18 +856,28 @@ void EditorWindow::BuildLayout() {
         connect(command, &QAction::triggered, this, [action] { action(); });
         return command;
     };
-    toolbar->addWidget(Caption(QStringLiteral("FILE"), toolbar));
-    iconAction(EditorIcon::NewFile, QStringLiteral("새 프로젝트"), [this] { NewProject(); });
-    iconAction(EditorIcon::Open, QStringLiteral("프로젝트 열기"), [this] { OpenProjectDialog(); });
     iconAction(EditorIcon::Save, QStringLiteral("장면 저장"), [this] { SaveScene(false); });
     toolbar->addSeparator();
-    toolbar->addWidget(Caption(QStringLiteral("CREATE"), toolbar));
-    iconAction(EditorIcon::Sprite, QStringLiteral("2D 엔티티 추가"), [this] { AddEntity(); });
-    iconAction(EditorIcon::Mesh, QStringLiteral("3D 메시 엔티티 추가"),
-               [this] { AddMeshEntity(); });
-    iconAction(EditorIcon::Grid, QStringLiteral("타일맵 추가"), [this] { AddTilemap(); });
+    auto* create = new QToolButton(toolbar);
+    create->setObjectName(QStringLiteral("placeActorsButton"));
+    create->setText(QStringLiteral("추가"));
+    create->setIcon(MakeEditorIcon(EditorIcon::Sprite));
+    create->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    create->setPopupMode(QToolButton::InstantPopup);
+    auto* createMenu = new QMenu(create);
+    createMenu->addAction(MakeEditorIcon(EditorIcon::Sprite), QStringLiteral("스프라이트"), this,
+                          [this] { AddEntity(); });
+    createMenu->addAction(MakeEditorIcon(EditorIcon::Mesh), QStringLiteral("메시"), this,
+                          [this] { AddMeshEntity(); });
+    createMenu->addAction(MakeEditorIcon(EditorIcon::Grid), QStringLiteral("타일맵"), this,
+                          [this] { AddTilemap(); });
+    createMenu
+        ->addAction(MakeEditorIcon(EditorIcon::Focus), QStringLiteral("카메라"), this,
+                    [this] { AddCameraEntity(); })
+        ->setObjectName(QStringLiteral("addCamera"));
+    create->setMenu(createMenu);
+    toolbar->addWidget(create);
     toolbar->addSeparator();
-    toolbar->addWidget(Caption(QStringLiteral("TRANSFORM"), toolbar));
     auto* actionGroup = new QActionGroup(toolbar);
     actionGroup->setExclusive(true);
     const std::array<std::pair<EditorIcon, int>, 6> toolbarTools{{{EditorIcon::Select, Qt::Key_Q},
@@ -821,7 +898,6 @@ void EditorWindow::BuildLayout() {
                 [this, index] { SetTool(static_cast<EditorTool>(index)); });
     }
     toolbar->addSeparator();
-    toolbar->addWidget(Caption(QStringLiteral("DEBUG"), toolbar));
     previewStartAction_ =
         iconAction(EditorIcon::Play, QStringLiteral("장면 실행 (F5)"), [this] { StartPreview(); });
     previewPauseAction_ = iconAction(EditorIcon::Pause, QStringLiteral("일시정지/재개 (F6)"),
@@ -831,17 +907,10 @@ void EditorWindow::BuildLayout() {
     previewStopAction_ = iconAction(EditorIcon::Stop, QStringLiteral("실행 중지 (Shift+F5)"),
                                     [this] { StopPreview(); });
     toolbar->addSeparator();
-    toolbar->addWidget(Caption(QStringLiteral("VIEW"), toolbar));
-    auto* toolbarView = new QComboBox(toolbar);
-    toolbarView->addItems({QStringLiteral("3D 원근"), QStringLiteral("2D 평면")});
-    toolbar->addWidget(toolbarView);
-    connect(toolbarView, &QComboBox::currentIndexChanged, viewportTabs_,
-            &QTabWidget::setCurrentIndex);
-    connect(viewportTabs_, &QTabWidget::currentChanged, toolbarView, &QComboBox::setCurrentIndex);
-    auto* toolbarFocus = iconAction(EditorIcon::Focus, QStringLiteral("선택 항목에 초점"),
-                                    [focus] { focus->click(); });
-    toolbarFocus->setToolTip(QStringLiteral("선택 항목에 초점 (F)"));
     toolbar->addSeparator();
+    auto* spacer = new QWidget(toolbar);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    toolbar->addWidget(spacer);
     projectLabel_ = Caption(QStringLiteral("프로젝트 없음"), toolbar);
     toolbar->addWidget(projectLabel_);
     auto* assetSearch = new QLineEdit(toolbar);
@@ -858,90 +927,13 @@ void EditorWindow::BuildLayout() {
         assetSearch->selectAll();
     });
 
-    statusBar()->addPermanentWidget(new QLabel(QStringLiteral("GRID 1u"), this));
-    statusBar()->addPermanentWidget(new QLabel(QStringLiteral("SNAP ON"), this));
-    defaultLayout_ = saveState(3);
+    BuildWorkspaceChrome();
+    defaultLayout_ = saveState(5);
     previewPauseAction_->setEnabled(false);
     previewStepAction_->setEnabled(false);
     previewStopAction_->setEnabled(false);
     ApplyTheme();
     RestoreWorkspaceLayout();
-}
-
-void EditorWindow::ApplyTheme() {
-    QFont font = QApplication::font();
-    font.setPointSizeF(9.0 * uiScale_);
-    setFont(font);
-    if (auto* bar = findChild<QToolBar*>(QStringLiteral("lux-main-toolbar")))
-        bar->setIconSize(QSize(static_cast<int>(20 * uiScale_), static_cast<int>(20 * uiScale_)));
-    for (QAbstractButton* button : toolButtons_)
-        if (auto* tool = qobject_cast<QToolButton*>(button)) {
-            tool->setIconSize(
-                QSize(static_cast<int>(22 * uiScale_), static_cast<int>(22 * uiScale_)));
-            tool->setFixedSize(static_cast<int>(34 * uiScale_), static_cast<int>(34 * uiScale_));
-        }
-    for (auto* number : findChildren<QDoubleSpinBox*>()) {
-        number->setMinimumWidth(static_cast<int>(82 * uiScale_));
-        number->setMaximumWidth(static_cast<int>(110 * uiScale_));
-    }
-    if (projectFiles_) {
-        projectFiles_->setIconSize(
-            QSize(static_cast<int>(94 * uiScale_), static_cast<int>(94 * uiScale_)));
-        if (projectFiles_->viewMode() == QListView::IconMode)
-            projectFiles_->setGridSize(
-                QSize(static_cast<int>(120 * uiScale_), static_cast<int>(118 * uiScale_)));
-    }
-    QString sheet;
-    if (theme_ == QLatin1String("dark")) {
-        sheet = QStringLiteral(
-            "QWidget{background:#292a2d;color:#d6d7d9;font-size:%1pt;}"
-            "QMainWindow,QMenuBar,QMenu,QToolBar,QStatusBar{background:#252629;color:#d6d7d9;}"
-            "QMenuBar{border-bottom:1px solid #4a4c50;}"
-            "QMenuBar::item:selected,QMenu::item:selected{background:#45556b;}"
-            "QToolBar{spacing:2px;border-bottom:1px solid #54565b;padding:2px;}"
-            "QToolBar::separator{background:#55575b;width:1px;margin:3px 5px;}"
-            "QDockWidget{border:1px solid #4a4c50;}"
-            "QDockWidget::title{background:#333538;color:#e1e2e4;padding:4px 6px;text-align:left;"
-            "border-bottom:1px solid #505257;}"
-            "QWidget#sceneBar{background:#333538;border-bottom:1px solid #515359;}"
-            "QWidget#toolRail{background:#202124;border-right:1px solid #4d4f54;}"
-            "QLabel#sectionCaption{color:#b4c1cd;font-weight:600;letter-spacing:1px;}"
-            "QLabel#toolHelp{color:#9da5ad;line-height:1.3;}"
-            "QLineEdit,QListWidget,QTreeWidget,QPlainTextEdit,QTextEdit,QDoubleSpinBox,QSpinBox,"
-            "QComboBox{"
-            "background:#202124;color:#e1e1e2;border:1px solid "
-            "#50535a;padding:2px;selection-background-color:#a86c27;}"
-            "QTreeWidget::item,QListWidget::item{min-height:18px;}"
-            "QListWidget::item:selected,QTreeWidget::item:selected{background:#9d682b;color:#fff;}"
-            "QPushButton,QToolButton{background:#383a3e;color:#dedfe1;border:1px solid "
-            "#585b61;padding:3px;}"
-            "QPushButton:hover,QToolButton:hover{background:#4b4f56;}"
-            "QPushButton:checked,QToolButton:checked{background:#9d682b;color:#fff;border-color:#"
-            "d8953d;}"
-            "QGroupBox{border:1px solid #4f5156;margin-top:12px;padding-top:7px;font-weight:600;}"
-            "QGroupBox::title{subcontrol-origin:margin;left:6px;color:#a8bdd0;}"
-            "QScrollArea,QScrollArea>QWidget>QWidget{background:#292a2d;}"
-            "QScrollBar:vertical{background:#252629;width:11px;}"
-            "QScrollBar::handle:vertical{background:#555961;min-height:20px;}"
-            "QSplitter::handle{background:#17181a;}"
-            "QStatusBar{border-top:1px solid #53555a;}"
-            "QStatusBar QLabel{padding:0 8px;border-left:1px solid #53555a;}");
-    } else if (theme_ == QLatin1String("light")) {
-        sheet = QStringLiteral(
-            "QWidget{background:#e2e4e7;color:#2a2d32;font-size:%1pt;}"
-            "QMainWindow,QMenuBar,QMenu,QToolBar,QStatusBar{background:#d1d4d9;}"
-            "QDockWidget::title{background:#c2c7ce;padding:4px;border-bottom:1px solid #9299a4;}"
-            "QLineEdit,QListWidget,QTreeWidget,QPlainTextEdit,QDoubleSpinBox,QComboBox{"
-            "background:#fff;color:#2a2d32;border:1px solid #9ba2aa;padding:2px;}"
-            "QPushButton,QToolButton{background:#d8dce1;border:1px solid #9ba2aa;padding:3px;}"
-            "QPushButton:checked,QToolButton:checked{background:#d99a49;}"
-            "QGroupBox{border:1px solid #aeb4bc;margin-top:12px;padding-top:7px;}");
-    } else {
-        sheet = QSettings().value(QStringLiteral("customStyle")).toString();
-    }
-    if (theme_ != QLatin1String("custom"))
-        sheet = sheet.arg(9.0 * uiScale_);
-    setStyleSheet(sheet);
 }
 
 void EditorWindow::RestoreWorkspaceLayout() {
@@ -951,8 +943,8 @@ void EditorWindow::RestoreWorkspaceLayout() {
     ApplyTheme();
     restoreGeometry(settings.value(QStringLiteral("geometry")).toByteArray());
     const auto state = settings.value(QStringLiteral("layout")).toByteArray();
-    if (!state.isEmpty() && !restoreState(state, 3))
-        restoreState(defaultLayout_, 3);
+    if (!state.isEmpty() && !restoreState(state, 5))
+        restoreState(defaultLayout_, 5);
 }
 
 void EditorWindow::SaveWorkspaceLayout() {
@@ -960,7 +952,8 @@ void EditorWindow::SaveWorkspaceLayout() {
     settings.setValue(QStringLiteral("theme"), theme_);
     settings.setValue(QStringLiteral("uiScale"), uiScale_);
     settings.setValue(QStringLiteral("geometry"), saveGeometry());
-    settings.setValue(QStringLiteral("layout"), saveState(3));
+    settings.setValue(QStringLiteral("layout"),
+                      levelLayout_.isEmpty() ? saveState(5) : levelLayout_);
     if (project_)
         settings.setValue(QStringLiteral("lastProject"),
                           QString::fromUtf8(PathUtf8(project_->GetFile())));
@@ -984,11 +977,12 @@ void EditorWindow::SaveWorkspaceLayout() {
 }
 
 void EditorWindow::ResetWorkspaceLayout() {
-    restoreState(defaultLayout_, 3);
-    for (auto* dock : docks_)
-        dock->show();
-    docks_[3]->hide();
-    docks_[4]->hide();
+    SetWorkspace(false);
+    restoreState(defaultLayout_, 5);
+    docks_[0]->show();
+    docks_[2]->show();
+    for (size_t index : {size_t{1}, size_t{3}, size_t{4}, size_t{5}, size_t{6}, size_t{7}})
+        docks_[index]->hide();
     statusBar()->showMessage(QStringLiteral("기본 작업 공간 배치를 복원했습니다."), 4000);
 }
 } // namespace LuxEditor

@@ -45,10 +45,12 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSlider>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QUndoCommand>
@@ -92,7 +94,7 @@ EditorWindow::EditorWindow(QWidget* parent)
     undo_->setUndoLimit(128);
     setWindowTitle(QStringLiteral("LuxEditor"));
     setMinimumSize(960, 600);
-    resize(1360, 860);
+    resize(1600, 960);
     setAcceptDrops(true);
     recentProjects_.Load();
     connect(&autosaveTimer_, &QTimer::timeout, this, [this] { AutoSaveScene(); });
@@ -273,12 +275,15 @@ void EditorWindow::BuildMenus() {
     add(edit, QStringLiteral("선택 삭제"), QStringLiteral("deleteEntity"), QKeySequence::Delete,
         [this] { DeleteEntity(); });
     QMenu* view = menuBar()->addMenu(QStringLiteral("보기"));
-    view->addAction(animationDock_->toggleViewAction());
+    add(view, QStringLiteral("애니메이션 에디터"), QStringLiteral("openAnimationWorkspace"), {},
+        [this] { SetWorkspace(true); });
     snapAction_ = view->addAction(QStringLiteral("격자에 맞춤"));
     snapAction_->setCheckable(true);
     snapAction_->setChecked(true);
     connect(snapAction_, &QAction::toggled, this, [this](bool enabled) {
         canvas_->SetSnapToGrid(enabled);
+        canvas3D_->SetSnapToGrid(enabled);
+        overviewCanvas_->SetSnapToGrid(enabled);
         if (project_) {
             auto settings = project_->GetSettings();
             settings.snapToGrid = enabled;
@@ -614,8 +619,9 @@ void EditorWindow::resizeEvent(QResizeEvent* event) {
 void EditorWindow::dragEnterEvent(QDragEnterEvent* event) {
     for (const QUrl& url : event->mimeData()->urls()) {
         const QString suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
-        if (suffix == QLatin1String("luxproj") || suffix == QLatin1String("lux") ||
-            suffix == QLatin1String("luxpack") || suffix == QLatin1String("luxbackup")) {
+        if (suffix == QLatin1String("luxproject") || suffix == QLatin1String("luxproj") ||
+            suffix == QLatin1String("lux") || suffix == QLatin1String("luxpack") ||
+            suffix == QLatin1String("luxbackup")) {
             event->acceptProposedAction();
             return;
         }
@@ -657,6 +663,7 @@ void EditorWindow::RefreshAll() {
 }
 
 void EditorWindow::RefreshProjectExplorer() {
+    RefreshAssetFolders();
     const auto row = projectFiles_->currentRow();
     const auto selectedPath = row >= 0 && static_cast<size_t>(row) < projectFilePaths_.size()
                                   ? projectFilePaths_[static_cast<size_t>(row)]
@@ -666,6 +673,7 @@ void EditorWindow::RefreshProjectExplorer() {
     assetPreview_->clear();
     assetDetails_->clear();
     if (!project_) {
+        assetCount_->setText(QStringLiteral("프로젝트 없음"));
         return;
     }
     const auto root = project_->GetFile().parent_path();
@@ -684,6 +692,11 @@ void EditorWindow::RefreshProjectExplorer() {
             continue;
         }
         if (it->is_regular_file(error)) {
+            if (!assetFolder_.empty()) {
+                const auto inside = relative.lexically_relative(assetFolder_);
+                if (inside.empty() || *inside.begin() == "..")
+                    continue;
+            }
             const QString label = Q(GenericPathUtf8(relative));
             const QString suffix = Q(PathUtf8(it->path().extension())).toLower();
             const bool scene = suffix == QLatin1String(".lux");
@@ -705,6 +718,7 @@ void EditorWindow::RefreshProjectExplorer() {
             }
         }
     }
+    assetCount_->setText(QStringLiteral("%1개 항목").arg(projectFilePaths_.size()));
     if (!selectedPath.empty()) {
         const auto found =
             std::find(projectFilePaths_.begin(), projectFilePaths_.end(), selectedPath);
@@ -787,10 +801,10 @@ void EditorWindow::RefreshInspector() {
         selected && selected.HasComponent<LuxEngine::TransformComponent>() && !previewActive_);
     animationTarget_->setText(selected ? QStringLiteral("대상 · 엔티티 #%1").arg(selected.GetId())
                                        : QStringLiteral("대상 없음"));
+    inspectorBody_->setVisible(static_cast<bool>(selected));
     inspectorBody_->setEnabled(static_cast<bool>(selected) && !previewActive_);
     const auto* reference =
         selected ? selected.TryGetComponent<LuxEngine::SceneReferenceComponent>() : nullptr;
-    sceneReferencePanel_->setVisible(reference != nullptr);
     if (reference) {
         sceneReferencePath_->setText(Q(reference->path));
         sceneReferencePath_->setToolTip(Q(reference->path));
@@ -914,7 +928,10 @@ void EditorWindow::RefreshInspector() {
         animationTimeline_->setEnabled(animated && canAnimate);
         keyframeList_->setEnabled(animated);
     }
+    RefreshCameraDetails();
     refreshingInspector_ = false;
+    FilterDetails(detailsSearch_->text());
+    RefreshAnimationWorkspace();
 }
 
 void EditorWindow::UpdateChrome() {
@@ -926,12 +943,13 @@ void EditorWindow::UpdateChrome() {
                    (document_.IsDirty() ? QStringLiteral(" *") : QString()));
     RefreshSceneTabs();
     projectLabel_->setText(project_ ? Q(project_->GetName()) : QStringLiteral("프로젝트 없음"));
-    statusBar()->showMessage(QStringLiteral("%1엔티티 %2개  |  %3")
-                                 .arg(projectName)
-                                 .arg(document_.GetScene().GetEntityCount())
-                                 .arg(viewportTabs_->currentWidget() == canvas3D_
-                                          ? QStringLiteral("3D 배치 미리보기")
-                                          : QStringLiteral("2D 장면")));
+    if (sceneStatus_)
+        sceneStatus_->setText(
+            QStringLiteral("%1개 오브젝트  ·  %2%3")
+                .arg(document_.GetScene().GetEntityCount())
+                .arg(viewportTabs_->currentWidget() == canvas3D_ ? QStringLiteral("3D")
+                                                                 : QStringLiteral("2D"))
+                .arg(document_.IsDirty() ? QStringLiteral("  ·  저장되지 않음") : QString()));
     for (QAction* action : {projectSettingsAction_, cloneAction_, exportAction_, backupAction_,
                             restoreAction_, rescanAction_})
         if (action)
@@ -1312,6 +1330,10 @@ void EditorWindow::TickPreview() {
 }
 
 void EditorWindow::SetTool(EditorTool tool) {
+    if (workspaceStack_ && workspaceStack_->currentIndex() == 1) {
+        SetAnimationTool(tool);
+        return;
+    }
     EndViewportEdit();
     EndTimelineEdit();
     canvas_->CancelInteraction();
@@ -2208,5 +2230,26 @@ void EditorWindow::PasteEntity() {
         }
     });
     RefreshAll();
+}
+
+EditorDocument& EditorWindow::GetDocument() noexcept {
+    return document_;
+}
+
+const EditorDocument& EditorWindow::GetDocument() const noexcept {
+    return document_;
+}
+
+const QString& EditorWindow::LastLogMessage() const noexcept {
+    return lastLogMessage_;
+}
+
+void EditorWindow::ExecuteRecordedEdit(const QString& name, const std::function<void()>& edit) {
+    RecordEdit(name, edit);
+    RefreshAll();
+}
+
+size_t EditorWindow::PendingSceneLoadCount() const noexcept {
+    return pendingSceneLoads_.size();
 }
 } // namespace LuxEditor

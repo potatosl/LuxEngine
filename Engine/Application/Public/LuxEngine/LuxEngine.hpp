@@ -33,3 +33,5 @@
 
 // Application
 #include <LuxEngine/Application.hpp>
+
+#include <LuxEngine/Scripting/ScriptRuntime.hpp>

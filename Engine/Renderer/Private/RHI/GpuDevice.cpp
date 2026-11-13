@@ -156,4 +156,5 @@ bool GpuDevice::ReadFrameCapture(GpuFrameCapture& capture) {
     return backend_ && backend_->ReadFrameCapture(capture);
 }
 
+GpuDevice::GpuDevice() = default;
 } // namespace LuxEngine

@@ -1,0 +1,5 @@
+if(NOT TARGET LuxSampleText)
+    add_library(LuxSampleText STATIC "${CMAKE_CURRENT_LIST_DIR}/Utf8.cpp")
+    target_include_directories(LuxSampleText PUBLIC "${CMAKE_CURRENT_LIST_DIR}/..")
+    target_link_libraries(LuxSampleText PUBLIC LuxEngine::Engine)
+endif()

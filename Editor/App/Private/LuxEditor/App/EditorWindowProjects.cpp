@@ -3,7 +3,9 @@
 #include <LuxEditor/Project/ProjectArchive.hpp>
 #include <LuxEditor/Project/ProjectDialog.hpp>
 #include <LuxEditor/Scene/SceneDependencies.hpp>
+#include <LuxEditor/Ui/IconFactory.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
+#include <LuxEditor/Viewport/SceneViewport3D.hpp>
 #include <QApplication>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -154,14 +156,15 @@ void EditorWindow::ApplyProjectPreferences() {
     if (snapAction_)
         snapAction_->setChecked(snap);
     canvas_->SetSnapToGrid(snap);
+    canvas3D_->SetSnapToGrid(snap);
     if (!project_) {
-        setWindowIcon(QIcon());
+        setWindowIcon(MakeBrandIcon(theme_ != QLatin1String("light")));
         return;
     }
     if (!project_->GetIcon().empty())
         setWindowIcon(QIcon(Q(project_->GetFile().parent_path() / project_->GetIcon())));
     else
-        setWindowIcon(QIcon());
+        setWindowIcon(MakeBrandIcon(theme_ != QLatin1String("light")));
 }
 
 EditorWindow::SceneOpenResult EditorWindow::LoadSceneDocument(const std::filesystem::path& file,

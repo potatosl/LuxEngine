@@ -1,5 +1,6 @@
 #pragma once
 #include <LuxEngine/Renderer/Renderer3D/Renderer3D.hpp>
+#include <QLineF>
 #include <QPointF>
 #include <QSizeF>
 #include <optional>
@@ -9,6 +10,13 @@ LuxEngine::PerspectiveCamera MakeViewportCamera3D(QSizeF size, LuxEngine::Vec3 f
                                                   double pitch, double distance);
 std::optional<QPointF> ProjectViewportPoint(const LuxEngine::PerspectiveCamera& camera, QSizeF size,
                                             LuxEngine::Vec3 point);
+
+// Clip segments against the complete camera frustum before perspective division.
+std::optional<QLineF> ProjectViewportSegment(const LuxEngine::PerspectiveCamera& camera,
+                                             QSizeF size, LuxEngine::Vec3 start,
+                                             LuxEngine::Vec3 end);
+// A 1/2/5 grid interval that remains readable while zooming.
+double ViewportGridSpacing(double worldUnitsPerPixel);
 
 struct ViewportRay3D {
     LuxEngine::Vec3 origin;

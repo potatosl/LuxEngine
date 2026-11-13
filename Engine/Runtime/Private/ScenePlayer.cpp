@@ -4,6 +4,7 @@
 #include <LuxEngine/Platform/Input.hpp>
 #include <LuxEngine/Platform/Window.hpp>
 #include <LuxEngine/Runtime/ScenePlayer.hpp>
+#include <SDL3/SDL_filesystem.h>
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -100,7 +101,13 @@ std::optional<ScenePlayerOptions> ParseScenePlayerArguments(const std::vector<st
             }
             return true;
         };
-        if (arg == "--title") {
+        if (arg == "--scripts") {
+            if (++i >= args.size() || args[i].empty()) {
+                error = "C# 스크립트 어셈블리 경로를 지정해 주세요.";
+                return std::nullopt;
+            }
+            options.scriptAssemblyPath = args[i];
+        } else if (arg == "--title") {
             if (!need(1))
                 return std::nullopt;
             options.title = args[++i];
@@ -200,6 +207,7 @@ ScenePlayer::ScenePlayer(ScenePlayerOptions options)
       options_(std::move(options)) {}
 
 bool ScenePlayer::LoadScene() {
+    scripts_.Shutdown();
     auto loaded = sceneManager_.Load(std::filesystem::path(std::u8string(
         reinterpret_cast<const char8_t*>(options_.scenePath.data()), options_.scenePath.size())));
     if (!loaded) {
@@ -210,6 +218,23 @@ bool ScenePlayer::LoadScene() {
     streamingAccumulator_ = 0;
     lastStreamingError_.clear();
     FindPlayer();
+    if (!scene_->GetComponentEntityIds<ScriptComponent>().empty()) {
+        ScriptRuntimeConfig config;
+        const auto base = SDL_GetBasePath();
+        const auto directory =
+            base ? std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(base)))
+                 : std::filesystem::path{};
+        config.assemblyPath =
+            options_.scriptAssemblyPath.empty()
+                ? directory / "Content/Scripts/GameScripts.dll"
+                : std::filesystem::path(std::u8string(
+                      reinterpret_cast<const char8_t*>(options_.scriptAssemblyPath.data()),
+                      options_.scriptAssemblyPath.size()));
+        if (!scripts_.Initialize(*scene_, config)) {
+            Log::Error(scripts_.GetLastError());
+            return false;
+        }
+    }
     return true;
 }
 
@@ -254,9 +279,20 @@ void ScenePlayer::UpdateCamera() {
     float aspect = 16.0f / 9.0f;
     if (GetWindow().GetFramebufferSize(width, height) && width > 0 && height > 0)
         aspect = static_cast<float>(width) / static_cast<float>(height);
-    const float halfWidth = view_.halfHeight * aspect;
-    camera_.SetProjection(view_.centerX - halfWidth, view_.centerX + halfWidth,
-                          view_.centerY - view_.halfHeight, view_.centerY + view_.halfHeight);
+    auto view = view_;
+    if (!options_.view) {
+        for (auto entity : scene_->GetEntities()) {
+            const auto* camera = entity.TryGetComponent<CameraComponent>();
+            if (camera && camera->isPrimary && !camera->isPerspective) {
+                const auto transform = scene_->GetWorldTransform(entity.GetId());
+                view = {transform.position.x, transform.position.y, camera->orthoSize};
+                break;
+            }
+        }
+    }
+    const float halfWidth = view.halfHeight * aspect;
+    camera_.SetProjection(view.centerX - halfWidth, view.centerX + halfWidth,
+                          view.centerY - view.halfHeight, view.centerY + view.halfHeight);
 
     const auto primary = ResolveScenePlayerCamera(*scene_, view_);
     camera3D_.SetPerspective(ToRadians(primary.fovDegrees), aspect, 0.1f, 1000.0f);
@@ -272,7 +308,8 @@ void ScenePlayer::OnUpdate(double dt) {
     }
     if (Input::WasActionPressed("Reload") && LoadScene())
         view_ = options_.view ? *options_.view : FitSceneView(*scene_);
-    if (player_ && player_.HasComponent<TransformComponent>()) {
+    if (player_ && !player_.HasComponent<ScriptComponent>() &&
+        player_.HasComponent<TransformComponent>()) {
         const float horizontal = (Input::IsActionDown("Right") ? 1.0f : 0.0f) -
                                  (Input::IsActionDown("Left") ? 1.0f : 0.0f);
         const float vertical =
@@ -308,6 +345,11 @@ void ScenePlayer::OnUpdate(double dt) {
             lastStreamingError_.clear();
         if (changed)
             FindPlayer();
+    }
+    if (scripts_.IsRunning() && !scripts_.Update(dt)) {
+        Log::Error(scripts_.GetLastError());
+        Close();
+        return;
     }
     scene_->OnUpdate(dt);
     if (options_.maxFrames != 0 && ++frames_ >= options_.maxFrames)
@@ -347,7 +389,11 @@ void ScenePlayer::OnRender(float) {
 }
 
 void ScenePlayer::OnShutdown() {
+    scripts_.Shutdown();
     Input::ClearBindings();
 }
 
+bool ScenePlayer::LoadedScene() const {
+    return loaded_;
+}
 } // namespace LuxEngine

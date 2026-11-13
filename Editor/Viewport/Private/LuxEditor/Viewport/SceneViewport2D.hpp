@@ -29,34 +29,26 @@ public:
         std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
     ~SceneViewport2D() override;
 
-    void RefreshScene() {
-        update();
-    }
+    void RefreshScene();
 
     void FocusSelection();
+    void FrameAll();
+    void SetGridVisible(bool visible);
     void CancelInteraction();
     // Visible area in world units: centre and half height.
     void GetView(double& centerX, double& centerY, double& halfHeight) const;
 
-    void SetSnapToGrid(bool enabled) {
-        snapToGrid_ = enabled;
-        update();
-    }
+    void SetSnapToGrid(bool enabled);
 
-    void SetTool(EditorTool tool) {
-        tool_ = tool;
-    }
+    void SetTool(EditorTool tool);
 
-    void SetTileId(uint8_t tile) {
-        tileId_ = tile;
-    }
+    void SetTileId(uint8_t tile);
 
-    void SetDebugColliders(bool enabled) {
-        debugColliders_ = enabled;
-        update();
-    }
+    void SetDebugColliders(bool enabled);
 
 private:
+    void FrameBounds(bool selectedOnly);
+    void keyPressEvent(QKeyEvent*) override;
     QPointF WorldToScreen(double x, double y) const;
     QPointF ScreenToWorld(QPointF point) const;
     void paintEvent(QPaintEvent*) override;
@@ -82,6 +74,7 @@ private:
     bool dragging_ = false;
     bool tilePainting_ = false;
     bool snapToGrid_ = true;
+    bool gridVisible_ = true;
     bool debugColliders_ = false;
     LuxEngine::uint32 dragId_ = 0;
     EditorTool tool_ = EditorTool::Select;

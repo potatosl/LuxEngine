@@ -1165,4 +1165,7 @@ bool SceneManager::Save(Scene& scene, const fs::path& targetPath, const fs::path
     }
 }
 
+SceneLoadResult::operator bool() const noexcept {
+    return scene != nullptr;
+}
 } // namespace LuxEngine

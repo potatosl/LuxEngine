@@ -84,3 +84,13 @@ LuxSceneConvert scene.lux scene.lux
 `nlohmann_json` 3.11 이상이 필요하다. CMake에서 다운로드하지 않는다. Fedora의 현재 패키지명은 `json-devel`, Homebrew는 `nlohmann-json`, vcpkg는 `nlohmann-json`이다. 커스텀 설치 경로는 `CMAKE_PREFIX_PATH` 또는 `nlohmann_json_DIR`로 지정한다.
 
 이 파서는 엔진 공개 헤더에 노출하지 않는다. 설치 SDK를 사용하는 게임은 JSON 파서 개발 패키지를 별도로 찾을 필요가 없다. 독립적으로 에디터를 빌드하는 개발 환경에는 파서가 필요하다. MIT 라이선스 고지는 `docs/licenses/LICENSE-nlohmann-json.txt`에 포함했다.
+
+## C# 스크립트 참조
+
+씬의 `components.script`에는 C# 클래스의 전체 이름을 `type`, 활성 상태를 `enabled`로 기록한다. 선택적인 컴포넌트이므로 기존 씬에는 영향을 주지 않는다. 현재 JSON 스키마 버전은 1을 유지하고 선택 필드를 확장했다. 이전 엔진이 새 컴포넌트를 해석할 수 있다고 가정하지 않는다.
+
+```json
+"script": { "type": "Game.Mover", "enabled": true }
+```
+
+클래스 이름은 유효한 UTF-8, NUL 미포함, 최대 512바이트로 검증한다. 사용자 C# 필드의 값 저장은 아직 지원하지 않는다. 런타임 어셈블리 경로는 씬과 별도로 `ScriptRuntimeConfig` 또는 `ScenePlayer --scripts`로 지정한다.

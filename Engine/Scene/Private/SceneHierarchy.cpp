@@ -80,7 +80,7 @@ bool InverseAffine(const Mat4& input, Mat4& result) {
 using AuthoredComponents =
     std::tuple<TagComponent, TransformComponent, SpriteRendererComponent, MeshRendererComponent,
                CameraComponent, Rigidbody2DComponent, BoxCollider2DComponent, Rigidbody3DComponent,
-               BoxCollider3DComponent, TilemapComponent, AnimationComponent,
+               BoxCollider3DComponent, TilemapComponent, AnimationComponent, ScriptComponent,
                SceneReferenceComponent>;
 
 template <typename Tuple, typename Callback, size_t... Indices>
