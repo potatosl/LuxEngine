@@ -97,6 +97,8 @@ void EditorDocument::NewScene() {
     auto& active = Active();
     active.scene = std::move(replacement);
     active.selectedId.reset();
+    active.selection.clear();
+    active.selectionSet.clear();
     active.path.clear();
     active.dirty = false;
     active.loadWarning.clear();
@@ -117,6 +119,8 @@ bool EditorDocument::Open(const std::string& path) {
     auto& active = Active();
     active.scene = std::move(replacement);
     active.selectedId.reset();
+    active.selection.clear();
+    active.selectionSet.clear();
     active.path.swap(nextPath);
     active.dirty = false;
     active.loadWarning = std::move(warning);
@@ -139,6 +143,8 @@ bool EditorDocument::Recover(const std::string& originalPath, const std::string&
     auto& active = Active();
     active.scene = std::move(replacement);
     active.selectedId.reset();
+    active.selection.clear();
+    active.selectionSet.clear();
     active.path.swap(nextPath);
     active.dirty = true;
     active.loadWarning = std::move(warning);
@@ -196,8 +202,10 @@ bool EditorDocument::ReplaceScene(const std::string& serializedPath,
     auto& active = Active();
     replacement->SetSourcePath(active.scene->GetSourcePath());
     active.scene = std::move(replacement);
-    active.selectedId =
-        selectedId && active.scene->IsAlive(*selectedId) ? selectedId : std::nullopt;
+    SetSelection(active.id,
+                 selectedId ? std::vector<LuxEngine::uint32>{*selectedId}
+                            : std::vector<LuxEngine::uint32>{},
+                 selectedId);
     active.dirty = true;
     active.loadWarning = std::move(warning);
     return true;
@@ -218,8 +226,10 @@ bool EditorDocument::ReplaceSceneFromData(TabId tab, const std::string& serializ
         return false;
     replacement->SetSourcePath(state->scene->GetSourcePath());
     state->scene = std::move(replacement);
-    state->selectedId =
-        selectedId && state->scene->IsAlive(*selectedId) ? selectedId : std::nullopt;
+    SetSelection(tab,
+                 selectedId ? std::vector<LuxEngine::uint32>{*selectedId}
+                            : std::vector<LuxEngine::uint32>{},
+                 selectedId);
     state->dirty = true;
     return true;
 }
@@ -403,14 +413,110 @@ bool EditorDocument::SetDirty(TabId tab, bool dirty) noexcept {
 
 std::optional<LuxEngine::uint32> EditorDocument::GetSelectedId(TabId tab) const noexcept {
     const auto* state = Find(tab);
-    return state && state->selectedId && state->scene->IsAlive(*state->selectedId)
-               ? state->selectedId
-               : std::nullopt;
+    if (!state)
+        return {};
+    if (state->selectedId && state->scene->IsAlive(*state->selectedId))
+        return state->selectedId;
+    for (auto iterator = state->selection.rbegin(); iterator != state->selection.rend(); ++iterator)
+        if (state->scene->IsAlive(*iterator))
+            return *iterator;
+    return {};
+}
+
+std::vector<LuxEngine::uint32> EditorDocument::GetSelection() const {
+    return GetSelection(GetActiveTabId());
+}
+
+std::vector<LuxEngine::uint32> EditorDocument::GetSelection(TabId tab) const {
+    std::vector<LuxEngine::uint32> result;
+    const auto* state = Find(tab);
+    if (state) {
+        for (const auto id : state->selection)
+            if (state->scene->IsAlive(id))
+                result.push_back(id);
+    }
+    return result;
+}
+
+void EditorDocument::SetSelection(std::vector<LuxEngine::uint32> ids,
+                                  std::optional<LuxEngine::uint32> primary) {
+    SetSelection(GetActiveTabId(), std::move(ids), primary);
+}
+
+void EditorDocument::SetSelection(TabId tab, std::vector<LuxEngine::uint32> ids,
+                                  std::optional<LuxEngine::uint32> primary) {
+    auto* state = Find(tab);
+    if (!state)
+        return;
+    std::vector<LuxEngine::uint32> normalized;
+    normalized.reserve(ids.size());
+    std::unordered_set<LuxEngine::uint32> membership;
+    membership.reserve(ids.size());
+    for (const auto id : ids)
+        if (state->scene->IsAlive(id) && membership.insert(id).second)
+            normalized.push_back(id);
+    if (primary) {
+        const auto found = std::find(normalized.begin(), normalized.end(), *primary);
+        if (found != normalized.end()) {
+            normalized.erase(found);
+            normalized.push_back(*primary);
+        }
+    }
+    state->selection = std::move(normalized);
+    state->selectionSet = std::move(membership);
+    state->selectedId =
+        state->selection.empty() ? std::optional<LuxEngine::uint32>{} : state->selection.back();
 }
 
 void EditorDocument::Select(TabId tab, std::optional<LuxEngine::uint32> id) {
-    if (auto* state = Find(tab))
-        state->selectedId = id && state->scene->IsAlive(*id) ? id : std::nullopt;
+    SetSelection(tab, id ? std::vector<LuxEngine::uint32>{*id} : std::vector<LuxEngine::uint32>{},
+                 id);
+}
+
+void EditorDocument::ModifySelection(std::optional<LuxEngine::uint32> id, SelectionMode mode) {
+    ModifySelection(GetActiveTabId(), id, mode);
+}
+
+void EditorDocument::ModifySelection(TabId tab, std::optional<LuxEngine::uint32> id,
+                                     SelectionMode mode) {
+    if (mode == SelectionMode::Replace) {
+        Select(tab, id);
+        return;
+    }
+    const auto* state = Find(tab);
+    if (!state || !id || !state->scene->IsAlive(*id))
+        return;
+    auto ids = GetSelection(tab);
+    const auto found = std::find(ids.begin(), ids.end(), *id);
+    if (found != ids.end() && mode == SelectionMode::Toggle) {
+        ids.erase(found);
+        SetSelection(tab, std::move(ids));
+    } else {
+        if (found == ids.end())
+            ids.push_back(*id);
+        SetSelection(tab, std::move(ids), id);
+    }
+}
+
+bool EditorDocument::IsSelected(LuxEngine::uint32 id) const {
+    const auto& state = Active();
+    return state.scene->IsAlive(id) && state.selectionSet.contains(id);
+}
+
+TransformSpace EditorDocument::GetTransformSpace() const noexcept {
+    return Active().transformSpace;
+}
+
+void EditorDocument::SetTransformSpace(TransformSpace space) noexcept {
+    Active().transformSpace = space;
+}
+
+SelectionPivot EditorDocument::GetSelectionPivotMode() const noexcept {
+    return Active().selectionPivot;
+}
+
+void EditorDocument::SetSelectionPivotMode(SelectionPivot pivot) noexcept {
+    Active().selectionPivot = pivot;
 }
 
 void EditorDocument::Select(std::optional<LuxEngine::uint32> id) {
@@ -425,18 +531,20 @@ LuxEngine::Entity EditorDocument::GetSelected() const {
 LuxEngine::Entity EditorDocument::CreateEntity(const std::string& name) {
     auto& active = Active();
     auto entity = active.scene->CreateEntity(name);
-    active.selectedId = entity.GetId();
+    SetSelection({entity.GetId()}, entity.GetId());
     active.dirty = true;
     return entity;
 }
 
 bool EditorDocument::DeleteSelected() {
-    const auto selected = GetSelected();
-    if (!selected)
+    const auto selected = GetSelection();
+    if (selected.empty())
         return false;
     auto& active = Active();
-    active.scene->DestroyEntity(selected);
-    active.selectedId.reset();
+    for (const auto id : selected)
+        if (active.scene->IsAlive(id))
+            active.scene->DestroyEntity(LuxEngine::Entity(id, active.scene.get()));
+    SetSelection({});
     active.dirty = true;
     return true;
 }
