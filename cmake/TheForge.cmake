@@ -119,6 +119,10 @@ configure_file("${LUX_FORGE_CONFIG_DIR}/ResourceLoader.cpp.tmp"
     "${LUX_FORGE_CONFIG_DIR}/ResourceLoader.cpp" COPYONLY)
 list(REMOVE_ITEM LUX_FORGE_SOURCES "${TF}/Resources/ResourceLoader/ResourceLoader.cpp")
 list(APPEND LUX_FORGE_SOURCES "${LUX_FORGE_CONFIG_DIR}/ResourceLoader.cpp")
+if(APPLE)
+    set_source_files_properties("${TF}/Graphics/GraphicsConfig.cpp"
+        "${LUX_FORGE_CONFIG_DIR}/ResourceLoader.cpp" PROPERTIES LANGUAGE OBJCXX)
+endif()
 # Swapchain images are always 2D, including one-pixel-high windows. The pinned Vulkan
 # renderer infers 1D views from height alone; preserve the requested texture dimension.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -137,13 +141,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(REMOVE_ITEM LUX_FORGE_SOURCES "${TF}/Graphics/Vulkan/Vulkan.c")
     list(APPEND LUX_FORGE_SOURCES "${LUX_FORGE_CONFIG_DIR}/Vulkan.c")
 endif()
+if(WIN32)
+    include(TheForgeD3D12)
+endif()
 add_library(TheForge STATIC ${LUX_FORGE_SOURCES})
 set_target_properties(TheForge PROPERTIES CXX_STANDARD 17 C_STANDARD 11
     CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON FOLDER ThirdParty)
 target_include_directories(TheForge PUBLIC "${LUX_FORGE_CONFIG_DIR}" "${TF}"
-    PRIVATE "${TF}/Resources/ResourceLoader" "${TF}/Graphics/Vulkan")
+    PRIVATE "${TF}/Resources/ResourceLoader" "${TF}/Graphics/Vulkan" "${TF}/Graphics/Direct3D12")
 target_compile_definitions(TheForge PUBLIC EXTERNAL_CONFIG_FILEPATH="LuxForgeConfig.h"
-    ZSTD_DISABLE_ASM)
+    ZSTD_DISABLE_ASM
+    $<$<AND:$<PLATFORM_ID:Windows>,$<NOT:$<CONFIG:Debug>>>:ENABLE_GRAPHICS_RUNTIME_CHECK>)
 target_link_libraries(TheForge PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 if(WIN32)
     target_compile_definitions(TheForge PUBLIC _WINDOWS UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
@@ -157,6 +165,7 @@ if(WIN32)
 elseif(APPLE)
     target_compile_options(TheForge PRIVATE -Wno-deprecated-declarations $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
     target_link_libraries(TheForge PUBLIC "-framework Metal" "-framework MetalKit"
+        "-framework MetalPerformanceShaders"
         "-framework Cocoa" "-framework QuartzCore" "-framework IOKit" "-framework CoreVideo")
 else()
     target_link_libraries(TheForge PUBLIC X11::X11 PkgConfig::ForgeWayland)

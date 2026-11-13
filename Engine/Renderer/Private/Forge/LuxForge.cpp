@@ -246,6 +246,20 @@ std::mutex g_DeviceMutex;
 Renderer* g_SharedRenderer = nullptr;
 uint32_t g_RendererUsers = 0;
 bool g_SharedRootSignatures = false;
+std::mutex g_InitializationLogMutex;
+std::string g_InitializationError;
+bool g_CaptureInitializationError = false;
+
+void CaptureInitializationError(void*, const char* message) {
+    std::lock_guard<std::mutex> lock(g_InitializationLogMutex);
+    if (!g_CaptureInitializationError || !g_InitializationError.empty())
+        return;
+    const char* text = std::strstr(message, "ERR| ");
+    g_InitializationError = text ? text + 5 : message;
+    while (!g_InitializationError.empty() &&
+           (g_InitializationError.back() == '\n' || g_InitializationError.back() == '\r'))
+        g_InitializationError.pop_back();
+}
 
 bool AcquirePlatform(std::string& error) {
     if (g_PlatformUsers++ > 0)
@@ -300,6 +314,8 @@ bool AcquirePlatform(std::string& error) {
         resourceDirsSet = true;
     }
     initLog("LuxForge", static_cast<LogLevel>(LogLevel::eWARNING | LogLevel::eERROR));
+    addLogCallback("LuxForgeInitialization", LogLevel::eERROR, nullptr, CaptureInitializationError,
+                   nullptr, nullptr);
     return true;
 }
 
@@ -916,12 +932,23 @@ LuxForgeDevice* Create(const LuxForgeInitDesc* desc, char* error, size_t errorSi
         RendererDesc settings = {};
         settings.mEnableGpuBasedValidation = false;
         initGPUConfiguration(settings.pExtendedSettings);
+        {
+            std::lock_guard<std::mutex> logLock(g_InitializationLogMutex);
+            g_InitializationError.clear();
+            g_CaptureInitializationError = true;
+        }
         initRenderer("LuxEngine", &settings, &g_SharedRenderer);
+        {
+            std::lock_guard<std::mutex> logLock(g_InitializationLogMutex);
+            g_CaptureInitializationError = false;
+            reason = g_InitializationError;
+        }
         if (!g_SharedRenderer) {
             exitGPUConfiguration();
             delete device;
             ReleasePlatform();
-            CopyText(error, errorSize, "The Forge renderer failed to start");
+            CopyText(error, errorSize,
+                     reason.empty() ? "The Forge renderer failed to start" : reason);
             return nullptr;
         }
         setupGPUConfigurationPlatformParameters(g_SharedRenderer, settings.pExtendedSettings);

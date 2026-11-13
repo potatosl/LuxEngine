@@ -107,6 +107,9 @@ jobs:
       - name: Run headless engine and editor regression tests
         shell: bash
         run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            export DYLD_FRAMEWORK_PATH="$QT_ROOT_DIR/lib${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
+          fi
           ctest --test-dir build --output-on-failure --no-tests=error \
             -L headless -LE 'long|slow' --parallel 2 --timeout 180 \
             --output-junit headless-results.xml

@@ -46,6 +46,10 @@ void Parse() {
     Check(options && options->view && Near(options->view->centerX, 1.5f) &&
               Near(options->view->centerY, -2.0f) && Near(options->view->halfHeight, 3.0f),
           "view option");
+    options = ParseScenePlayerArguments({"a.lux", "--view", "1.5e1", "-.5", "3e-1"}, error);
+    Check(options && options->view && Near(options->view->centerX, 15.0f) &&
+              Near(options->view->centerY, -.5f) && Near(options->view->halfHeight, .3f),
+          "view accepts decimal and scientific notation");
     const std::vector<Args> invalid = {
         {},
         {"--title", "x"},
@@ -54,6 +58,13 @@ void Parse() {
         {"a.lux", "--size", "800"},
         {"a.lux", "--view", "0", "0", "0"},
         {"a.lux", "--view", "0", "0", "nan"},
+        {"a.lux", "--view", "0", "0", "inf"},
+        {"a.lux", "--view", "0", "0", "1e999"},
+        {"a.lux", "--view", " 1", "0", "3"},
+        {"a.lux", "--view", "1 ", "0", "3"},
+        {"a.lux", "--view", "+1", "0", "3"},
+        {"a.lux", "--view", "1x", "0", "3"},
+        {"a.lux", "--view", "1,5", "0", "3"},
         {"a.lux", "--frames", "-1"},
         {"a.lux", "--unknown"},
     };

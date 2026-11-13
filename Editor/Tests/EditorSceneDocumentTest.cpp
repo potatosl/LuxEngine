@@ -23,7 +23,7 @@ void Check(bool condition, const char* message) {
 }
 
 struct Files {
-    fs::path root = fs::temp_directory_path() /
+    fs::path root = fs::weakly_canonical(fs::temp_directory_path()) /
                     ("lux-scene-documents-" +
                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 

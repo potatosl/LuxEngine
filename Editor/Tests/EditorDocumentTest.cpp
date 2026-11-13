@@ -789,9 +789,18 @@ void TestArchiveSecurityAndFuzzing() {
 
     // 14.4. Valid 4-byte Unicode U+10FFFF (\xF4\x8F\xBF\xBF) - allowed
     const auto maxUnicodeZip = files.path / "max_unicode.luxpack";
+    const auto maxUnicodeProbe = files.path / PathFromUtf8("max_\xF4\x8F\xBF\xBF.txt");
+    bool nativeUnicodeSupported = false;
+    {
+        std::ofstream probe(maxUnicodeProbe, std::ios::binary);
+        nativeUnicodeSupported = probe.is_open();
+    }
+    std::error_code probeError;
+    std::filesystem::remove(maxUnicodeProbe, probeError);
     z = zip_open(PathUtf8(maxUnicodeZip).c_str(), ZIP_CREATE | ZIP_TRUNCATE, &zipErr);
     zip_source_t* srcMax = zip_source_buffer(z, "good", 4, 0);
-    zip_file_add(z, "max_\xF4\x8F\xBF\xBF.txt", srcMax, ZIP_FL_ENC_UTF_8);
+    Check(zip_file_add(z, "max_\xF4\x8F\xBF\xBF.txt", srcMax, ZIP_FL_ENC_UTF_8) >= 0,
+          "Maximum valid Unicode archive entry creates");
     zip_source_t* srcSceneMax =
         zip_source_buffer(z, validSceneData.c_str(), validSceneData.size(), 0);
     zip_file_add(z, "Scene.lux", srcSceneMax, ZIP_FL_ENC_UTF_8);
@@ -799,8 +808,15 @@ void TestArchiveSecurityAndFuzzing() {
     zip_source_t* srcProjMax = zip_source_buffer(z, projMaxStr.c_str(), projMaxStr.size(), 0);
     zip_file_add(z, EditorProject::FileName, srcProjMax, ZIP_FL_ENC_UTF_8);
     zip_close(z);
-    Check(ImportProject(maxUnicodeZip, files.path / "max_unicode_imported", error).has_value(),
-          "Maximum valid Unicode U+10FFFF accepted");
+    const auto maxUnicodeImport =
+        ImportProject(maxUnicodeZip, files.path / "max_unicode_imported", error);
+    if (nativeUnicodeSupported)
+        Check(maxUnicodeImport.has_value(),
+              ("Maximum valid Unicode U+10FFFF accepted: " + error).c_str());
+    else
+        Check(!maxUnicodeImport && !error.empty() &&
+                  !std::filesystem::exists(files.path / "max_unicode_imported"),
+              "Unsupported native Unicode filenames fail without publishing partial imports");
 }
 
 void TestArchiveSizeLimits() {
