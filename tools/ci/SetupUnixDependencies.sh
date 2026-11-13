@@ -67,10 +67,11 @@ if [[ ! -f "$prefix/lib/cmake/box2d/box2dConfig.cmake" ]]; then
     cmake --install "$source_root/box2d-build"
 fi
 
-if [[ ! -f "$prefix/include/stb/stb_image.h" ]]; then
+if [[ ! -f "$prefix/include/stb/stb_image.h" ||
+      ! -f "$prefix/include/stb/stb_truetype.h" ]]; then
     stb_source="$source_root/stb"
     fetch_source https://github.com/nothings/stb.git \
         9600522de53973336fa033a289858a4354cbb04c "$stb_source"
     mkdir -p "$prefix/include/stb"
-    cp "$stb_source/stb_image.h" "$stb_source/stb_image_write.h" "$prefix/include/stb/"
+    cp "$stb_source"/*.h "$prefix/include/stb/"
 fi

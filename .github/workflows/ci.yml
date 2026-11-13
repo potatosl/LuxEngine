@@ -58,7 +58,8 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore vcpkg Binary Cache
-        uses: actions/cache@v4
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
           path: .vcpkg-cache
           key: windows-2022-msvc-vcpkg-${{ hashFiles('.github/workflows/ci.yml') }}
@@ -70,6 +71,13 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Path .vcpkg-cache -Force | Out-Null
           vcpkg install --triplet x64-windows --clean-after-build sdl3 stb libzip nlohmann-json
+
+      - name: Save Installed vcpkg Packages
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
