@@ -632,10 +632,11 @@ void ViewportAffinePicking() {
     Check(tiny && Near(static_cast<float>(*tiny), .000035f, .0000001f),
           "invertible tiny models use a scale-relative determinant tolerance");
 
-    int begin = 0, end = 0, edits = 0;
+    int begin = 0, end = 0, edits = 0, cancelled = 0;
     SceneViewport3D view(
         nullptr, document, [&](std::optional<uint32> id) { document.Select(id); },
         [&](uint32, const TransformComponent&) { ++edits; }, [&] { ++begin; }, [&] { ++end; });
+    view.SetCancelEditCallback([&] { ++cancelled; });
     view.resize(900, 650);
     view.show();
     Pump();
@@ -647,7 +648,7 @@ void ViewportAffinePicking() {
     Click(view, *screen);
     Check(document.GetSelected() && document.GetSelected().GetId() == child.GetId(),
           "default viewport camera and affine picking select the visible sheared child");
-    begin = end = edits = 0;
+    begin = end = edits = cancelled = 0;
     view.SetTool(EditorTool::Select);
     QMouseEvent press(QEvent::MouseButtonPress, *screen, view.mapToGlobal(screen->toPoint()),
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -661,9 +662,8 @@ void ViewportAffinePicking() {
                         Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
     QApplication::sendEvent(&view, &move);
     QApplication::sendEvent(&view, &release);
-    Check(
-        begin == 1 && end == 1 && edits == 0,
-        "an invalidated parent cancels a drag without throwing through Qt or leaving an open edit");
+    Check(begin == 1 && end == 0 && cancelled == 1 && edits == 0,
+          "an invalidated parent cancels exactly once without committing or throwing through Qt");
 }
 
 void ViewportWorldEditing() {
@@ -1216,9 +1216,11 @@ int main(int argc, char** argv) {
         Check(DecodeBuildOutput(replacementOutput.toUtf8()) == replacementOutput,
               "valid UTF-8 replacement characters do not trigger legacy decoding");
 #ifdef _WIN32
-        const QByteArray legacyOutput = koreanOutput.left(2).toLocal8Bit();
-        Check(DecodeBuildOutput(legacyOutput) == koreanOutput.left(2),
-              "legacy Windows tool output is converted without losing Korean text");
+        // An English ANSI code page cannot encode Hangul. Use fixed non-UTF-8 bytes
+        // ("한글" in CP949) and the actual system code page instead of a lossy round trip.
+        const QByteArray legacyOutput = QByteArray::fromHex("c7d1b1db");
+        Check(DecodeBuildOutput(legacyOutput) == QString::fromLocal8Bit(legacyOutput),
+              "legacy Windows tool output follows the active ANSI code page");
 #endif
         const auto capture = qEnvironmentVariable("LUX_EDITOR_SCENE_CAPTURE");
         if (!capture.isEmpty()) {

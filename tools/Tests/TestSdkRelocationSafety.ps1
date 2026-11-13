@@ -1,67 +1,45 @@
-# Regression Test: Ensure VerifySdkRelocation.ps1 never deletes user data
-param(
-    [string]$BuildDir = "build/local"
-)
+# Verify SDK relocation rejects existing directories without changing user data.
+param([string]$BuildDir = "build/local")
 
 $ErrorActionPreference = "Stop"
-$root = (Get-Item $PSScriptRoot).Parent.Parent.FullName
-Set-Location $root
+$repository = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+$powerShell = (Get-Process -Id $PID).Path
+$testDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "LuxUserDataSafety-$([guid]::NewGuid())"
 
-if (-not (Test-Path (Join-Path $root $BuildDir))) {
-    if (Test-Path (Join-Path $root "build")) {
-        $BuildDir = "build"
+function Invoke-ExpectedRelocationFailure {
+    $ErrorActionPreference = "Continue"
+    $output = & $powerShell -NoProfile -File (Join-Path $repository "tools/VerifySdkRelocation.ps1") -BuildDir $BuildDir -SdkPrefix $testDirectory 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -or $output -notmatch "Target SdkPrefix directory already exists and is not empty") {
+        throw "Relocation did not reject existing user data as expected, exit $LASTEXITCODE. Output: $output"
     }
 }
 
-Write-Host "=== Running Regression Test: SdkRelocation User Data Safety ==="
-
-$tempBase = [System.IO.Path]::GetTempPath()
-$testUserDataDir = Join-Path $tempBase "LuxUserTestDir_Preserve_$(Get-Random)"
-New-Item -ItemType Directory -Path $testUserDataDir -Force | Out-Null
-
-$dummyUserFile = Join-Path $testUserDataDir "important_user_work.txt"
-$dummyContent = "CRITICAL USER DATA - DO NOT DELETE $(Get-Date)"
-Set-Content -Path $dummyUserFile -Value $dummyContent -Encoding ascii
-
-$subfolder = Join-Path $testUserDataDir "subproject"
-New-Item -ItemType Directory -Path $subfolder -Force | Out-Null
-$dummySubFile = Join-Path $subfolder "code.cpp"
-Set-Content -Path $dummySubFile -Value "// User Code" -Encoding ascii
-
-$threwExpected = $false
 try {
-    Write-Host "Invoking VerifySdkRelocation with existing user directory: $testUserDataDir"
-    $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
-    & $psExe -ExecutionPolicy Bypass -File "$root/tools/VerifySdkRelocation.ps1" -BuildDir $BuildDir -SdkPrefix $testUserDataDir
-    if ($LASTEXITCODE -ne 0) {
-        $threwExpected = $true
+    New-Item -ItemType Directory -Path (Join-Path $testDirectory "subproject") -Force | Out-Null
+    $userFile = Join-Path $testDirectory "important_user_work.txt"
+    $sourceFile = Join-Path $testDirectory "subproject/code.cpp"
+    [System.IO.File]::WriteAllText($userFile, "CRITICAL USER DATA - DO NOT DELETE")
+    [System.IO.File]::WriteAllText($sourceFile, "// User code")
+    $userHash = (Get-FileHash -LiteralPath $userFile -Algorithm SHA256).Hash
+    $sourceHash = (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash
+
+    Invoke-ExpectedRelocationFailure
+    foreach ($file in @($userFile, $sourceFile)) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+            throw "SDK relocation deleted a user file: $file"
+        }
+    }
+    if ((Get-FileHash -LiteralPath $userFile -Algorithm SHA256).Hash -ne $userHash -or
+        (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash -ne $sourceHash) {
+        throw "SDK relocation changed existing user data."
+    }
+    Write-Host "SDK relocation rejected existing user data and preserved both files."
+}
+finally {
+    if (Test-Path -LiteralPath $testDirectory) {
+        Remove-Item -LiteralPath $testDirectory -Recurse -Force
     }
 }
-catch {
-    Write-Host "Caught expected exception: $_"
-    $threwExpected = $true
-}
 
-# 1. Verify that invocation was rejected
-if (-not $threwExpected) {
-    throw "Safety test failed: VerifySdkRelocation did not reject existing non-empty directory!"
-}
-
-# 2. Verify all user files and subfolders are 100% intact!
-if (-not (Test-Path $dummyUserFile)) {
-    throw "CRITICAL FAILURE: User file '$dummyUserFile' was deleted!"
-}
-$readContent = Get-Content -Path $dummyUserFile -Raw
-if ($readContent.Trim() -ne $dummyContent.Trim()) {
-    throw "CRITICAL FAILURE: User file content was modified!"
-}
-if (-not (Test-Path $dummySubFile)) {
-    throw "CRITICAL FAILURE: User subfolder file was deleted!"
-}
-
-Write-Host "User files verified intact! Preserved perfectly."
-
-# Clean up our test temp directory
-Remove-Item -Recurse -Force $testUserDataDir -ErrorAction SilentlyContinue
-
-Write-Host "=== SdkRelocation User Data Safety Test: PASSED ==="
+# A rejected child invocation is expected; the test itself completed successfully.
+exit 0

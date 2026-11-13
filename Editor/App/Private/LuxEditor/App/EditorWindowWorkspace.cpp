@@ -1,6 +1,8 @@
 #include <LuxEditor/App/EditorWindow.hpp>
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Ui/IconFactory.hpp>
+#include <LuxEditor/Viewport/SceneViewport2D.hpp>
+#include <LuxEditor/Viewport/SceneViewport3D.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
 #include <QAction>
 #include <QApplication>
@@ -142,6 +144,9 @@ void EditorWindow::SetWorkspace(bool animation) {
     workspaceTabs_->setCurrentIndex(animation ? 1 : 0);
     if ((workspaceStack_->currentIndex() == 1) == animation)
         return;
+    CancelViewportEdit();
+    canvas_->CancelInteraction();
+    canvas3D_->CancelInteraction();
     if (animation) {
         levelLayout_ = saveState(5);
         if (auto* toolbar = findChild<QToolBar*>(QStringLiteral("lux-main-toolbar")))

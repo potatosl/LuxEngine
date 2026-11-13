@@ -6,59 +6,13 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Utf8.ps1")
+. (Join-Path $PSScriptRoot "WindowsRuntime.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
 
-function Get-VulkanGpuStatus {
-    $vulkaninfo = $null
-    $searchPaths = @()
-    if ($env:VULKAN_SDK) { $searchPaths += Join-Path $env:VULKAN_SDK "bin\vulkaninfo.exe" }
-    if ($env:VK_SDK_PATH) { $searchPaths += Join-Path $env:VK_SDK_PATH "bin\vulkaninfo.exe" }
-    $searchPaths += "C:\Windows\System32\vulkaninfo.exe"
-    foreach ($p in $searchPaths) {
-        if ($p -and (Test-Path $p)) {
-            $vulkaninfo = $p
-            break
-        }
-    }
-    if (-not $vulkaninfo) {
-        $vCmd = Get-Command vulkaninfo.exe -ErrorAction SilentlyContinue
-        if ($vCmd) { $vulkaninfo = $vCmd.Source }
-    }
-
-    if ($vulkaninfo -and (Test-Path $vulkaninfo)) {
-        try {
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = $vulkaninfo
-            $psi.Arguments = "--summary"
-            $psi.UseShellExecute = $false
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $psi.CreateNoWindow = $true
-
-            $proc = [System.Diagnostics.Process]::Start($psi)
-            $stdOutTask = $proc.StandardOutput.ReadToEndAsync()
-            $stdErrTask = $proc.StandardError.ReadToEndAsync()
-            if (-not $proc.WaitForExit(10000)) {
-                $proc.Kill()
-                return @{ Status = "GPU_PROBE_UNKNOWN"; Reason = "vulkaninfo --summary timed out" }
-            }
-            $stdout = $stdOutTask.Result
-
-            if ($proc.ExitCode -eq 0 -and ($stdout -match "GPU\d+:" -or $stdout -match "deviceName")) {
-                $gpuMatch = [regex]::Match($stdout, "deviceName\s*=\s*(.+)")
-                $deviceName = if ($gpuMatch.Success) { $gpuMatch.Groups[1].Value.Trim() } else { "Generic Vulkan GPU" }
-                return @{ Status = "GPU_AVAILABLE"; DeviceName = $deviceName; VulkanInfo = $vulkaninfo }
-            } else {
-                return @{ Status = "GPU_UNAVAILABLE"; Reason = "vulkaninfo exit code $($proc.ExitCode) or no physical GPU listed" }
-            }
-        } catch {
-            return @{ Status = "GPU_PROBE_UNKNOWN"; Reason = $_.Exception.Message }
-        }
-    }
-
-    # Secondary hardware detection via WMI/CIM when vulkaninfo is absent
+function Get-D3D12GpuStatus {
+    # D3D12 is the Windows backend; Vulkan device availability is unrelated.
     try {
         $controllers = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
         if ($controllers) {
@@ -90,11 +44,11 @@ function Get-VulkanGpuStatus {
                     Reason = "Hardware GPU detected via CIM: $($gpuNames -join ', ')"
                 }
             } elseif ($hasVirtualOnly) {
-                return @{ Status = "GPU_UNAVAILABLE"; Reason = "vulkaninfo.exe not found and only virtual/cloud display adapters detected" }
+                return @{ Status = "GPU_UNAVAILABLE"; Reason = "Only virtual/cloud display adapters were detected" }
             } else {
                 return @{
                     Status = "GPU_PROBE_UNKNOWN";
-                    Reason = "vulkaninfo.exe not found and unknown display adapter: $($gpuNames -join ', ')";
+                    Reason = "Unknown display adapter: $($gpuNames -join ', ')";
                     HardwareGpu = ($gpuNames -join ", ")
                 }
             }
@@ -103,7 +57,7 @@ function Get-VulkanGpuStatus {
         # ignore CIM failure and fallback to UNKNOWN
     }
 
-    return @{ Status = "GPU_PROBE_UNKNOWN"; Reason = "vulkaninfo.exe not found and hardware query unavailable" }
+    return @{ Status = "GPU_PROBE_UNKNOWN"; Reason = "Hardware adapter query unavailable" }
 }
 
 Write-Host "=== Testing LuxPlayer Standalone Portable Package ==="
@@ -128,11 +82,11 @@ try {
         throw "LuxPlayer.exe not found in $testStaging"
     }
 
+    Assert-LuxWindowsRuntime -Directory $testStaging
+
     # Verify essential dependencies inside package
     $essentialFiles = @(
         "SDL3.dll",
-        "shaders/Basic.vert.spv",
-        "shaders/Basic.frag.spv",
         "scenes/ScenePlayer.lux",
         "licenses/LICENSE-LuxEngine.txt",
         "licenses/DEPENDENCIES.md"
@@ -144,14 +98,8 @@ try {
         }
     }
 
-    # Sanitize PATH: retain standard Windows System32 and Vulkan SDK bin if present
+    # Retain system paths only so host development dependencies cannot mask missing files.
     $cleanPath = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
-    if ($env:VULKAN_SDK -and (Test-Path (Join-Path $env:VULKAN_SDK "bin"))) {
-        $cleanPath = "$cleanPath;$env:VULKAN_SDK\bin"
-    } elseif ($env:VK_SDK_PATH -and (Test-Path (Join-Path $env:VK_SDK_PATH "bin"))) {
-        $cleanPath = "$cleanPath;$env:VK_SDK_PATH\bin"
-    }
-
     # 1. Test 'LuxPlayer.exe --version'
     Write-Host "1. Testing 'LuxPlayer.exe --version' in clean environment..."
     $psi1 = New-Object System.Diagnostics.ProcessStartInfo
@@ -204,7 +152,7 @@ try {
 
     # 3. Test 'LuxPlayer.exe scenes/ScenePlayer.lux --frames 5'
     Write-Host "3. Testing 'LuxPlayer.exe scenes/ScenePlayer.lux --frames 5'..."
-    $gpuCheck = Get-VulkanGpuStatus
+    $gpuCheck = Get-D3D12GpuStatus
     Write-Host "GPU probe result: Status=$($gpuCheck.Status), Device=$($gpuCheck.DeviceName)$($gpuCheck.HardwareGpu), Reason=$($gpuCheck.Reason)"
 
     if ($RequireGpu -and $gpuCheck.Status -ne "GPU_AVAILABLE") {
@@ -236,6 +184,8 @@ try {
     if ($proc3.ExitCode -eq 0) {
         $gpuRenderPassed = $true
         Write-Host "[GPU_RENDER_PASS] LuxPlayer successfully rendered frames."
+    } elseif ($proc3.ExitCode -ne 1 -and $proc3.ExitCode -ne 3) {
+        throw "[GPU_RENDER_FAIL] LuxPlayer crashed or failed abnormally with exit code $($proc3.ExitCode): $err3"
     } elseif ($gpuCheck.Status -eq "GPU_AVAILABLE") {
         # Physical GPU is present, so failure is a real bug/crash, NOT a headless restriction!
         throw "[GPU_RENDER_FAIL] Physical GPU ($($gpuCheck.DeviceName)) is present, but LuxPlayer failed with exit code $($proc3.ExitCode): $err3"
@@ -251,7 +201,7 @@ try {
             throw "[GPU_RENDER_FAIL] Inconclusive GPU probe ($($gpuCheck.Reason)), and LuxPlayer crashed/failed abnormally with exit code $($proc3.ExitCode): $err3"
         }
     } else {
-        # Headless VM environment without physical Vulkan GPU
+        # Headless VM environment without a physical D3D12 adapter
         if ($RequireGpu) {
             throw "[GPU_RENDER_FAIL] -RequireGpu specified, but environment is headless ($($gpuCheck.Reason))."
         }

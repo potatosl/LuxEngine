@@ -3,6 +3,7 @@
 namespace LuxEditor {
 size_t SceneHistoryBytes(const EditorSnapshot& snapshot) {
     return static_cast<size_t>(snapshot.scene.size()) +
+           snapshot.selection.size() * sizeof(LuxEngine::uint32) +
            snapshot.animationTimes.size() * sizeof(decltype(snapshot.animationTimes)::value_type);
 }
 

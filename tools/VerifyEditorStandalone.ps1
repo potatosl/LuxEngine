@@ -5,6 +5,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot "Utf8.ps1")
+. (Join-Path $PSScriptRoot "WindowsRuntime.ps1")
 $ErrorActionPreference = "Stop"
 $root = (Get-Item $PSScriptRoot).Parent.FullName
 Set-Location $root
@@ -32,6 +33,8 @@ try {
         throw "LuxEditor.exe not found in $testStaging"
     }
 
+    Assert-LuxWindowsRuntime -Directory $testStaging
+
     # Verify essential dependencies inside package
     $essentialFiles = @(
         "SDL3.dll",
@@ -39,8 +42,6 @@ try {
         "Qt6Gui.dll",
         "Qt6Widgets.dll",
         "platforms/qwindows.dll",
-        "shaders/Basic.vert.spv",
-        "shaders/Basic.frag.spv",
         "licenses/LICENSE-LuxEngine.txt",
         "licenses/LICENSE-Qt6.txt",
         "licenses/LICENSE-LGPLv3.txt",

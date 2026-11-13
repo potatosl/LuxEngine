@@ -231,6 +231,8 @@ void EditorWindow::BuildAnimationPanel() {
         [](LuxEngine::uint32, LuxEngine::uint32, LuxEngine::uint32, uint8_t) {}, begin, end,
         renderer);
     animationPreview2D_->setObjectName(QStringLiteral("animationPreview2D"));
+    animationPreview2D_->SetCancelEditCallback([this] { CancelViewportEdit(); });
+    animationPreview3D_->SetCancelEditCallback([this] { CancelViewportEdit(); });
     preview->addTab(animationPreview3D_, QStringLiteral("3D 미리보기"));
     preview->addTab(animationPreview2D_, QStringLiteral("2D 미리보기"));
 
@@ -516,7 +518,7 @@ void EditorWindow::SetAnimationTool(EditorTool tool) {
         return;
     StopAnimationPlayback();
     EndTimelineEdit();
-    EndViewportEdit();
+    CancelViewportEdit();
     if (animationPreview2D_) {
         animationPreview2D_->CancelInteraction();
         animationPreview2D_->SetTool(tool);

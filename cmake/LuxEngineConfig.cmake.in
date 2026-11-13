@@ -82,6 +82,16 @@ function(lux_copy_runtime target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LuxEngine_RUNTIME_DIR}/${_lux_renderer_name}" "$<TARGET_FILE_DIR:${target}>"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${LuxEngine_RENDERER_DATA_DIR}" "$<TARGET_FILE_DIR:${target}>")
+    if(WIN32)
+        foreach(_lux_renderer_dependency amd_ags_x64.dll dxcompiler.dll WinPixEventRuntime.dll dxil.dll)
+            if(EXISTS "${LuxEngine_RUNTIME_DIR}/${_lux_renderer_dependency}")
+                add_custom_command(TARGET ${target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${LuxEngine_RUNTIME_DIR}/${_lux_renderer_dependency}" "$<TARGET_FILE_DIR:${target}>"
+                    VERBATIM)
+            endif()
+        endforeach()
+    endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproject" OR
        EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproj")
         file(GLOB_RECURSE _lux_mesh_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"

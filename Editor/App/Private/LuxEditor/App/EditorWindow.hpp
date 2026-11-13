@@ -3,6 +3,7 @@
 #include <LuxEditor/Project/EditorProject.hpp>
 #include <LuxEditor/Scene/EditorDocument.hpp>
 #include <LuxEditor/Scene/EditorSnapshot.hpp>
+#include <LuxEditor/Scene/SelectionTransform.hpp>
 #include <LuxEditor/Viewport/EditorTool.hpp>
 #include <LuxEngine/Scene/SceneManager.hpp>
 #include <QMainWindow>
@@ -193,6 +194,9 @@ private:
     void PackageBuild();
     void ApplyViewportTransform(LuxEngine::uint32 id, const LuxEngine::TransformComponent& value);
     void BeginViewportEdit();
+    void CancelViewportEdit();
+    void SyncHierarchySelection();
+    void RefreshSelection(bool hierarchy = true);
     void EndViewportEdit();
     void SetTool(EditorTool tool);
     void Log(const QString& message, bool error = false);
@@ -342,6 +346,11 @@ private:
     bool restoringHistory_ = false;
     EditorTool tool_ = EditorTool::Select;
     EditorSnapshot viewportEditBefore_;
+    EditorDocument::TabId viewportEditTab_ = 0;
+    bool viewportEditWasDirty_ = false;
+    std::weak_ptr<int> viewportEditLifetime_;
+    SelectionTransformSession selectionTransform_;
+    bool transformRejected_ = false;
     EditorSnapshot timelineBefore_;
     EditorSnapshot previewBefore_;
     std::optional<LuxEngine::uint32> viewportEditSelected_;
