@@ -3,10 +3,13 @@
 #include <LuxEngine/Core/Math.hpp>
 #include <QImage>
 #include <QPointF>
+#include <QRectF>
 #include <QWidget>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 class QPainter;
 
@@ -37,6 +40,7 @@ public:
 
     void FocusSelection();
     void CancelInteraction();
+    void SetCancelEditCallback(std::function<void()> callback);
 
     void SetTool(EditorTool tool);
 
@@ -48,6 +52,10 @@ private:
     void DrawGizmo(QPainter& painter) const;
     void BeginDrag(LuxEngine::uint32 id, QPointF point);
     void FrameBounds(bool selectedOnly);
+    void NotifySelection();
+    void SelectRectangle(QRectF rectangle, Qt::KeyboardModifiers modifiers);
+    LuxEngine::Mat4 GizmoBasis() const;
+    LuxEngine::Vec3 GizmoPosition() const;
     void mousePressEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
@@ -58,11 +66,14 @@ private:
     std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform_;
     std::function<void()> onBeginEdit_;
     std::function<void()> onEndEdit_;
+    std::function<void()> onCancelEdit_;
     LuxEngine::Vec3 focus_{0, 0, 0};
     double yaw_ = .65, pitch_ = -.48, distance_ = 22;
     QPointF lastMouse_{};
     QPointF dragStart_{};
     LuxEngine::Vec3 initialPosition_{};
+    LuxEngine::Vec3 initialPivot_{};
+    LuxEngine::Mat4 initialBasis_{};
     LuxEngine::Vec3 initialRotation_{};
     LuxEngine::Vec3 initialScale_{1, 1, 1};
     LuxEngine::uint32 dragId_ = 0;
@@ -73,6 +84,15 @@ private:
     bool snapToGrid_ = false;
     bool gridVisible_ = true;
     bool orbiting_ = false, panning_ = false, dragging_ = false;
+    bool marquee_ = false;
+    QPointF marqueeStart_{};
+    QPointF marqueeEnd_{};
+    Qt::KeyboardModifiers marqueeModifiers_ = Qt::NoModifier;
+    std::vector<LuxEngine::uint32> dragSelection_;
+    std::weak_ptr<int> dragLifetime_;
+    std::uint64_t dragTab_ = 0;
+    int dragSpace_ = 0;
+    int dragPivotMode_ = 0;
     std::shared_ptr<EngineSceneRenderer> engineRenderer_;
     bool engineFrame_ = false;
     QImage cachedFrame_;

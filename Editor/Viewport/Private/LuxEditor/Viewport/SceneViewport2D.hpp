@@ -3,11 +3,14 @@
 #include <LuxEngine/Core/Core.hpp>
 #include <QImage>
 #include <QPointF>
+#include <QRectF>
 #include <QWidget>
 #include <array>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace LuxEngine {
 struct TransformComponent;
@@ -35,6 +38,7 @@ public:
     void FrameAll();
     void SetGridVisible(bool visible);
     void CancelInteraction();
+    void SetCancelEditCallback(std::function<void()> callback);
     // Visible area in world units: centre and half height.
     void GetView(double& centerX, double& centerY, double& halfHeight) const;
 
@@ -47,6 +51,12 @@ public:
     void SetDebugColliders(bool enabled);
 
 private:
+    bool event(QEvent*) override;
+    void BeginEdit();
+    bool GestureSceneValid() const;
+    int HitGizmo(QPointF point) const;
+    void DrawGizmo(class QPainter& painter) const;
+    void FinishSelection();
     void FrameBounds(bool selectedOnly);
     void keyPressEvent(QKeyEvent*) override;
     QPointF WorldToScreen(double x, double y) const;
@@ -64,6 +74,22 @@ private:
         onPaintTile_;
     std::function<void()> onBeginEdit_;
     std::function<void()> onEndEdit_;
+    std::function<void()> onCancelEdit_;
+    std::weak_ptr<int> gestureLifetime_;
+    std::uint64_t gestureTab_ = 0;
+    int gestureSpace_ = 0;
+    int gesturePivotMode_ = 0;
+    std::string fallbackBefore_;
+    std::vector<LuxEngine::uint32> selectionBefore_;
+    std::optional<LuxEngine::uint32> primaryBefore_;
+    bool dirtyBefore_ = false;
+    bool selecting_ = false;
+    bool selectionBox_ = false;
+    Qt::KeyboardModifiers selectionModifiers_ = Qt::NoModifier;
+    QPointF selectionStart_{};
+    QPointF selectionEnd_{};
+    QPointF dragPivot_{};
+    int dragAxis_ = -1;
     double pixelsPerUnit_ = 72.0;
     QPointF pan_{};
     QPointF lastMouse_{};

@@ -143,6 +143,8 @@ endif()
 if(LUX_BUILD_TESTS)
     foreach(pair
         "LuxSelectionCoreTests|SelectionCoreTest.cpp|Editor_selection_core"
+        "LuxInteraction2DTests|Interaction2DTest.cpp|Editor_interaction_2d"
+        "LuxInteraction3DTests|Interaction3DTest.cpp|Editor_interaction_3d"
     )
         string(REPLACE "|" ";" fields "${pair}")
         list(GET fields 0 target)

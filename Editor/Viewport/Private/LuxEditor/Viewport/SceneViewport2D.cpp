@@ -1,4 +1,5 @@
 #include <LuxEditor/Scene/EditorDocument.hpp>
+#include <LuxEditor/Scene/SelectionTransform.hpp>
 #include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
 #include <LuxEditor/Viewport/ViewportCamera3D.hpp>
@@ -7,6 +8,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QTransform>
 #include <QWheelEvent>
 #include <algorithm>
@@ -98,17 +100,77 @@ SceneViewport2D::SceneViewport2D(
 
 SceneViewport2D::~SceneViewport2D() = default;
 
+void SceneViewport2D::SetCancelEditCallback(std::function<void()> callback) {
+    onCancelEdit_ = std::move(callback);
+}
+
+void SceneViewport2D::BeginEdit() {
+    gestureTab_ = document_.GetActiveTabId();
+    gestureLifetime_ = document_.GetScene().Lifetime();
+    gestureSpace_ = static_cast<int>(document_.GetTransformSpace());
+    gesturePivotMode_ = static_cast<int>(document_.GetSelectionPivotMode());
+    dirtyBefore_ = document_.IsDirty();
+    selectionBefore_ = document_.GetSelection();
+    primaryBefore_ = document_.GetSelectedId(gestureTab_);
+    fallbackBefore_.clear();
+    if (!onCancelEdit_)
+        document_.GetScene().SerializeToString(fallbackBefore_);
+    onBeginEdit_();
+}
+
+bool SceneViewport2D::GestureSceneValid() const {
+    if (gestureLifetime_.expired() || gestureTab_ != document_.GetActiveTabId())
+        return false;
+    const auto lifetime = document_.GetScene().Lifetime();
+    return !gestureLifetime_.owner_before(lifetime) && !lifetime.owner_before(gestureLifetime_) &&
+           selectionBefore_ == document_.GetSelection() &&
+           primaryBefore_ == document_.GetSelectedId(gestureTab_) &&
+           gestureSpace_ == static_cast<int>(document_.GetTransformSpace()) &&
+           gesturePivotMode_ == static_cast<int>(document_.GetSelectionPivotMode());
+}
+
 void SceneViewport2D::CancelInteraction() {
-    panning_ = dragging_ = tilePainting_ = false;
+    const bool editing = dragging_ || tilePainting_;
+    const auto origin = gestureTab_;
+    const auto* scene = document_.GetScene(origin);
+    const auto lifetime = scene ? scene->Lifetime() : std::weak_ptr<int>{};
+    const bool valid = scene && !gestureLifetime_.expired() &&
+                       !gestureLifetime_.owner_before(lifetime) &&
+                       !lifetime.owner_before(gestureLifetime_);
+    panning_ = dragging_ = tilePainting_ = selecting_ = selectionBox_ = false;
+    if (QWidget::mouseGrabber() == this)
+        releaseMouse();
     dragId_ = 0;
+    dragAxis_ = -1;
+    gestureTab_ = 0;
+    gestureLifetime_.reset();
+    if (editing) {
+        if (onCancelEdit_) {
+            onCancelEdit_();
+        } else if (valid && !fallbackBefore_.empty()) {
+            if (document_.ReplaceSceneFromData(origin, fallbackBefore_, primaryBefore_)) {
+                document_.SetSelection(origin, selectionBefore_, primaryBefore_);
+                document_.SetDirty(origin, dirtyBefore_);
+            }
+        }
+    }
+    fallbackBefore_.clear();
+    update();
 }
 
 void SceneViewport2D::focusOutEvent(QFocusEvent* event) {
-    const bool editing = dragging_ || tilePainting_;
     CancelInteraction();
-    if (editing)
-        onEndEdit_();
     QWidget::focusOutEvent(event);
+}
+
+bool SceneViewport2D::event(QEvent* event) {
+    if (event->type() == QEvent::ShortcutOverride &&
+        static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape &&
+        (dragging_ || tilePainting_ || selecting_)) {
+        event->accept();
+        return true;
+    }
+    return QWidget::event(event);
 }
 
 QPointF SceneViewport2D::WorldToScreen(double x, double y) const {
@@ -133,7 +195,7 @@ void SceneViewport2D::FrameBounds(bool selectedOnly) {
     bool found = false;
     for (auto entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
-            (selectedOnly && entity != document_.GetSelected()))
+            (selectedOnly && !document_.IsSelected(entity.GetId())))
             continue;
         QRectF local(-.5, -.5, 1, 1);
         if (auto* map = entity.TryGetComponent<LuxEngine::TilemapComponent>())
@@ -169,6 +231,11 @@ void SceneViewport2D::SetGridVisible(bool visible) {
 }
 
 void SceneViewport2D::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Escape && (dragging_ || tilePainting_ || selecting_)) {
+        CancelInteraction();
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_F && event->modifiers() == Qt::NoModifier) {
         FocusSelection();
         return;
@@ -280,7 +347,7 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
                                      : QBrush(Exposed(TileColor(tile), settings.exposure)));
                 painter.drawPolygon(shape);
             }
-        if (selected && selected.GetId() == entity.GetId()) {
+        if (document_.IsSelected(entity.GetId())) {
             painter.setPen(QPen(Selection, 2, Qt::DashLine));
             painter.setBrush(Qt::NoBrush);
             painter.drawPolygon(
@@ -297,7 +364,7 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
                         [](float value) { return !std::isfinite(value); }))
             continue;
         const QPolygonF shape = polygon(entity, {-.5, -.5, 1, 1});
-        const bool active = selected && selected.GetId() == entity.GetId();
+        const bool active = document_.IsSelected(entity.GetId());
         painter.setPen(QPen(active ? Selection : QColor(178, 189, 204), active ? 3 : 1));
         if (engineFrame_)
             painter.setBrush(Qt::NoBrush);
@@ -325,9 +392,85 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
                                                  collider.size.x, collider.size.y}));
         }
     }
+    DrawGizmo(painter);
+    if (selecting_ && selectionBox_) {
+        painter.setPen(QPen(QColor(91, 161, 229), 1, Qt::DashLine));
+        painter.setBrush(QColor(70, 135, 210, 38));
+        painter.drawRect(QRectF(selectionStart_, selectionEnd_).normalized());
+    }
+}
+
+int SceneViewport2D::HitGizmo(QPointF point) const {
+    const auto selected = document_.GetSelected();
+    if (tool_ == EditorTool::Select || !selected ||
+        !selected.HasComponent<LuxEngine::TransformComponent>())
+        return -1;
+    const auto pivot = GetSelectionPivot(document_);
+    const auto origin = WorldToScreen(pivot.x, pivot.y);
+    const double radius = QLineF(origin, point).length();
+    if (tool_ == EditorTool::Rotate)
+        return std::abs(radius - 54) <= 8 ? 2 : -1;
+    if (radius <= 9)
+        return 2;
+    const auto transform = document_.GetScene().GetWorldTransform(selected.GetId());
+    const double angle =
+        document_.GetTransformSpace() == TransformSpace::Local ? transform.rotation.z : 0;
+    const std::array<QPointF, 2> directions{QPointF(std::cos(angle), -std::sin(angle)),
+                                            QPointF(-std::sin(angle), -std::cos(angle))};
+    for (int axis = 0; axis < 2; ++axis) {
+        const auto offset = point - origin;
+        const double along = QPointF::dotProduct(offset, directions[axis]);
+        const double perpendicular =
+            std::abs(offset.x() * directions[axis].y() - offset.y() * directions[axis].x());
+        if (along >= 14 && along <= 86 && perpendicular <= 8)
+            return axis;
+    }
+    return -1;
+}
+
+void SceneViewport2D::DrawGizmo(QPainter& painter) const {
+    const auto selected = document_.GetSelected();
+    if (tool_ == EditorTool::Select || tool_ == EditorTool::TileBrush ||
+        tool_ == EditorTool::TileErase || !selected ||
+        !selected.HasComponent<LuxEngine::TransformComponent>())
+        return;
+    const auto pivot = GetSelectionPivot(document_);
+    const auto origin = WorldToScreen(pivot.x, pivot.y);
+    painter.setBrush(Qt::NoBrush);
+    if (tool_ == EditorTool::Rotate) {
+        painter.setPen(QPen(QColor(98, 148, 215), 2));
+        painter.drawEllipse(origin, 54, 54);
+    } else {
+        const auto transform = document_.GetScene().GetWorldTransform(selected.GetId());
+        const double angle =
+            document_.GetTransformSpace() == TransformSpace::Local ? transform.rotation.z : 0;
+        const std::array<QPointF, 2> directions{QPointF(std::cos(angle), -std::sin(angle)),
+                                                QPointF(-std::sin(angle), -std::cos(angle))};
+        const std::array<QColor, 2> colors{QColor(220, 91, 100), QColor(100, 194, 124)};
+        for (int axis = 0; axis < 2; ++axis) {
+            const auto tip = origin + directions[axis] * 78;
+            painter.setPen(QPen(colors[axis], 2));
+            painter.setBrush(colors[axis]);
+            painter.drawLine(origin, tip);
+            if (tool_ == EditorTool::Scale)
+                painter.drawRect(QRectF(tip - QPointF(4, 4), QSizeF(8, 8)));
+            else {
+                const QPointF side(-directions[axis].y(), directions[axis].x());
+                painter.drawPolygon(QPolygonF{tip, tip - directions[axis] * 11 + side * 4,
+                                              tip - directions[axis] * 11 - side * 4});
+            }
+            painter.drawText(tip + QPointF(7, -5),
+                             axis == 0 ? QStringLiteral("X") : QStringLiteral("Y"));
+        }
+    }
+    painter.setPen(QPen(QColor(225, 225, 225), 1));
+    painter.setBrush(QColor(94, 102, 112));
+    painter.drawRect(QRectF(origin - QPointF(4, 4), QSizeF(8, 8)));
 }
 
 void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
+    if (dragging_ || tilePainting_ || selecting_)
+        CancelInteraction();
     lastMouse_ = event->position();
     if (event->button() == Qt::MiddleButton) {
         panning_ = true;
@@ -337,16 +480,42 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
         return;
     setFocus();
     if (tool_ == EditorTool::TileBrush || tool_ == EditorTool::TileErase) {
+        const auto world = ScreenToWorld(event->position());
+        auto map = document_.GetSelected();
+        if (!map || !InsideMap(map, world)) {
+            map = {};
+            const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
+            for (auto iterator = entities.rbegin(); iterator != entities.rend(); ++iterator)
+                if (InsideMap(*iterator, world)) {
+                    map = *iterator;
+                    break;
+                }
+        }
+        if (!map)
+            return;
+        if (document_.GetSelected() != map) {
+            document_.SetSelection({map.GetId()}, map.GetId());
+            onSelect_(map.GetId());
+        }
+        dragId_ = map.GetId();
         tilePainting_ = true;
-        onBeginEdit_();
+        BeginEdit();
         PaintAt(event->position());
         return;
     }
     const QPointF world = ScreenToWorld(event->position());
     std::optional<LuxEngine::uint32> hit;
+    dragAxis_ = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)
+                    ? -1
+                    : HitGizmo(event->position());
+    if (dragAxis_ >= 0 && document_.GetSelected())
+        hit = document_.GetSelected().GetId();
+    const bool gizmoHit = hit.has_value();
     const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
     // Reverse the actual painter passes: sprites are in front of the tilemap pass.
     for (const bool sprites : {true, false}) {
+        if (gizmoHit)
+            break;
         for (auto it = entities.rbegin(); it != entities.rend(); ++it) {
             LuxEngine::Entity entity = *it;
             if (!entity.HasComponent<LuxEngine::TransformComponent>())
@@ -382,40 +551,143 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
                 hit = selectedGroup.GetId();
         }
     }
-    onSelect_(hit);
-    if (hit) {
-        LuxEngine::Entity selected = document_.GetSelected();
-        LuxEngine::TransformComponent transform;
-        try {
-            transform = selected.GetScene()->GetWorldTransform(selected.GetId());
-        } catch (const std::logic_error&) {
-            return;
-        }
-        dragStartWorld_ = world;
-        dragInitial_ = {transform.position.x, transform.position.y, transform.position.z,
-                        transform.rotation.x, transform.rotation.y, transform.rotation.z,
-                        transform.scale.x,    transform.scale.y,    transform.scale.z};
-        dragId_ = *hit;
-        dragging_ = true;
-        onBeginEdit_();
+    const auto modifiers = event->modifiers();
+    if (hit && (modifiers & (Qt::ControlModifier | Qt::ShiftModifier))) {
+        document_.ModifySelection(hit, modifiers & Qt::ControlModifier ? SelectionMode::Toggle
+                                                                       : SelectionMode::Add);
+        onSelect_(document_.GetSelectedId(document_.GetActiveTabId()));
+        update();
+        return;
     }
+    if (!hit) {
+        selecting_ = true;
+        selectionBox_ = false;
+        selectionStart_ = selectionEnd_ = event->position();
+        selectionModifiers_ = modifiers;
+        selectionBefore_ = document_.GetSelection();
+        primaryBefore_ = document_.GetSelectedId(document_.GetActiveTabId());
+        gestureTab_ = document_.GetActiveTabId();
+        gestureLifetime_ = document_.GetScene().Lifetime();
+        gestureSpace_ = static_cast<int>(document_.GetTransformSpace());
+        gesturePivotMode_ = static_cast<int>(document_.GetSelectionPivotMode());
+        return;
+    }
+    if (!document_.IsSelected(*hit))
+        document_.SetSelection({*hit}, hit);
+    else
+        document_.SetSelection(document_.GetSelection(), hit);
+    onSelect_(document_.GetSelectedId(document_.GetActiveTabId()));
+    LuxEngine::Entity selected = document_.GetSelected();
+    if (!selected || !selected.HasComponent<LuxEngine::TransformComponent>())
+        return;
+    LuxEngine::TransformComponent transform;
+    try {
+        transform = selected.GetScene()->GetWorldTransform(selected.GetId());
+        const auto pivot = GetSelectionPivot(document_);
+        dragPivot_ = {pivot.x, pivot.y};
+    } catch (const std::logic_error&) {
+        return;
+    }
+    dragStartWorld_ = world;
+    dragInitial_ = {transform.position.x, transform.position.y, transform.position.z,
+                    transform.rotation.x, transform.rotation.y, transform.rotation.z,
+                    transform.scale.x,    transform.scale.y,    transform.scale.z};
+    dragId_ = selected.GetId();
+    dragging_ = true;
+    BeginEdit();
+}
+
+void SceneViewport2D::FinishSelection() {
+    if (!GestureSceneValid()) {
+        CancelInteraction();
+        return;
+    }
+    auto selection = selectionModifiers_ & (Qt::ControlModifier | Qt::ShiftModifier)
+                         ? selectionBefore_
+                         : std::vector<LuxEngine::uint32>{};
+    auto primary = selectionModifiers_ & (Qt::ControlModifier | Qt::ShiftModifier)
+                       ? primaryBefore_
+                       : std::optional<LuxEngine::uint32>{};
+    const QRectF rectangle = QRectF(selectionStart_, selectionEnd_).normalized();
+    if (selectionBox_) {
+        QPainterPath area;
+        area.addRect(rectangle);
+        for (auto entity : document_.GetScene().GetEntitiesIn2DLayerOrder()) {
+            if (!entity.HasComponent<LuxEngine::TransformComponent>())
+                continue;
+            QRectF local(-.5, -.5, 1, 1);
+            if (const auto* map = entity.TryGetComponent<LuxEngine::TilemapComponent>())
+                local = {0, 0, map->width * map->tileSize, map->height * map->tileSize};
+            else if (!entity.HasComponent<LuxEngine::SpriteRendererComponent>())
+                continue;
+            QPolygonF polygon;
+            for (const auto& corner :
+                 {local.topLeft(), local.topRight(), local.bottomRight(), local.bottomLeft()}) {
+                const auto world = World(entity).map(corner);
+                polygon << WorldToScreen(world.x(), world.y());
+            }
+            QPainterPath shape;
+            shape.addPolygon(polygon);
+            if (!area.intersects(shape) && !area.contains(shape))
+                continue;
+            const auto found = std::find(selection.begin(), selection.end(), entity.GetId());
+            if ((selectionModifiers_ & Qt::ControlModifier) && found != selection.end())
+                selection.erase(found);
+            else if (found == selection.end()) {
+                selection.push_back(entity.GetId());
+                primary = entity.GetId();
+            }
+        }
+    }
+    selecting_ = selectionBox_ = false;
+    gestureTab_ = 0;
+    gestureLifetime_.reset();
+    document_.SetSelection(std::move(selection), primary);
+    onSelect_(document_.GetSelectedId(document_.GetActiveTabId()));
+    update();
 }
 
 void SceneViewport2D::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton)
         panning_ = false;
-    if (event->button() == Qt::LeftButton && tilePainting_) {
-        tilePainting_ = false;
-        onEndEdit_();
+    if (event->button() != Qt::LeftButton)
+        return;
+    if (selecting_) {
+        selectionEnd_ = event->position();
+        FinishSelection();
+        return;
     }
-    if (event->button() == Qt::LeftButton && dragging_) {
-        dragging_ = false;
+    if (tilePainting_ || dragging_) {
+        if (!GestureSceneValid()) {
+            CancelInteraction();
+            return;
+        }
+        tilePainting_ = dragging_ = false;
+        dragAxis_ = -1;
+        dragId_ = 0;
+        gestureTab_ = 0;
+        gestureLifetime_.reset();
+        fallbackBefore_.clear();
         onEndEdit_();
     }
 }
 
 void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
-    if (panning_ && (event->buttons() & Qt::MiddleButton)) {
+    if ((dragging_ || tilePainting_ || selecting_) && !(event->buttons() & Qt::LeftButton)) {
+        CancelInteraction();
+        return;
+    }
+    if (panning_ && !(event->buttons() & Qt::MiddleButton))
+        panning_ = false;
+    if ((dragging_ || tilePainting_ || selecting_) && !GestureSceneValid()) {
+        CancelInteraction();
+        return;
+    }
+    if (selecting_ && (event->buttons() & Qt::LeftButton)) {
+        selectionEnd_ = event->position();
+        selectionBox_ = selectionBox_ || QLineF(selectionStart_, selectionEnd_).length() >= 4;
+        update();
+    } else if (panning_ && (event->buttons() & Qt::MiddleButton)) {
         pan_ += event->position() - lastMouse_;
         update();
     } else if (tilePainting_ && (event->buttons() & Qt::LeftButton)) {
@@ -424,40 +696,68 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
         const QPointF world = ScreenToWorld(event->position());
         LuxEngine::Entity entity = document_.GetSelected();
         if (!entity || entity.GetId() != dragId_ ||
-            !entity.HasComponent<LuxEngine::TransformComponent>())
+            !entity.HasComponent<LuxEngine::TransformComponent>()) {
+            CancelInteraction();
             return;
+        }
         LuxEngine::TransformComponent value;
         try {
             value = entity.GetScene()->GetWorldTransform(entity.GetId());
         } catch (const std::logic_error&) {
             CancelInteraction();
-            onEndEdit_();
             return;
         }
+        // Each preview is an absolute target derived from the gesture origin. A shared pivot
+        // can move the active entity during rotation/scale, so reading its preview position here
+        // would accidentally feed that orbit back as an additional translation on the next event.
+        value.position = {dragInitial_[0], dragInitial_[1], dragInitial_[2]};
+        value.rotation = {dragInitial_[3], dragInitial_[4], dragInitial_[5]};
+        value.scale = {dragInitial_[6], dragInitial_[7], dragInitial_[8]};
         if (tool_ == EditorTool::Move || tool_ == EditorTool::Select) {
-            double x = dragInitial_[0] + world.x() - dragStartWorld_.x();
-            double y = dragInitial_[1] + world.y() - dragStartWorld_.y();
-            if (snapToGrid_) {
+            QPointF movement = world - dragStartWorld_;
+            if (dragAxis_ == 0 || dragAxis_ == 1) {
+                const double angle =
+                    document_.GetTransformSpace() == TransformSpace::Local ? dragInitial_[5] : 0;
+                const QPointF direction = dragAxis_ == 0
+                                              ? QPointF(std::cos(angle), std::sin(angle))
+                                              : QPointF(-std::sin(angle), std::cos(angle));
+                movement = direction * QPointF::dotProduct(movement, direction);
+            }
+            double x = dragInitial_[0] + movement.x();
+            double y = dragInitial_[1] + movement.y();
+            if (snapToGrid_ && !(event->modifiers() & Qt::AltModifier)) {
                 x = std::round(x);
                 y = std::round(y);
             }
             value.position.x = static_cast<float>(x);
             value.position.y = static_cast<float>(y);
         } else if (tool_ == EditorTool::Rotate) {
-            const QPointF center(dragInitial_[0], dragInitial_[1]);
-            const double start =
-                std::atan2(dragStartWorld_.y() - center.y(), dragStartWorld_.x() - center.x());
-            const double current = std::atan2(world.y() - center.y(), world.x() - center.x());
-            value.rotation.z = dragInitial_[5] + static_cast<float>(current - start);
+            const double start = std::atan2(dragStartWorld_.y() - dragPivot_.y(),
+                                            dragStartWorld_.x() - dragPivot_.x());
+            const double current =
+                std::atan2(world.y() - dragPivot_.y(), world.x() - dragPivot_.x());
+            float angle = static_cast<float>(current - start);
+            if (event->modifiers() & Qt::ControlModifier)
+                angle = std::round(angle / LuxEngine::ToRadians(15)) * LuxEngine::ToRadians(15);
+            value.rotation.z = dragInitial_[5] + angle;
         } else if (tool_ == EditorTool::Scale) {
-            const QPointF center(dragInitial_[0], dragInitial_[1]);
-            const double initial =
-                std::hypot(dragStartWorld_.x() - center.x(), dragStartWorld_.y() - center.y());
-            const double current = std::hypot(world.x() - center.x(), world.y() - center.y());
-            const float factor =
-                static_cast<float>(std::clamp(current / std::max(.01, initial), .05, 100.0));
-            value.scale.x = dragInitial_[6] * factor;
-            value.scale.y = dragInitial_[7] * factor;
+            double factor;
+            if (dragAxis_ == 0 || dragAxis_ == 1) {
+                const double angle =
+                    document_.GetTransformSpace() == TransformSpace::Local ? dragInitial_[5] : 0;
+                const QPointF direction = dragAxis_ == 0
+                                              ? QPointF(std::cos(angle), std::sin(angle))
+                                              : QPointF(-std::sin(angle), std::cos(angle));
+                factor = std::exp(QPointF::dotProduct(world - dragStartWorld_, direction) *
+                                  pixelsPerUnit_ * .01);
+            } else {
+                const double initial = QLineF(dragStartWorld_, dragPivot_).length();
+                const double current = QLineF(world, dragPivot_).length();
+                factor = current / std::max(.01, initial);
+            }
+            const float scale = static_cast<float>(std::clamp(factor, .05, 100.0));
+            value.scale.x = dragInitial_[6] * (dragAxis_ != 1 ? scale : 1);
+            value.scale.y = dragInitial_[7] * (dragAxis_ != 0 ? scale : 1);
         }
         if (std::isfinite(value.position.x) && std::isfinite(value.position.y) &&
             std::isfinite(value.rotation.z) && std::isfinite(value.scale.x) &&
@@ -469,19 +769,13 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
 
 void SceneViewport2D::PaintAt(QPointF point) {
     const auto world = ScreenToWorld(point);
-    auto entity = document_.GetSelected();
-    QPointF cell;
-    if (!entity || !InsideMap(entity, world, &cell)) {
-        const auto entities = document_.GetScene().GetEntitiesIn2DLayerOrder();
-        entity = {};
-        for (auto it = entities.rbegin(); it != entities.rend(); ++it)
-            if (InsideMap(*it, world, &cell)) {
-                entity = *it;
-                onSelect_(entity.GetId());
-                break;
-            }
+    const auto entity = document_.GetSelected();
+    if (!entity || entity.GetId() != dragId_) {
+        CancelInteraction();
+        return;
     }
-    if (entity)
+    QPointF cell;
+    if (InsideMap(entity, world, &cell))
         onPaintTile_(entity.GetId(), static_cast<LuxEngine::uint32>(cell.x()),
                      static_cast<LuxEngine::uint32>(cell.y()),
                      tool_ == EditorTool::TileErase ? 0 : tileId_);
@@ -506,6 +800,8 @@ void SceneViewport2D::SetSnapToGrid(bool enabled) {
 }
 
 void SceneViewport2D::SetTool(EditorTool tool) {
+    if (tool_ != tool)
+        CancelInteraction();
     tool_ = tool;
 }
 
