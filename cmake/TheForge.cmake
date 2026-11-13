@@ -137,11 +137,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(REMOVE_ITEM LUX_FORGE_SOURCES "${TF}/Graphics/Vulkan/Vulkan.c")
     list(APPEND LUX_FORGE_SOURCES "${LUX_FORGE_CONFIG_DIR}/Vulkan.c")
 endif()
+if(WIN32)
+    include(TheForgeD3D12)
+endif()
 add_library(TheForge STATIC ${LUX_FORGE_SOURCES})
 set_target_properties(TheForge PROPERTIES CXX_STANDARD 17 C_STANDARD 11
     CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON FOLDER ThirdParty)
 target_include_directories(TheForge PUBLIC "${LUX_FORGE_CONFIG_DIR}" "${TF}"
-    PRIVATE "${TF}/Resources/ResourceLoader" "${TF}/Graphics/Vulkan")
+    PRIVATE "${TF}/Resources/ResourceLoader" "${TF}/Graphics/Vulkan" "${TF}/Graphics/Direct3D12")
 target_compile_definitions(TheForge PUBLIC EXTERNAL_CONFIG_FILEPATH="LuxForgeConfig.h"
     ZSTD_DISABLE_ASM ENABLE_GRAPHICS_RUNTIME_CHECK)
 target_link_libraries(TheForge PUBLIC Threads::Threads ${CMAKE_DL_LIBS})

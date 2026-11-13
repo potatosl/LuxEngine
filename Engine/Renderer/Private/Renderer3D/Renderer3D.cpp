@@ -467,6 +467,8 @@ void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
     auto lockedState = impl_->LockValidState();
     if (!lockedState)
         return;
+    if (!mesh.vertices_.BelongsTo(*impl_->device) || !mesh.indices_.BelongsTo(*impl_->device))
+        return;
     if (impl_->pbr) {
         if (texture && !texture->BelongsTo(*impl_->device))
             return;

@@ -42,6 +42,7 @@ foreach(suite core physics2d scene assets audio window security)
     set_tests_properties(Engine_${suite} PROPERTIES TIMEOUT 30 LABELS headless
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxEngineTests>")
 endforeach()
+
 set_tests_properties(Engine_audio PROPERTIES TIMEOUT 180 ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
 set_tests_properties(Engine_window PROPERTIES TIMEOUT 60 ENVIRONMENT "SDL_VIDEODRIVER=dummy")
 
@@ -158,8 +159,19 @@ target_link_libraries(LuxForgeBackendTests PRIVATE LuxEngine::Engine)
 target_include_directories(LuxForgeBackendTests PRIVATE "${PROJECT_SOURCE_DIR}/Engine/Renderer/Private")
 lux_set_target_warnings(LuxForgeBackendTests)
 lux_copy_runtime(LuxForgeBackendTests)
-foreach(suite basics misuse frames drawing meshes scene3d)
+foreach(suite basics misuse ownership frames drawing meshes scene3d)
     add_test(NAME Forge_${suite} COMMAND LuxForgeBackendTests ${suite})
     set_tests_properties(Forge_${suite} PROPERTIES LABELS "gpu;forge" TIMEOUT 180 SKIP_RETURN_CODE 77
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxForgeBackendTests>" ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
 endforeach()
+
+if(WIN32)
+    add_executable(LuxForgeInitializationTests ForgeInitializationTest.cpp)
+    target_include_directories(LuxForgeInitializationTests PRIVATE "${PROJECT_SOURCE_DIR}/Engine/Renderer/Private")
+    target_link_libraries(LuxForgeInitializationTests PRIVATE user32)
+    lux_set_target_warnings(LuxForgeInitializationTests)
+    lux_copy_runtime(LuxForgeInitializationTests)
+    add_test(NAME Forge_initialization_failure COMMAND LuxForgeInitializationTests)
+    set_tests_properties(Forge_initialization_failure PROPERTIES LABELS "gpu;forge" TIMEOUT 30
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:LuxForgeInitializationTests>")
+endif()

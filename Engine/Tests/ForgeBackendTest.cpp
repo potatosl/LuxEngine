@@ -193,6 +193,60 @@ void Misuse() {
           "destroying another viewport preserves the shared renderer");
 }
 
+void Ownership() {
+    std::printf("[ownership]\n");
+    Session first(128, 128, {}, true), second(128, 128, {}, true);
+    if (!first.ok || !second.ok)
+        return Check(false, "sessions for mesh ownership");
+    const Vec3 outside[] = {{100, 100, 0}, {101, 100, 0}, {100, 101, 0}};
+    const Vec3 centered[] = {{-1, -1, 0}, {1, -1, 0}, {0, 1, 0}};
+    const uint32 indices[] = {0, 1, 2};
+    Mesh3D foreign, local;
+    if (!foreign.Upload(&first.gpu, outside, indices) ||
+        !local.Upload(&second.gpu, centered, indices))
+        return Check(false, "meshes uploaded to independent devices");
+    Renderer3D::Context context(&second.gpu);
+    PerspectiveCamera camera(ToRadians(60), 1, .1f, 100);
+    camera.SetPosition({0, 0, 4});
+    camera.SetTarget({0, 0, 0});
+    for (const auto mode : {Render3DMode::Legacy, Render3DMode::Pbr}) {
+        Render3DSettings settings;
+        settings.mode = mode;
+        settings.shadows = false;
+        settings.showSkybox = false;
+        settings.imageBasedLighting = false;
+        if (!Begin(second.window, second.gpu))
+            return Check(false, "foreign mesh frame begins");
+        Check(second.gpu.RequestFrameCapture() && second.gpu.Clear(0, 0, 1, 1),
+              "foreign mesh frame prepared");
+        context.BeginScene(camera, settings, 1);
+        context.DrawMesh(foreign, Mat4{}, Material3D{});
+        Check(context.GetStats().meshCount == 0 && context.GetStats().drawCalls == 0,
+              "foreign mesh is rejected before recording");
+        context.EndScene();
+        GpuFrameCapture capture;
+        Check(second.gpu.EndFrame() && second.gpu.ReadFrameCapture(capture) &&
+                  CentreIs(capture, 0, 0, 255),
+              "foreign mesh cannot alias the current device's buffers");
+        if (!Begin(second.window, second.gpu))
+            return Check(false, "local mesh frame begins");
+        Check(second.gpu.RequestFrameCapture() && second.gpu.Clear(0, 0, 1, 1),
+              "local mesh frame prepared");
+        context.BeginScene(camera, settings, 1);
+        context.DrawMesh(local, Mat4{}, Material3D{});
+        Check(context.GetStats().meshCount == 1, "local mesh remains accepted");
+        context.EndScene();
+        const bool captured = second.gpu.EndFrame() && second.gpu.ReadFrameCapture(capture);
+        Check(captured, "local mesh frame captured");
+        if (captured) {
+            const auto pixel = (static_cast<size_t>(capture.height / 2) * capture.width +
+                                capture.width / 2) * 4;
+            Check(capture.rgba[pixel] > 16 && capture.rgba[pixel + 1] > 16,
+                  "local mesh still reaches the screen");
+        }
+    }
+}
+
 void Resizing() {
     std::printf("[resize]\n");
     Session s;
@@ -2441,6 +2495,7 @@ int main(int argc, char** argv) {
     }
     run("basics", Basics);
     run("misuse", Misuse);
+    run("ownership", Ownership);
     run("resize", Resizing);
     run("lifecycle", Lifecycle);
     run("frames", ManyFrames);
