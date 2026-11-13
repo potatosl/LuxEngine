@@ -8,44 +8,22 @@
 #include <vector>
 
 namespace LuxEditor {
-inline size_t SceneHistoryBytes(const EditorSnapshot& snapshot) {
-    return static_cast<size_t>(snapshot.scene.size()) +
-           snapshot.animationTimes.size() * sizeof(decltype(snapshot.animationTimes)::value_type);
-}
+size_t SceneHistoryBytes(const EditorSnapshot& snapshot);
 
 class SceneEditCommand final : public QUndoCommand {
 public:
     SceneEditCommand(QString name, std::function<void()> undo, std::function<void()> redo,
-                     std::vector<EditorDocument::TabId> tabs = {}, size_t bytes = 0)
-        : QUndoCommand(std::move(name)), undo_(std::move(undo)), redo_(std::move(redo)),
-          tabs_(std::move(tabs)), bytes_(bytes) {}
+                     std::vector<EditorDocument::TabId> tabs = {}, size_t bytes = 0);
 
-    void undo() override {
-        if (undo_)
-            undo_();
-    }
+    void undo() override;
 
-    void redo() override {
-        if (first_)
-            first_ = false;
-        else if (redo_)
-            redo_();
-    }
+    void redo() override;
 
-    bool Touches(EditorDocument::TabId id) const {
-        return std::find(tabs_.begin(), tabs_.end(), id) != tabs_.end();
-    }
+    bool Touches(EditorDocument::TabId id) const;
 
-    size_t Bytes() const noexcept {
-        return bytes_;
-    }
+    size_t Bytes() const noexcept;
 
-    void Discard() {
-        undo_ = {};
-        redo_ = {};
-        bytes_ = 0;
-        setObsolete(true);
-    }
+    void Discard();
 
 private:
     std::function<void()> undo_, redo_;

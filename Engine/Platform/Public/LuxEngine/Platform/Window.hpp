@@ -17,6 +17,8 @@ struct WindowProps {
     uint32 height = 720;
     bool resizable = true;
     bool vsync = true;
+    // Legacy name: request the platform rendering surface (Vulkan on Linux, Metal on macOS).
+    // Windows uses the native window directly for The Forge Direct3D 12.
     bool vulkan = false;
     // Creates the window without showing it, e.g. for offscreen rendering in tools.
     bool hidden = false;
@@ -26,7 +28,7 @@ class LUX_API Window {
 public:
     using EventCallbackFn = std::function<void(Event&)>;
 
-    Window() = default;
+    Window();
     ~Window();
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;
@@ -37,21 +39,13 @@ public:
     void Shutdown();
     void PollEvents();
 
-    ColorTheme GetColorTheme() const {
-        return colorTheme_;
-    }
+    ColorTheme GetColorTheme() const;
 
-    bool HasWindowIcon() const {
-        return hasWindowIcon_;
-    }
+    bool HasWindowIcon() const;
 
-    bool IsRunning() const {
-        return isRunning_;
-    }
+    bool IsRunning() const;
 
-    SDL_Window* GetNativeHandle() const {
-        return window_;
-    }
+    SDL_Window* GetNativeHandle() const;
 
     uint32 GetWidth() const;
     uint32 GetHeight() const;
@@ -66,17 +60,11 @@ public:
 
     bool SetVSync(bool enabled);
 
-    void SetPresentCallback(std::function<bool(bool)> callback) {
-        presentCallback_ = std::move(callback);
-    }
+    void SetPresentCallback(std::function<bool(bool)> callback);
 
-    bool IsVSync() const {
-        return props_.vsync;
-    }
+    bool IsVSync() const;
 
-    void SetEventCallback(const EventCallbackFn& callback) {
-        eventCallback_ = callback;
-    }
+    void SetEventCallback(const EventCallbackFn& callback);
 
     static constexpr uint32 MaxEventsPerPoll = 4096;
 

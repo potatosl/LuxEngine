@@ -6,6 +6,7 @@
 #include <LuxEngine/Scene/Entity.hpp>
 #include <LuxEngine/Scene/Scene.hpp>
 #include <LuxEngine/Scene/SceneManager.hpp>
+#include <LuxEngine/Scripting/ScriptRuntime.hpp>
 #include <optional>
 #include <string>
 #include <vector>
@@ -21,6 +22,7 @@ struct ScenePlayerView {
 
 struct ScenePlayerOptions {
     std::string scenePath;
+    std::string scriptAssemblyPath;
     std::string title = "LuxEngine Player";
     uint32 width = 1280;
     uint32 height = 720;
@@ -53,9 +55,7 @@ class ScenePlayer final : public Application {
 public:
     explicit ScenePlayer(ScenePlayerOptions options);
 
-    bool LoadedScene() const {
-        return loaded_;
-    }
+    bool LoadedScene() const;
 
 protected:
     void OnInit() override;
@@ -70,6 +70,7 @@ private:
 
     ScenePlayerOptions options_;
     SceneManager sceneManager_;
+    ScriptRuntime scripts_;
     std::shared_ptr<Scene> scene_ = std::make_shared<Scene>();
     Entity player_;
     OrthographicCamera camera_;

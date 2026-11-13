@@ -1,7 +1,8 @@
-// LuxForge.dll: implements LuxForgeApi with The Forge (Direct3D 12 on Windows).
+// The Forge render bridge: D3D12 on Windows, Vulkan on Linux, Metal on macOS.
 #include "LuxForgeApi.h"
 
 // Standard headers first: The Forge's IMemory.h turns malloc/free into compile errors.
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -10,10 +11,14 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 // clang-format off
 #include "Graphics/GraphicsConfig.h"
@@ -38,14 +43,16 @@
 
 // The Forge asks the app framework to rebuild the swap chain / renderer on device-loss style
 // events (normally WindowsBase.cpp). LuxEngine owns the window, so it just records the request.
-static ResetDesc g_ResetRequest = {};
+static std::atomic<bool> g_ResetRequested = false;
 
-void requestReset(const ResetDesc* pResetDesc) {
-    g_ResetRequest = *pResetDesc;
+#if defined(_WIN32)
+void requestReset(const ResetDesc* desc) {
+    g_ResetRequested.store(desc && desc->mType != RESET_TYPE_NONE);
 }
+#endif
 
 static bool ResetRequested() {
-    return g_ResetRequest.mType != RESET_TYPE_NONE;
+    return g_ResetRequested.load();
 }
 
 // Direct3D12.c keeps these internal; the declarations match its definitions.
@@ -53,6 +60,10 @@ typedef struct SubresourceDataDesc {
     uint64_t mSrcOffset;
     uint32_t mMipLevel;
     uint32_t mArrayLayer;
+#if defined(VULKAN) || defined(METAL)
+    uint32_t mRowPitch;
+    uint32_t mSlicePitch;
+#endif
 } SubresourceDataDesc;
 
 extern "C" void cmdCopySubresource(Cmd* pCmd, Buffer* pDstBuffer, Texture* pTexture,
@@ -63,16 +74,17 @@ struct LuxForgeDevice {
     Queue* graphicsQueue = nullptr;
     uint32_t framesInFlight = 2;
     bool validation = false;
-    bool rootSignatures = false;
     std::string lastError;
 
-    HWND window = nullptr;
+    WindowHandle window = {};
     SwapChain* swapChain = nullptr;
     uint32_t width = 0;
     uint32_t height = 0;
     bool vsync = true;
     GpuCmdRing cmdRing = {};
-    Semaphore* imageAcquired = nullptr;
+    // Acquisition waits belong to command-ring slots; presentation waits belong to images.
+    std::vector<Semaphore*> imageAcquired;
+    std::vector<Semaphore*> renderFinished;
 
     // Current frame
     bool frameOpen = false;
@@ -216,15 +228,24 @@ struct LuxForgeDevice {
 };
 
 namespace {
+#if defined(DIRECT3D12)
+constexpr DescriptorType UniformBufferDescriptor = DESCRIPTOR_TYPE_UNDEFINED;
+#else
+constexpr DescriptorType UniformBufferDescriptor = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+#endif
+
 void CollectSceneGarbage(LuxForgeDevice* device, bool everything);
 void ShutdownScene(LuxForgeDevice* device);
 void BeginSceneFrame(LuxForgeDevice* device);
+int EndFrame(LuxForgeDevice* device);
 
 // The Forge's memory, file and log systems, its GPU configuration and resource loader are
-// process-wide, so LuxForge allows a single live device.
+// process-wide. Viewports share that renderer and own independent queues and swap chains.
 int g_PlatformUsers = 0;
 std::mutex g_DeviceMutex;
-LuxForgeDevice* g_LiveDevice = nullptr;
+Renderer* g_SharedRenderer = nullptr;
+uint32_t g_RendererUsers = 0;
+bool g_SharedRootSignatures = false;
 
 bool AcquirePlatform(std::string& error) {
     if (g_PlatformUsers++ > 0)
@@ -248,13 +269,25 @@ bool AcquirePlatform(std::string& error) {
     // there) so The Forge never dereferences an unset file system.
     static std::string dllDir;
     if (dllDir.empty()) {
+#if defined(_WIN32)
         HMODULE self = nullptr;
         GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            reinterpret_cast<LPCSTR>(&AcquirePlatform), &self);
-        char path[MAX_PATH] = {};
-        GetModuleFileNameA(self, path, MAX_PATH);
+        char path[32768] = {};
+        GetModuleFileNameA(self, path, sizeof(path));
         dllDir = path;
+#else
+        Dl_info module = {};
+        if (!dladdr(reinterpret_cast<void*>(&AcquirePlatform), &module) || !module.dli_fname) {
+            error = "The Forge renderer directory could not be resolved";
+            exitFileSystem();
+            exitMemAlloc();
+            --g_PlatformUsers;
+            return false;
+        }
+        dllDir = module.dli_fname;
+#endif
         dllDir.resize(dllDir.find_last_of("\\/") + 1);
     }
     // The directory table is a process-wide global that survives exitFileSystem(); setting it a
@@ -266,7 +299,7 @@ bool AcquirePlatform(std::string& error) {
                                     dllDir.c_str());
         resourceDirsSet = true;
     }
-    initLog("LuxForge", DEFAULT_LOG_LEVEL);
+    initLog("LuxForge", static_cast<LogLevel>(LogLevel::eWARNING | LogLevel::eERROR));
     return true;
 }
 
@@ -289,10 +322,18 @@ bool Fail(LuxForgeDevice* device, const char* message) {
     return false;
 }
 
+void RemoveSwapChain(LuxForgeDevice* device) {
+    for (auto* semaphore : device->renderFinished)
+        exitSemaphore(device->renderer, semaphore);
+    device->renderFinished.clear();
+    if (device->swapChain)
+        removeSwapChain(device->renderer, device->swapChain);
+    device->swapChain = nullptr;
+}
+
 bool AddSwapChain(LuxForgeDevice* device) {
     SwapChainDesc desc = {};
-    desc.mWindowHandle.type = WINDOW_HANDLE_TYPE_WIN32;
-    desc.mWindowHandle.window = device->window;
+    desc.mWindowHandle = device->window;
     desc.ppPresentQueues = &device->graphicsQueue;
     desc.mPresentQueueCount = 1;
     desc.mImageCount = getRecommendedSwapchainImageCount(device->renderer, &desc.mWindowHandle);
@@ -306,7 +347,12 @@ bool AddSwapChain(LuxForgeDevice* device) {
     desc.mEnableVsync = device->vsync;
     desc.mUseFlipSwapEffect = true;
     addSwapChain(device->renderer, &desc, &device->swapChain);
-    return device->swapChain != nullptr;
+    if (!device->swapChain)
+        return false;
+    device->renderFinished.resize(device->swapChain->mImageCount);
+    for (auto& semaphore : device->renderFinished)
+        initSemaphore(device->renderer, &semaphore);
+    return true;
 }
 
 void RemoveCaptureBuffer(LuxForgeDevice* device) {
@@ -319,21 +365,19 @@ void RemoveCaptureBuffer(LuxForgeDevice* device) {
 
 // Diagnostic: report the first step after which the D3D12 device is gone (LUX_FORGE_TRACE=1).
 bool DeviceAlive(LuxForgeDevice* device, const char* step) {
-    static const bool trace = [] {
-        char* value = nullptr;
-        size_t length = 0;
-        const bool on =
-            _dupenv_s(&value, &length, "LUX_FORGE_TRACE") == 0 && value && value[0] == '1';
-        (std::free)(value); // parenthesised: IMemory.h turns free() into an error
-        return on;
-    }();
+#if defined(DIRECT3D12)
+    const char* trace = (std::getenv)("LUX_FORGE_TRACE");
     const HRESULT reason = device->renderer->mDx.pDevice->GetDeviceRemovedReason();
-    if (trace || FAILED(reason)) {
-        std::fprintf(stderr, "[LuxForge] %-28s device %s (0x%08lX)\n", step,
-                     FAILED(reason) ? "REMOVED" : "ok", static_cast<unsigned long>(reason));
-        std::fflush(stderr);
+    if ((trace && trace[0] == '1') || FAILED(reason)) {
+        std::fprintf(stderr, "[LuxForge] %s: device status 0x%08lX\n", step,
+                     static_cast<unsigned long>(reason));
     }
     return SUCCEEDED(reason);
+#else
+    (void)device;
+    (void)step;
+    return !ResetRequested();
+#endif
 }
 
 bool AddDepthTarget(LuxForgeDevice* device) {
@@ -341,6 +385,7 @@ bool AddDepthTarget(LuxForgeDevice* device) {
     desc.mWidth = device->width;
     desc.mHeight = device->height;
     desc.mDepth = 1;
+    desc.mFlags = TEXTURE_CREATION_FLAG_FORCE_2D;
     desc.mArraySize = 1;
     desc.mMipLevels = 1;
     desc.mSampleCount = SAMPLE_COUNT_1;
@@ -485,25 +530,22 @@ bool Init2D(LuxForgeDevice* device, std::string& error) {
     ShaderLoadDesc shader = {};
     shader.mVert.pFileName = "lux2d.vert";
     shader.mFrag.pFileName = "lux2d.frag";
-    {
-        char* diag = nullptr;
-        size_t length = 0;
-        if (_dupenv_s(&diag, &length, "LUX_FORGE_DIAG") == 0 && diag) {
-            if (std::strcmp(diag, "color") == 0)
-                shader.mFrag.pFileName = "lux2d_diag_color.frag";
-            else if (std::strcmp(diag, "texture") == 0)
-                shader.mFrag.pFileName = "lux2d_diag_texture.frag";
-            (std::free)(diag);
-        }
+    if (const char* diagnostic = (std::getenv)("LUX_FORGE_DIAG")) {
+        if (std::strcmp(diagnostic, "color") == 0)
+            shader.mFrag.pFileName = "lux2d_diag_color.frag";
+        else if (std::strcmp(diagnostic, "texture") == 0)
+            shader.mFrag.pFileName = "lux2d_diag_texture.frag";
     }
     DeviceAlive(device, "before shaders");
     addShader(device->renderer, &shader, &device->shader2D);
     DeviceAlive(device, "after shaders");
+#if defined(DIRECT3D12)
     if (!device->renderer->mDx.pGraphicsRootSignature) {
         error =
             "LuxForge root signature (DIRECT3D12/default.rootsig) is missing next to LuxForge.dll";
         return false;
     }
+#endif
     if (!device->shader2D) {
         error =
             "LuxForge shaders (DIRECT3D12/lux2d.vert, lux2d.frag) are missing next to LuxForge.dll";
@@ -533,7 +575,7 @@ bool Init2D(LuxForgeDevice* device, std::string& error) {
         load.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
         // No whole-buffer view: a CBV over 64 KiB is invalid (D3D12 removes the device).
         // Each draw gets its own 256-byte CBV through DescriptorDataRange instead.
-        load.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNDEFINED;
+        load.mDesc.mDescriptors = UniformBufferDescriptor;
         load.mDesc.pName = "LuxForge draw constants";
         DeviceAlive(device, "before uniform buffer");
         addResource(&load, nullptr);
@@ -598,8 +640,8 @@ bool Init2D(LuxForgeDevice* device, std::string& error) {
         static_cast<TinyImageFormat>(device->swapChain->ppRenderTargets[0]->mFormat);
     PipelineDesc desc = {};
     desc.mType = PIPELINE_TYPE_GRAPHICS;
-    PIPELINE_LAYOUT_DESC(desc, NULL, NULL, SRT_LAYOUT_DESC(Lux2DSrt, PerBatch),
-                         SRT_LAYOUT_DESC(Lux2DSrt, PerDraw));
+    PIPELINE_LAYOUT_DESC(desc, NULL, SRT_LAYOUT_DESC(Lux2DSrt, PerFrame),
+                         SRT_LAYOUT_DESC(Lux2DSrt, PerBatch), SRT_LAYOUT_DESC(Lux2DSrt, PerDraw));
     GraphicsPipelineDesc& graphics = desc.mGraphicsDesc;
     graphics.mPrimitiveTopo = PRIMITIVE_TOPO_TRI_LIST;
     graphics.mRenderTargetCount = 1;
@@ -649,7 +691,7 @@ bool Init2D(LuxForgeDevice* device, std::string& error) {
         load.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_TO_GPU;
         load.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
         load.mDesc.mDescriptors =
-            DESCRIPTOR_TYPE_UNDEFINED; // per-block CBVs below (see draw constants)
+            UniformBufferDescriptor; // per-block CBVs below (see draw constants)
         load.mDesc.pName = "LuxForge lights";
         addResource(&load, nullptr);
         waitForAllResourceLoads();
@@ -811,43 +853,48 @@ void Destroy(LuxForgeDevice* device) {
     if (!device)
         return;
     std::lock_guard<std::mutex> lock(g_DeviceMutex);
-    if (g_LiveDevice == device)
-        g_LiveDevice = nullptr;
     if (device->renderer) {
+        // Consume an acquired image semaphore even if the caller abandons an open frame.
+        // A queue-idle wait alone does not wait for an unconsumed image-acquisition signal.
+        if (device->frameOpen && !ResetRequested())
+            EndFrame(device);
         if (device->graphicsQueue)
             waitQueueIdle(device->graphicsQueue);
         RemoveCaptureBuffer(device);
         ShutdownScene(device);
         Shutdown2D(device);
-        if (device->imageAcquired)
-            exitSemaphore(device->renderer, device->imageAcquired);
+        for (auto* semaphore : device->imageAcquired)
+            exitSemaphore(device->renderer, semaphore);
         if (device->cmdRing.mPoolCount)
             exitGpuCmdRing(device->renderer, &device->cmdRing);
         if (device->swapChain)
-            removeSwapChain(device->renderer, device->swapChain);
+            RemoveSwapChain(device);
         if (device->graphicsQueue)
             exitQueue(device->renderer, device->graphicsQueue);
-        if (device->rootSignatures)
-            exitRootSignature(device->renderer);
-        exitResourceLoaderInterface(device->renderer);
-        exitRenderer(device->renderer);
-        exitGPUConfiguration();
+        if (--g_RendererUsers == 0) {
+#if defined(DIRECT3D12) || defined(VULKAN)
+            if (g_SharedRootSignatures)
+                exitRootSignature(device->renderer);
+#endif
+            exitResourceLoaderInterface(device->renderer);
+            exitRenderer(device->renderer);
+            exitGPUConfiguration();
+            g_SharedRenderer = nullptr;
+            g_SharedRootSignatures = false;
+        }
     }
     delete device;
     ReleasePlatform();
 }
 
 LuxForgeDevice* Create(const LuxForgeInitDesc* desc, char* error, size_t errorSize) {
-    if (!desc || !desc->nativeWindow || !IsWindow(static_cast<HWND>(desc->nativeWindow))) {
+    if (!desc || (!desc->nativeWindow && !desc->nativeWindowId)) {
         CopyText(error, errorSize, "No native window");
         return nullptr;
     }
     std::unique_lock<std::mutex> lock(g_DeviceMutex);
-    if (g_LiveDevice) {
-        CopyText(error, errorSize, "The Forge backend supports one GPU device per process");
-        return nullptr;
-    }
-    g_ResetRequest = {};
+    if (!g_SharedRenderer)
+        g_ResetRequested.store(false);
     std::string reason;
     if (!AcquirePlatform(reason)) {
         CopyText(error, errorSize, reason);
@@ -857,33 +904,56 @@ LuxForgeDevice* Create(const LuxForgeInitDesc* desc, char* error, size_t errorSi
     device->framesInFlight = desc->framesInFlight ? desc->framesInFlight : 2;
     if (device->framesInFlight > 8)
         device->framesInFlight = 8;
-    device->validation = desc->validation != 0;
+    // The shared Forge renderer enables validation at build time. Report the actual mode,
+    // rather than pretending a per-viewport request can change that process-wide setting.
+#if defined(ENABLE_GRAPHICS_VALIDATION)
+    device->validation = true;
+#else
+    device->validation = false;
+#endif
 
-    RendererDesc settings;
-    std::memset(&settings, 0, sizeof(settings));
-    settings.mEnableGpuBasedValidation = false;
-    initGPUConfiguration(settings.pExtendedSettings);
-    initRenderer("LuxEngine", &settings, &device->renderer);
-    if (!device->renderer) {
-        exitGPUConfiguration();
-        delete device;
-        ReleasePlatform();
-        CopyText(error, errorSize, "The Forge renderer failed to start (no supported GPU?)");
-        return nullptr;
+    if (!g_SharedRenderer) {
+        RendererDesc settings = {};
+        settings.mEnableGpuBasedValidation = false;
+        initGPUConfiguration(settings.pExtendedSettings);
+        initRenderer("LuxEngine", &settings, &g_SharedRenderer);
+        if (!g_SharedRenderer) {
+            exitGPUConfiguration();
+            delete device;
+            ReleasePlatform();
+            CopyText(error, errorSize, "The Forge renderer failed to start");
+            return nullptr;
+        }
+        setupGPUConfigurationPlatformParameters(g_SharedRenderer, settings.pExtendedSettings);
+        initResourceLoaderInterface(g_SharedRenderer);
+#if defined(DIRECT3D12) || defined(VULKAN)
+        RootSignatureDesc signatures = {};
+        INIT_RS_DESC(signatures, "default.rootsig", "compute.rootsig");
+        initRootSignature(g_SharedRenderer, &signatures);
+        g_SharedRootSignatures = true;
+#endif
     }
-    setupGPUConfigurationPlatformParameters(device->renderer, settings.pExtendedSettings);
-
+    device->renderer = g_SharedRenderer;
+    ++g_RendererUsers;
     QueueDesc queue = {};
     queue.mType = QUEUE_TYPE_GRAPHICS;
     initQueue(device->renderer, &queue, &device->graphicsQueue);
-    initResourceLoaderInterface(device->renderer);
-    RootSignatureDesc rootSignatures = {};
-    rootSignatures.pGraphicsFileName = "default.rootsig";
-    rootSignatures.pComputeFileName = "compute.rootsig";
-    initRootSignature(device->renderer, &rootSignatures);
-    device->rootSignatures = true;
-
-    device->window = static_cast<HWND>(desc->nativeWindow);
+#if defined(_WIN32)
+    device->window.type = WINDOW_HANDLE_TYPE_WIN32;
+    device->window.window = static_cast<HWND>(desc->nativeWindow);
+#elif defined(__APPLE__)
+    device->window.window = desc->nativeWindow;
+#else
+    if (desc->windowType == LUX_FORGE_WINDOW_WAYLAND) {
+        device->window.type = WINDOW_HANDLE_TYPE_WAYLAND;
+        device->window.wl_display = static_cast<wl_display*>(desc->nativeDisplay);
+        device->window.wl_surface = static_cast<wl_surface*>(desc->nativeWindow);
+    } else {
+        device->window.type = WINDOW_HANDLE_TYPE_XLIB;
+        device->window.display = static_cast<Display*>(desc->nativeDisplay);
+        device->window.window = static_cast<Window>(desc->nativeWindowId);
+    }
+#endif
     device->width = desc->width ? desc->width : 1;
     device->height = desc->height ? desc->height : 1;
     device->vsync = desc->vsync != 0;
@@ -899,7 +969,9 @@ LuxForgeDevice* Create(const LuxForgeInitDesc* desc, char* error, size_t errorSi
     ring.mCmdPerPoolCount = 1;
     ring.mAddSyncPrimitives = true;
     initGpuCmdRing(device->renderer, &ring, &device->cmdRing);
-    initSemaphore(device->renderer, &device->imageAcquired);
+    device->imageAcquired.resize(device->framesInFlight);
+    for (auto& semaphore : device->imageAcquired)
+        initSemaphore(device->renderer, &semaphore);
     if (desc->maxFrameVertexBytes)
         device->maxFrameVertexBytes = desc->maxFrameVertexBytes;
     std::string setupError;
@@ -914,7 +986,6 @@ LuxForgeDevice* Create(const LuxForgeInitDesc* desc, char* error, size_t errorSi
         CopyText(error, errorSize, setupError);
         return nullptr;
     }
-    g_LiveDevice = device;
     return device;
 }
 
@@ -925,8 +996,10 @@ int BeginFrame(LuxForgeDevice* device) {
         return Fail(device, "GPU device was lost"), LUX_FORGE_FRAME_ERROR;
     if (device->frameOpen)
         return Fail(device, "BeginFrame called twice"), LUX_FORGE_FRAME_ERROR;
-    if (IsIconic(device->window))
+#if defined(_WIN32)
+    if (IsIconic(device->window.window))
         return LUX_FORGE_FRAME_SKIPPED;
+#endif
 
     device->element = getNextGpuCmdRingElement(&device->cmdRing, true, 1);
     FenceStatus status = FENCE_STATUS_COMPLETE;
@@ -959,11 +1032,12 @@ int BeginFrame(LuxForgeDevice* device) {
     device->frameStats.vertexBytes = 0;
 
     uint32_t index = UINT32_MAX;
-    acquireNextImage(device->renderer, device->swapChain, device->imageAcquired, nullptr, &index);
+    acquireNextImage(device->renderer, device->swapChain, device->imageAcquired[device->frameSlot],
+                     nullptr, &index);
     if (index == UINT32_MAX) {
         // Swap chain is out of date; rebuild it at the current size and skip this frame.
         waitQueueIdle(device->graphicsQueue);
-        removeSwapChain(device->renderer, device->swapChain);
+        RemoveSwapChain(device);
         device->swapChain = nullptr;
         if (!AddSwapChain(device))
             return Fail(device, "Swap chain could not be recreated"), LUX_FORGE_FRAME_ERROR;
@@ -990,7 +1064,11 @@ int Clear(LuxForgeDevice* device, float r, float g, float b, float a) {
 }
 
 bool PrepareCaptureBuffer(LuxForgeDevice* device, uint32_t width, uint32_t height) {
-    const uint32_t rowPitch = (width * 4 + 255u) & ~255u; // D3D12 placed-footprint row alignment
+#if defined(DIRECT3D12)
+    const uint32_t rowPitch = (width * 4 + 255u) & ~255u;
+#else
+    const uint32_t rowPitch = width * 4;
+#endif
     if (device->captureBuffer && device->captureWidth == width && device->captureHeight == height)
         return true;
     RemoveCaptureBuffer(device);
@@ -1026,6 +1104,10 @@ int EndFrame(LuxForgeDevice* device) {
                                       RESOURCE_STATE_COPY_SOURCE};
         cmdResourceBarrier(cmd, 0, nullptr, 0, nullptr, 1, &toCopy);
         SubresourceDataDesc sub = {};
+#if defined(VULKAN) || defined(METAL)
+        sub.mRowPitch = device->captureRowPitch;
+        sub.mSlicePitch = device->captureRowPitch * device->captureHeight;
+#endif
         cmdCopySubresource(cmd, device->captureBuffer, target->pTexture, &sub);
         RenderTargetBarrier toPresent = {target, RESOURCE_STATE_COPY_SOURCE,
                                          RESOURCE_STATE_PRESENT};
@@ -1041,9 +1123,9 @@ int EndFrame(LuxForgeDevice* device) {
     submit.mCmdCount = 1;
     submit.ppCmds = &cmd;
     submit.mWaitSemaphoreCount = 1;
-    submit.ppWaitSemaphores = &device->imageAcquired;
+    submit.ppWaitSemaphores = &device->imageAcquired[device->frameSlot];
     submit.mSignalSemaphoreCount = 1;
-    submit.ppSignalSemaphores = &device->element.pSemaphore;
+    submit.ppSignalSemaphores = &device->renderFinished[device->imageIndex];
     submit.pSignalFence = device->element.pFence;
     queueSubmit(device->graphicsQueue, &submit);
     device->slotSubmitted[device->frameSlot] = ++device->frameNumber;
@@ -1059,7 +1141,7 @@ int EndFrame(LuxForgeDevice* device) {
     present.pSwapChain = device->swapChain;
     present.mIndex = static_cast<uint8_t>(device->imageIndex);
     present.mWaitSemaphoreCount = 1;
-    present.ppWaitSemaphores = &device->element.pSemaphore;
+    present.ppWaitSemaphores = &device->renderFinished[device->imageIndex];
     present.mSubmitDone = true;
     queuePresent(device->graphicsQueue, &present);
     if (ResetRequested())
@@ -1078,7 +1160,7 @@ int Resize(LuxForgeDevice* device, uint32_t width, uint32_t height) {
     if (width == device->width && height == device->height)
         return 1;
     waitQueueIdle(device->graphicsQueue);
-    removeSwapChain(device->renderer, device->swapChain);
+    RemoveSwapChain(device);
     device->swapChain = nullptr;
     device->width = width;
     device->height = height;
@@ -1094,9 +1176,9 @@ int SetVSync(LuxForgeDevice* device, int enabled) {
     if ((enabled != 0) == device->vsync)
         return 1;
     waitQueueIdle(device->graphicsQueue);
-    toggleVSync(device->renderer, &device->swapChain);
+    RemoveSwapChain(device);
     device->vsync = enabled != 0;
-    return device->swapChain ? 1 : Fail(device, "VSync change failed");
+    return AddSwapChain(device) ? 1 : Fail(device, "VSync change failed");
 }
 
 int WaitIdle(LuxForgeDevice* device) {
@@ -1288,7 +1370,7 @@ uint32_t CreateBuffer(LuxForgeDevice* device, int type, uint32_t sizeBytes) {
         load.mDesc.mStartState = RESOURCE_STATE_INDEX_BUFFER;
         break;
     default: // uniform/storage: no whole-buffer view (CBVs are limited to 64 KiB)
-        load.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNDEFINED;
+        load.mDesc.mDescriptors = UniformBufferDescriptor;
         load.mDesc.mStartState = RESOURCE_STATE_COMMON;
         break;
     }
@@ -1483,7 +1565,13 @@ void GetInfo(const LuxForgeDevice* device, LuxForgeInfo* info) {
     if (!info)
         return;
     std::memset(info, 0, sizeof(*info));
+#if defined(DIRECT3D12)
     std::snprintf(info->apiName, sizeof(info->apiName), "Direct3D 12");
+#elif defined(METAL)
+    std::snprintf(info->apiName, sizeof(info->apiName), "Metal");
+#else
+    std::snprintf(info->apiName, sizeof(info->apiName), "Vulkan");
+#endif
     if (!device || !device->renderer)
         return;
     std::snprintf(info->deviceName, sizeof(info->deviceName), "%s",
@@ -1660,7 +1748,7 @@ bool InitScene(LuxForgeDevice* device) {
             static_cast<uint64_t>(LuxForgeDevice::kMaxScenePasses) * LuxForgeDevice::kSceneStride;
         load.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_TO_GPU;
         load.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
-        load.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNDEFINED; // per-pass CBVs below
+        load.mDesc.mDescriptors = UniformBufferDescriptor; // per-pass CBVs below
         load.mDesc.pName = "LuxForge scene constants";
         addResource(&load, nullptr);
         waitForAllResourceLoads();
@@ -2038,7 +2126,7 @@ int RenderScene(LuxForgeDevice* device, const LuxForgeScene* scene, const LuxFor
                                                                                 : draw.metallic)
                                                          : 0.0f;
         const float rough = std::isfinite(draw.roughness) ? (draw.roughness < .045f ? .045f
-                                                             : draw.roughness > 1 ? 1
+                                                             : draw.roughness > 1   ? 1
                                                                                   : draw.roughness)
                                                           : .5f;
         // colorOptions = (1, metallic, roughness, 1): discard transparent texels, PBR lighting.

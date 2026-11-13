@@ -54,11 +54,16 @@ include(CompilerWarnings)
 include(Dependencies)
 include(Shaders)
 include(Branding)
+include(Dotnet)
 option(LUX_BUILD_TESTS "Build engine tests" ON)
 option(LUX_BUILD_TOOLS "Build development tools" ON)
 option(LUX_BUILD_EDITOR "Build the separate Qt 6 editor" OFF)
 if(LUX_BUILD_TESTS)
     enable_testing()
+    add_test(NAME CMake_dotnet_host_discovery COMMAND ${CMAKE_COMMAND}
+        "-DTEST_ROOT=${CMAKE_BINARY_DIR}/cmake-tests"
+        -P "${CMAKE_SOURCE_DIR}/cmake/tests/DotnetHostTest.cmake")
+    set_tests_properties(CMake_dotnet_host_discovery PROPERTIES LABELS headless TIMEOUT 30)
 endif()
 
 # -------------------------------------------------------------
@@ -77,7 +82,7 @@ if(LUX_BUILD_TESTS)
     add_subdirectory(Engine/Tests)
 endif()
 
-# Optional The Forge backend (LuxForge.dll); off unless -DLUX_ENABLE_FORGE=ON.
+# The Forge supplies the native renderer for each supported desktop platform.
 include(TheForge)
 
 include(CMakePackageConfigHelpers)
@@ -101,7 +106,6 @@ install(TARGETS LuxEngine LuxRuntime EXPORT LuxEngineTargets
 if(WIN32 AND TARGET SDL3::SDL3-shared)
     install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
 endif()
-install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders/" DESTINATION share/LuxEngine/shaders)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/licenses/" DESTINATION share/LuxEngine/licenses)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/licenses/" DESTINATION licenses)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/samples/MinimalGame/" DESTINATION share/LuxEngine/examples/MinimalGame)

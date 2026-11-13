@@ -52,9 +52,7 @@ public:
     std::string GetPath(TabId tab) const;
     const std::string& GetLoadWarning(TabId tab) const noexcept;
 
-    const std::string& GetLoadWarning() const noexcept {
-        return Active().loadWarning;
-    }
+    const std::string& GetLoadWarning() const noexcept;
 
     bool IsDirty(TabId tab) const noexcept;
     bool SetDirty(TabId tab, bool dirty) noexcept;
@@ -62,38 +60,24 @@ public:
     std::optional<LuxEngine::uint32> GetSelectedId(TabId tab) const noexcept;
     void Select(TabId tab, std::optional<LuxEngine::uint32> id);
 
-    const std::string& GetLastError() const noexcept {
-        return error_;
-    }
+    const std::string& GetLastError() const noexcept;
 
-    bool IsDirty() const noexcept {
-        return Active().dirty;
-    }
+    bool IsDirty() const noexcept;
 
-    void MarkDirty() noexcept {
-        Active().dirty = true;
-    }
+    void MarkDirty() noexcept;
 
-    void SetDirty(bool dirty) noexcept {
-        Active().dirty = dirty;
-    }
+    void SetDirty(bool dirty) noexcept;
 
-    const std::string& GetPath() const noexcept {
-        return Active().path;
-    }
+    const std::string& GetPath() const noexcept;
 
     void Select(std::optional<LuxEngine::uint32> id);
     LuxEngine::Entity GetSelected() const;
     LuxEngine::Entity CreateEntity(const std::string& name = "Entity");
     bool DeleteSelected();
 
-    LuxEngine::Scene& GetScene() noexcept {
-        return *Active().scene;
-    }
+    LuxEngine::Scene& GetScene() noexcept;
 
-    const LuxEngine::Scene& GetScene() const noexcept {
-        return *Active().scene;
-    }
+    const LuxEngine::Scene& GetScene() const noexcept;
 
 private:
     struct TabState {
@@ -105,13 +89,9 @@ private:
         std::string loadWarning;
     };
 
-    TabState& Active() noexcept {
-        return tabs_[activeIndex_];
-    }
+    TabState& Active() noexcept;
 
-    const TabState& Active() const noexcept {
-        return tabs_[activeIndex_];
-    }
+    const TabState& Active() const noexcept;
 
     TabState* Find(TabId tab) noexcept;
     const TabState* Find(TabId tab) const noexcept;

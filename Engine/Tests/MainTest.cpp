@@ -3745,6 +3745,7 @@ void HdrEnvironment() {
     files.Binary("environment.HDR", replacement.data(), replacement.size());
     Check(EnvironmentData::Reload(path, error), "valid HDR reload starts new generation");
     frame();
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
     const auto uploadDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(100);
     do {
         Vk::InjectFault(Vk::Fault::ImageAllocation);
@@ -3759,6 +3760,10 @@ void HdrEnvironment() {
     Check(EnvironmentData::Reload(path, error), "environment upload can be retried explicitly");
     wait();
     Check(Pixel(frame(), .5f, .5f) != rotated, "successful retry atomically replaces environment");
+#else
+    wait();
+    Check(Pixel(frame(), .5f, .5f) != rotated, "environment reload replaces GPU resource");
+#endif
     settings.showSkybox = true;
     Check(Pixel(frame(), 0, 0)[3] == 255, "ready environment draws skybox into background");
     settings.showSkybox = false;
@@ -3836,11 +3841,13 @@ void Shadows() {
     frame();
     frame();
     settings.shadows = true;
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
     Vk::InjectFault(Vk::Fault::ImageAllocation);
     const auto fallback = frame();
     Vk::ClearFaults();
     Check(!context.GetLastAssetError().empty(), "shadow allocation failure is reported");
     Check(fallback.rgba == original.rgba, "shadow failure preserves unshadowed HDR rendering");
+#endif
     const auto shadowed = frame();
     size_t darker = 0;
     for (size_t i = 0; i < original.rgba.size(); i += 4)
@@ -3874,6 +3881,7 @@ void Shadows() {
     graphics.ValidationClean("directional shadows and failure fallback");
 }
 
+#if defined(LUX_GPU_FAULT_INJECTION) && LUX_GPU_FAULT_INJECTION
 void ModernFailures() {
     Graphics graphics({}, 128, 96);
     PerspectiveCamera camera(ToRadians(60), 128.f / 96, .1f, 20);
@@ -3902,6 +3910,12 @@ void ModernFailures() {
     }
     graphics.ValidationClean("HDR resource failure fallback");
 }
+
+#else
+void ModernFailures() {
+    throw SkipTest("Native Vulkan fault injection was retired with the native backend");
+}
+#endif
 
 void ModernLifetimes() {
     GpuDeviceConfig config;

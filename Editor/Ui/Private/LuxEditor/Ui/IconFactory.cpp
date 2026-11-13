@@ -1,11 +1,25 @@
 #include <LuxEditor/Ui/IconFactory.hpp>
+#include <LuxEngine/Platform/Branding.hpp>
+#include <QImage>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
 #include <QPolygonF>
+#include <SDL3/SDL_surface.h>
 #include <array>
 
 namespace LuxEditor {
+QIcon MakeBrandIcon(bool dark) {
+    auto* surface = LuxEngine::Branding::CreateWindowIcon(dark);
+    if (!surface)
+        return {};
+    QImage image(static_cast<const uchar*>(surface->pixels), surface->w, surface->h, surface->pitch,
+                 QImage::Format_RGBA8888);
+    QIcon icon(QPixmap::fromImage(image.copy()));
+    SDL_DestroySurface(surface);
+    return icon;
+}
+
 QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
     QPixmap pixels(24, 24);
     pixels.fill(Qt::transparent);

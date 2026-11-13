@@ -8,6 +8,8 @@
 #include <memory>
 #include <optional>
 
+class QPainter;
+
 namespace LuxEngine {
 struct TransformComponent;
 }
@@ -25,19 +27,27 @@ public:
         std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
         std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
 
-    void RefreshScene() {
-        update();
-    }
+    enum class ViewPreset { Perspective, Front, Right, Top };
+
+    void RefreshScene();
+    void SetViewPreset(ViewPreset preset);
+    void FrameAll();
+    void SetSnapToGrid(bool enabled);
+    void SetGridVisible(bool visible);
 
     void FocusSelection();
     void CancelInteraction();
 
-    void SetTool(EditorTool tool) {
-        tool_ = tool;
-    }
+    void SetTool(EditorTool tool);
 
 private:
+    bool event(QEvent*) override;
     void paintEvent(QPaintEvent*) override;
+    void keyPressEvent(QKeyEvent*) override;
+    int HitGizmo(QPointF point) const;
+    void DrawGizmo(QPainter& painter) const;
+    void BeginDrag(LuxEngine::uint32 id, QPointF point);
+    void FrameBounds(bool selectedOnly);
     void mousePressEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
@@ -57,6 +67,11 @@ private:
     LuxEngine::Vec3 initialScale_{1, 1, 1};
     LuxEngine::uint32 dragId_ = 0;
     EditorTool tool_ = EditorTool::Select;
+    ViewPreset preset_ = ViewPreset::Perspective;
+    int axis_ = -1;
+    bool axisGesture_ = false;
+    bool snapToGrid_ = false;
+    bool gridVisible_ = true;
     bool orbiting_ = false, panning_ = false, dragging_ = false;
     std::shared_ptr<EngineSceneRenderer> engineRenderer_;
     bool engineFrame_ = false;

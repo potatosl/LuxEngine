@@ -17,7 +17,7 @@ enum class TextureColorSpace { Linear, Srgb };
 
 class LUX_API GpuTexture {
 public:
-    GpuTexture() = default;
+    GpuTexture();
     ~GpuTexture();
 
     GpuTexture(const GpuTexture&) = delete;
@@ -31,27 +31,18 @@ public:
 
     bool Initialize(std::nullptr_t, uint32, uint32, const void* = nullptr,
                     TextureFilter = TextureFilter::Linear,
-                    TextureColorSpace = TextureColorSpace::Linear) {
-        Release();
-        return false;
-    }
+                    TextureColorSpace = TextureColorSpace::Linear);
 
     void Release();
 
-    uint32 GetWidth() const {
-        return IsValid() ? width_ : 0;
-    }
+    uint32 GetWidth() const;
 
-    uint32 GetHeight() const {
-        return IsValid() ? height_ : 0;
-    }
+    uint32 GetHeight() const;
 
     bool IsValid() const;
     bool BelongsTo(const GpuDevice& device) const;
 
-    TextureColorSpace GetColorSpace() const noexcept {
-        return colorSpace_;
-    }
+    TextureColorSpace GetColorSpace() const noexcept;
 
 private:
     friend class GpuDevice;

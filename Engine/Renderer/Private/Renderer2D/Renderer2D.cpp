@@ -371,4 +371,36 @@ Renderer2D::Statistics Renderer2D::GetStats() {
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext2DMutex);
     return DefaultContext2D().GetStats();
 }
+
+void OrthographicCamera::SetPosition(const Vec3& position) {
+    position_ = position;
+    RecalculateMatrix();
+}
+
+void OrthographicCamera::SetRotation(float rotationRadians) {
+    rotation_ = rotationRadians;
+    RecalculateMatrix();
+}
+
+const Vec3& OrthographicCamera::GetPosition() const {
+    return position_;
+}
+
+float OrthographicCamera::GetRotation() const {
+    return rotation_;
+}
+
+const Mat4& OrthographicCamera::GetProjectionMatrix() const {
+    return projectionMatrix_;
+}
+
+const Mat4& OrthographicCamera::GetViewMatrix() const {
+    return viewMatrix_;
+}
+
+const Mat4& OrthographicCamera::GetViewProjectionMatrix() const {
+    return viewProjectionMatrix_;
+}
+
+OrthographicCamera::OrthographicCamera() = default;
 } // namespace LuxEngine

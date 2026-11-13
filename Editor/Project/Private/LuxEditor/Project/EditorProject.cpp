@@ -579,4 +579,42 @@ bool RecentProjects::Save() const {
     return ReplaceFile(temporary, storageFile_);
 }
 
+const std::filesystem::path& EditorProject::GetFile() const noexcept {
+    return file_;
+}
+
+std::filesystem::path EditorProject::GetSceneFile() const {
+    return file_.parent_path() / scene_;
+}
+
+const std::string& EditorProject::GetName() const noexcept {
+    return settings_.name;
+}
+
+const std::string& EditorProject::GetEngineVersion() const noexcept {
+    return engineVersion_;
+}
+
+ProjectTemplate EditorProject::GetTemplate() const noexcept {
+    return projectTemplate_;
+}
+
+const ProjectSettings& EditorProject::GetSettings() const noexcept {
+    return settings_;
+}
+
+const std::filesystem::path& EditorProject::GetIcon() const noexcept {
+    return settings_.icon;
+}
+
+RecentProjects::RecentProjects(std::filesystem::path storageFile)
+    : storageFile_(std::move(storageFile)) {}
+
+const std::vector<std::filesystem::path>& RecentProjects::Get() const noexcept {
+    return files_;
+}
 } // namespace LuxEditor
+
+namespace LuxEditor {
+bool ProjectDependency::operator==(const ProjectDependency&) const = default;
+}

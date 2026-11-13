@@ -30,7 +30,7 @@ MeshOutput VS_MAIN(VSInput In)
     Out.uv = In.uv;
     Out.world = world.xyz;
     Out.options = gDraw.colorOptions;
-    const float3x3 m = (float3x3)gDraw.model;
+    const float3x3 m = float3x3(gDraw.model);
     const float3x3 cofactors = float3x3(cross(m[1], m[2]), cross(m[2], m[0]), cross(m[0], m[1]));
     const float determinant = dot(m[0], cofactors[0]);
     Out.normal = abs(determinant) > 1e-10f ? mul(cofactors, In.normal) / determinant : float3(0, 0, 0);

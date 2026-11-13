@@ -14,7 +14,7 @@ class GpuDevice;
 
 namespace LuxEditor {
 
-// Renders a Scene with the engine's Vulkan Renderer2D and Renderer3D into images the Qt viewport
+// Renders a Scene with the engine's The Forge Renderer2D and Renderer3D into images the Qt viewport
 // can show. The engine needs an SDL window for its swapchain, so a hidden window is used and every
 // frame is read back with the GpuDevice frame capture.
 class EngineSceneRenderer final {
@@ -34,23 +34,19 @@ public:
     // worldBounds: left, top (larger y), right, bottom in world units.
     bool Render(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight, const QRectF& worldBounds,
                 QImage& output);
-    // 3D perspective rendering with native Vulkan Renderer3D.
+    // 3D perspective rendering with the engine Renderer3D.
     bool Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                   const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
                   QImage& output, QImage* skyboxBackground = nullptr);
 
-    const QString& LastError() const {
-        return error_;
-    }
+    const QString& LastError() const;
 
     LuxEngine::GpuDevice* GetGpuDevice() noexcept;
     const LuxEngine::GpuDevice* GetGpuDevice() const noexcept;
     bool GetMeshBounds(const std::string& path, LuxEngine::Vec3& minimum,
                        LuxEngine::Vec3& maximum) const;
 
-    LuxEngine::uint32 GetRecoveryCount() const noexcept {
-        return recoveries_;
-    }
+    LuxEngine::uint32 GetRecoveryCount() const noexcept;
 
     // Disabled for offscreen/minimal Qt platforms unless SetForceAllowed(true) or
     // LUX_EDITOR_FORCE_GPU_VIEWPORT is set, and disabled when LUX_EDITOR_SOFTWARE_VIEWPORT is set.
@@ -58,9 +54,7 @@ public:
     static void SetForceAllowed(bool force);
     static void SetDefaultValidation(int validationMode);
 
-    void SetPostSceneHookForTesting(std::function<void()> hook) {
-        postSceneHook_ = std::move(hook);
-    }
+    void SetPostSceneHookForTesting(std::function<void()> hook);
 
 private:
     bool Render3DPass(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,

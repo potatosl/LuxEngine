@@ -647,7 +647,7 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
                 const auto asset = path.empty() ? std::string("기본 큐브") : path;
                 cached.error = missingUv ? "텍스처를 적용할 UV 좌표가 없는 OBJ입니다: " + asset
                                : !loaded ? "OBJ 메시를 읽지 못했습니다: " + asset
-                               : !room ? "메시 캐시 예산을 초과했습니다: " + asset
+                               : !room   ? "메시 캐시 예산을 초과했습니다: " + asset
                                        : "GPU 메시 업로드 실패: " + impl_->device->GetLastError() +
                                              " / " + asset;
             }
@@ -851,4 +851,45 @@ const std::string& Renderer3D::GetLastAssetError() {
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
     return DefaultContext3D().GetLastAssetError();
 }
+
+void PerspectiveCamera::SetPosition(const Vec3& position) {
+    position_ = position;
+    RecalculateMatrix();
+}
+
+void PerspectiveCamera::SetTarget(const Vec3& target) {
+    target_ = target;
+    RecalculateMatrix();
+}
+
+void PerspectiveCamera::SetUp(const Vec3& up) {
+    up_ = up;
+    RecalculateMatrix();
+}
+
+const Vec3& PerspectiveCamera::GetPosition() const {
+    return position_;
+}
+
+const Vec3& PerspectiveCamera::GetTarget() const {
+    return target_;
+}
+
+const Mat4& PerspectiveCamera::GetProjectionMatrix() const {
+    return projectionMatrix_;
+}
+
+const Mat4& PerspectiveCamera::GetViewMatrix() const {
+    return viewMatrix_;
+}
+
+const Mat4& PerspectiveCamera::GetViewProjectionMatrix() const {
+    return viewProjectionMatrix_;
+}
+
+uint32 Mesh3D::GetIndexCount() const {
+    return IsValid() ? indexCount_ : 0;
+}
+
+PerspectiveCamera::PerspectiveCamera() = default;
 } // namespace LuxEngine

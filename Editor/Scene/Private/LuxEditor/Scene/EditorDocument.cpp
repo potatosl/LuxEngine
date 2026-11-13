@@ -440,4 +440,44 @@ bool EditorDocument::DeleteSelected() {
     active.dirty = true;
     return true;
 }
+
+const std::string& EditorDocument::GetLoadWarning() const noexcept {
+    return Active().loadWarning;
+}
+
+const std::string& EditorDocument::GetLastError() const noexcept {
+    return error_;
+}
+
+bool EditorDocument::IsDirty() const noexcept {
+    return Active().dirty;
+}
+
+void EditorDocument::MarkDirty() noexcept {
+    Active().dirty = true;
+}
+
+void EditorDocument::SetDirty(bool dirty) noexcept {
+    Active().dirty = dirty;
+}
+
+const std::string& EditorDocument::GetPath() const noexcept {
+    return Active().path;
+}
+
+LuxEngine::Scene& EditorDocument::GetScene() noexcept {
+    return *Active().scene;
+}
+
+const LuxEngine::Scene& EditorDocument::GetScene() const noexcept {
+    return *Active().scene;
+}
+
+EditorDocument::TabState& EditorDocument::Active() noexcept {
+    return tabs_[activeIndex_];
+}
+
+const EditorDocument::TabState& EditorDocument::Active() const noexcept {
+    return tabs_[activeIndex_];
+}
 } // namespace LuxEditor

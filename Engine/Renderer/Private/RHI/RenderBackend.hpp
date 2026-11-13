@@ -27,7 +27,7 @@ struct SceneDrawDesc {
 // HDR scene path (PBR, shadows, image-based lighting) owned by a backend.
 class Scene3DRenderer {
 public:
-    virtual ~Scene3DRenderer() = default;
+    virtual ~Scene3DRenderer();
     // Resolves the handles immediately; returns false when one of them is not live.
     virtual bool AddDraw(const SceneDrawDesc& draw) = 0;
     virtual size_t DrawCount() const = 0;
@@ -42,7 +42,7 @@ public:
 // depend on the public objects (buffer type, ownership, size) before forwarding here.
 class RenderBackend {
 public:
-    virtual ~RenderBackend() = default;
+    virtual ~RenderBackend();
 
     virtual bool Initialize(Window& window, const GpuDeviceConfig& config) = 0;
     virtual void Shutdown() = 0;

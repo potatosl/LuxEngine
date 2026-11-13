@@ -11,6 +11,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(LuxEngine CONFIG REQUIRED)
 include(${CMAKE_CURRENT_SOURCE_DIR}/Dependencies.cmake OPTIONAL)
 add_executable(LuxGame Source/Main.cpp)
+find_program(LUX_GAME_DOTNET dotnet HINTS "$ENV{DOTNET_ROOT}" REQUIRED)
+set(_lux_managed_output "${CMAKE_CURRENT_SOURCE_DIR}/.lux/managed")
+add_custom_target(LuxGameScripts
+    COMMAND "${LUX_GAME_DOTNET}" build "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/GameScripts.csproj"
+        --configuration Release --output "${_lux_managed_output}"
+        --artifacts-path "${CMAKE_CURRENT_BINARY_DIR}/managed-artifacts"
+        "-p:LuxEngineScriptCore=${LuxEngine_MANAGED_DIR}/LuxEngine.ScriptCore.dll"
+        "-p:RestoreConfigFile=${CMAKE_CURRENT_SOURCE_DIR}/Scripts/NuGet.Config"
+        -p:NuGetAudit=false
+    VERBATIM)
+add_dependencies(LuxGame LuxGameScripts)
 target_link_libraries(LuxGame PRIVATE LuxEngine::Engine LuxEngine::Runtime)
 target_compile_definitions(LuxGame PRIVATE LUX_GAME_TEMPLATE_KIND=@KIND@)
 if(MSVC)
@@ -32,6 +43,10 @@ add_custom_target(LuxGameContent
         "${_lux_manifest}"
         "$<TARGET_FILE_DIR:LuxGame>/Content/project.luxproject"
     VERBATIM)
+add_dependencies(LuxGameContent LuxGameScripts)
+add_custom_command(TARGET LuxGameContent POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${_lux_managed_output}"
+        "$<TARGET_FILE_DIR:LuxGame>/Content/Scripts")
 add_dependencies(LuxGame LuxGameContent)
 if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Assets")
     add_custom_command(TARGET LuxGameContent POST_BUILD
@@ -128,6 +143,12 @@ protected:
         scene_ = manager_.Load(sceneFile, error);
         if (!scene_)
             throw std::runtime_error(error.empty() ? "시작 씬을 열 수 없습니다." : error);
+        if (!scene_->GetComponentEntityIds<le::ScriptComponent>().empty()) {
+            le::ScriptRuntimeConfig config;
+            config.assemblyPath = basePath / "Content/Scripts/GameScripts.dll";
+            if (!scripts_.Initialize(*scene_, config))
+                throw std::runtime_error(scripts_.GetLastError());
+        }
         camera3D_.SetPerspective(le::ToRadians(60), 16.0f / 9, .1f, 1000);
         camera3D_.SetPosition({0, 6, 12});
         camera3D_.SetTarget({0, 0, 0});
@@ -186,7 +207,7 @@ protected:
     void OnUpdate(double dt) override {
         if (le::Input::WasActionPressed("Quit"))
             Close();
-        if (player_) {
+        if (player_ && !player_.HasComponent<le::ScriptComponent>()) {
             const float horizontal = (le::Input::IsActionDown("Right") ? 1.0f : 0.0f) -
                                      (le::Input::IsActionDown("Left") ? 1.0f : 0.0f);
             const float vertical = (le::Input::IsActionDown("Up") ? 1.0f : 0.0f) -
@@ -237,6 +258,8 @@ protected:
             }
         }
         TickStreaming(dt);
+        if (scripts_.IsRunning() && !scripts_.Update(dt))
+            throw std::runtime_error(scripts_.GetLastError());
         scene_->OnUpdate(dt);
         if (smokeTest_ && ++frames_ >= 10) {
             if (GetGpuDevice().GetCounters().validationErrors != 0)
@@ -266,6 +289,7 @@ protected:
     }
 
     void OnShutdown() override {
+        scripts_.Shutdown();
         le::Input::ClearBindings();
         manager_.ClearCache();
         le::PhysicsEngine::Shutdown();
@@ -275,6 +299,7 @@ protected:
 
 private:
     le::SceneManager manager_;
+    le::ScriptRuntime scripts_;
     std::shared_ptr<le::Scene> scene_;
     le::Entity player_;
     le::Entity npc_;
@@ -297,15 +322,84 @@ int RunGame(int argc, char* argv[]) {
 }
 LUX_ENGINE_MAIN(RunGame)
 )LUX";
+constexpr const char* ScriptProject = R"LUX(<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="LuxEngine.ScriptCore">
+      <HintPath>$(LuxEngineScriptCore)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
+)LUX";
+
+constexpr const char* ScriptSource = R"LUX(using LuxEngine;
+
+namespace Game {
+    public sealed class Mover : EntityScript {
+        public float Speed = 4.0f;
+
+        protected override void OnUpdate(double deltaTime) {
+            Transform transform = Entity.Transform;
+            float horizontal = (Input.IsKeyPressed(LuxKey.D) ? 1.0f : 0.0f)
+                - (Input.IsKeyPressed(LuxKey.A) ? 1.0f : 0.0f);
+            transform.Position.X += horizontal * Speed * (float)deltaTime;
+            Entity.Transform = transform;
+        }
+    }
+}
+)LUX";
+
+constexpr const char* ScriptFormatting = R"LUX(root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+csharp_new_line_before_open_brace = none
+csharp_new_line_before_else = false
+csharp_new_line_before_catch = false
+csharp_new_line_before_finally = false
+csharp_style_namespace_declarations = block_scoped:warning
+csharp_style_expression_bodied_methods = false:warning
+csharp_preserve_single_line_blocks = false
+csharp_preserve_single_line_statements = false
+)LUX";
 } // namespace
 
 bool CreateTemplateFiles(const std::filesystem::path& directory, ProjectTemplate projectTemplate,
                          std::string& error) {
     std::error_code ec;
+    std::filesystem::create_directories(directory / "Scripts", ec);
+    if (ec) {
+        error = "프로젝트 소스 폴더를 만들 수 없습니다.";
+        return false;
+    }
     std::filesystem::create_directories(directory / "Source", ec);
     if (ec) {
         error = "프로젝트 소스 폴더를 만들 수 없습니다.";
         return false;
+    }
+    const std::pair<const char*, const char*> scriptFiles[] = {
+        {"Scripts/GameScripts.csproj", ScriptProject},
+        {"Scripts/Mover.cs", ScriptSource},
+        {".editorconfig", ScriptFormatting},
+        {"Scripts/NuGet.Config",
+         "<configuration><packageSources><clear /></packageSources></configuration>\n"}};
+    for (const auto& [path, content] : scriptFiles) {
+        std::ofstream file(directory / path, std::ios::binary);
+        file << content;
+        file.close();
+        if (!file) {
+            error = "C# 프로젝트 파일을 저장할 수 없습니다.";
+            return false;
+        }
     }
     std::string cmake = GameCMake;
     const auto marker = cmake.find("@KIND@");

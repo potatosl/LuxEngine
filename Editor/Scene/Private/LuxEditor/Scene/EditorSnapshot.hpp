@@ -10,15 +10,10 @@ struct EditorSnapshot {
     QByteArray scene;
     std::vector<std::pair<LuxEngine::uint32, float>> animationTimes;
 
-    bool isEmpty() const {
-        return scene.isEmpty();
-    }
+    bool isEmpty() const;
 
-    void clear() {
-        scene.clear();
-        animationTimes.clear();
-    }
+    void clear();
 
-    bool operator==(const EditorSnapshot&) const = default;
+    bool operator==(const EditorSnapshot&) const;
 };
 } // namespace LuxEditor

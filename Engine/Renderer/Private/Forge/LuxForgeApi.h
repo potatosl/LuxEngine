@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define LUX_FORGE_API_VERSION 6u
+#define LUX_FORGE_API_VERSION 7u
 
 #if defined(_WIN32)
 #if defined(LUX_FORGE_BUILD)
@@ -25,8 +25,16 @@ extern "C" {
 
 typedef struct LuxForgeDevice LuxForgeDevice;
 
+#define LUX_FORGE_WINDOW_WIN32 1u
+#define LUX_FORGE_WINDOW_X11 2u
+#define LUX_FORGE_WINDOW_WAYLAND 3u
+#define LUX_FORGE_WINDOW_METAL 4u
+
 typedef struct LuxForgeInitDesc {
-    void* nativeWindow; // HWND on Windows
+    void* nativeWindow;      // HWND, wl_surface, or SDL Metal NSView
+    void* nativeDisplay;     // Display* on X11, wl_display* on Wayland
+    uint64_t nativeWindowId; // X11 Window
+    uint32_t windowType;     // LUX_FORGE_WINDOW_*
     uint32_t width;
     uint32_t height;
     uint32_t framesInFlight;
@@ -122,7 +130,7 @@ typedef struct LuxForgeScene {
     float up[4];
     float forward[4];
     float shadowMatrix[16];
-    float shadowOptions[4]; // x: on, y: 1/resolution, z: depth bias, w: normal bias
+    float shadowOptions[4];    // x: on, y: 1/resolution, z: depth bias, w: normal bias
     uint32_t shadowResolution; // 0 = no shadow pass (then shadowOptions[0] must be 0)
     uint32_t environmentMap;   // from createEnvironment
 } LuxForgeScene;
@@ -164,21 +172,23 @@ typedef struct LuxForgeApi {
     int (*hasTexture)(const LuxForgeDevice* device, uint32_t texture);
     // Triangle list (vertexCount % 3 == 0) with a column-major view-projection matrix.
     // texture 0 = white. depth = depth test/write without blending (3D), else alpha blended 2D.
-    int (*drawTriangles)(LuxForgeDevice* device, const LuxForgeVertex* vertices, uint32_t vertexCount,
-                         const float* viewProjection, uint32_t texture, int depth);
+    int (*drawTriangles)(LuxForgeDevice* device, const LuxForgeVertex* vertices,
+                         uint32_t vertexCount, const float* viewProjection, uint32_t texture,
+                         int depth);
     void (*stats)(const LuxForgeDevice* device, LuxForgeStats* stats);
 
     // GPU buffers (zero-initialised). Updates wait for frames still reading the buffer.
     uint32_t (*createBuffer)(LuxForgeDevice* device, int type, uint32_t sizeBytes);
-    int (*updateBuffer)(LuxForgeDevice* device, uint32_t buffer, const void* data, uint32_t sizeBytes,
-                        uint32_t offsetBytes);
+    int (*updateBuffer)(LuxForgeDevice* device, uint32_t buffer, const void* data,
+                        uint32_t sizeBytes, uint32_t offsetBytes);
     void (*destroyBuffer)(LuxForgeDevice* device, uint32_t buffer);
     int (*hasBuffer)(const LuxForgeDevice* device, uint32_t buffer);
     // Lit meshes (port of the Vulkan backend's mesh pipeline: Basic shaders with lit = true).
     int (*setLighting)(LuxForgeDevice* device, const LuxForgeLighting* lighting);
-    int (*drawIndexed)(LuxForgeDevice* device, uint32_t vertexBuffer, uint32_t indexBuffer, uint32_t indexCount,
-                       const float* viewProjection, const float* model, const float* albedo, uint32_t texture,
-                       float metallic, float roughness, int pbr);
+    int (*drawIndexed)(LuxForgeDevice* device, uint32_t vertexBuffer, uint32_t indexBuffer,
+                       uint32_t indexCount, const float* viewProjection, const float* model,
+                       const float* albedo, uint32_t texture, float metallic, float roughness,
+                       int pbr);
 
     // HDR scene renderer. An environment holds the sky, diffuse and specular cube maps and the
     // 2D BRDF lookup table (images[0..3]); returns an id > 0, or 0 on failure.
@@ -188,8 +198,8 @@ typedef struct LuxForgeApi {
     // Shadow map, HDR pass (sky + lit meshes with the current SetLighting block) and tone mapping
     // onto the swap chain. Pixels no mesh or sky covered keep what was drawn before. Draws that
     // reference dead resources are skipped; *drawn (optional) receives the number rendered.
-    int (*renderScene)(LuxForgeDevice* device, const LuxForgeScene* scene, const LuxForgeSceneDraw* draws,
-                       uint32_t drawCount, uint32_t* drawn);
+    int (*renderScene)(LuxForgeDevice* device, const LuxForgeScene* scene,
+                       const LuxForgeSceneDraw* draws, uint32_t drawCount, uint32_t* drawn);
 } LuxForgeApi;
 
 typedef const LuxForgeApi* (*LuxForgeGetApiFn)(void);
