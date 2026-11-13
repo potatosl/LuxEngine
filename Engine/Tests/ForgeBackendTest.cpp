@@ -75,13 +75,14 @@ bool RestoreForCapture(Window& window) {
     const auto start = SDL_GetTicks();
     do {
         window.PollEvents();
-        if (SDL_ShowWindow(native) && SDL_RestoreWindow(native) && SDL_SyncWindow(native)) {
+        if (SDL_ShowWindow(native) && SDL_RestoreWindow(native) && SDL_RaiseWindow(native) &&
+            SDL_SyncWindow(native)) {
             window.PollEvents();
             if (!window.IsMinimized())
                 return true;
         }
         SDL_Delay(10);
-    } while (SDL_GetTicks() - start < 2000);
+    } while (SDL_GetTicks() - start < 5000);
     return false;
 }
 
@@ -106,11 +107,13 @@ struct Session {
     GpuDevice gpu;
     bool ok = false;
 
-    explicit Session(uint32 width = 320, uint32 height = 240, GpuDeviceConfig config = {}) {
+    explicit Session(uint32 width = 320, uint32 height = 240, GpuDeviceConfig config = {},
+                     bool hidden = false) {
         WindowProps props;
         props.width = width;
         props.height = height;
         props.title = "LuxEngine Forge backend verification";
+        props.hidden = hidden;
         props.vulkan = false;
         if (!window.Initialize(props))
             return;
@@ -173,11 +176,21 @@ void Misuse() {
           "misuse keeps the device usable");
     Check(CaptureClear(s.window, s.gpu, 0, 1, 0, capture) && CentreIs(capture, 0, 255, 0),
           "rendering after misuse");
+    Window secondWindow;
+    Check(secondWindow.Initialize({.title = "Second Forge viewport", .width = 96, .height = 64}),
+          "second window initialized");
     GpuDevice second;
-    Check(!second.Initialize(s.window), "second Forge device refused");
-    std::printf("  second device: %s\n", second.GetLastError().c_str());
+    Check(second.Initialize(secondWindow), "second Forge viewport initialized");
+    Check(CaptureClear(secondWindow, second, 0, 0, 1, capture) && CentreIs(capture, 0, 0, 255),
+          "second viewport renders independently");
     Check(CaptureClear(s.window, s.gpu, 1, 0, 0, capture) && CentreIs(capture, 255, 0, 0),
-          "first device unaffected by refused second");
+          "first device remains usable alongside second viewport");
+    second.Shutdown();
+    Check(second.Initialize(secondWindow) && Begin(secondWindow, second),
+          "frame can be abandoned during viewport shutdown");
+    second.Shutdown();
+    Check(CaptureClear(s.window, s.gpu, 0, 1, 0, capture) && CentreIs(capture, 0, 255, 0),
+          "destroying another viewport preserves the shared renderer");
 }
 
 void Resizing() {
@@ -338,7 +351,9 @@ template <class F> bool CaptureFrame(Session& s, GpuFrameCapture& out, F&& draw)
 
 void Drawing() {
     std::printf("[drawing]\n");
-    Session s(64, 64);
+    // A decorated Wayland window may be resized to the compositor's minimum title-bar
+    // width after creation. Pixel-exact texture tests use an unmapped readback window.
+    Session s(64, 64, {}, true);
     if (!s.ok)
         return Check(false, "session for drawing");
     const Mat4 pixels = Mat4::Orthographic(0, 64, 64, 0, -1, 1);
@@ -432,10 +447,22 @@ void Drawing() {
                                   s.gpu.DrawTriangles(right, pixels, &wide);
                        }),
           "thin textures drawn");
+    Check(c.width == 64 && c.height == 64, "pixel test retains its authored framebuffer size");
     Check(PixelIs(c, 16, 8, 255, 0, 0, "1x2 top") && PixelIs(c, 16, 56, 0, 0, 255, "1x2 bottom") &&
               PixelIs(c, 36, 32, 0, 255, 0, "2x1 left") &&
               PixelIs(c, 60, 32, 255, 255, 0, "2x1 right"),
           "thin textures sample correctly");
+
+    Check(CaptureFrame(s, c,
+                       [&] {
+                           const auto quad = Quad(0, 0, 64, 64, 0, Vec4(1, 1, 1, 1));
+                           return s.gpu.Clear(0, 0, 0, 1) &&
+                                  s.gpu.DrawTriangles(quad, pixels, &wide);
+                       }),
+          "thin texture is reusable in a subsequent frame");
+    Check(PixelIs(c, 8, 32, 0, 255, 0, "reused 2x1 left") &&
+              PixelIs(c, 56, 32, 255, 255, 0, "reused 2x1 right"),
+          "thin texture retains its own texels across frame slots");
 
     // Depth: z=+0.5 -> depth 0.25 (near), z=-0.5 -> 0.75 (far); LEQUAL keeps the nearest.
     Check(CaptureFrame(s, c,
@@ -1158,7 +1185,11 @@ double SecondsUntil(const std::string& hhmm) {
         return 0;
     std::time_t now = std::time(nullptr);
     std::tm local{};
+#if defined(_WIN32)
     localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
     std::tm target = local;
     target.tm_hour = hh, target.tm_min = mm, target.tm_sec = 0;
     double diff = std::difftime(std::mktime(&target), now);
@@ -2404,7 +2435,6 @@ int main(int argc, char** argv) {
         if (only.empty() || std::find(only.begin(), only.end(), name) != only.end())
             section();
     };
-    _putenv_s("LUX_RENDER_BACKEND", "forge");
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::printf("SKIP: no video driver\n");
         return 77;

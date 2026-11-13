@@ -8,6 +8,9 @@ lux_engine_module(Core
         Public/LuxEngine/Core/Random.hpp
         Public/LuxEngine/Core/Timer.hpp
     SOURCES
+        Private/Random.cpp
+        Private/Event.cpp
+        Private/Math.cpp
         Private/Log.cpp
         Private/Timer.cpp
 )

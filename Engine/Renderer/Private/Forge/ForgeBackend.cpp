@@ -15,21 +15,16 @@
 #include <thread>
 #include <vector>
 
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#if defined(__APPLE__)
+#include <SDL3/SDL_metal.h>
 #endif
 
 namespace LuxEngine::Forge {
 
 struct ForgeLibrary {
-#if defined(_WIN32)
-    HMODULE module = nullptr;
+    SDL_SharedObject* module = nullptr;
+#if defined(__APPLE__)
+    SDL_MetalView metalView = nullptr;
 #endif
     const LuxForgeApi* api = nullptr;
     LuxForgeDevice* device = nullptr;
@@ -37,10 +32,12 @@ struct ForgeLibrary {
     ~ForgeLibrary() {
         if (api && device)
             api->destroy(device);
-#if defined(_WIN32)
-        if (module)
-            FreeLibrary(module);
+#if defined(__APPLE__)
+        if (metalView)
+            SDL_Metal_DestroyView(metalView);
 #endif
+        if (module)
+            SDL_UnloadObject(module);
     }
 };
 
@@ -73,31 +70,60 @@ bool ForgeBackend::ForgeFailure() {
 
 bool ForgeBackend::Initialize(Window& window, const GpuDeviceConfig& config) {
     Shutdown();
-#if !defined(_WIN32)
-    (void)window;
-    (void)config;
-    return Fail(GpuStatus::Error, "The Forge backend is only available on Windows");
-#else
     auto lib = std::make_unique<ForgeLibrary>();
-    lib->module = LoadLibraryW(L"LuxForge.dll");
+#if defined(_WIN32)
+    constexpr const char* libraryName = "LuxForge.dll";
+#elif defined(__APPLE__)
+    constexpr const char* libraryName = "libLuxForge.dylib";
+#else
+    constexpr const char* libraryName = "libLuxForge.so";
+#endif
+    const char* base = SDL_GetBasePath();
+    if (!base)
+        return Fail(GpuStatus::Error, "The executable directory is unavailable");
+    const std::string libraryPath = std::string(base) + libraryName;
+    lib->module = SDL_LoadObject(libraryPath.c_str());
     if (!lib->module)
-        return Fail(GpuStatus::Error, "LuxForge.dll was not found next to the executable");
-    auto getApi = reinterpret_cast<LuxForgeGetApiFn>(GetProcAddress(lib->module, "LuxForgeGetApi"));
+        return Fail(GpuStatus::Error,
+                    "The Forge renderer could not be loaded: " + std::string(SDL_GetError()));
+    const auto getApi =
+        reinterpret_cast<LuxForgeGetApiFn>(SDL_LoadFunction(lib->module, "LuxForgeGetApi"));
     lib->api = getApi ? getApi() : nullptr;
     if (!lib->api || lib->api->version != LUX_FORGE_API_VERSION)
-        return Fail(GpuStatus::Error, "LuxForge.dll does not match this engine build");
-
+        return Fail(GpuStatus::Error, "The Forge renderer does not match this engine build");
     SDL_Window* sdl = window.GetNativeHandle();
-    void* hwnd = sdl ? SDL_GetPointerProperty(SDL_GetWindowProperties(sdl),
-                                              SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr)
-                     : nullptr;
-    if (!hwnd)
-        return Fail(GpuStatus::Error, "Window has no Win32 handle");
+    if (!sdl)
+        return Fail(GpuStatus::Error, "The rendering window is unavailable");
+    const auto properties = SDL_GetWindowProperties(sdl);
+    LuxForgeInitDesc desc = {};
+#if defined(_WIN32)
+    desc.windowType = LUX_FORGE_WINDOW_WIN32;
+    desc.nativeWindow =
+        SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#elif defined(__APPLE__)
+    (void)properties;
+    lib->metalView = SDL_Metal_CreateView(sdl);
+    desc.windowType = LUX_FORGE_WINDOW_METAL;
+    desc.nativeWindow = lib->metalView;
+#else
+    const char* driver = SDL_GetCurrentVideoDriver();
+    if (driver && std::strcmp(driver, "wayland") == 0) {
+        desc.windowType = LUX_FORGE_WINDOW_WAYLAND;
+        desc.nativeDisplay =
+            SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
+        desc.nativeWindow =
+            SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+    } else {
+        desc.windowType = LUX_FORGE_WINDOW_X11;
+        desc.nativeDisplay =
+            SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
+        desc.nativeWindowId = static_cast<uint64_t>(
+            SDL_GetNumberProperty(properties, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+    }
+#endif
     uint32 width = 0, height = 0;
     window.GetFramebufferSize(width, height);
 
-    LuxForgeInitDesc desc = {};
-    desc.nativeWindow = hwnd;
     desc.width = width;
     desc.height = height;
     desc.framesInFlight = config.framesInFlight ? config.framesInFlight : 2;
@@ -124,7 +150,6 @@ bool ForgeBackend::Initialize(Window& window, const GpuDeviceConfig& config) {
     frameStats_ = {};
     counters_ = {};
     return true;
-#endif
 }
 
 void ForgeBackend::Shutdown() {

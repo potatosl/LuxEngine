@@ -443,3 +443,69 @@ void SurvivalGame::AddEffect(Vec2 position, float radius, int type) {
     effects_.push_back({position, 0, type == 4 ? 1.0f : .45f, radius, type});
 }
 } // namespace ForestGame
+
+namespace ForestGame {
+Phase SurvivalGame::GetPhase() const {
+    return phase_;
+}
+
+const Player& SurvivalGame::GetPlayer() const {
+    return player_;
+}
+
+const std::vector<Enemy>& SurvivalGame::GetEnemies() const {
+    return enemies_;
+}
+
+const std::vector<Projectile>& SurvivalGame::GetProjectiles() const {
+    return projectiles_;
+}
+
+const std::vector<Gem>& SurvivalGame::GetGems() const {
+    return gems_;
+}
+
+const std::vector<Effect>& SurvivalGame::GetEffects() const {
+    return effects_;
+}
+
+const std::array<Upgrade, 3>& SurvivalGame::GetChoices() const {
+    return choices_;
+}
+
+float SurvivalGame::Elapsed() const {
+    return elapsed_;
+}
+
+float SurvivalGame::Duration() const {
+    return rules_.runDuration;
+}
+
+int SurvivalGame::Kills() const {
+    return kills_;
+}
+
+Vec2 SurvivalGame::LastFacing() const {
+    return facing_;
+}
+
+float SurvivalGame::OrbitAngle() const {
+    return orbitAngle_;
+}
+
+int SurvivalGame::OrbitCount() const {
+    return orbitCount_;
+}
+
+float SurvivalGame::OrbitRadius() const {
+    return orbitRadius_;
+}
+
+float SurvivalGame::PulseRadius() const {
+    return pulseRadius_;
+}
+
+bool SurvivalGame::BossSpawned() const {
+    return bossSpawned_;
+}
+} // namespace ForestGame

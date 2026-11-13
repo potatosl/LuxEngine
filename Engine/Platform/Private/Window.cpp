@@ -23,7 +23,11 @@ bool Window::Initialize(const WindowProps& props) {
         flags |= SDL_WINDOW_RESIZABLE;
     }
     if (props_.vulkan) {
+#if defined(__APPLE__)
+        flags |= SDL_WINDOW_METAL;
+#elif defined(__linux__)
         flags |= SDL_WINDOW_VULKAN;
+#endif
     }
     if (props_.hidden) {
         flags |= SDL_WINDOW_HIDDEN;
@@ -40,7 +44,8 @@ bool Window::Initialize(const WindowProps& props) {
     if (!ApplySystemTheme())
         Log::Warn(std::string("Window icon failed: ") + SDL_GetError());
     isRunning_ = true;
-    Log::Info("Window initialized successfully (" + props_.title + ")");
+    if (!props_.hidden)
+        Log::Info("Window initialized successfully (" + props_.title + ")");
     return true;
 }
 
@@ -49,6 +54,11 @@ bool Window::ApplySystemTheme() {
         return false;
     const bool dark = SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
     const auto theme = dark ? ColorTheme::Dark : ColorTheme::Light;
+    // Readback-only viewport windows have no user-facing title bar or icon.
+    if (props_.hidden) {
+        colorTheme_ = theme;
+        return true;
+    }
     if (hasWindowIcon_ && theme == colorTheme_)
         return true;
     auto* icon = Branding::CreateWindowIcon(dark);
@@ -228,4 +238,33 @@ uint32 Window::GetHeight() const {
                                                                    : props_.height;
 }
 
+ColorTheme Window::GetColorTheme() const {
+    return colorTheme_;
+}
+
+bool Window::HasWindowIcon() const {
+    return hasWindowIcon_;
+}
+
+bool Window::IsRunning() const {
+    return isRunning_;
+}
+
+SDL_Window* Window::GetNativeHandle() const {
+    return window_;
+}
+
+void Window::SetPresentCallback(std::function<bool(bool)> callback) {
+    presentCallback_ = std::move(callback);
+}
+
+bool Window::IsVSync() const {
+    return props_.vsync;
+}
+
+void Window::SetEventCallback(const EventCallbackFn& callback) {
+    eventCallback_ = callback;
+}
+
+Window::Window() = default;
 } // namespace LuxEngine

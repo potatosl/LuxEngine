@@ -81,69 +81,37 @@ public:
     bool ChooseUpgrade(int index);
     void Tick(double dt, Vec2 movement, bool dash = false);
 
-    Phase GetPhase() const {
-        return phase_;
-    }
+    Phase GetPhase() const;
 
-    const Player& GetPlayer() const {
-        return player_;
-    }
+    const Player& GetPlayer() const;
 
-    const std::vector<Enemy>& GetEnemies() const {
-        return enemies_;
-    }
+    const std::vector<Enemy>& GetEnemies() const;
 
-    const std::vector<Projectile>& GetProjectiles() const {
-        return projectiles_;
-    }
+    const std::vector<Projectile>& GetProjectiles() const;
 
-    const std::vector<Gem>& GetGems() const {
-        return gems_;
-    }
+    const std::vector<Gem>& GetGems() const;
 
-    const std::vector<Effect>& GetEffects() const {
-        return effects_;
-    }
+    const std::vector<Effect>& GetEffects() const;
 
-    const std::array<Upgrade, 3>& GetChoices() const {
-        return choices_;
-    }
+    const std::array<Upgrade, 3>& GetChoices() const;
 
-    float Elapsed() const {
-        return elapsed_;
-    }
+    float Elapsed() const;
 
-    float Duration() const {
-        return rules_.runDuration;
-    }
+    float Duration() const;
 
-    int Kills() const {
-        return kills_;
-    }
+    int Kills() const;
 
-    Vec2 LastFacing() const {
-        return facing_;
-    }
+    Vec2 LastFacing() const;
 
-    float OrbitAngle() const {
-        return orbitAngle_;
-    }
+    float OrbitAngle() const;
 
-    int OrbitCount() const {
-        return orbitCount_;
-    }
+    int OrbitCount() const;
 
-    float OrbitRadius() const {
-        return orbitRadius_;
-    }
+    float OrbitRadius() const;
 
-    float PulseRadius() const {
-        return pulseRadius_;
-    }
+    float PulseRadius() const;
 
-    bool BossSpawned() const {
-        return bossSpawned_;
-    }
+    bool BossSpawned() const;
 
 private:
     void Reset();

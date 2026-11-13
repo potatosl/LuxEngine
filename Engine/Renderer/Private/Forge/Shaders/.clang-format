@@ -1,0 +1,3 @@
+BasedOnStyle: InheritParentConfig
+# FSL resource declarations depend on types defined by preceding includes.
+SortIncludes: Never

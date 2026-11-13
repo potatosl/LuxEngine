@@ -319,3 +319,17 @@ void ForestSurvivorApp::OnShutdown() {
     le::Log::Info("숲의 수호자 샘플을 종료했습니다.");
 }
 } // namespace ForestGame
+
+namespace ForestGame {
+const SurvivalGame& ForestSurvivorApp::GetGame() const {
+    return game_;
+}
+
+UiAction ForestSurvivorApp::ActionAt(float normalizedX, float normalizedY) const {
+    return renderer_.HitAction(normalizedX, normalizedY);
+}
+
+bool ForestSurvivorApp::UiTextFits() const {
+    return renderer_.TextLayoutFits();
+}
+} // namespace ForestGame

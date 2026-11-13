@@ -34,9 +34,7 @@ public:
     FrameResult RunFrame();
     void Shutdown() noexcept;
 
-    void Close() {
-        running_ = false;
-    }
+    void Close();
 
     virtual void OnEvent(Event& e);
 
@@ -45,13 +43,13 @@ public:
     GpuDevice& GetGpuDevice();
 
 protected:
-    virtual void OnInit() {}
+    virtual void OnInit();
 
-    virtual void OnUpdate(double /*dt*/) {}
+    virtual void OnUpdate(double /*dt*/);
 
-    virtual void OnRender(float /*elapsedSeconds*/) {}
+    virtual void OnRender(float /*elapsedSeconds*/);
 
-    virtual void OnShutdown() {}
+    virtual void OnShutdown();
 
 private:
     bool OnWindowClose(WindowCloseEvent& e);

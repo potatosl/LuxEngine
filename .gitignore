@@ -50,3 +50,6 @@ tools/dxc/
 /Engine/Resources/Characters/Mumu/previews/
 
 /external/
+
+/Engine/ThirdParty/
+**/obj/

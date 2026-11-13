@@ -14,7 +14,7 @@ enum class BufferType { Vertex, Index, Uniform, Storage };
 
 class LUX_API GpuBuffer {
 public:
-    GpuBuffer() = default;
+    GpuBuffer();
     ~GpuBuffer();
 
     GpuBuffer(const GpuBuffer&) = delete;
@@ -26,13 +26,9 @@ public:
     bool SetData(const void* data, uint32 sizeBytes, uint32 offsetBytes = 0);
     void Release();
 
-    uint32 GetSize() const {
-        return IsValid() ? sizeBytes_ : 0;
-    }
+    uint32 GetSize() const;
 
-    BufferType GetType() const {
-        return type_;
-    }
+    BufferType GetType() const;
 
     bool IsValid() const;
     bool BelongsTo(const GpuDevice& device) const;

@@ -23,17 +23,11 @@ class ForestSurvivorApp final : public LuxEngine::Application {
 public:
     explicit ForestSurvivorApp(RunOptions options);
 
-    const SurvivalGame& GetGame() const {
-        return game_;
-    }
+    const SurvivalGame& GetGame() const;
 
-    UiAction ActionAt(float normalizedX, float normalizedY) const {
-        return renderer_.HitAction(normalizedX, normalizedY);
-    }
+    UiAction ActionAt(float normalizedX, float normalizedY) const;
 
-    bool UiTextFits() const {
-        return renderer_.TextLayoutFits();
-    }
+    bool UiTextFits() const;
 
     void OnEvent(LuxEngine::Event& event) override;
 

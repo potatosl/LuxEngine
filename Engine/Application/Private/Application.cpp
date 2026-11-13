@@ -275,4 +275,15 @@ void Application::Shutdown() noexcept {
     shuttingDown_ = false;
 }
 
+void Application::Close() {
+    running_ = false;
+}
+
+void Application::OnInit() {}
+
+void Application::OnUpdate(double /*dt*/) {}
+
+void Application::OnRender(float /*elapsedSeconds*/) {}
+
+void Application::OnShutdown() {}
 } // namespace LuxEngine

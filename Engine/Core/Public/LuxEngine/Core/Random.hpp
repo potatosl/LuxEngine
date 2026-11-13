@@ -9,23 +9,13 @@ namespace LuxEngine {
 // A small deterministic generator for procedural scenes and reproducible tests.
 class Random {
 public:
-    explicit Random(uint32 seed) : state_(seed) {}
+    LUX_API explicit Random(uint32 seed);
 
-    uint32 Next() {
-        state_ = state_ * 1664525u + 1013904223u;
-        return state_;
-    }
+    LUX_API uint32 Next();
 
-    float Unit() {
-        return static_cast<float>(Next() >> 8) / 16777216.0f;
-    }
+    LUX_API float Unit();
 
-    float Range(float minimum, float maximum) {
-        if (!std::isfinite(minimum) || !std::isfinite(maximum) || maximum < minimum ||
-            !std::isfinite(maximum - minimum))
-            throw std::invalid_argument("Invalid random range");
-        return minimum + (maximum - minimum) * Unit();
-    }
+    LUX_API float Range(float minimum, float maximum);
 
 private:
     uint32 state_;

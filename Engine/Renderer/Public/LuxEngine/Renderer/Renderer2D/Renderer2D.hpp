@@ -17,40 +17,24 @@ struct Vertex2D {
 
 class LUX_API OrthographicCamera {
 public:
-    OrthographicCamera() = default;
+    OrthographicCamera();
     OrthographicCamera(float left, float right, float bottom, float top);
 
     void SetProjection(float left, float right, float bottom, float top);
 
-    void SetPosition(const Vec3& position) {
-        position_ = position;
-        RecalculateMatrix();
-    }
+    void SetPosition(const Vec3& position);
 
-    void SetRotation(float rotationRadians) {
-        rotation_ = rotationRadians;
-        RecalculateMatrix();
-    }
+    void SetRotation(float rotationRadians);
 
-    const Vec3& GetPosition() const {
-        return position_;
-    }
+    const Vec3& GetPosition() const;
 
-    float GetRotation() const {
-        return rotation_;
-    }
+    float GetRotation() const;
 
-    const Mat4& GetProjectionMatrix() const {
-        return projectionMatrix_;
-    }
+    const Mat4& GetProjectionMatrix() const;
 
-    const Mat4& GetViewMatrix() const {
-        return viewMatrix_;
-    }
+    const Mat4& GetViewMatrix() const;
 
-    const Mat4& GetViewProjectionMatrix() const {
-        return viewProjectionMatrix_;
-    }
+    const Mat4& GetViewProjectionMatrix() const;
 
 private:
     void RecalculateMatrix();

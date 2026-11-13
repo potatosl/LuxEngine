@@ -19,10 +19,7 @@ struct TransformComponent {
     Vec3 rotation{0.0f, 0.0f, 0.0f};
     Vec3 scale{1.0f, 1.0f, 1.0f};
 
-    Mat4 GetTransform() const {
-        return Mat4::Translate(position) * Mat4::RotateZ(rotation.z) * Mat4::RotateY(rotation.y) *
-               Mat4::RotateX(rotation.x) * Mat4::Scale(scale);
-    }
+    LUX_API Mat4 GetTransform() const;
 };
 
 struct HierarchyComponent {
@@ -61,34 +58,21 @@ struct TilemapComponent {
     float tileSize = 1.0f;
     std::vector<uint8_t> tiles = std::vector<uint8_t>(width * height, 0);
 
-    uint8_t Get(uint32 x, uint32 y) const {
-        return x < width && y < height && y * width + x < tiles.size() ? tiles[y * width + x] : 0;
-    }
+    LUX_API uint8_t Get(uint32 x, uint32 y) const;
 
-    bool Set(uint32 x, uint32 y, uint8_t tile) {
-        if (x >= width || y >= height || y * width + x >= tiles.size() || tile > 5)
-            return false;
-        tiles[y * width + x] = tile;
-        return true;
-    }
+    LUX_API bool Set(uint32 x, uint32 y, uint8_t tile);
 
-    bool Resize(uint32 newWidth, uint32 newHeight) {
-        if (newWidth == 0 || newHeight == 0 || newWidth > 256 || newHeight > 256)
-            return false;
-        std::vector<uint8_t> next(newWidth * newHeight, 0);
-        for (uint32 y = 0; y < std::min(height, newHeight); ++y)
-            for (uint32 x = 0; x < std::min(width, newWidth); ++x)
-                next[y * newWidth + x] = Get(x, y);
-        width = newWidth;
-        height = newHeight;
-        tiles.swap(next);
-        return true;
-    }
+    LUX_API bool Resize(uint32 newWidth, uint32 newHeight);
 };
 
 struct MeshRendererComponent {
     Material3D material;
     std::string meshPath;
+};
+
+struct ScriptComponent {
+    std::string typeName;
+    bool enabled = true;
 };
 
 struct CameraComponent {

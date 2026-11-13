@@ -31,7 +31,7 @@ enum EventCategory {
 
 class Event {
 public:
-    virtual ~Event() = default;
+    LUX_API virtual ~Event();
 
     bool Handled = false;
 
@@ -39,22 +39,14 @@ public:
     virtual const char* GetName() const = 0;
     virtual int GetCategoryFlags() const = 0;
 
-    bool IsInCategory(EventCategory category) const {
-        return (GetCategoryFlags() & category) != 0;
-    }
+    LUX_API bool IsInCategory(EventCategory category) const;
 };
 
 class EventDispatcher {
 public:
-    EventDispatcher(Event& event) : event_(event) {}
+    LUX_API EventDispatcher(Event& event);
 
-    template <typename T, typename F> bool Dispatch(const F& func) {
-        if (event_.GetEventType() == T::GetStaticType()) {
-            event_.Handled |= func(static_cast<T&>(event_));
-            return true;
-        }
-        return false;
-    }
+    template <typename T, typename F> bool Dispatch(const F& func);
 
 private:
     Event& event_;
@@ -62,52 +54,32 @@ private:
 
 class WindowCloseEvent : public Event {
 public:
-    WindowCloseEvent() = default;
+    LUX_API WindowCloseEvent();
 
-    static EventType GetStaticType() {
-        return EventType::WindowClose;
-    }
+    LUX_API static EventType GetStaticType();
 
-    EventType GetEventType() const override {
-        return GetStaticType();
-    }
+    LUX_API EventType GetEventType() const override;
 
-    const char* GetName() const override {
-        return "WindowClose";
-    }
+    LUX_API const char* GetName() const override;
 
-    int GetCategoryFlags() const override {
-        return EventCategoryApplication;
-    }
+    LUX_API int GetCategoryFlags() const override;
 };
 
 class WindowResizeEvent : public Event {
 public:
-    WindowResizeEvent(uint32 width, uint32 height) : width_(width), height_(height) {}
+    LUX_API WindowResizeEvent(uint32 width, uint32 height);
 
-    uint32 GetWidth() const {
-        return width_;
-    }
+    LUX_API uint32 GetWidth() const;
 
-    uint32 GetHeight() const {
-        return height_;
-    }
+    LUX_API uint32 GetHeight() const;
 
-    static EventType GetStaticType() {
-        return EventType::WindowResize;
-    }
+    LUX_API static EventType GetStaticType();
 
-    EventType GetEventType() const override {
-        return GetStaticType();
-    }
+    LUX_API EventType GetEventType() const override;
 
-    const char* GetName() const override {
-        return "WindowResize";
-    }
+    LUX_API const char* GetName() const override;
 
-    int GetCategoryFlags() const override {
-        return EventCategoryApplication;
-    }
+    LUX_API int GetCategoryFlags() const override;
 
 private:
     uint32 width_;
@@ -116,32 +88,19 @@ private:
 
 class KeyPressedEvent : public Event {
 public:
-    KeyPressedEvent(int32 keycode, bool isRepeat = false)
-        : keycode_(keycode), isRepeat_(isRepeat) {}
+    LUX_API KeyPressedEvent(int32 keycode, bool isRepeat = false);
 
-    int32 GetKeyCode() const {
-        return keycode_;
-    }
+    LUX_API int32 GetKeyCode() const;
 
-    bool IsRepeat() const {
-        return isRepeat_;
-    }
+    LUX_API bool IsRepeat() const;
 
-    static EventType GetStaticType() {
-        return EventType::KeyPressed;
-    }
+    LUX_API static EventType GetStaticType();
 
-    EventType GetEventType() const override {
-        return GetStaticType();
-    }
+    LUX_API EventType GetEventType() const override;
 
-    const char* GetName() const override {
-        return "KeyPressed";
-    }
+    LUX_API const char* GetName() const override;
 
-    int GetCategoryFlags() const override {
-        return EventCategoryInput | EventCategoryKeyboard;
-    }
+    LUX_API int GetCategoryFlags() const override;
 
 private:
     int32 keycode_;
@@ -150,27 +109,17 @@ private:
 
 class KeyReleasedEvent : public Event {
 public:
-    KeyReleasedEvent(int32 keycode) : keycode_(keycode) {}
+    LUX_API KeyReleasedEvent(int32 keycode);
 
-    int32 GetKeyCode() const {
-        return keycode_;
-    }
+    LUX_API int32 GetKeyCode() const;
 
-    static EventType GetStaticType() {
-        return EventType::KeyReleased;
-    }
+    LUX_API static EventType GetStaticType();
 
-    EventType GetEventType() const override {
-        return GetStaticType();
-    }
+    LUX_API EventType GetEventType() const override;
 
-    const char* GetName() const override {
-        return "KeyReleased";
-    }
+    LUX_API const char* GetName() const override;
 
-    int GetCategoryFlags() const override {
-        return EventCategoryInput | EventCategoryKeyboard;
-    }
+    LUX_API int GetCategoryFlags() const override;
 
 private:
     int32 keycode_;
@@ -178,31 +127,19 @@ private:
 
 class MouseMovedEvent : public Event {
 public:
-    MouseMovedEvent(float x, float y) : mouseX_(x), mouseY_(y) {}
+    LUX_API MouseMovedEvent(float x, float y);
 
-    float GetX() const {
-        return mouseX_;
-    }
+    LUX_API float GetX() const;
 
-    float GetY() const {
-        return mouseY_;
-    }
+    LUX_API float GetY() const;
 
-    static EventType GetStaticType() {
-        return EventType::MouseMoved;
-    }
+    LUX_API static EventType GetStaticType();
 
-    EventType GetEventType() const override {
-        return GetStaticType();
-    }
+    LUX_API EventType GetEventType() const override;
 
-    const char* GetName() const override {
-        return "MouseMoved";
-    }
+    LUX_API const char* GetName() const override;
 
-    int GetCategoryFlags() const override {
-        return EventCategoryInput | EventCategoryMouse;
-    }
+    LUX_API int GetCategoryFlags() const override;
 
 private:
     float mouseX_;
@@ -211,31 +148,19 @@ private:
 
 class MouseScrolledEvent : public Event {
 public:
-    MouseScrolledEvent(float xOffset, float yOffset) : xOffset_(xOffset), yOffset_(yOffset) {}
+    LUX_API MouseScrolledEvent(float xOffset, float yOffset);
 
-    float GetXOffset() const {
-        return xOffset_;
-    }
+    LUX_API float GetXOffset() const;
 
-    float GetYOffset() const {
-        return yOffset_;
-    }
+    LUX_API float GetYOffset() const;
 
-    static EventType GetStaticType() {
-        return EventType::MouseScrolled;
-    }
+    LUX_API static EventType GetStaticType();
 
-    EventType GetEventType() const override {
-        return GetStaticType();
-    }
+    LUX_API EventType GetEventType() const override;
 
-    const char* GetName() const override {
-        return "MouseScrolled";
-    }
+    LUX_API const char* GetName() const override;
 
-    int GetCategoryFlags() const override {
-        return EventCategoryInput | EventCategoryMouse;
-    }
+    LUX_API int GetCategoryFlags() const override;
 
 private:
     float xOffset_;
@@ -244,27 +169,17 @@ private:
 
 class MouseButtonPressedEvent : public Event {
 public:
-    MouseButtonPressedEvent(int32 button) : button_(button) {}
+    LUX_API MouseButtonPressedEvent(int32 button);
 
-    int32 GetMouseButton() const {
-        return button_;
-    }
+    LUX_API int32 GetMouseButton() const;
 
-    static EventType GetStaticType() {
-        return EventType::MouseButtonPressed;
-    }
+    LUX_API static EventType GetStaticType();
 
-    EventType GetEventType() const override {
-        return GetStaticType();
-    }
+    LUX_API EventType GetEventType() const override;
 
-    const char* GetName() const override {
-        return "MouseButtonPressed";
-    }
+    LUX_API const char* GetName() const override;
 
-    int GetCategoryFlags() const override {
-        return EventCategoryInput | EventCategoryMouse | EventCategoryMouseButton;
-    }
+    LUX_API int GetCategoryFlags() const override;
 
 private:
     int32 button_;
@@ -272,30 +187,22 @@ private:
 
 class MouseButtonReleasedEvent : public Event {
 public:
-    MouseButtonReleasedEvent(int32 button) : button_(button) {}
+    LUX_API MouseButtonReleasedEvent(int32 button);
 
-    int32 GetMouseButton() const {
-        return button_;
-    }
+    LUX_API int32 GetMouseButton() const;
 
-    static EventType GetStaticType() {
-        return EventType::MouseButtonReleased;
-    }
+    LUX_API static EventType GetStaticType();
 
-    EventType GetEventType() const override {
-        return GetStaticType();
-    }
+    LUX_API EventType GetEventType() const override;
 
-    const char* GetName() const override {
-        return "MouseButtonReleased";
-    }
+    LUX_API const char* GetName() const override;
 
-    int GetCategoryFlags() const override {
-        return EventCategoryInput | EventCategoryMouse | EventCategoryMouseButton;
-    }
+    LUX_API int GetCategoryFlags() const override;
 
 private:
     int32 button_;
 };
 
 } // namespace LuxEngine
+
+#include <LuxEngine/Core/Event.inl>

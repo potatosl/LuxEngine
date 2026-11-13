@@ -1,4 +1,7 @@
 @PACKAGE_INIT@
+set(LuxEngine_RUNTIME_DIR "${PACKAGE_PREFIX_DIR}/bin")
+set(LuxEngine_RENDERER_DATA_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/renderer")
+set(LuxEngine_MANAGED_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/managed")
 set(LuxEngine_SHADER_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/shaders")
 set(LuxEngine_TEMPLATES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/templates")
 set(LuxEngine_LICENSES_DIR "${PACKAGE_PREFIX_DIR}/share/LuxEngine/licenses")
@@ -27,7 +30,6 @@ if(TARGET box2d::box2d)
         MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;NOCONFIG;"
     )
 endif()
-find_dependency(Vulkan 1.1)
 include("${CMAKE_CURRENT_LIST_DIR}/LuxEngineTargets.cmake")
 
 # Map configurations for multi-config generators (Visual Studio, Xcode)
@@ -54,16 +56,34 @@ endif()
 function(lux_copy_shaders target)
     if(EXISTS "${LuxEngine_SHADER_DIR}")
         add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${LuxEngine_SHADER_DIR}"
-                "$<TARGET_FILE_DIR:${target}>/shaders"
-        )
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${LuxEngine_SHADER_DIR}" "$<TARGET_FILE_DIR:${target}>")
     endif()
 endfunction()
 
 function(lux_copy_runtime target)
     lux_copy_shaders(${target})
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproj")
+    if(WIN32)
+        set(_lux_nethost "nethost.dll")
+    elseif(APPLE)
+        set(_lux_nethost "libnethost.dylib")
+    else()
+        set(_lux_nethost "libnethost.so")
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${LuxEngine_MANAGED_DIR}" "$<TARGET_FILE_DIR:${target}>/managed"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LuxEngine_RUNTIME_DIR}/${_lux_nethost}" "$<TARGET_FILE_DIR:${target}>")
+    if(WIN32)
+        set(_lux_renderer_name "LuxForge.dll")
+    elseif(APPLE)
+        set(_lux_renderer_name "libLuxForge.dylib")
+    else()
+        set(_lux_renderer_name "libLuxForge.so")
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LuxEngine_RUNTIME_DIR}/${_lux_renderer_name}" "$<TARGET_FILE_DIR:${target}>"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${LuxEngine_RENDERER_DATA_DIR}" "$<TARGET_FILE_DIR:${target}>")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproject" OR
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproj")
         file(GLOB_RECURSE _lux_mesh_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[oO][bB][jJ]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[pP][nN][gG]"
@@ -96,10 +116,10 @@ function(lux_copy_runtime target)
                     $<TARGET_FILE:SDL3::SDL3-shared>
                     "$<TARGET_FILE_DIR:${target}>"
             )
-        elseif(EXISTS "${PACKAGE_PREFIX_DIR}/bin/SDL3.dll")
+        elseif(EXISTS "${LuxEngine_RUNTIME_DIR}/SDL3.dll")
             add_custom_command(TARGET ${target} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${PACKAGE_PREFIX_DIR}/bin/SDL3.dll"
+                    "${LuxEngine_RUNTIME_DIR}/SDL3.dll"
                     "$<TARGET_FILE_DIR:${target}>"
             )
         endif()

@@ -7,6 +7,7 @@ lux_engine_module(Scene
         Public/LuxEngine/Scene/Scene.hpp
         Public/LuxEngine/Scene/SceneManager.hpp
     SOURCES
+        Private/Entity.cpp
         Private/PhysicsWorld2D.cpp
         Private/SceneJson.cpp
         Private/Scene.cpp

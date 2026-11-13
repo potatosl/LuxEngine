@@ -58,19 +58,13 @@ public:
     // Both scenes' previously obtained entity handles are invalidated; the target origin stays.
     bool ApplyState(Scene& prepared);
 
-    const SceneSettings& GetSettings() const noexcept {
-        return settings_;
-    }
+    const SceneSettings& GetSettings() const noexcept;
 
     bool SetSettings(const SceneSettings& settings);
 
-    const std::string& GetSourcePath() const noexcept {
-        return sourcePath_;
-    }
+    const std::string& GetSourcePath() const noexcept;
 
-    void SetSourcePath(std::string path) {
-        sourcePath_ = std::move(path);
-    }
+    void SetSourcePath(std::string path);
 
     void OnUpdate(double dt);
     void OnRender();
@@ -78,9 +72,7 @@ public:
     std::string ResolveAssetPath(const std::string& path) const;
 
     // BeginContact events from the most recent 2D physics step, including sensors.
-    const std::vector<Collision2DEvent>& GetCollisionEvents2D() const {
-        return collisionEvents2D_;
-    }
+    const std::vector<Collision2DEvent>& GetCollisionEvents2D() const;
     enum class SaveFault {
         None,
         TempWriteFailure,
@@ -98,92 +90,32 @@ public:
     bool SerializeToString(std::string& out);
     bool DeserializeFromString(const std::string& data);
 
-    uint32 GetEntityCount() const {
-        return static_cast<uint32>(entities_.size());
-    }
+    uint32 GetEntityCount() const;
 
-    bool IsAlive(uint32 id) const {
-        return entities_.contains(id);
-    }
+    bool IsAlive(uint32 id) const;
 
-    std::weak_ptr<int> Lifetime() const {
-        return lifetime_;
-    }
+    std::weak_ptr<int> Lifetime() const;
 
-    template <class T, class... Args> T& AddComponent(uint32 id, Args&&... args) {
-        RequireAlive(id);
-        auto& values = GetPool<T>().values;
-        auto [it, added] = values.try_emplace(id, T{std::forward<Args>(args)...});
-        if (!added)
-            throw std::logic_error("Component already exists");
-        return it->second;
-    }
+    template <class T, class... Args> T& AddComponent(uint32 id, Args&&... args);
 
-    template <class T> T& GetComponent(uint32 id) {
-        return const_cast<T&>(std::as_const(*this).GetComponent<T>(id));
-    }
+    template <class T> T& GetComponent(uint32 id);
 
-    template <class T> const T& GetComponent(uint32 id) const {
-        RequireAlive(id);
-        auto it = pools_.find(typeid(T));
-        if (it == pools_.end())
-            throw std::out_of_range("Component does not exist");
-        return static_cast<const Pool<T>&>(*it->second).values.at(id);
-    }
+    template <class T> const T& GetComponent(uint32 id) const;
 
-    template <class T> T* TryGetComponent(uint32 id) {
-        return const_cast<T*>(std::as_const(*this).TryGetComponent<T>(id));
-    }
+    template <class T> T* TryGetComponent(uint32 id);
 
-    template <class T> const T* TryGetComponent(uint32 id) const {
-        if (!IsAlive(id))
-            return nullptr;
-        auto it = pools_.find(typeid(T));
-        if (it == pools_.end())
-            return nullptr;
-        auto& values = static_cast<const Pool<T>&>(*it->second).values;
-        auto component = values.find(id);
-        return component == values.end() ? nullptr : &component->second;
-    }
+    template <class T> const T* TryGetComponent(uint32 id) const;
 
-    template <class T> bool HasComponent(uint32 id) const {
-        auto it = pools_.find(typeid(T));
-        return IsAlive(id) && it != pools_.end() &&
-               static_cast<const Pool<T>&>(*it->second).values.contains(id);
-    }
+    template <class T> bool HasComponent(uint32 id) const;
 
     // Query a component pool directly without allocating/sorting every entity in the scene.
-    template <class T> std::vector<uint32> GetComponentEntityIds() const {
-        const auto found = pools_.find(typeid(T));
-        if (found == pools_.end())
-            return {};
-        const auto& values = static_cast<const Pool<T>&>(*found->second).values;
-        std::vector<uint32> result;
-        result.reserve(values.size());
-        for (const auto& [id, component] : values)
-            if (IsAlive(id))
-                result.push_back(id);
-        std::sort(result.begin(), result.end());
-        return result;
-    }
+    template <class T> std::vector<uint32> GetComponentEntityIds() const;
 
-    template <class T> void RemoveComponent(uint32 id) {
-        RequireAlive(id);
-        if (!HasComponent<T>(id))
-            return;
-        auto it = pools_.find(typeid(T));
-        if (it != pools_.end()) {
-            it->second->Erase(id);
-            if constexpr (std::is_same_v<T, TransformComponent> ||
-                          std::is_same_v<T, Rigidbody2DComponent> ||
-                          std::is_same_v<T, BoxCollider2DComponent>)
-                RemovePhysicsBody2D(id);
-        }
-    }
+    template <class T> void RemoveComponent(uint32 id);
 
 private:
     struct PoolBase {
-        virtual ~PoolBase() = default;
+        LUX_API virtual ~PoolBase();
         virtual void Erase(uint32 id) = 0;
         virtual bool Empty() const = 0;
         virtual bool Contains(uint32 id) const = 0;
@@ -192,30 +124,16 @@ private:
     template <class T> struct Pool final : PoolBase {
         std::unordered_map<uint32, T> values;
 
-        void Erase(uint32 id) override {
-            values.erase(id);
-        }
+        void Erase(uint32 id) override;
 
-        bool Empty() const override {
-            return values.empty();
-        }
+        bool Empty() const override;
 
-        bool Contains(uint32 id) const override {
-            return values.contains(id);
-        }
+        bool Contains(uint32 id) const override;
     };
 
-    template <class T> Pool<T>& GetPool() {
-        auto it = pools_.find(typeid(T));
-        if (it == pools_.end())
-            it = pools_.emplace(typeid(T), std::make_unique<Pool<T>>()).first;
-        return static_cast<Pool<T>&>(*it->second);
-    }
+    template <class T> Pool<T>& GetPool();
 
-    void RequireAlive(uint32 id) const {
-        if (!IsAlive(id))
-            throw std::out_of_range("Entity is not alive");
-    }
+    void RequireAlive(uint32 id) const;
 
     bool DeserializeStream(std::istream& in); // Legacy scene versions 1–6, read only.
     bool DeserializeJson(const std::string& data);
@@ -235,3 +153,5 @@ private:
     double physicsAccumulator_ = 0;
 };
 } // namespace LuxEngine
+
+#include <LuxEngine/Scene/Scene.inl>

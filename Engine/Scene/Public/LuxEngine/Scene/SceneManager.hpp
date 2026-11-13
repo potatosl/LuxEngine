@@ -13,9 +13,7 @@ struct SceneLoadResult {
     std::string error;
     bool retryable = false;
 
-    explicit operator bool() const noexcept {
-        return scene != nullptr;
-    }
+    LUX_API explicit operator bool() const noexcept;
 };
 
 // File loading and composition are CPU-only. Async jobs own their inputs and never access Qt,
