@@ -35,6 +35,8 @@ class QTreeWidget;
 class QUndoStack;
 class QWidget;
 class QSlider;
+class QStackedWidget;
+class QVBoxLayout;
 class QPushButton;
 class QProcess;
 class QPixmap;
@@ -55,22 +57,13 @@ public:
     explicit EditorWindow(QWidget* parent = nullptr);
     ~EditorWindow() override;
 
-    EditorDocument& GetDocument() noexcept {
-        return document_;
-    }
+    EditorDocument& GetDocument() noexcept;
 
-    const EditorDocument& GetDocument() const noexcept {
-        return document_;
-    }
+    const EditorDocument& GetDocument() const noexcept;
 
-    const QString& LastLogMessage() const noexcept {
-        return lastLogMessage_;
-    }
+    const QString& LastLogMessage() const noexcept;
 
-    void ExecuteRecordedEdit(const QString& name, const std::function<void()>& edit) {
-        RecordEdit(name, edit);
-        RefreshAll();
-    }
+    void ExecuteRecordedEdit(const QString& name, const std::function<void()>& edit);
 
     EditorDocument::TabId NewSceneDocument();
     bool OpenSceneDocument(const std::filesystem::path& path, bool asynchronous = false);
@@ -78,9 +71,7 @@ public:
     bool CloseSceneDocument(EditorDocument::TabId id, bool discardDirty = false);
     bool MoveSelectionToScene(EditorDocument::TabId destination);
 
-    size_t PendingSceneLoadCount() const noexcept {
-        return pendingSceneLoads_.size();
-    }
+    size_t PendingSceneLoadCount() const noexcept;
 
 private:
     void BuildMenus();
@@ -114,8 +105,17 @@ private:
     void PushSceneCommand(SceneEditCommand* command);
     void AnimateSceneTransition(const QPixmap& previous);
     void BuildLayout();
+    void BuildWorkspaceChrome();
+    void SetWorkspace(bool animation);
+    void ToggleDrawer(size_t index);
+    void RefreshAssetFolders();
+    void FilterDetails(const QString& text);
     void BuildAnimationPanel();
     void StopAnimationPlayback();
+    void RefreshAnimationWorkspace();
+    void SetAnimationTool(EditorTool tool);
+    void OnAnimationKeyChanged(const QWidget* field);
+    void MoveAnimationKey(int index, float time);
     void ApplyTheme();
     void RestoreWorkspaceLayout();
     void SaveWorkspaceLayout();
@@ -153,6 +153,10 @@ private:
     bool SaveScene(bool choosePath);
     void AddEntity();
     void AddMeshEntity();
+    void AddCameraEntity();
+    void BuildCameraDetails(QVBoxLayout* layout);
+    void RefreshCameraDetails();
+    void OnCameraChanged();
     void AddTilemap();
     void PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngine::uint32 y, uint8_t tile);
     void DeleteEntity();
@@ -233,6 +237,16 @@ private:
     const std::chrono::steady_clock::time_point openedAt_ = std::chrono::steady_clock::now();
     std::map<EditorDocument::TabId, std::chrono::steady_clock::time_point> autosavedAt_;
     QUndoStack* undo_ = nullptr;
+    QStackedWidget* workspaceStack_ = nullptr;
+    QTabBar* workspaceTabs_ = nullptr;
+    QLabel* sceneStatus_ = nullptr;
+    QTreeWidget* assetFolders_ = nullptr;
+    QLabel* assetBreadcrumb_ = nullptr;
+    QLabel* assetCount_ = nullptr;
+    QLineEdit* detailsSearch_ = nullptr;
+    std::filesystem::path assetFolder_;
+    std::filesystem::path assetProjectRoot_;
+    QByteArray levelLayout_;
     QTabWidget* viewportTabs_ = nullptr;
     SceneViewport2D* canvas_ = nullptr;
     SceneViewport2D* overviewCanvas_ = nullptr;
@@ -257,6 +271,11 @@ private:
     QLineEdit* name_ = nullptr;
     QCheckBox* spriteEnabled_ = nullptr;
     QCheckBox* meshEnabled_ = nullptr;
+    QCheckBox* cameraEnabled_ = nullptr;
+    QCheckBox* cameraPrimary_ = nullptr;
+    QComboBox* cameraProjection_ = nullptr;
+    QDoubleSpinBox* cameraFov_ = nullptr;
+    QDoubleSpinBox* cameraOrthoSize_ = nullptr;
     QLineEdit* meshPath_ = nullptr;
     QLineEdit* baseColorTexturePath_ = nullptr;
     QCheckBox* tilemapEnabled_ = nullptr;
@@ -282,6 +301,10 @@ private:
     QCheckBox* animationLoop_ = nullptr;
     QDoubleSpinBox* animationDuration_ = nullptr;
     QSlider* animationTimeline_ = nullptr;
+    QDoubleSpinBox* animationKeyTime_ = nullptr;
+    std::array<std::array<QDoubleSpinBox*, 3>, 3> animationKeyValues_{};
+    SceneViewport2D* animationPreview2D_ = nullptr;
+    SceneViewport3D* animationPreview3D_ = nullptr;
     QListWidget* keyframeList_ = nullptr;
     uint8_t tileId_ = 1;
     QDoubleSpinBox* metallic_ = nullptr;

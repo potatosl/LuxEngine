@@ -25,8 +25,13 @@ void Check(bool condition, const char* message) {
 }
 
 QGroupBox* Group(EditorWindow& window, const char* title) {
+    const auto expected = QString::fromLatin1(title) == QLatin1String("2D PHYSICS")
+                              ? QStringLiteral("Physics 2D")
+                              : QString::fromLatin1(title);
     for (auto* group : window.findChildren<QGroupBox*>())
-        if (group->title() == QString::fromLatin1(title))
+        if (group->title().compare(expected, Qt::CaseInsensitive) == 0 ||
+            group->property("componentTitle").toString().compare(expected, Qt::CaseInsensitive) ==
+                0)
             return group;
     throw std::runtime_error("Inspector group not found");
 }

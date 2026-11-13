@@ -1,8 +1,10 @@
 #include <LuxEditor/Scene/EditorDocument.hpp>
 #include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
+#include <LuxEditor/Viewport/ViewportCamera3D.hpp>
 #include <LuxEngine/ECS/ECS.hpp>
 #include <QFocusEvent>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTransform>
@@ -126,44 +128,86 @@ void SceneViewport2D::GetView(double& centerX, double& centerY, double& halfHeig
     halfHeight = std::max(1.0, height() * 0.5) / pixelsPerUnit_;
 }
 
-void SceneViewport2D::FocusSelection() {
-    LuxEngine::Entity selected = document_.GetSelected();
-    if (selected && selected.HasComponent<LuxEngine::TransformComponent>()) {
-        auto position = selected.GetScene()->GetWorldTransform(selected.GetId()).position;
-        pan_ = {-position.x * pixelsPerUnit_, position.y * pixelsPerUnit_};
-        update();
+void SceneViewport2D::FrameBounds(bool selectedOnly) {
+    QRectF bounds;
+    bool found = false;
+    for (auto entity : document_.GetScene().GetEntities()) {
+        if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
+            (selectedOnly && entity != document_.GetSelected()))
+            continue;
+        QRectF local(-.5, -.5, 1, 1);
+        if (auto* map = entity.TryGetComponent<LuxEngine::TilemapComponent>())
+            local = {0, 0, map->width * map->tileSize, map->height * map->tileSize};
+        const auto rectangle = World(entity).mapRect(local);
+        if (!std::isfinite(rectangle.x()) || !std::isfinite(rectangle.y()) ||
+            !std::isfinite(rectangle.width()) || !std::isfinite(rectangle.height()))
+            continue;
+        bounds = found ? bounds.united(rectangle) : rectangle;
+        found = true;
     }
+    if (!found)
+        return;
+    pixelsPerUnit_ =
+        std::clamp(std::min(std::max(1, width() - 100) / std::max(.1, bounds.width()),
+                            std::max(1, height() - 100) / std::max(.1, bounds.height())),
+                   .01, 2048.0);
+    pan_ = {-bounds.center().x() * pixelsPerUnit_, bounds.center().y() * pixelsPerUnit_};
+    update();
+}
+
+void SceneViewport2D::FocusSelection() {
+    FrameBounds(true);
+}
+
+void SceneViewport2D::FrameAll() {
+    FrameBounds(false);
+}
+
+void SceneViewport2D::SetGridVisible(bool visible) {
+    gridVisible_ = visible;
+    update();
+}
+
+void SceneViewport2D::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_F && event->modifiers() == Qt::NoModifier) {
+        FocusSelection();
+        return;
+    }
+    if (event->key() == Qt::Key_Home) {
+        FrameAll();
+        return;
+    }
+    QWidget::keyPressEvent(event);
 }
 
 void SceneViewport2D::DrawGrid(QPainter& painter, int alpha) const {
-    auto line = [alpha](QColor color) {
+    if (!gridVisible_)
+        return;
+    const double spacing = ViewportGridSpacing(1 / pixelsPerUnit_);
+    const double pixels = spacing * pixelsPerUnit_;
+    const double originX = width() * .5 + pan_.x();
+    const double originY = height() * .5 + pan_.y();
+    const auto line = [&](double index, bool vertical) {
+        QColor color =
+            std::abs(std::remainder(index, 5.0)) < .1 ? QColor(75, 77, 82) : QColor(47, 49, 53);
+        if (std::abs(index) < .01)
+            color = vertical ? QColor(75, 135, 87) : QColor(155, 75, 77);
         color.setAlpha(alpha);
-        return color;
+        painter.setPen(QPen(color, std::abs(index) < .01 ? 1.5 : 1));
+        if (vertical) {
+            const double x = originX + index * pixels;
+            painter.drawLine(QPointF(x, 0), QPointF(x, height()));
+        } else {
+            const double y = originY - index * pixels;
+            painter.drawLine(QPointF(0, y), QPointF(width(), y));
+        }
     };
-    const double originX = width() * 0.5 + pan_.x();
-    const double originY = height() * 0.5 + pan_.y();
-    const int minX = std::max(-10000, static_cast<int>(std::floor(-originX / pixelsPerUnit_)));
-    const int maxX =
-        std::min(10000, static_cast<int>(std::ceil((width() - originX) / pixelsPerUnit_)));
-    const int minY =
-        std::max(-10000, static_cast<int>(std::floor((originY - height()) / pixelsPerUnit_)));
-    const int maxY = std::min(10000, static_cast<int>(std::ceil(originY / pixelsPerUnit_)));
-    for (int unit = minX; unit <= maxX; ++unit) {
-        painter.setPen(QPen(line(unit == 0       ? QColor(170, 84, 91)
-                                 : unit % 5 == 0 ? QColor(67, 74, 86)
-                                                 : QColor(48, 54, 64)),
-                            unit == 0 ? 2 : 1));
-        const double x = originX + unit * pixelsPerUnit_;
-        painter.drawLine(QPointF(x, 0), QPointF(x, height()));
-    }
-    for (int unit = minY; unit <= maxY; ++unit) {
-        painter.setPen(QPen(line(unit == 0       ? QColor(89, 157, 113)
-                                 : unit % 5 == 0 ? QColor(67, 74, 86)
-                                                 : QColor(48, 54, 64)),
-                            unit == 0 ? 2 : 1));
-        const double y = originY - unit * pixelsPerUnit_;
-        painter.drawLine(QPointF(0, y), QPointF(width(), y));
-    }
+    const double firstX = std::floor(-originX / pixels);
+    const double firstY = std::floor((originY - height()) / pixels);
+    for (int index = 0; index <= int(std::ceil(width() / pixels)) + 1; ++index)
+        line(firstX + index, true);
+    for (int index = 0; index <= int(std::ceil(height() / pixels)) + 1; ++index)
+        line(firstY + index, false);
 }
 
 void SceneViewport2D::paintEvent(QPaintEvent*) {
@@ -193,8 +237,7 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         return;
 
     const auto& settings = document_.GetScene().GetSettings();
-    painter.fillRect(rect(), QColor::fromRgbF(settings.clearColor.x, settings.clearColor.y,
-                                              settings.clearColor.z, settings.clearColor.w));
+    painter.fillRect(rect(), QColor(29, 30, 33));
     const auto polygon = [this](LuxEngine::Entity entity, QRectF bounds) {
         QPolygonF shape;
         const auto matrix = World(entity);
@@ -447,9 +490,31 @@ void SceneViewport2D::PaintAt(QPointF point) {
 void SceneViewport2D::wheelEvent(QWheelEvent* event) {
     const QPointF world = ScreenToWorld(event->position());
     pixelsPerUnit_ =
-        std::clamp(pixelsPerUnit_ * std::pow(1.2, event->angleDelta().y() / 120.0), 16.0, 320.0);
+        std::clamp(pixelsPerUnit_ * std::pow(1.2, event->angleDelta().y() / 120.0), .01, 2048.0);
     pan_ = {event->position().x() - width() * .5 - world.x() * pixelsPerUnit_,
             event->position().y() - height() * .5 + world.y() * pixelsPerUnit_};
+    update();
+}
+
+void SceneViewport2D::RefreshScene() {
+    update();
+}
+
+void SceneViewport2D::SetSnapToGrid(bool enabled) {
+    snapToGrid_ = enabled;
+    update();
+}
+
+void SceneViewport2D::SetTool(EditorTool tool) {
+    tool_ = tool;
+}
+
+void SceneViewport2D::SetTileId(uint8_t tile) {
+    tileId_ = tile;
+}
+
+void SceneViewport2D::SetDebugColliders(bool enabled) {
+    debugColliders_ = enabled;
     update();
 }
 } // namespace LuxEditor

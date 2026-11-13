@@ -17,7 +17,7 @@ enum class ProjectTemplate { Empty, Platformer, TopDown, Rpg, Puzzle, Pbr3D };
 struct ProjectDependency {
     std::string package;
     std::string version;
-    bool operator==(const ProjectDependency&) const = default;
+    bool operator==(const ProjectDependency&) const;
 };
 
 struct ProjectSettings {
@@ -56,33 +56,19 @@ public:
     bool ClearAutosave(const std::filesystem::path& sceneFile) const;
     size_t RescanResources(std::string& error) const;
 
-    const std::filesystem::path& GetFile() const noexcept {
-        return file_;
-    }
+    const std::filesystem::path& GetFile() const noexcept;
 
-    std::filesystem::path GetSceneFile() const {
-        return file_.parent_path() / scene_;
-    }
+    std::filesystem::path GetSceneFile() const;
 
-    const std::string& GetName() const noexcept {
-        return settings_.name;
-    }
+    const std::string& GetName() const noexcept;
 
-    const std::string& GetEngineVersion() const noexcept {
-        return engineVersion_;
-    }
+    const std::string& GetEngineVersion() const noexcept;
 
-    ProjectTemplate GetTemplate() const noexcept {
-        return projectTemplate_;
-    }
+    ProjectTemplate GetTemplate() const noexcept;
 
-    const ProjectSettings& GetSettings() const noexcept {
-        return settings_;
-    }
+    const ProjectSettings& GetSettings() const noexcept;
 
-    const std::filesystem::path& GetIcon() const noexcept {
-        return settings_.icon;
-    }
+    const std::filesystem::path& GetIcon() const noexcept;
 
     static std::string CurrentEngineVersion();
 
@@ -98,15 +84,12 @@ private:
 
 class RecentProjects final {
 public:
-    explicit RecentProjects(std::filesystem::path storageFile)
-        : storageFile_(std::move(storageFile)) {}
+    explicit RecentProjects(std::filesystem::path storageFile);
 
     void Load();
     bool Add(const std::filesystem::path& projectFile);
 
-    const std::vector<std::filesystem::path>& Get() const noexcept {
-        return files_;
-    }
+    const std::vector<std::filesystem::path>& Get() const noexcept;
 
 private:
     bool Save() const;

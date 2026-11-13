@@ -28,5 +28,6 @@ enum class EditorIcon {
     Stop,
     Bug
 };
+QIcon MakeBrandIcon(bool dark);
 QIcon MakeEditorIcon(EditorIcon icon, QColor color = QColor(214, 223, 231));
 } // namespace LuxEditor
