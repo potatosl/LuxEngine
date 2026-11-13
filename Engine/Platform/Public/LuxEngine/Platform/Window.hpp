@@ -40,15 +40,19 @@ public:
     ColorTheme GetColorTheme() const {
         return colorTheme_;
     }
+
     bool HasWindowIcon() const {
         return hasWindowIcon_;
     }
+
     bool IsRunning() const {
         return isRunning_;
     }
+
     SDL_Window* GetNativeHandle() const {
         return window_;
     }
+
     uint32 GetWidth() const;
     uint32 GetHeight() const;
     bool GetFramebufferSize(uint32& width, uint32& height) const;
@@ -61,9 +65,11 @@ public:
     bool IsFullscreen() const;
 
     bool SetVSync(bool enabled);
+
     void SetPresentCallback(std::function<bool(bool)> callback) {
         presentCallback_ = std::move(callback);
     }
+
     bool IsVSync() const {
         return props_.vsync;
     }

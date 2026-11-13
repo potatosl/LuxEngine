@@ -23,15 +23,18 @@ constexpr const char* GameExecutable = "LuxGame";
 QString Q(const std::filesystem::path& path) {
     return QString::fromUtf8(PathUtf8(path));
 }
+
 std::filesystem::path FromQ(const QString& text) {
     return PathFromUtf8(text.toUtf8().toStdString());
 }
+
 QString SafeFileName(QString name) {
     for (const QChar c : QStringLiteral("/\\:*?\"<>|"))
         name.replace(c, u'_');
     name = name.trimmed();
     return name.isEmpty() ? QStringLiteral("LuxGame") : name;
 }
+
 QString SizeText(uint64_t bytes) {
     constexpr double mebi = 1024.0 * 1024.0;
     return bytes >= 1024 * 1024 ? QStringLiteral("%1 MB").arg(bytes / mebi, 0, 'f', 1)

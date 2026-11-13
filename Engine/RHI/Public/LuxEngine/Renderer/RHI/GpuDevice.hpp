@@ -9,6 +9,7 @@
 
 namespace LuxEngine {
 class Window;
+
 namespace Vk {
 struct DeviceState;
 }

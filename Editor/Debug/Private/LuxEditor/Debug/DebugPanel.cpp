@@ -86,12 +86,14 @@ DebugPanel::DebugPanel(QWidget* parent, std::function<void(uint32_t)> onSelect)
             onSelect_(id);
     });
 }
+
 void DebugPanel::AddLog(const QString& message, bool error) {
     logs_.push_back({message, error});
     if (logs_.size() > 2000)
         logs_.erase(logs_.begin(), logs_.begin() + 500);
     FilterLogs();
 }
+
 void DebugPanel::FilterLogs() {
     output_->clear();
     for (const auto& entry : logs_) {
@@ -103,6 +105,7 @@ void DebugPanel::FilterLogs() {
             (entry.error ? QStringLiteral("[오류] ") : QStringLiteral("[정보] ")) + entry.message);
     }
 }
+
 void DebugPanel::UpdateScene(LuxEngine::Scene& scene, uint32_t selectedId, uint64_t frame,
                              double frameMs) {
     metrics_->setText(QStringLiteral("프레임 %1  |  %2 ms  |  엔티티 %3  |  충돌 %4")

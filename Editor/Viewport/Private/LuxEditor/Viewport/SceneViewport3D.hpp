@@ -15,6 +15,7 @@ struct TransformComponent;
 namespace LuxEditor {
 class EditorDocument;
 class EngineSceneRenderer;
+
 class SceneViewport3D final : public QWidget {
 public:
     SceneViewport3D(
@@ -23,11 +24,14 @@ public:
         std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform,
         std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
         std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
+
     void RefreshScene() {
         update();
     }
+
     void FocusSelection();
     void CancelInteraction();
+
     void SetTool(EditorTool tool) {
         tool_ = tool;
     }

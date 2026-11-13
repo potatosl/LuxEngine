@@ -12,6 +12,7 @@ struct SceneLoadResult {
     std::shared_ptr<Scene> scene;
     std::string error;
     bool retryable = false;
+
     explicit operator bool() const noexcept {
         return scene != nullptr;
     }

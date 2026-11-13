@@ -19,6 +19,7 @@ QTransform World(LuxEngine::Entity entity) {
     const auto* m = matrix.elements;
     return QTransform(m[0], m[1], m[4], m[5], m[12], m[13]);
 }
+
 bool LocalPoint(LuxEngine::Entity entity, QPointF world, QPointF& local) {
     bool valid = false;
     const auto inverse = World(entity).inverted(&valid);
@@ -27,6 +28,7 @@ bool LocalPoint(LuxEngine::Entity entity, QPointF world, QPointF& local) {
     local = inverse.map(world);
     return std::isfinite(local.x()) && std::isfinite(local.y());
 }
+
 bool InsideMap(LuxEngine::Entity entity, QPointF world, QPointF* cell = nullptr) {
     const auto* map = entity.TryGetComponent<LuxEngine::TilemapComponent>();
     QPointF local;
@@ -42,12 +44,15 @@ bool InsideMap(LuxEngine::Entity entity, QPointF world, QPointF* cell = nullptr)
         *cell = candidate;
     return true;
 }
+
 QColor Exposed(QColor color, float exposure) {
     return QColor::fromRgbF(std::clamp(color.redF() * exposure, 0.0f, 1.0f),
                             std::clamp(color.greenF() * exposure, 0.0f, 1.0f),
                             std::clamp(color.blueF() * exposure, 0.0f, 1.0f), color.alphaF());
 }
+
 constexpr QColor Selection(255, 205, 92);
+
 QColor TileColor(uint8_t tile) {
     switch (tile) {
     case 1:
@@ -64,12 +69,14 @@ QColor TileColor(uint8_t tile) {
         return Qt::transparent;
     }
 }
+
 QString Name(LuxEngine::Entity entity) {
     return entity.HasComponent<LuxEngine::TagComponent>()
                ? QString::fromUtf8(entity.GetComponent<LuxEngine::TagComponent>().tag)
                : QStringLiteral("엔티티 #%1").arg(entity.GetId());
 }
 } // namespace
+
 SceneViewport2D::SceneViewport2D(
     QWidget* parent, EditorDocument& document,
     std::function<void(std::optional<LuxEngine::uint32>)> onSelect,
@@ -86,11 +93,14 @@ SceneViewport2D::SceneViewport2D(
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(300, 200);
 }
+
 SceneViewport2D::~SceneViewport2D() = default;
+
 void SceneViewport2D::CancelInteraction() {
     panning_ = dragging_ = tilePainting_ = false;
     dragId_ = 0;
 }
+
 void SceneViewport2D::focusOutEvent(QFocusEvent* event) {
     const bool editing = dragging_ || tilePainting_;
     CancelInteraction();
@@ -98,20 +108,24 @@ void SceneViewport2D::focusOutEvent(QFocusEvent* event) {
         onEndEdit_();
     QWidget::focusOutEvent(event);
 }
+
 QPointF SceneViewport2D::WorldToScreen(double x, double y) const {
     return {width() * 0.5 + pan_.x() + x * pixelsPerUnit_,
             height() * 0.5 + pan_.y() - y * pixelsPerUnit_};
 }
+
 QPointF SceneViewport2D::ScreenToWorld(QPointF point) const {
     return {(point.x() - width() * 0.5 - pan_.x()) / pixelsPerUnit_,
             (height() * 0.5 + pan_.y() - point.y()) / pixelsPerUnit_};
 }
+
 void SceneViewport2D::GetView(double& centerX, double& centerY, double& halfHeight) const {
     const QPointF center = ScreenToWorld(QPointF(width() * 0.5, height() * 0.5));
     centerX = center.x();
     centerY = center.y();
     halfHeight = std::max(1.0, height() * 0.5) / pixelsPerUnit_;
 }
+
 void SceneViewport2D::FocusSelection() {
     LuxEngine::Entity selected = document_.GetSelected();
     if (selected && selected.HasComponent<LuxEngine::TransformComponent>()) {
@@ -120,6 +134,7 @@ void SceneViewport2D::FocusSelection() {
         update();
     }
 }
+
 void SceneViewport2D::DrawGrid(QPainter& painter, int alpha) const {
     auto line = [alpha](QColor color) {
         color.setAlpha(alpha);
@@ -150,6 +165,7 @@ void SceneViewport2D::DrawGrid(QPainter& painter, int alpha) const {
         painter.drawLine(QPointF(0, y), QPointF(width(), y));
     }
 }
+
 void SceneViewport2D::paintEvent(QPaintEvent*) {
     // Decouple GPU render/readback phase from QPainter lifecycle.
     // Vulkan offscreen rendering must complete before QPainter opens on this QWidget
@@ -267,6 +283,7 @@ void SceneViewport2D::paintEvent(QPaintEvent*) {
         }
     }
 }
+
 void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
     lastMouse_ = event->position();
     if (event->button() == Qt::MiddleButton) {
@@ -340,6 +357,7 @@ void SceneViewport2D::mousePressEvent(QMouseEvent* event) {
         onBeginEdit_();
     }
 }
+
 void SceneViewport2D::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton)
         panning_ = false;
@@ -352,6 +370,7 @@ void SceneViewport2D::mouseReleaseEvent(QMouseEvent* event) {
         onEndEdit_();
     }
 }
+
 void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
     if (panning_ && (event->buttons() & Qt::MiddleButton)) {
         pan_ += event->position() - lastMouse_;
@@ -404,6 +423,7 @@ void SceneViewport2D::mouseMoveEvent(QMouseEvent* event) {
     }
     lastMouse_ = event->position();
 }
+
 void SceneViewport2D::PaintAt(QPointF point) {
     const auto world = ScreenToWorld(point);
     auto entity = document_.GetSelected();
@@ -423,6 +443,7 @@ void SceneViewport2D::PaintAt(QPointF point) {
                      static_cast<LuxEngine::uint32>(cell.y()),
                      tool_ == EditorTool::TileErase ? 0 : tileId_);
 }
+
 void SceneViewport2D::wheelEvent(QWheelEvent* event) {
     const QPointF world = ScreenToWorld(event->position());
     pixelsPerUnit_ =

@@ -16,6 +16,7 @@ struct TransformComponent;
 namespace LuxEditor {
 class EditorDocument;
 class EngineSceneRenderer;
+
 class SceneViewport2D final : public QWidget {
 public:
     SceneViewport2D(
@@ -27,23 +28,29 @@ public:
         std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
         std::shared_ptr<EngineSceneRenderer> renderer = nullptr);
     ~SceneViewport2D() override;
+
     void RefreshScene() {
         update();
     }
+
     void FocusSelection();
     void CancelInteraction();
     // Visible area in world units: centre and half height.
     void GetView(double& centerX, double& centerY, double& halfHeight) const;
+
     void SetSnapToGrid(bool enabled) {
         snapToGrid_ = enabled;
         update();
     }
+
     void SetTool(EditorTool tool) {
         tool_ = tool;
     }
+
     void SetTileId(uint8_t tile) {
         tileId_ = tile;
     }
+
     void SetDebugColliders(bool enabled) {
         debugColliders_ = enabled;
         update();

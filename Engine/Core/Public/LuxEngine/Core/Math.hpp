@@ -12,17 +12,21 @@ struct Vec2 {
     float y = 0.0f;
 
     constexpr Vec2() = default;
+
     constexpr Vec2(float inX, float inY) : x(inX), y(inY) {}
 
     Vec2 operator+(const Vec2& o) const {
         return {x + o.x, y + o.y};
     }
+
     Vec2 operator-(const Vec2& o) const {
         return {x - o.x, y - o.y};
     }
+
     Vec2 operator*(float scalar) const {
         return {x * scalar, y * scalar};
     }
+
     Vec2& operator+=(const Vec2& o) {
         x += o.x;
         y += o.y;
@@ -36,17 +40,21 @@ struct Vec3 {
     float z = 0.0f;
 
     constexpr Vec3() = default;
+
     constexpr Vec3(float inX, float inY, float inZ) : x(inX), y(inY), z(inZ) {}
 
     Vec3 operator+(const Vec3& o) const {
         return {x + o.x, y + o.y, z + o.z};
     }
+
     Vec3 operator-(const Vec3& o) const {
         return {x - o.x, y - o.y, z - o.z};
     }
+
     Vec3 operator*(float scalar) const {
         return {x * scalar, y * scalar, z * scalar};
     }
+
     Vec3& operator+=(const Vec3& o) {
         x += o.x;
         y += o.y;
@@ -78,6 +86,7 @@ struct Vec4 {
     float w = 1.0f;
 
     constexpr Vec4() = default;
+
     constexpr Vec4(float inX, float inY, float inZ, float inW) : x(inX), y(inY), z(inZ), w(inW) {}
 };
 
@@ -147,6 +156,7 @@ struct Mat4 {
         result.elements[10] = c;
         return result;
     }
+
     static Mat4 RotateY(float angle) {
         Mat4 result;
         const float c = std::cos(angle), s = std::sin(angle);
@@ -156,6 +166,7 @@ struct Mat4 {
         result.elements[10] = c;
         return result;
     }
+
     static Mat4 RotateZ(float angleRadians) {
         Mat4 result = Identity();
         const float c = std::cos(angleRadians);

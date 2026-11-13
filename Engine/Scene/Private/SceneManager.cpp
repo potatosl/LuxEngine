@@ -32,9 +32,11 @@ std::string Utf8(const fs::path& path) {
     const auto value = path.generic_u8string();
     return {reinterpret_cast<const char*>(value.data()), value.size()};
 }
+
 fs::path Path(const std::string& value) {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(value.data()), value.size()));
 }
+
 fs::path Canonical(const fs::path& path, const fs::path& owner = {}) {
     if (path.empty() || path.native().find(fs::path::value_type{}) != fs::path::string_type::npos)
         throw std::runtime_error("씬 경로가 비어 있습니다.");
@@ -48,12 +50,14 @@ fs::path Canonical(const fs::path& path, const fs::path& owner = {}) {
         throw std::runtime_error("씬 경로를 확인할 수 없습니다: " + Utf8(path));
     return canonical.lexically_normal();
 }
+
 bool SamePath(const fs::path& first, const fs::path& second) {
     if (first == second)
         return true;
     std::error_code error;
     return fs::equivalent(first, second, error) && !error;
 }
+
 std::shared_ptr<Scene> Clone(Scene& source) {
     std::string data;
     if (!source.SerializeToString(data))
@@ -72,6 +76,7 @@ std::shared_ptr<Scene> Clone(Scene& source) {
     }
     return result;
 }
+
 void Commit(Scene& target, Scene& staged) {
     if (staged.GetEntityCount() > MaxEntities)
         throw std::runtime_error("합성 씬의 엔티티 수가 100000개를 넘었습니다.");
@@ -79,6 +84,7 @@ void Commit(Scene& target, Scene& staged) {
     if (!target.ApplyState(staged))
         throw std::runtime_error("합성 씬 상태를 적용할 수 없습니다.");
 }
+
 std::vector<uint32> ReferenceRoots(Scene& scene) {
     auto result = scene.GetComponentEntityIds<SceneReferenceComponent>();
     if (result.empty())
@@ -103,6 +109,7 @@ std::vector<uint32> ReferenceRoots(Scene& scene) {
                      [&](uint32 a, uint32 b) { return depths.at(a) < depths.at(b); });
     return result;
 }
+
 bool IsDescendant(Scene& scene, uint32 id, uint32 root) {
     for (size_t depth = 0; id != 0 && depth <= MaxEntities; ++depth) {
         if (id == root)
@@ -111,12 +118,14 @@ bool IsDescendant(Scene& scene, uint32 id, uint32 root) {
     }
     return false;
 }
+
 bool HasReferenceAncestor(Scene& scene, uint32 id) {
     for (auto parent = scene.GetParent(id); parent != 0; parent = scene.GetParent(parent))
         if (scene.HasComponent<SceneReferenceComponent>(parent))
             return true;
     return false;
 }
+
 void ValidateInheritance(Scene& scene) {
     unsigned bases = 0;
     for (const auto root : ReferenceRoots(scene))
@@ -125,6 +134,7 @@ void ValidateInheritance(Scene& scene) {
             !HasReferenceAncestor(scene, root) && ++bases > 1)
             throw std::runtime_error("씬 전체에 적용되는 상속 기준은 하나만 지정할 수 있습니다.");
 }
+
 void PruneMaps(Scene& scene) {
     for (auto entity : scene.GetEntities()) {
         if (auto* reference = entity.TryGetComponent<SceneReferenceComponent>())
@@ -135,14 +145,18 @@ void PruneMaps(Scene& scene) {
             entity.RemoveComponent<InstanceSourceComponent>();
     }
 }
+
 using IdMap = std::unordered_map<uint32, uint32>;
+
 IdMap ReadMap(const SceneReferenceComponent& reference) {
     return {reference.entityMap.begin(), reference.entityMap.end()};
 }
+
 void WriteMap(SceneReferenceComponent& reference, const IdMap& mapping) {
     reference.entityMap.assign(mapping.begin(), mapping.end());
     std::sort(reference.entityMap.begin(), reference.entityMap.end());
 }
+
 void RemapReference(SceneReferenceComponent& reference, const IdMap& mapping) {
     std::vector<std::pair<uint32, uint32>> next;
     for (const auto& [source, local] : reference.entityMap)
@@ -150,6 +164,7 @@ void RemapReference(SceneReferenceComponent& reference, const IdMap& mapping) {
             next.emplace_back(source, found->second);
     reference.entityMap = std::move(next);
 }
+
 SceneSettings InheritedSettings(const SceneSettings& current, const SceneSettings& previous,
                                 const SceneSettings& source) {
     auto result = current;
@@ -174,6 +189,7 @@ SceneSettings InheritedSettings(const SceneSettings& current, const SceneSetting
         result.physicsSubsteps = source.physicsSubsteps;
     return result;
 }
+
 std::string EntitySignature(Scene& scene, uint32 id) {
     Scene single;
     auto entity = single.CreateEntity();
@@ -190,6 +206,7 @@ std::string EntitySignature(Scene& scene, uint32 id) {
         throw std::runtime_error("인스턴스 속성을 비교할 수 없습니다.");
     return signature;
 }
+
 bool SameEntity(Scene& current, uint32 local, Scene& previous, uint32 source, const IdMap& map,
                 uint32 container) {
     if (!current.IsAlive(local) || !previous.IsAlive(source))
@@ -203,6 +220,7 @@ bool SameEntity(Scene& current, uint32 local, Scene& previous, uint32 source, co
            (oldHierarchy && oldHierarchy->group) == (localHierarchy && localHierarchy->group) &&
            EntitySignature(current, local) == EntitySignature(previous, source);
 }
+
 // Persisted metadata can contain previous source and unloaded-subtree snapshots. Their reference
 // paths use the same owning-file context as the outer scene, including after project relocation.
 void RewritePaths(Scene& scene, const fs::path& owner, const fs::path* destination,
@@ -254,6 +272,7 @@ void RewritePaths(Scene& scene, const fs::path& owner, const fs::path* destinati
         }
     }
 }
+
 std::string CaptureSubtree(Scene& target, uint32 root) {
     auto snapshot = Clone(target);
     std::unordered_set<uint32> retained;
@@ -273,6 +292,7 @@ std::string CaptureSubtree(Scene& target, uint32 root) {
         throw std::runtime_error("언로드할 씬의 상태를 보관할 수 없습니다.");
     return data;
 }
+
 void RestoreSubtree(Scene& target, uint32 root) {
     auto reference = target.GetComponent<SceneReferenceComponent>(root);
     if (reference.suspended.empty())
@@ -316,6 +336,7 @@ void RestoreSubtree(Scene& target, uint32 root) {
     target.GetComponent<SceneReferenceComponent>(root) = std::move(reference);
     PruneMaps(target);
 }
+
 void UnloadSubtree(Scene& target, uint32 root) {
     auto& reference = target.GetComponent<SceneReferenceComponent>(root);
     if (!reference.loaded)
@@ -335,6 +356,7 @@ struct Stamp {
     fs::file_time_type writeTime{};
     std::uintmax_t bytes = 0;
 };
+
 Stamp FileStamp(const fs::path& path) {
     std::error_code error;
     if (!fs::is_regular_file(path, error) || error)
@@ -348,6 +370,7 @@ Stamp FileStamp(const fs::path& path) {
         throw std::runtime_error("씬 파일 변경 시각을 확인할 수 없습니다.");
     return result;
 }
+
 bool Matches(const Stamp& expected) {
     try {
         const auto actual = FileStamp(expected.path);
@@ -356,6 +379,7 @@ bool Matches(const Stamp& expected) {
         return false;
     }
 }
+
 struct LoadContext {
     std::vector<fs::path> stack;
     std::vector<Stamp> dependencies;
@@ -364,6 +388,7 @@ struct LoadContext {
     bool force = false;
     std::optional<uint64> cacheGeneration;
 };
+
 LoadContext ContextFor(Scene& scene, bool force = true) {
     LoadContext context;
     context.force = force;
@@ -371,6 +396,7 @@ LoadContext ContextFor(Scene& scene, bool force = true) {
         context.stack.push_back(Canonical(Path(scene.GetSourcePath())));
     return context;
 }
+
 void CheckSaveDependencies(Scene& scene, const fs::path& owner, std::vector<fs::path>& stack,
                            std::uintmax_t& bytes, size_t& references,
                            std::set<std::string>& validated) {
@@ -407,6 +433,7 @@ struct SceneManager::State {
         std::vector<Stamp> dependencies;
         uint64 used = 0;
     };
+
     struct StreamJob {
         Scene* owner = nullptr;
         std::weak_ptr<int> lifetime;
@@ -414,6 +441,7 @@ struct SceneManager::State {
         std::string path;
         std::future<SceneLoadResult> future;
     };
+
     struct FailedStream {
         Scene* owner = nullptr;
         std::weak_ptr<int> lifetime;
@@ -421,6 +449,7 @@ struct SceneManager::State {
         std::string path;
         std::chrono::steady_clock::time_point retry;
     };
+
     mutable std::mutex mutex;
     std::map<std::string, CacheEntry> rawCache, preloadCache;
     uint64 sequence = 0, generation = 0;
@@ -456,6 +485,7 @@ struct SceneManager::State {
             oldestCache->erase(oldest);
         }
     }
+
     std::string Read(const fs::path& path, LoadContext& context) {
         const auto stamp = FileStamp(path);
         context.bytes += stamp.bytes;
@@ -707,15 +737,19 @@ SceneLoadResult SceneManager::State::LoadTop(const fs::path& requested, bool pre
 }
 
 SceneManager::SceneManager() : state_(std::make_shared<State>()) {}
+
 SceneManager::~SceneManager() = default;
+
 SceneLoadResult SceneManager::Load(const fs::path& path) {
     return state_->LoadTop(path, false);
 }
+
 std::shared_ptr<Scene> SceneManager::Load(const fs::path& path, std::string& error) {
     auto result = Load(path);
     error = std::move(result.error);
     return std::move(result.scene);
 }
+
 std::future<SceneLoadResult> SceneManager::LoadAsync(const fs::path& path) {
     auto promise = std::make_shared<std::promise<SceneLoadResult>>();
     auto future = promise->get_future();
@@ -751,11 +785,13 @@ std::future<SceneLoadResult> SceneManager::LoadAsync(const fs::path& path) {
     }
     return future;
 }
+
 bool SceneManager::Preload(const fs::path& path, std::string& error) {
     const auto result = state_->LoadTop(path, true);
     error = result.error;
     return static_cast<bool>(result);
 }
+
 std::future<SceneLoadResult> SceneManager::PreloadAsync(const fs::path& path) {
     auto promise = std::make_shared<std::promise<SceneLoadResult>>();
     auto future = promise->get_future();
@@ -791,6 +827,7 @@ std::future<SceneLoadResult> SceneManager::PreloadAsync(const fs::path& path) {
     }
     return future;
 }
+
 bool SceneManager::IsPreloaded(const fs::path& path) const {
     try {
         const auto key = Utf8(Canonical(path));
@@ -807,6 +844,7 @@ bool SceneManager::IsPreloaded(const fs::path& path) const {
         return false;
     }
 }
+
 bool SceneManager::Unload(const fs::path& path) {
     try {
         const auto canonical = Canonical(path);
@@ -833,6 +871,7 @@ bool SceneManager::Unload(const fs::path& path) {
         return false;
     }
 }
+
 void SceneManager::ClearCache() {
     std::lock_guard lock(state_->mutex);
     ++state_->generation;
@@ -882,6 +921,7 @@ uint32 SceneManager::AddSceneInstance(Scene& target, const fs::path& path, Scene
         return 0;
     }
 }
+
 bool SceneManager::RefreshInstances(Scene& target, std::string& error) {
     error.clear();
     try {
@@ -915,6 +955,7 @@ bool SceneManager::RefreshInstances(Scene& target, std::string& error) {
         return false;
     }
 }
+
 bool SceneManager::RefreshInstance(Scene& target, uint32 root, std::string& error) {
     error.clear();
     try {
@@ -937,6 +978,7 @@ bool SceneManager::RefreshInstance(Scene& target, uint32 root, std::string& erro
         return false;
     }
 }
+
 bool SceneManager::UnloadInstance(Scene& target, uint32 root, std::string& error) {
     error.clear();
     try {
@@ -954,6 +996,7 @@ bool SceneManager::UnloadInstance(Scene& target, uint32 root, std::string& error
         return false;
     }
 }
+
 bool SceneManager::ConfigureStreaming(Scene& target, uint32 root, Vec2 center, float loadRadius,
                                       float unloadRadius, std::string& error) {
     error.clear();
@@ -977,6 +1020,7 @@ bool SceneManager::ConfigureStreaming(Scene& target, uint32 root, Vec2 center, f
         return false;
     }
 }
+
 bool SceneManager::UpdateStreaming(Scene& target, Vec2 observer, std::string& error,
                                    bool* changed) {
     error.clear();
@@ -1091,6 +1135,7 @@ bool SceneManager::UpdateStreaming(Scene& target, Vec2 observer, std::string& er
         return false;
     }
 }
+
 bool SceneManager::Save(Scene& scene, const fs::path& targetPath, const fs::path& previousPath,
                         std::string& error) {
     error.clear();

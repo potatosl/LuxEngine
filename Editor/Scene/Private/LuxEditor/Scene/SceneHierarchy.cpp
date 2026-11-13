@@ -13,6 +13,7 @@ SceneHierarchy::SceneHierarchy(QWidget* parent) : QTreeWidget(parent) {
     setDragDropMode(QAbstractItemView::InternalMove);
     setDefaultDropAction(Qt::MoveAction);
 }
+
 void SceneHierarchy::dropEvent(QDropEvent* event) {
     if (event->source() != this || !reparent) {
         event->ignore();

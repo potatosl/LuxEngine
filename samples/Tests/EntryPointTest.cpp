@@ -1,6 +1,7 @@
 #include <LuxEngine/EntryPoint.hpp>
 #include <iostream>
 #include <stdexcept>
+
 namespace {
 int Checks(int argc, char** argv) {
     if (argc < 1 || !argv || !argv[0])

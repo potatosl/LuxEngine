@@ -24,11 +24,13 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <cmath>
+
 namespace LuxEditor {
 namespace {
 std::optional<LuxEngine::uint32> SelectedId(EditorDocument& doc) {
     return doc.GetSelectedId(doc.GetActiveTabId());
 }
+
 class KeyList final : public QListWidget {
 public:
     KeyList(QWidget* parent, std::function<void()> remove)
@@ -36,6 +38,7 @@ public:
 
 private:
     std::function<void()> remove_;
+
     bool event(QEvent* event) override {
         if (event->type() == QEvent::ShortcutOverride &&
             static_cast<QKeyEvent*>(event)->key() == Qt::Key_Delete) {
@@ -44,6 +47,7 @@ private:
         }
         return QListWidget::event(event);
     }
+
     void keyPressEvent(QKeyEvent* event) override {
         if (event->key() == Qt::Key_Delete) {
             remove_();
@@ -52,6 +56,7 @@ private:
             QListWidget::keyPressEvent(event);
     }
 };
+
 class KeyTimeline final : public QSlider {
 public:
     KeyTimeline(QWidget* parent, std::function<LuxEngine::Entity()> selected)
@@ -61,6 +66,7 @@ public:
 
 private:
     std::function<LuxEngine::Entity()> selected_;
+
     void paintEvent(QPaintEvent* event) override {
         QSlider::paintEvent(event);
         QPainter painter(this);
@@ -85,12 +91,14 @@ private:
     }
 };
 } // namespace
+
 void EditorWindow::StopAnimationPlayback() {
     if (!animationTimer_.isActive())
         return;
     animationTimer_.stop();
     EndTimelineEdit();
 }
+
 void EditorWindow::BuildAnimationPanel() {
     animationDock_ = new QDockWidget(QStringLiteral("애니메이션"), this);
     animationDock_->setObjectName(QStringLiteral("AnimationWorkspace"));
@@ -256,6 +264,7 @@ void EditorWindow::BuildAnimationPanel() {
             StopAnimationPlayback();
     });
 }
+
 void EditorWindow::OnAnimationChanged(const QWidget* field) {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
@@ -291,6 +300,7 @@ void EditorWindow::OnAnimationChanged(const QWidget* field) {
     RefreshInspector();
     UpdateChrome();
 }
+
 void EditorWindow::AddKeyframe() {
     if (previewActive_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>() ||
@@ -308,6 +318,7 @@ void EditorWindow::AddKeyframe() {
     RefreshInspector();
     UpdateChrome();
 }
+
 void EditorWindow::RemoveKeyframe() {
     if (previewActive_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::AnimationComponent>())
@@ -326,12 +337,14 @@ void EditorWindow::RemoveKeyframe() {
     RefreshInspector();
     UpdateChrome();
 }
+
 void EditorWindow::ScrubAnimation(int value) {
     const auto selected = document_.GetSelected();
     if (selected && selected.HasComponent<LuxEngine::AnimationComponent>())
         SeekAnimationTime(selected.GetComponent<LuxEngine::AnimationComponent>().clip.duration *
                           std::clamp(value, 0, 1000) / 1000.0);
 }
+
 void EditorWindow::SeekAnimationTime(double time) {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>() ||
@@ -357,6 +370,7 @@ void EditorWindow::SeekAnimationTime(double time) {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::EndTimelineEdit() {
     if (timelineBefore_.isEmpty())
         return;

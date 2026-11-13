@@ -18,16 +18,19 @@
 namespace {
 using namespace LuxEditor;
 using namespace LuxEngine;
+
 void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 QGroupBox* Group(EditorWindow& window, const char* title) {
     for (auto* group : window.findChildren<QGroupBox*>())
         if (group->title() == QString::fromLatin1(title))
             return group;
     throw std::runtime_error("Inspector group not found");
 }
+
 void CheckTransform(const TransformComponent& actual, const TransformComponent& expected) {
     const std::array<float, 9> a{actual.position.x, actual.position.y, actual.position.z,
                                  actual.rotation.x, actual.rotation.y, actual.rotation.z,
@@ -37,6 +40,7 @@ void CheckTransform(const TransformComponent& actual, const TransformComponent& 
                                  expected.scale.x,    expected.scale.y,    expected.scale.z};
     Check(a == b, "editing one Transform axis preserves every untouched float exactly");
 }
+
 void TestFields(QApplication& app, const QString& directory) {
     Scene scene;
     auto entity = scene.CreateEntity("Inspector fixture");

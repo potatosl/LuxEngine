@@ -68,17 +68,21 @@ namespace {
 QString Q(const std::string& value) {
     return QString::fromUtf8(value);
 }
+
 QString Q(const std::filesystem::path& value) {
     return Q(PathUtf8(value));
 }
+
 std::string Utf8(const QString& value) {
     return value.toUtf8().toStdString();
 }
+
 std::optional<LuxEngine::uint32> SelectedId(EditorDocument& document) {
     const LuxEngine::Entity entity = document.GetSelected();
     return entity ? std::optional<LuxEngine::uint32>(entity.GetId()) : std::nullopt;
 }
 } // namespace
+
 EditorWindow::EditorWindow(QWidget* parent)
     : QMainWindow(parent),
       recentProjects_(
@@ -115,12 +119,14 @@ EditorWindow::EditorWindow(QWidget* parent)
     }
     const auto active = document_.GetActiveTabId();
     const auto activeProject = project_;
+
     struct Recovery {
         EditorDocument::TabId tab = 0;
         std::string path;
         std::filesystem::path autosave;
         EditorProject context;
     };
+
     std::vector<Recovery> recoveries;
     const auto savedDocuments = settings.value(QStringLiteral("openSceneDocuments")).toByteArray();
     if (savedDocuments.size() <= 1024 * 1024) {
@@ -173,6 +179,7 @@ EditorWindow::EditorWindow(QWidget* parent)
     ApplyProjectPreferences();
     RefreshAll();
 }
+
 EditorWindow::~EditorWindow() {
     StopAnimationPlayback();
     autosaveTimer_.stop();
@@ -193,6 +200,7 @@ EditorWindow::~EditorWindow() {
         delete dock;
     }
 }
+
 void EditorWindow::BuildMenus() {
     auto add = [this](QMenu* menu, const QString& title, const QString& id,
                       const QKeySequence& fallback, const std::function<void()>& action) {
@@ -392,6 +400,7 @@ void EditorWindow::BuildMenus() {
         [this] { ImportEditorSettings(); });
     UpdateRecentMenu();
 }
+
 void EditorWindow::UpdateRecentMenu() {
     recentMenu_->clear();
     const auto& files = recentProjects_.Get();
@@ -403,6 +412,7 @@ void EditorWindow::UpdateRecentMenu() {
     for (const auto& file : files)
         recentMenu_->addAction(Q(file), this, [this, file] { OpenProjectFile(file); });
 }
+
 void EditorWindow::OpenCommandPalette() {
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("명령 검색"));
@@ -439,6 +449,7 @@ void EditorWindow::OpenCommandPalette() {
             break;
         }
 }
+
 void EditorWindow::ConfigureShortcuts() {
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("단축키 설정"));
@@ -469,6 +480,7 @@ void EditorWindow::ConfigureShortcuts() {
                          editor->keySequence().toString());
     statusBar()->showMessage(QStringLiteral("단축키를 저장했습니다."), 4000);
 }
+
 void EditorWindow::ExportEditorSettings() {
     const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("에디터 설정 내보내기"),
                                                       QStringLiteral("LuxEditorSettings.json"),
@@ -493,6 +505,7 @@ void EditorWindow::ExportEditorSettings() {
     else
         Log(QStringLiteral("에디터 설정을 내보냈습니다."));
 }
+
 void EditorWindow::ImportEditorSettings() {
     const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("에디터 설정 가져오기"),
                                                       {}, QStringLiteral("JSON (*.json)"));
@@ -542,6 +555,7 @@ void EditorWindow::ImportEditorSettings() {
     ApplyTheme();
     Log(QStringLiteral("에디터 설정을 가져왔습니다."));
 }
+
 void EditorWindow::Log(const QString& message, bool error) {
     lastLogMessage_ = message;
     if (error) {
@@ -553,10 +567,12 @@ void EditorWindow::Log(const QString& message, bool error) {
     }
     statusBar()->showMessage(message, 5000);
 }
+
 void EditorWindow::ShowError(const QString& title, const QString& message) {
     Log(title + QStringLiteral(": ") + message, true);
     QMessageBox::critical(this, title, message);
 }
+
 void EditorWindow::RunWithProgress(const QString& message, const std::function<void()>& task) {
     QProgressDialog progress(message, QString(), 0, 0, this);
     progress.setWindowModality(Qt::WindowModal);
@@ -567,6 +583,7 @@ void EditorWindow::RunWithProgress(const QString& message, const std::function<v
     task();
     progress.close();
 }
+
 void EditorWindow::closeEvent(QCloseEvent* event) {
     StopPreview();
     StopSceneWindow();
@@ -578,6 +595,7 @@ void EditorWindow::closeEvent(QCloseEvent* event) {
     SaveWorkspaceLayout();
     event->accept();
 }
+
 void EditorWindow::resizeEvent(QResizeEvent* event) {
     QMainWindow::resizeEvent(event);
     if (assetPreviewPanel_)
@@ -592,6 +610,7 @@ void EditorWindow::resizeEvent(QResizeEvent* event) {
         }
     }
 }
+
 void EditorWindow::dragEnterEvent(QDragEnterEvent* event) {
     for (const QUrl& url : event->mimeData()->urls()) {
         const QString suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
@@ -602,6 +621,7 @@ void EditorWindow::dragEnterEvent(QDragEnterEvent* event) {
         }
     }
 }
+
 void EditorWindow::dropEvent(QDropEvent* event) {
     if (event->mimeData()->urls().isEmpty())
         return;
@@ -624,6 +644,7 @@ void EditorWindow::dropEvent(QDropEvent* event) {
     }
     event->acceptProposedAction();
 }
+
 void EditorWindow::RefreshAll() {
     RefreshSceneTabs();
     RefreshHierarchy();
@@ -634,6 +655,7 @@ void EditorWindow::RefreshAll() {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::RefreshProjectExplorer() {
     const auto row = projectFiles_->currentRow();
     const auto selectedPath = row >= 0 && static_cast<size_t>(row) < projectFilePaths_.size()
@@ -691,6 +713,7 @@ void EditorWindow::RefreshProjectExplorer() {
                 static_cast<int>(std::distance(projectFilePaths_.begin(), found)));
     }
 }
+
 void EditorWindow::RefreshHierarchy() {
     refreshingHierarchy_ = true;
     const QSignalBlocker block(hierarchy_);
@@ -754,6 +777,7 @@ void EditorWindow::RefreshHierarchy() {
     }
     refreshingHierarchy_ = false;
 }
+
 void EditorWindow::RefreshInspector() {
     refreshingInspector_ = true;
     LuxEngine::Entity selected = document_.GetSelected();
@@ -892,6 +916,7 @@ void EditorWindow::RefreshInspector() {
     }
     refreshingInspector_ = false;
 }
+
 void EditorWindow::UpdateChrome() {
     const QString name = document_.GetPath().empty() ? QStringLiteral("새 장면")
                                                      : QFileInfo(Q(document_.GetPath())).fileName();
@@ -912,6 +937,7 @@ void EditorWindow::UpdateChrome() {
         if (action)
             action->setEnabled(project_.has_value());
 }
+
 void EditorWindow::SelectEntity(std::optional<LuxEngine::uint32> id, bool syncHierarchy) {
     StopAnimationPlayback();
     document_.Select(id);
@@ -922,6 +948,7 @@ void EditorWindow::SelectEntity(std::optional<LuxEngine::uint32> id, bool syncHi
     canvas3D_->RefreshScene();
     overviewCanvas_->RefreshScene();
 }
+
 void EditorWindow::AddEntity() {
     if (previewActive_)
         return;
@@ -932,6 +959,7 @@ void EditorWindow::AddEntity() {
     });
     RefreshAll();
 }
+
 void EditorWindow::AddMeshEntity() {
     if (previewActive_)
         return;
@@ -943,6 +971,7 @@ void EditorWindow::AddMeshEntity() {
     viewportTabs_->setCurrentIndex(0);
     RefreshAll();
 }
+
 void EditorWindow::AddTilemap() {
     if (previewActive_)
         return;
@@ -955,6 +984,7 @@ void EditorWindow::AddTilemap() {
     SetTool(EditorTool::TileBrush);
     RefreshAll();
 }
+
 void EditorWindow::PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngine::uint32 y,
                              uint8_t tile) {
     if (previewActive_)
@@ -967,6 +997,7 @@ void EditorWindow::PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngin
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::DeleteEntity() {
     const auto selected = document_.GetSelected();
     if (!selected)
@@ -984,6 +1015,7 @@ void EditorWindow::DeleteEntity() {
     });
     RefreshAll();
 }
+
 void EditorWindow::OnNameChanged() {
     if (refreshingInspector_)
         return;
@@ -1007,6 +1039,7 @@ void EditorWindow::OnNameChanged() {
     canvas3D_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::OnTransformChanged(int row, int axis) {
     if (refreshingInspector_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
@@ -1025,6 +1058,7 @@ void EditorWindow::OnTransformChanged(int row, int axis) {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::OnSpriteChanged() {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
@@ -1042,6 +1076,7 @@ void EditorWindow::OnSpriteChanged() {
     canvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::OnColorChanged(int channel) {
     if (refreshingInspector_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::SpriteRendererComponent>())
@@ -1057,6 +1092,7 @@ void EditorWindow::OnColorChanged(int channel) {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::OnMeshChanged(const QWidget* field) {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
@@ -1082,6 +1118,7 @@ void EditorWindow::OnMeshChanged(const QWidget* field) {
     canvas3D_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::OnTilemapChanged(const QWidget* field) {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
@@ -1109,6 +1146,7 @@ void EditorWindow::OnTilemapChanged(const QWidget* field) {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::OnPhysicsChanged(const QWidget* field) {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected())
         return;
@@ -1157,6 +1195,7 @@ void EditorWindow::OnPhysicsChanged(const QWidget* field) {
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::StartPreview() {
     // 개발 중: 전체 게임 런타임 임베딩 대신 엔진 Scene의 물리·애니메이션만 실행합니다.
     if (previewActive_)
@@ -1188,6 +1227,7 @@ void EditorWindow::StartPreview() {
     previewTimer_.start();
     Log(QStringLiteral("장면 미리보기를 시작했습니다."));
 }
+
 void EditorWindow::StopPreview() {
     StopAnimationPlayback();
     if (!previewActive_)
@@ -1212,6 +1252,7 @@ void EditorWindow::StopPreview() {
     RefreshAll();
     Log(QStringLiteral("장면 미리보기를 중지하고 편집 상태를 복원했습니다."));
 }
+
 void EditorWindow::TogglePreviewPause() {
     if (!previewActive_)
         return;
@@ -1223,6 +1264,7 @@ void EditorWindow::TogglePreviewPause() {
     Log(previewPaused_ ? QStringLiteral("장면 미리보기를 일시정지했습니다.")
                        : QStringLiteral("장면 미리보기를 재개했습니다."));
 }
+
 void EditorWindow::StepPreview() {
     if (!previewActive_)
         StartPreview();
@@ -1232,6 +1274,7 @@ void EditorWindow::StepPreview() {
     previewTimer_.stop();
     TickPreview();
 }
+
 void EditorWindow::TickPreview() {
     if (!previewActive_)
         return;
@@ -1267,6 +1310,7 @@ void EditorWindow::TickPreview() {
     canvas3D_->RefreshScene();
     overviewCanvas_->RefreshScene();
 }
+
 void EditorWindow::SetTool(EditorTool tool) {
     EndViewportEdit();
     EndTimelineEdit();
@@ -1288,12 +1332,14 @@ void EditorWindow::SetTool(EditorTool tool) {
     toolHint_->setText(descriptions[static_cast<size_t>(tool)]);
     tilePalette_->setEnabled(tool == EditorTool::TileBrush);
 }
+
 void EditorWindow::BeginViewportEdit() {
     viewportEditBefore_ = SnapshotScene();
     if (!document_.IsDirty() && !viewportEditBefore_.isEmpty())
         cleanScenes_[document_.GetActiveTabId()] = viewportEditBefore_;
     viewportEditSelected_ = SelectedId(document_);
 }
+
 void EditorWindow::ApplyViewportTransform(LuxEngine::uint32 id,
                                           const LuxEngine::TransformComponent& value) {
     if (previewActive_)
@@ -1311,6 +1357,7 @@ void EditorWindow::ApplyViewportTransform(LuxEngine::uint32 id,
     overviewCanvas_->RefreshScene();
     UpdateChrome();
 }
+
 void EditorWindow::EndViewportEdit() {
     if (viewportEditBefore_.isEmpty())
         return;
@@ -1332,6 +1379,7 @@ void EditorWindow::EndViewportEdit() {
     viewportEditBefore_.clear();
     viewportEditSelected_.reset();
 }
+
 EditorSnapshot EditorWindow::SnapshotScene() {
     std::string serialized;
     if (!document_.GetScene().SerializeToString(serialized))
@@ -1344,6 +1392,7 @@ EditorSnapshot EditorWindow::SnapshotScene() {
                 entity.GetId(), entity.GetComponent<LuxEngine::AnimationComponent>().currentTime);
     return snapshot;
 }
+
 void EditorWindow::RestoreScene(const EditorSnapshot& snapshot,
                                 std::optional<LuxEngine::uint32> selected) {
     if (snapshot.isEmpty())
@@ -1363,6 +1412,7 @@ void EditorWindow::RestoreScene(const EditorSnapshot& snapshot,
     if (!restored)
         Log(QStringLiteral("장면 상태 복원에 실패했습니다."), true);
 }
+
 void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& edit) {
     if (previewActive_)
         return;
@@ -1419,6 +1469,7 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     UpdateSceneDirty(document_.GetActiveTabId(), after);
     UpdateChrome();
 }
+
 void EditorWindow::CopyEntity() {
     LuxEngine::Entity selected = document_.GetSelected();
     if (!selected)
@@ -1573,6 +1624,7 @@ void EditorWindow::CopyEntity() {
     QApplication::clipboard()->setMimeData(mime);
     Log(QStringLiteral("엔티티를 복사했습니다."));
 }
+
 namespace {
 constexpr qsizetype kMaxClipboardJsonBytes = 1024 * 1024;
 constexpr float kMaxClipboardCoord = 100000.0f;

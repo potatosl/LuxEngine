@@ -14,26 +14,33 @@ constexpr float kMaxFixtureSize = 10'000.0f;
 constexpr float kMaxCoordinate = 100'000.0f;
 constexpr float kMinDynamicMass = 0.001f;
 constexpr float kMaxDynamicMass = 1'000'000.0f;
+
 bool Same(Vec2 a, Vec2 b) {
     return a.x == b.x && a.y == b.y;
 }
+
 bool Finite(Vec2 v) {
     return std::isfinite(v.x) && std::isfinite(v.y);
 }
+
 bool Bounded(Vec2 v, float limit) {
     return Finite(v) && std::abs(v.x) <= limit && std::abs(v.y) <= limit;
 }
+
 struct Geometry {
     Vec2 size;
     Vec2 offset;
 };
+
 Vec2 Rotate(Vec2 point, float angle) {
     const float c = std::cos(angle), s = std::sin(angle);
     return {c * point.x - s * point.y, s * point.x + c * point.y};
 }
+
 Vec2 BodyPosition(Vec2 entityPosition, const Geometry& geometry, float angle) {
     return entityPosition + Rotate(geometry.offset, angle);
 }
+
 Vec2 EntityPosition(Vec2 bodyPosition, const Geometry& geometry, float angle) {
     return bodyPosition - Rotate(geometry.offset, angle);
 }
@@ -104,6 +111,7 @@ struct PhysicsWorld2D::Impl {
     Impl() {
         world.SetContactListener(&contacts);
     }
+
     ~Impl() {
         world.SetContactListener(nullptr);
     }
@@ -164,6 +172,7 @@ struct PhysicsWorld2D::Impl {
 };
 
 PhysicsWorld2D::PhysicsWorld2D() : impl_(std::make_unique<Impl>()) {}
+
 PhysicsWorld2D::~PhysicsWorld2D() = default;
 
 void PhysicsWorld2D::Remove(uint32 id) {

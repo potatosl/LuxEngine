@@ -11,10 +11,12 @@
 
 namespace {
 using namespace ForestGame;
+
 void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 void Frames(ForestSurvivorApp& app, int count = 3) {
     for (int frame = 0; frame < count; ++frame) {
         SDL_Delay(18);
@@ -26,6 +28,7 @@ void Frames(ForestSurvivorApp& app, int count = 3) {
               "all Korean labels fit the current viewport and wrapped containers");
     }
 }
+
 void Capture(ForestSurvivorApp& app, const std::string& name) {
     const char* directory = SDL_getenv("LUX_FOREST_CAPTURE_DIR");
     if (!directory)
@@ -44,6 +47,7 @@ void Capture(ForestSurvivorApp& app, const std::string& name) {
     SDL_DestroySurface(surface);
     Check(saved, "localized UI capture is saved");
 }
+
 void Motion(ForestSurvivorApp& app, float x, float y) {
     SDL_Event event{};
     event.type = SDL_EVENT_MOUSE_MOTION;
@@ -52,6 +56,7 @@ void Motion(ForestSurvivorApp& app, float x, float y) {
     event.motion.y = y * app.GetWindow().GetHeight();
     Check(SDL_PushEvent(&event), "mouse movement queues");
 }
+
 void Button(ForestSurvivorApp& app, bool pressed) {
     SDL_Event event{};
     event.type = pressed ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
@@ -59,6 +64,7 @@ void Button(ForestSurvivorApp& app, bool pressed) {
     event.button.button = SDL_BUTTON_LEFT;
     Check(SDL_PushEvent(&event), "mouse button queues");
 }
+
 void Key(ForestSurvivorApp& app, SDL_Keycode key, bool pressed) {
     SDL_Event event{};
     event.type = pressed ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
@@ -66,6 +72,7 @@ void Key(ForestSurvivorApp& app, SDL_Keycode key, bool pressed) {
     event.key.key = key;
     Check(SDL_PushEvent(&event), "keyboard event queues");
 }
+
 LuxEngine::Vec2 Find(ForestSurvivorApp& app, UiAction action) {
     LuxEngine::Vec2 low{1, 1}, high{0, 0};
     bool found = false;
@@ -85,6 +92,7 @@ LuxEngine::Vec2 Find(ForestSurvivorApp& app, UiAction action) {
     Check(app.ActionAt(center.x, center.y) == action, "button center belongs to its hit target");
     return center;
 }
+
 void QueueClick(ForestSurvivorApp& app, UiAction action) {
     const auto point = Find(app, action);
     // Queue a complete gesture together so native pointer motion cannot split the synthetic click.
@@ -93,6 +101,7 @@ void QueueClick(ForestSurvivorApp& app, UiAction action) {
     Motion(app, point.x, point.y);
     Button(app, false);
 }
+
 void Click(ForestSurvivorApp& app, UiAction action) {
     QueueClick(app, action);
     const auto expected = action == UiAction::Pause ? Phase::Paused : Phase::Playing;

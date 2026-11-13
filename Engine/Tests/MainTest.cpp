@@ -35,11 +35,13 @@
 namespace {
 int checks = 0;
 std::atomic<uint64_t> warningMessages{0};
+
 void Check(bool ok, const char* message) {
     ++checks;
     if (!ok)
         throw std::runtime_error(message);
 }
+
 template <class F> void Throws(F fn, const char* message) {
     bool threw = false;
     try {
@@ -49,6 +51,7 @@ template <class F> void Throws(F fn, const char* message) {
     }
     Check(threw, message);
 }
+
 bool Near(float a, float b) {
     return std::abs(a - b) < 0.0001f;
 }
@@ -183,8 +186,10 @@ std::string Sha256Hex(const std::string& input) {
     }
     return out;
 }
+
 struct Files {
     std::filesystem::path root;
+
     Files() {
         const auto temporary = std::filesystem::temp_directory_path();
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -202,22 +207,28 @@ struct Files {
         }
         throw std::runtime_error("Cannot reserve a unique test directory");
     }
+
     ~Files() {
         std::error_code ec;
         std::filesystem::remove_all(root, ec);
     }
+
     std::string Path(const char* name) const {
         return (root / name).string();
     }
+
     void Text(const char* name, const char* data) const {
         std::ofstream(Path(name)) << data;
     }
+
     void Binary(const char* name, const void* data, size_t size) const {
         std::ofstream out(Path(name), std::ios::binary);
         out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
     }
 };
+
 using namespace LuxEngine;
+
 void Core() {
     Random first(42), second(42);
     for (int index = 0; index < 32; ++index) {
@@ -338,6 +349,7 @@ void Core() {
     Check(!Input::IsGamepadButtonPressed(static_cast<LuxGamepadButton>(-1)),
           "invalid gamepad button");
 }
+
 void Physics2D() {
     PhysicsEngine::Init();
     PhysicsEngine::SetGravity2D({0, -9.81f});
@@ -667,12 +679,15 @@ void Physics2D() {
     }
     PhysicsEngine::Shutdown();
 }
+
 void Scenes() {
     Scene scene;
     auto a = scene.CreateEntity("a"), b = scene.CreateEntity("b");
+
     struct Custom {
         int value = 7;
     };
+
     a.AddComponent<Custom>();
     a.AddComponent<Rigidbody2DComponent>();
     scene.DestroyEntity(a);
@@ -1038,6 +1053,7 @@ void Scenes() {
         }
     }
 }
+
 void Assets() {
     double brightness[2]{};
     for (int variant = 0; variant < 2; ++variant) {
@@ -1187,6 +1203,7 @@ void Assets() {
           "shader load");
     AssetManager::Shutdown();
 }
+
 void Wav(const std::string& file, uint32 dataBytes = 16000) {
     std::ofstream out(file, std::ios::binary);
     auto u16 = [&](uint16 value) {
@@ -1222,6 +1239,7 @@ void Wav(const std::string& file, uint32 dataBytes = 16000) {
         }
     }
 }
+
 void Audio() {
     Files files;
     Wav(files.Path("tone.wav"));
@@ -1303,6 +1321,7 @@ void Audio() {
     std::cout << "Audio 1,000x Init/Shutdown stress completed in " << stressElapsed << " ms\n";
     Check(!AudioEngine::IsMusicPlaying(), "audio shutdown clean");
 }
+
 void WindowEvents() {
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
     Check(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD), "dummy video initializes");
@@ -1536,18 +1555,22 @@ void WindowEvents() {
     Input::Shutdown();
     SDL_Quit();
 }
+
 struct SkipTest : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
+
 bool MissingVulkanDevice(const std::string& error) {
     return error.find("No Vulkan physical devices") != std::string::npos ||
            error.find("No suitable Vulkan device") != std::string::npos ||
            error.find("Vulkan 1.1 loader") != std::string::npos ||
            error.find("VK_ERROR_INCOMPATIBLE_DRIVER") != std::string::npos;
 }
+
 struct Graphics {
     Window window;
     GpuDevice gpu;
+
     explicit Graphics(const GpuDeviceConfig& config = {}, uint32 width = 320, uint32 height = 240,
                       bool checkTheme = true) {
         if (!SDL_Init(SDL_INIT_VIDEO))
@@ -1587,6 +1610,7 @@ struct Graphics {
             throw std::runtime_error("GPU initialization failed: " + error);
         }
     }
+
     ~Graphics() {
         AssetManager::Shutdown();
         Renderer2D::Shutdown();
@@ -1595,6 +1619,7 @@ struct Graphics {
         window.Shutdown();
         SDL_Quit();
     }
+
     bool Begin(int attempts = 8) {
         for (int attempt = 0; attempt < attempts; ++attempt) {
             window.PollEvents();
@@ -1607,6 +1632,7 @@ struct Graphics {
         }
         return false;
     }
+
     template <class F> GpuFrameCapture Capture(F&& draw) {
         Check(gpu.RequestFrameCapture(), "frame capture requested");
         Check(Begin(), "capture frame begins");
@@ -1618,6 +1644,7 @@ struct Graphics {
               "frame capture size");
         return capture;
     }
+
     void ValidationClean(const char* stage) {
         const auto counters = gpu.GetCounters();
         if (counters.validationErrors != 0)
@@ -1626,6 +1653,7 @@ struct Graphics {
         ++checks;
     }
 };
+
 void PresentCompletion() {
     GpuDeviceConfig config;
     config.validation = GpuValidation::Synchronization;
@@ -1827,6 +1855,7 @@ void MultiDeviceLifetime() {
 #endif
     first.gpu.Shutdown();
 }
+
 std::array<int, 4> Pixel(const GpuFrameCapture& capture, float x, float y) {
     const auto px = std::min<uint32>(capture.width - 1, static_cast<uint32>(x * capture.width));
     const auto py = std::min<uint32>(capture.height - 1, static_cast<uint32>(y * capture.height));
@@ -1834,10 +1863,12 @@ std::array<int, 4> Pixel(const GpuFrameCapture& capture, float x, float y) {
     return {capture.rgba[index], capture.rgba[index + 1], capture.rgba[index + 2],
             capture.rgba[index + 3]};
 }
+
 bool IsColor(const std::array<int, 4>& pixel, int r, int g, int b, int tolerance = 3) {
     return std::abs(pixel[0] - r) <= tolerance && std::abs(pixel[1] - g) <= tolerance &&
            std::abs(pixel[2] - b) <= tolerance;
 }
+
 std::array<RenderVertex, 6> Rect(float x0, float y0, float x1, float y1, float z,
                                  const Vec4& color) {
     return {{{{x0, y0, z}, color, {0, 1}},
@@ -1847,6 +1878,7 @@ std::array<RenderVertex, 6> Rect(float x0, float y0, float x1, float y1, float z
              {{x0, y1, z}, color, {0, 0}},
              {{x0, y0, z}, color, {0, 1}}}};
 }
+
 void ReportValidation(const GpuDevice& gpu) {
     const auto& info = gpu.GetInfo();
     std::cout << "device: " << info.deviceName << " (" << info.deviceType << "), validation "
@@ -1854,29 +1886,36 @@ void ReportValidation(const GpuDevice& gpu) {
               << (info.synchronizationValidation ? "on" : "off") << ", timeline "
               << (info.timelineSemaphores ? "on" : "off") << '\n';
 }
+
 void Lifecycle() {
     {
         Graphics probe({}, 64, 64, false);
     }
+
     struct Probe : Application {
         int shutdowns = 0;
         bool failInit = false, failRender = false, closeOnUpdate = true;
+
         void OnInit() override {
             if (failInit)
                 throw std::runtime_error("init failure");
         }
+
         void OnUpdate(double) override {
             if (closeOnUpdate && !failRender)
                 Close();
         }
+
         void OnRender(float) override {
             if (failRender)
                 throw std::runtime_error("render failure");
         }
+
         void OnShutdown() override {
             ++shutdowns;
         }
     };
+
     Throws([] { Application::Get(); }, "application singleton absent before construction");
     {
         Probe app;
@@ -1929,6 +1968,7 @@ void Lifecycle() {
     }
     SDL_Quit();
 }
+
 void MaterialAssetReloading(Graphics& graphics) {
     Files files;
     const auto modelPath = files.Path("reload-plane.obj");
@@ -2423,6 +2463,7 @@ void RenderOutput(Graphics& graphics) {
     MaterialAssetReloading(graphics);
     graphics.ValidationClean("render output checks");
 }
+
 void TextureFiltering() {
     Graphics graphics;
     const std::array<uint8, 8> pixels{255, 0, 0, 255, 0, 0, 255, 255};
@@ -2482,6 +2523,7 @@ void TextureFiltering() {
           "device reinitialization recreates the shared nearest sampler");
     graphics.ValidationClean("texture filters after device reinitialization");
 }
+
 void Gpu() {
     Graphics graphics;
     ReportValidation(graphics.gpu);
@@ -2564,6 +2606,7 @@ void Gpu() {
     Check(!delayed.IsValid() && delayed.GetWidth() == 0, "device shutdown invalidates resources");
     delayed.Release();
 }
+
 void VulkanSystems() {
     Graphics graphics;
     ReportValidation(graphics.gpu);
@@ -2833,10 +2876,12 @@ struct FaultScope {
     FaultScope() {
         Vk::ClearFaults();
     }
+
     ~FaultScope() {
         Vk::ClearFaults();
     }
 };
+
 void Failures() {
     Graphics graphics;
     ReportValidation(graphics.gpu);
@@ -3021,10 +3066,12 @@ void Failures() {
 
     struct Probe : Application {
         int shutdowns = 0;
+
         void OnShutdown() override {
             ++shutdowns;
         }
     };
+
     {
         FaultScope scope;
         Probe app;
@@ -3064,6 +3111,7 @@ template <class F> std::vector<double> TimedFrames(Graphics& graphics, int frame
     }
     return times;
 }
+
 void PrintTimes(const char* name, std::vector<double> times) {
     std::sort(times.begin(), times.end());
     double sum = 0;
@@ -3073,6 +3121,7 @@ void PrintTimes(const char* name, std::vector<double> times) {
     std::cout << name << ": avg " << sum / times.size() << " ms, p95 " << at(0.95) << " ms, p99 "
               << at(0.99) << " ms over " << times.size() << " frames\n";
 }
+
 void Stress() {
     Graphics graphics({}, 640, 360, false);
     ReportValidation(graphics.gpu);
@@ -3223,6 +3272,7 @@ void Stress() {
     Check(gpu.WaitIdle(), "stress drained");
     graphics.ValidationClean("stress");
 }
+
 long ResidentKilobytes() {
 #if defined(__linux__)
     std::ifstream status("/proc/self/status");
@@ -3233,6 +3283,7 @@ long ResidentKilobytes() {
 #endif
     return -1;
 }
+
 void LongRun() {
     double seconds = 20.0;
     if (const char* env = std::getenv("LUX_LONGRUN_SECONDS"))
@@ -3304,6 +3355,7 @@ inline void WriteU16Le(std::vector<uint8>& buf, size_t offset, uint16 value) {
         buf[offset + 1] = static_cast<uint8>((value >> 8) & 0xFF);
     }
 }
+
 inline void WriteU32Le(std::vector<uint8>& buf, size_t offset, uint32 value) {
     if (offset + 4 <= buf.size()) {
         buf[offset + 0] = static_cast<uint8>(value & 0xFF);
@@ -3985,6 +4037,7 @@ void RenderingBenchmark() {
 int vulkanValidationMessages = 0;
 SDL_LogOutputFunction defaultLogOutput = nullptr;
 void* defaultLogData = nullptr;
+
 void SDLCALL CountValidation(void* data, int category, SDL_LogPriority priority,
                              const char* message) {
     if (priority == SDL_LOG_PRIORITY_WARN)
@@ -3995,6 +4048,7 @@ void SDLCALL CountValidation(void* data, int category, SDL_LogPriority priority,
         defaultLogOutput(data, category, priority, message);
 }
 } // namespace
+
 int main(int argc, char** argv) {
     SDL_GetLogOutputFunction(&defaultLogOutput, &defaultLogData);
     SDL_SetLogOutputFunction(CountValidation, defaultLogData);

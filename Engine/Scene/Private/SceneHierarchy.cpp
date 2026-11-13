@@ -12,12 +12,15 @@ namespace {
 bool Finite(const Vec3& value) {
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
+
 bool Finite(const TransformComponent& value) {
     return Finite(value.position) && Finite(value.rotation) && Finite(value.scale);
 }
+
 float Length(Vec3 value) {
     return std::sqrt(value.Dot(value));
 }
+
 bool Decompose(const Mat4& matrix, TransformComponent& value, bool requireTrs) {
     const auto* m = matrix.elements;
     value.position = {m[12], m[13], m[14]};
@@ -48,6 +51,7 @@ bool Decompose(const Mat4& matrix, TransformComponent& value, bool requireTrs) {
     }
     return Finite(value);
 }
+
 bool InverseAffine(const Mat4& input, Mat4& result) {
     const auto* m = input.elements;
     const double a = m[0], b = m[4], c = m[8], d = m[1], e = m[5], f = m[9], g = m[2], h = m[6],
@@ -72,15 +76,18 @@ bool InverseAffine(const Mat4& input, Mat4& result) {
     return std::all_of(std::begin(result.elements), std::end(result.elements),
                        [](float v) { return std::isfinite(v); });
 }
+
 using AuthoredComponents =
     std::tuple<TagComponent, TransformComponent, SpriteRendererComponent, MeshRendererComponent,
                CameraComponent, Rigidbody2DComponent, BoxCollider2DComponent, Rigidbody3DComponent,
                BoxCollider3DComponent, TilemapComponent, AnimationComponent,
                SceneReferenceComponent>;
+
 template <typename Tuple, typename Callback, size_t... Indices>
 void ForEachType(Callback&& callback, std::index_sequence<Indices...>) {
     (callback.template operator()<std::tuple_element_t<Indices, Tuple>>(), ...);
 }
+
 template <typename Tuple, typename Callback> void ForEachType(Callback&& callback) {
     ForEachType<Tuple>(std::forward<Callback>(callback),
                        std::make_index_sequence<std::tuple_size_v<Tuple>>{});

@@ -17,26 +17,31 @@ namespace {
 namespace fs = std::filesystem;
 using namespace LuxEditor;
 using namespace LuxEngine;
+
 void Check(bool condition, const char* description) {
     if (!condition)
         throw std::runtime_error(description);
 }
+
 std::string Data(Scene& scene) {
     std::string data;
     Check(scene.SerializeToString(data), "fixture scene serializes");
     return data;
 }
+
 std::string Bytes(const fs::path& file) {
     std::ifstream input(file, std::ios::binary);
     Check(input.is_open(), "fixture file opens");
     return {std::istreambuf_iterator<char>(input), {}};
 }
+
 struct Fixture {
     fs::path root = fs::temp_directory_path() /
                     ("lux-scene-dependencies-" +
                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     EditorProject project;
     fs::path internal, external;
+
     Fixture() {
         fs::create_directories(root);
         std::string error;
@@ -51,11 +56,13 @@ struct Fixture {
         Check(source.Serialize(PathUtf8(internal)) && source.Serialize(PathUtf8(external)),
               "internal and external sources save");
     }
+
     ~Fixture() {
         std::error_code error;
         fs::remove_all(root, error);
     }
 };
+
 SceneReferenceComponent& Reference(Scene& scene, const fs::path& source) {
     auto entity = scene.CreateEntity("Reference");
     auto& reference = entity.AddComponent<SceneReferenceComponent>();
@@ -63,6 +70,7 @@ SceneReferenceComponent& Reference(Scene& scene, const fs::path& source) {
     reference.loaded = false;
     return reference;
 }
+
 void RejectWithoutMutation(Fixture& fixture, Scene& scene, const char* reason) {
     const auto before = Data(scene);
     const auto origin = scene.GetSourcePath();
@@ -74,6 +82,7 @@ void RejectWithoutMutation(Fixture& fixture, Scene& scene, const char* reason) {
               Bytes(fixture.project.GetFile()) == descriptor && Bytes(fixture.internal) == source,
           "failed dependency validation preserves in-memory data and source files");
 }
+
 void TestSourcesAndSnapshots() {
     Fixture fixture;
     std::string error;
@@ -107,6 +116,7 @@ void TestSourcesAndSnapshots() {
     reference.baseline = "broken snapshot";
     RejectWithoutMutation(fixture, scene, "malformed stored dependency state is rejected");
 }
+
 void TestEnvironmentDependencies() {
     Fixture fixture;
     Scene scene;
@@ -131,6 +141,7 @@ void TestEnvironmentDependencies() {
     scene.SetSettings(settings);
     RejectWithoutMutation(fixture, scene, "outside environment rejected");
 }
+
 void TestMeshDependencies() {
     Fixture fixture;
     Scene scene;
@@ -213,6 +224,7 @@ void TestTransitiveSources() {
     Check(!ValidateProjectScenes(fixture.project, error),
           "whole-project validation catches external sources in currently unloaded scenes");
 }
+
 void TestAliasesAndProjectScan() {
     Fixture fixture;
     std::string error;
@@ -239,6 +251,7 @@ void TestAliasesAndProjectScan() {
               "unreferenced external scene aliases are not admitted into Content");
     }
 }
+
 void TestDepth() {
     Fixture fixture;
     fs::path next = fixture.internal;
@@ -259,6 +272,7 @@ void TestDepth() {
     RejectWithoutMutation(fixture, shared,
                           "cached shallow dependencies cannot bypass the depth limit");
 }
+
 void TestFileBudget() {
     Fixture fixture;
     const auto oversized = fixture.internal.parent_path() / "Oversized.lux";
@@ -293,6 +307,7 @@ void TestIndependentSceneBudgets() {
           "a project may exceed 128 MiB when each independent scene graph stays within limits");
 }
 } // namespace
+
 int RunDependencyChecks(int, char**) {
     try {
         TestSourcesAndSnapshots();

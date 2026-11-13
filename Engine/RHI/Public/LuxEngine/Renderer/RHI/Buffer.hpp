@@ -5,6 +5,7 @@
 
 namespace LuxEngine {
 class GpuDevice;
+
 namespace Vk {
 struct DeviceState;
 }
@@ -28,9 +29,11 @@ public:
     uint32 GetSize() const {
         return IsValid() ? sizeBytes_ : 0;
     }
+
     BufferType GetType() const {
         return type_;
     }
+
     bool IsValid() const;
     bool BelongsTo(const GpuDevice& device) const;
 

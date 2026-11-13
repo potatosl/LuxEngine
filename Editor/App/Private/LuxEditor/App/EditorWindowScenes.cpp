@@ -42,9 +42,11 @@ namespace {
 QString Q(const std::filesystem::path& path) {
     return QString::fromUtf8(PathUtf8(path));
 }
+
 QString Q(const std::string& text) {
     return QString::fromUtf8(text);
 }
+
 bool SameFile(const std::filesystem::path& left, const std::filesystem::path& right) {
     if (left.empty() || right.empty())
         return false;
@@ -55,6 +57,7 @@ bool SameFile(const std::filesystem::path& left, const std::filesystem::path& ri
     const auto b = std::filesystem::weakly_canonical(right, ec);
     return !ec && a == b;
 }
+
 bool OwnsLoadedScene(const EditorProject& project, const LuxEngine::Scene& scene) {
     const auto source = PathFromUtf8(scene.GetSourcePath());
     if (!source.is_absolute())
@@ -67,6 +70,7 @@ bool OwnsLoadedScene(const EditorProject& project, const LuxEngine::Scene& scene
     return !relative.empty() && !relative.is_absolute() && *relative.begin() != ".." &&
            relative.extension() == ".lux";
 }
+
 QString SceneName(const EditorDocument::TabInfo& tab) {
     return tab.path.empty() ? QStringLiteral("새 씬 %1").arg(tab.id)
                             : QFileInfo(Q(tab.path)).fileName();

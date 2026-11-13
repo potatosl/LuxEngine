@@ -66,6 +66,7 @@ struct Renderer3D::Context::Impl {
     PerspectiveCamera sceneCamera;
     std::unique_ptr<Vk::Scene3DRenderer> modern;
     std::vector<Vk::SceneDraw> draws;
+
     struct CachedMesh {
         Ref<Mesh3D> mesh;
         uint64 used = 0;
@@ -75,6 +76,7 @@ struct Renderer3D::Context::Impl {
         Vec3 minimum{-.5f, -.5f, -.5f}, maximum{.5f, .5f, .5f};
         bool hasUvs = false, uvBlocked = false;
     };
+
     struct CachedTexture {
         Ref<GpuTexture> texture;
         uint64 attempted = std::numeric_limits<uint64>::max();
@@ -82,10 +84,12 @@ struct Renderer3D::Context::Impl {
         size_t bytes = 0;
         std::string error;
     };
+
     std::unordered_map<std::string, CachedTexture> textures;
     std::unordered_map<std::string, std::string> warnings;
     std::string lastError;
     size_t textureBytes = 0;
+
     void Report(const std::string& key, const std::string& message) {
         if (message.empty()) {
             warnings.erase(key);
@@ -101,6 +105,7 @@ struct Renderer3D::Context::Impl {
             Log::Warn(message);
         }
     }
+
     std::unordered_map<std::string, CachedMesh> meshes;
     uint64 sequence = 0;
     size_t meshBytes = 0;
@@ -121,6 +126,7 @@ struct Renderer3D::Context::Impl {
 bool Renderer3D::Context::IsEnvironmentReady() const {
     return impl_ && impl_->modern && impl_->modern->EnvironmentReady();
 }
+
 double Renderer3D::Context::GetEnvironmentPreparationMs() const {
     return impl_ && impl_->modern ? impl_->modern->EnvironmentPreparationMs() : 0;
 }
@@ -833,6 +839,7 @@ Renderer3D::Statistics Renderer3D::GetStats() {
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
     return DefaultContext3D().GetStats();
 }
+
 const std::string& Renderer3D::GetLastAssetError() {
     if (t_ActiveContext3D)
         return t_ActiveContext3D->GetLastAssetError();

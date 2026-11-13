@@ -125,13 +125,16 @@ bool WriteProjectFile(const EditorProject& project, const std::filesystem::path&
     temporary += ".writing-" +
                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
                  std::to_string(++sequence);
+
     struct Cleanup {
         std::filesystem::path path;
+
         ~Cleanup() {
             std::error_code error;
             std::filesystem::remove(path, error);
         }
     } cleanup{temporary};
+
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         const auto data = SerializeProjectJson(project, scene);

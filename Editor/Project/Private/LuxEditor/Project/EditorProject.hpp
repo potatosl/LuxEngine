@@ -59,24 +59,31 @@ public:
     const std::filesystem::path& GetFile() const noexcept {
         return file_;
     }
+
     std::filesystem::path GetSceneFile() const {
         return file_.parent_path() / scene_;
     }
+
     const std::string& GetName() const noexcept {
         return settings_.name;
     }
+
     const std::string& GetEngineVersion() const noexcept {
         return engineVersion_;
     }
+
     ProjectTemplate GetTemplate() const noexcept {
         return projectTemplate_;
     }
+
     const ProjectSettings& GetSettings() const noexcept {
         return settings_;
     }
+
     const std::filesystem::path& GetIcon() const noexcept {
         return settings_.icon;
     }
+
     static std::string CurrentEngineVersion();
 
 private:
@@ -93,8 +100,10 @@ class RecentProjects final {
 public:
     explicit RecentProjects(std::filesystem::path storageFile)
         : storageFile_(std::move(storageFile)) {}
+
     void Load();
     bool Add(const std::filesystem::path& projectFile);
+
     const std::vector<std::filesystem::path>& Get() const noexcept {
         return files_;
     }

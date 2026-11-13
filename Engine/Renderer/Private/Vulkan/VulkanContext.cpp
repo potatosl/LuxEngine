@@ -13,6 +13,7 @@ struct InstanceOwner {
     VkInstance handle = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
     Ref<InstanceValidation> validation = CreateRef<InstanceValidation>();
+
     ~InstanceOwner() {
         if (messenger) {
             auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
@@ -34,17 +35,21 @@ struct InstancePool {
     size_t active = 0;
     std::vector<std::pair<std::string, std::shared_ptr<InstanceOwner>>> instances;
 };
+
 struct InstanceLease {
     std::shared_ptr<InstancePool> pool;
     std::shared_ptr<InstanceOwner> owner;
+
     // Acquired while pool->mutex is held; constructing the complete lease is non-throwing.
     InstanceLease(std::shared_ptr<InstancePool> sharedPool,
                   std::shared_ptr<InstanceOwner> sharedOwner)
         : pool(std::move(sharedPool)), owner(std::move(sharedOwner)) {
         ++pool->active;
     }
+
     InstanceLease(const InstanceLease&) = delete;
     InstanceLease& operator=(const InstanceLease&) = delete;
+
     ~InstanceLease() {
         std::lock_guard lock(pool->mutex);
         owner.reset();
@@ -52,11 +57,13 @@ struct InstanceLease {
             pool->instances.clear();
     }
 };
+
 namespace {
 std::shared_ptr<InstancePool> SharedInstances() {
     static auto pool = std::make_shared<InstancePool>();
     return pool;
 }
+
 std::string InstanceKey(const VkInstanceCreateInfo& create, bool syncValidation) {
     std::ostringstream key;
     key << create.pApplicationInfo->apiVersion << ':' << create.flags << ':' << syncValidation;
@@ -73,6 +80,7 @@ struct FaultSlot {
     uint32 count = 0;
     uint32 triggered = 0;
 };
+
 std::mutex faultMutex;
 std::array<FaultSlot, static_cast<size_t>(Fault::Count)> faults;
 #endif
@@ -185,6 +193,7 @@ InstanceLifetimeCounters GetInstanceLifetimeCounters() {
     std::lock_guard lock(pool->mutex);
     return {static_cast<uint32>(pool->instances.size()), static_cast<uint32>(pool->active)};
 }
+
 void InjectInstanceValidationCounters(uint32 errors, uint32 warnings) {
     auto pool = SharedInstances();
     std::lock_guard lock(pool->mutex);
@@ -193,18 +202,22 @@ void InjectInstanceValidationCounters(uint32 errors, uint32 warnings) {
         entry.second->validation->warnings += warnings;
     }
 }
+
 void InjectFault(Fault fault, uint32 count, uint32 skip) {
     std::lock_guard lock(faultMutex);
     faults[static_cast<size_t>(fault)] = {skip, count, 0};
 }
+
 void ClearFaults() {
     std::lock_guard lock(faultMutex);
     faults = {};
 }
+
 uint32 TriggeredFaults(Fault fault) {
     std::lock_guard lock(faultMutex);
     return faults[static_cast<size_t>(fault)].triggered;
 }
+
 bool ConsumeFault(Fault fault) {
     std::lock_guard lock(faultMutex);
     auto& slot = faults[static_cast<size_t>(fault)];

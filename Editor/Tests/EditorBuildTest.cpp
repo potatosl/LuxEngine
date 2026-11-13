@@ -27,9 +27,11 @@ struct TempDirectory {
     fs::path path = fs::temp_directory_path() /
                     ("lux-editor-build-" +
                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+
     TempDirectory() {
         fs::create_directories(path);
     }
+
     ~TempDirectory() {
         std::error_code error;
         fs::remove_all(path, error);
@@ -362,6 +364,7 @@ void TestPackage() {
     Check(!CreateDistributionArchive(out / exe, archive, "bad/name", error) && !error.empty(),
           "bad root name is an error");
 }
+
 void TestMeshPackaging() {
     TempDirectory files;
     const auto out = files.path / "out";

@@ -8,18 +8,22 @@ namespace LuxEngine {
 class Entity {
 public:
     Entity() = default;
+
     Entity(uint32 id, Scene* scene)
         : id_(id), scene_(scene), lifetime_(scene ? scene->Lifetime() : std::weak_ptr<int>{}) {}
 
     uint32 GetId() const {
         return id_;
     }
+
     Scene* GetScene() const {
         return lifetime_.expired() ? nullptr : scene_;
     }
+
     bool IsValid() const {
         return !lifetime_.expired() && scene_ && scene_->IsAlive(id_);
     }
+
     explicit operator bool() const {
         return IsValid();
     }
@@ -59,6 +63,7 @@ public:
     bool operator==(const Entity& other) const {
         return id_ == other.id_ && scene_ == other.scene_;
     }
+
     bool operator!=(const Entity& other) const {
         return !(*this == other);
     }
@@ -68,6 +73,7 @@ private:
         if (!IsValid())
             throw std::out_of_range("Invalid entity");
     }
+
     uint32 id_ = 0;
     Scene* scene_ = nullptr;
     std::weak_ptr<int> lifetime_;

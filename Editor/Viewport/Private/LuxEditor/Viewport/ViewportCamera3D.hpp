@@ -9,10 +9,12 @@ LuxEngine::PerspectiveCamera MakeViewportCamera3D(QSizeF size, LuxEngine::Vec3 f
                                                   double pitch, double distance);
 std::optional<QPointF> ProjectViewportPoint(const LuxEngine::PerspectiveCamera& camera, QSizeF size,
                                             LuxEngine::Vec3 point);
+
 struct ViewportRay3D {
     LuxEngine::Vec3 origin;
     LuxEngine::Vec3 direction;
 };
+
 std::optional<ViewportRay3D> MakeViewportRay3D(const LuxEngine::PerspectiveCamera& camera,
                                                QSizeF size, QPointF point);
 // The local unit cube may have a full affine world transform, including parent-induced shear.

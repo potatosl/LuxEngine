@@ -35,14 +35,17 @@ public:
     PerspectiveCamera(float fovRadians, float aspect, float nearClip, float farClip);
 
     void SetPerspective(float fovRadians, float aspect, float nearClip, float farClip);
+
     void SetPosition(const Vec3& position) {
         position_ = position;
         RecalculateMatrix();
     }
+
     void SetTarget(const Vec3& target) {
         target_ = target;
         RecalculateMatrix();
     }
+
     void SetUp(const Vec3& up) {
         up_ = up;
         RecalculateMatrix();
@@ -51,15 +54,19 @@ public:
     const Vec3& GetPosition() const {
         return position_;
     }
+
     const Vec3& GetTarget() const {
         return target_;
     }
+
     const Mat4& GetProjectionMatrix() const {
         return projectionMatrix_;
     }
+
     const Mat4& GetViewMatrix() const {
         return viewMatrix_;
     }
+
     const Mat4& GetViewProjectionMatrix() const {
         return viewProjectionMatrix_;
     }
@@ -83,6 +90,7 @@ public:
                 std::span<const uint32> indices);
     void Release();
     bool IsValid() const;
+
     uint32 GetIndexCount() const {
         return IsValid() ? indexCount_ : 0;
     }

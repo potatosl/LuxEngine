@@ -25,6 +25,7 @@ struct CachedAudio {
     Uint8* bytes = nullptr;
     Uint32 length = 0;
     std::string filepath;
+
     ~CachedAudio() {
         if (bytes) {
             SDL_free(bytes);
@@ -65,6 +66,7 @@ struct CacheEntry {
     std::shared_ptr<CachedAudio> audio;
     std::list<std::string>::iterator lruIt;
 };
+
 std::list<std::string> s_LruList;
 std::unordered_map<std::string, CacheEntry> audioCache;
 uint64 s_CurrentCacheBytes = 0;

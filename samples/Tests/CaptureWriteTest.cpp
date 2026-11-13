@@ -13,6 +13,7 @@ void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 class CaptureSample final : public LuxSamples::SampleApplication {
 public:
     explicit CaptureSample(const std::filesystem::path& file)
@@ -21,11 +22,14 @@ public:
 
 private:
     void Reset() override {}
+
     void Step(float) override {}
+
     void Draw(float) override {
         LuxSamples::Text("가나다", {-1, 2}, .1f, {1, 1, 1, 1});
     }
 };
+
 class FileSizeLimit final {
 public:
     explicit FileSizeLimit(rlim_t limit) {
@@ -38,6 +42,7 @@ public:
             throw std::runtime_error("set temporary file-size limit");
         }
     }
+
     ~FileSizeLimit() {
         setrlimit(RLIMIT_FSIZE, &previous_);
         std::signal(SIGXFSZ, previousSignal_);
@@ -47,17 +52,21 @@ private:
     rlimit previous_{};
     void (*previousSignal_)(int) = SIG_DFL;
 };
+
 struct Files {
     std::filesystem::path root = std::filesystem::temp_directory_path() /
                                  ("lux-sample-capture-" + std::to_string(SDL_GetTicksNS()));
+
     Files() {
         std::filesystem::create_directories(root);
     }
+
     ~Files() {
         std::error_code ec;
         std::filesystem::remove_all(root, ec);
     }
 };
+
 int RunChecks(int, char**) {
     Files files;
     const auto good = files.root / "정상.ppm", limited = files.root / "쓰기 실패.ppm";

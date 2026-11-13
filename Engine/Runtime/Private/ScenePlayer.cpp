@@ -16,17 +16,21 @@ bool ParseNumber(const std::string& text, float& value) {
     const auto result = std::from_chars(text.data(), end, value);
     return result.ec == std::errc{} && result.ptr == end && std::isfinite(value);
 }
+
 bool ParseNumber(const std::string& text, uint32& value) {
     const auto* end = text.data() + text.size();
     const auto result = std::from_chars(text.data(), end, value);
     return result.ec == std::errc{} && result.ptr == end;
 }
+
 bool IsPlayerTag(const std::string& tag) {
     return tag == "플레이어" || tag == "주인공" || tag == "Player";
 }
+
 bool Finite(Vec3 value) {
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
+
 Vec3 Unit(Vec3 value, Vec3 fallback) {
     const double length = std::hypot(static_cast<double>(value.x), static_cast<double>(value.y),
                                      static_cast<double>(value.z));
@@ -35,6 +39,7 @@ Vec3 Unit(Vec3 value, Vec3 fallback) {
     return {static_cast<float>(value.x / length), static_cast<float>(value.y / length),
             static_cast<float>(value.z / length)};
 }
+
 Vec3 CameraUp(Vec3 forward, Vec3 preferred) {
     preferred = Unit(preferred, {0, 1, 0});
     auto right = forward.Cross(preferred);

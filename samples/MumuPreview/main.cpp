@@ -19,6 +19,7 @@
 
 namespace le = LuxEngine;
 namespace fs = std::filesystem;
+
 namespace {
 constexpr std::array<const char*, 4> PartNames{"body.obj", "face.obj", "foot_l.obj", "foot_r.obj"};
 constexpr size_t LodCount = 3;
@@ -27,10 +28,12 @@ constexpr float Pi = std::numbers::pi_v<float>;
 fs::path FromUtf8(std::string_view text) {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
 }
+
 std::string ToUtf8(const fs::path& path) {
     const auto text = path.generic_u8string();
     return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
+
 struct Options {
     fs::path assets;
     fs::path capture;
@@ -40,6 +43,7 @@ struct Options {
     bool smoke = false;
     bool help = false;
 };
+
 unsigned ParseUnsigned(std::string_view value, unsigned maximum) {
     unsigned result = 0;
     const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
@@ -47,6 +51,7 @@ unsigned ParseUnsigned(std::string_view value, unsigned maximum) {
         throw std::runtime_error("숫자 옵션이 올바르지 않습니다.");
     return result;
 }
+
 Options ParseOptions(int argc, char** argv) {
     Options options;
     for (int index = 1; index < argc; ++index) {
@@ -89,11 +94,14 @@ Options ParseOptions(int argc, char** argv) {
         options.frames = 60;
     return options;
 }
+
 struct CpuMesh {
     std::vector<le::Vertex3D> vertices;
     std::vector<le::uint32> indices;
 };
+
 using CpuLod = std::array<CpuMesh, 4>;
+
 std::array<CpuLod, LodCount> LoadAssets(const fs::path& directory) {
     std::array<CpuLod, LodCount> result;
     for (size_t lod = 0; lod < result.size(); ++lod) {
@@ -135,10 +143,12 @@ std::array<CpuLod, LodCount> LoadAssets(const fs::path& directory) {
     le::AssetManager::Clear();
     return result;
 }
+
 void AppendBigEndian(std::vector<le::uint8>& bytes, le::uint32 value) {
     for (int shift = 24; shift >= 0; shift -= 8)
         bytes.push_back(static_cast<le::uint8>(value >> shift));
 }
+
 void AppendPngChunk(std::vector<le::uint8>& png, std::string_view type,
                     std::span<const le::uint8> data) {
     AppendBigEndian(png, static_cast<le::uint32>(data.size()));
@@ -153,6 +163,7 @@ void AppendPngChunk(std::vector<le::uint8>& png, std::string_view type,
     }
     AppendBigEndian(png, crc ^ 0xffffffffu);
 }
+
 std::vector<le::uint8> EncodePng(const le::GpuFrameCapture& image) {
     std::vector<le::uint8> raw;
     const size_t rowBytes = static_cast<size_t>(image.width) * 4;
@@ -189,6 +200,7 @@ std::vector<le::uint8> EncodePng(const le::GpuFrameCapture& image) {
     AppendPngChunk(png, "IEND", {});
     return png;
 }
+
 void WriteCapture(le::GpuDevice& gpu, const fs::path& path) {
     le::GpuFrameCapture capture;
     if (!gpu.ReadFrameCapture(capture) || capture.width == 0 || capture.height == 0 ||
@@ -211,15 +223,18 @@ void WriteCapture(le::GpuDevice& gpu, const fs::path& path) {
         throw std::runtime_error("캡처 파일을 저장하지 못했습니다.");
     std::cout << "캡처 저장: " << ToUtf8(path) << '\n';
 }
+
 class MumuPreview final : public le::Application {
 public:
     explicit MumuPreview(Options options, std::array<CpuLod, LodCount> meshes)
         : Application({"Mumu | 1 Idle  2 Walk  3 Hop | A/D Orbit  W/S Zoom | Tab LOD | Space Pause",
                        1100, 850}),
           options_(std::move(options)), cpuMeshes_(std::move(meshes)) {}
+
     ~MumuPreview() override {
         Shutdown();
     }
+
     int RunPreview() {
         unsigned skipped = 0;
         for (;;) {
@@ -260,6 +275,7 @@ private:
     float yaw_ = .36f;
     float distance_ = 5.6f;
     bool paused_ = false;
+
     void OnInit() override {
         for (size_t lod = 0; lod < meshes_.size(); ++lod)
             for (size_t part = 0; part < PartNames.size(); ++part)
@@ -283,6 +299,7 @@ private:
         std::cout << "1 대기 / 2 걷기 / 3 점프, A/D 회전, W/S 확대·축소, Tab LOD, Space 일시정지, "
                      "R 초기화, Esc 종료\n";
     }
+
     void OnUpdate(double dt) override {
         if (le::Input::WasActionPressed("quit"))
             Close();
@@ -311,6 +328,7 @@ private:
         if (!paused_ && !options_.smoke)
             time_ += static_cast<float>(dt);
     }
+
     void OnRender(float) override {
         if (options_.smoke) {
             mode_ = std::min(2u, rendered_ / 40);
@@ -379,6 +397,7 @@ private:
             throw std::runtime_error("일부 메시 렌더링이 누락되었습니다.");
         ++rendered_;
     }
+
     void OnShutdown() override {
         context_.Shutdown();
         ground_.Release();
@@ -388,6 +407,7 @@ private:
         le::Input::ClearBindings();
     }
 };
+
 int RunMumu(int argc, char** argv) {
     auto options = ParseOptions(argc, argv);
     if (options.help) {
@@ -407,6 +427,7 @@ int RunMumu(int argc, char** argv) {
     return app.Initialize() ? app.RunPreview() : 1;
 }
 } // namespace
+
 int main(int argc, char** argv) {
     try {
         return RunMumu(argc, argv);

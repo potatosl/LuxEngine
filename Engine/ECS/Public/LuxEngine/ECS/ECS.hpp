@@ -64,12 +64,14 @@ struct TilemapComponent {
     uint8_t Get(uint32 x, uint32 y) const {
         return x < width && y < height && y * width + x < tiles.size() ? tiles[y * width + x] : 0;
     }
+
     bool Set(uint32 x, uint32 y, uint8_t tile) {
         if (x >= width || y >= height || y * width + x >= tiles.size() || tile > 5)
             return false;
         tiles[y * width + x] = tile;
         return true;
     }
+
     bool Resize(uint32 newWidth, uint32 newHeight) {
         if (newWidth == 0 || newHeight == 0 || newWidth > 256 || newHeight > 256)
             return false;

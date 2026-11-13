@@ -21,10 +21,12 @@ public:
     OrthographicCamera(float left, float right, float bottom, float top);
 
     void SetProjection(float left, float right, float bottom, float top);
+
     void SetPosition(const Vec3& position) {
         position_ = position;
         RecalculateMatrix();
     }
+
     void SetRotation(float rotationRadians) {
         rotation_ = rotationRadians;
         RecalculateMatrix();
@@ -33,6 +35,7 @@ public:
     const Vec3& GetPosition() const {
         return position_;
     }
+
     float GetRotation() const {
         return rotation_;
     }
@@ -40,9 +43,11 @@ public:
     const Mat4& GetProjectionMatrix() const {
         return projectionMatrix_;
     }
+
     const Mat4& GetViewMatrix() const {
         return viewMatrix_;
     }
+
     const Mat4& GetViewProjectionMatrix() const {
         return viewProjectionMatrix_;
     }

@@ -49,6 +49,7 @@ class SceneViewport2D;
 class SceneViewport3D;
 class DebugPanel;
 class SceneEditCommand;
+
 class EditorWindow final : public QMainWindow {
 public:
     explicit EditorWindow(QWidget* parent = nullptr);
@@ -57,21 +58,26 @@ public:
     EditorDocument& GetDocument() noexcept {
         return document_;
     }
+
     const EditorDocument& GetDocument() const noexcept {
         return document_;
     }
+
     const QString& LastLogMessage() const noexcept {
         return lastLogMessage_;
     }
+
     void ExecuteRecordedEdit(const QString& name, const std::function<void()>& edit) {
         RecordEdit(name, edit);
         RefreshAll();
     }
+
     EditorDocument::TabId NewSceneDocument();
     bool OpenSceneDocument(const std::filesystem::path& path, bool asynchronous = false);
     bool SwitchSceneDocument(EditorDocument::TabId id, bool animate = true);
     bool CloseSceneDocument(EditorDocument::TabId id, bool discardDirty = false);
     bool MoveSelectionToScene(EditorDocument::TabId destination);
+
     size_t PendingSceneLoadCount() const noexcept {
         return pendingSceneLoads_.size();
     }
@@ -206,6 +212,7 @@ private:
     QTimer sceneLoadTimer_;
     QTimer sceneStreamingTimer_;
     LuxEngine::SceneManager sceneManager_;
+
     struct PendingSceneLoad {
         std::filesystem::path path;
         std::future<LuxEngine::SceneLoadResult> result;
@@ -214,6 +221,7 @@ private:
         EditorDocument::TabId origin = 0;
         bool preload = false;
     };
+
     std::vector<PendingSceneLoad> pendingSceneLoads_;
     uint64_t sceneLoadGeneration_ = 0;
     bool refreshingSceneTabs_ = false;

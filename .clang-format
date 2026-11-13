@@ -10,3 +10,4 @@ ReferenceAlignment: Left
 AllowShortFunctionsOnASingleLine: Empty
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
+SeparateDefinitionBlocks: Always

@@ -23,6 +23,7 @@ struct ObjectUniform {
     float albedo[4];
     float colorOptions[4];
 };
+
 static_assert(sizeof(ObjectUniform) == Vk::UniformObjectBytes);
 
 struct LightUniform {
@@ -30,11 +31,13 @@ struct LightUniform {
     float colorIntensity[4];
     uint32 count[4];
     float camera[4];
+
     struct {
         float positionRadius[4];
         float colorIntensity[4];
     } points[Vk::MaxPointLights];
 };
+
 static_assert(sizeof(LightUniform) == Vk::UniformLightBytes);
 
 VkResult SubmitRecoveryFrame(Vk::DeviceState& s, Vk::FrameData& frame, uint64& serial) {

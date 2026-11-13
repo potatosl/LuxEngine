@@ -24,10 +24,12 @@ public:
 
 private:
     void FilterLogs();
+
     struct LogEntry {
         QString message;
         bool error;
     };
+
     std::vector<LogEntry> logs_;
     QComboBox* filter_ = nullptr;
     QLineEdit* search_ = nullptr;

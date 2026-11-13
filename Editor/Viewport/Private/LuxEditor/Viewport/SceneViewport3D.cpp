@@ -47,6 +47,7 @@ LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity,
     }
     return world;
 }
+
 QPolygonF Outline(const std::vector<QPointF>& points) {
     auto sorted = points;
     std::sort(sorted.begin(), sorted.end(),
@@ -71,6 +72,7 @@ QPolygonF Outline(const std::vector<QPointF>& points) {
     hull.removeLast();
     return hull;
 }
+
 LuxEngine::Vec3 TransformCorner(const LuxEngine::Mat4& model, LuxEngine::Vec3 point) {
     const auto& m = model.elements;
     return {m[0] * point.x + m[4] * point.y + m[8] * point.z + m[12],
@@ -78,6 +80,7 @@ LuxEngine::Vec3 TransformCorner(const LuxEngine::Mat4& model, LuxEngine::Vec3 po
             m[2] * point.x + m[6] * point.y + m[10] * point.z + m[14]};
 }
 } // namespace
+
 SceneViewport3D::SceneViewport3D(
     QWidget* parent, EditorDocument& document,
     std::function<void(std::optional<LuxEngine::uint32>)> onSelect,
@@ -90,10 +93,12 @@ SceneViewport3D::SceneViewport3D(
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(300, 200);
 }
+
 void SceneViewport3D::CancelInteraction() {
     orbiting_ = panning_ = dragging_ = false;
     dragId_ = 0;
 }
+
 void SceneViewport3D::focusOutEvent(QFocusEvent* event) {
     const bool editing = dragging_;
     CancelInteraction();
@@ -101,6 +106,7 @@ void SceneViewport3D::focusOutEvent(QFocusEvent* event) {
         onEndEdit_();
     QWidget::focusOutEvent(event);
 }
+
 void SceneViewport3D::FocusSelection() {
     LuxEngine::Entity selected = document_.GetSelected();
     if (selected && selected.HasComponent<LuxEngine::TransformComponent>()) {
@@ -109,6 +115,7 @@ void SceneViewport3D::FocusSelection() {
         update();
     }
 }
+
 void SceneViewport3D::paintEvent(QPaintEvent*) {
     // Decouple GPU render/readback phase from QPainter lifecycle.
     // Vulkan offscreen rendering must complete before QPainter opens on this QWidget
@@ -272,6 +279,7 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         }
     }
 }
+
 void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
     setFocus();
     lastMouse_ = event->position();
@@ -326,6 +334,7 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
         onBeginEdit_();
     }
 }
+
 void SceneViewport3D::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::RightButton)
         orbiting_ = false;
@@ -336,6 +345,7 @@ void SceneViewport3D::mouseReleaseEvent(QMouseEvent* event) {
         onEndEdit_();
     }
 }
+
 void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
     const QPointF delta = event->position() - lastMouse_;
     if (orbiting_ && (event->buttons() & Qt::RightButton)) {
@@ -397,6 +407,7 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
     }
     lastMouse_ = event->position();
 }
+
 void SceneViewport3D::wheelEvent(QWheelEvent* event) {
     distance_ = std::clamp(distance_ * std::pow(.9, event->angleDelta().y() / 120.0), 1.0, 1000.0);
     update();

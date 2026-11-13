@@ -15,42 +15,52 @@
 
 namespace {
 using namespace LuxEngine;
+
 void Check(bool value, const char* description) {
     if (!value)
         throw std::runtime_error(description);
 }
+
 bool Near(float a, float b, float epsilon = 1e-4f) {
     return std::abs(a - b) < epsilon;
 }
+
 void CheckMatrix(const Mat4& a, const Mat4& b, const char* description) {
     for (size_t index = 0; index < 16; ++index)
         Check(Near(a.elements[index], b.elements[index]), description);
 }
+
 std::string Data(Scene& scene) {
     std::string data;
     Check(scene.SerializeToString(data), "valid scene serializes");
     return data;
 }
+
 void Replace(std::string& data, const std::string& before, const std::string& after) {
     const auto position = data.find(before);
     Check(position != std::string::npos, "malformed fixture marker exists");
     data.replace(position, before.size(), after);
 }
+
 void SavePathSafety() {
     namespace fs = std::filesystem;
+
     struct Files {
         fs::path root =
             fs::temp_directory_path() /
             ("lux-scene-path-audit-" +
              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+
         Files() {
             fs::create_directories(root);
         }
+
         ~Files() {
             std::error_code error;
             fs::remove_all(root, error);
         }
     } files;
+
     const auto file = files.root / "original.lux";
     const auto encoded = file.u8string();
     const std::string path(reinterpret_cast<const char*>(encoded.data()), encoded.size());
@@ -86,6 +96,7 @@ void SavePathSafety() {
               !manager.PreloadAsync(invalidPath).get(),
           "synchronous and asynchronous loading reject embedded NUL paths");
 }
+
 void MeshAssetMetadata() {
     Scene scene;
     auto entity = scene.CreateEntity("메시 객체");
@@ -184,6 +195,7 @@ void Hierarchy() {
     Check(!other && !child && scene.IsAlive(parent.GetId()),
           "deleting a group cascades only its descendants");
 }
+
 void HierarchyCodecAndImport() {
     Scene source;
     auto root = source.CreateEntity("그룹"), child = source.CreateEntity("자식");
@@ -236,14 +248,17 @@ void HierarchyCodecAndImport() {
     const auto duplicates = target.ImportEntities(target, {map.at(root.GetId())});
     Check(duplicates.size() == 2 && target.GetEntityCount() == 5,
           "same-scene duplication snapshots its source before allocating new IDs");
+
     struct Unsupported {
         int value = 3;
     };
+
     source.CreateEntity("미지원").AddComponent<Unsupported>();
     const auto before = Data(target);
     Check(target.ImportEntities(source).empty() && Data(target) == before,
           "failed import preserves every destination component and ID");
 }
+
 void ReferenceMetadata() {
     Scene scene;
     auto root = scene.CreateEntity("참조"), child = scene.CreateEntity("인스턴스");
@@ -281,6 +296,7 @@ void ReferenceMetadata() {
               !Data(loaded).empty(),
           "deleting an inherited child records a valid missing-map deletion override");
 }
+
 void SettingsAndPhysics() {
     Scene up, down;
     auto first = up.CreateEntity(), second = down.CreateEntity();
@@ -355,6 +371,7 @@ void SettingsAndPhysics() {
               Near(independentBodies.GetWorldTransform(movingChild.GetId()).position.x, 13, .01f),
           "body writeback follows hierarchy rather than entity allocation or hash iteration order");
 }
+
 void BackwardCompatibilityAndOrigin() {
     Scene scene;
     Check(scene.DeserializeFromString("LuxEngineScene 1 0\n"), "version 1 remains readable");
@@ -368,11 +385,13 @@ void BackwardCompatibilityAndOrigin() {
     scene.SetSourcePath("한글/origin.lux");
     Check(scene.DeserializeFromString(Data(scene)) && scene.GetSourcePath() == "한글/origin.lux",
           "undo data replacement preserves the non-persisted source path");
+
     struct CommaNumbers final : std::numpunct<char> {
         char do_decimal_point() const override {
             return ',';
         }
     };
+
     const auto canonical = Data(scene);
     const auto previousLocale = std::locale();
     std::locale::global(std::locale(previousLocale, new CommaNumbers));
@@ -440,16 +459,19 @@ void RuntimePreservingCommit() {
     Check(!scene.ApplyState(prepared) && Data(scene) == before,
           "invalid prepared state never mutates the live scene or physics world");
 }
+
 int RenderHierarchy() {
     struct Graphics {
         Window window;
         GpuDevice gpu;
+
         ~Graphics() {
             gpu.Shutdown();
             window.Shutdown();
             SDL_Quit();
         }
     } graphics;
+
     if (!SDL_Init(SDL_INIT_VIDEO) ||
         !graphics.window.Initialize(
             {.title = "씬 계층 렌더링 검사", .width = 320, .height = 240, .vulkan = true}))

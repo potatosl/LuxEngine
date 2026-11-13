@@ -15,6 +15,7 @@ constexpr float Pi = std::numbers::pi_v<float>;
 std::mutex revisionsMutex;
 std::unordered_map<std::string, uint64> revisions;
 uint64 nextRevision = 1;
+
 std::string Key(const std::string& path) {
     if (path.empty())
         return {};
@@ -37,17 +38,20 @@ float RadicalInverse(uint32 bits) {
     bits = ((bits & 0x00ff00ffu) << 8) | ((bits & 0xff00ff00u) >> 8);
     return static_cast<float>(bits) * 2.3283064365386963e-10f;
 }
+
 Vec3 TangentSample(Vec3 n, float x, float y, float z) {
     const Vec3 up = std::abs(n.z) < .999f ? Vec3{0, 0, 1} : Vec3{1, 0, 0};
     const Vec3 t = up.Cross(n).Normalized();
     return (t * x + n.Cross(t) * y + n * z).Normalized();
 }
+
 Vec3 Ggx(Vec3 n, float roughness, float u, float v) {
     const float a = roughness * roughness;
     const float cosine = std::sqrt((1 - v) / (1 + (a * a - 1) * v));
     const float sine = std::sqrt(std::max(0.f, 1 - cosine * cosine));
     return TangentSample(n, std::cos(2 * Pi * u) * sine, std::sin(2 * Pi * u) * sine, cosine);
 }
+
 Vec3 CubeDirection(uint32 face, float u, float v) {
     switch (face) {
     case 0:
@@ -64,6 +68,7 @@ Vec3 CubeDirection(uint32 face, float u, float v) {
         return Vec3{-u, -v, -1}.Normalized();
     }
 }
+
 bool Decode(const std::string& path, int& width, int& height, std::vector<float>& pixels,
             std::string& error) {
     try {
@@ -112,9 +117,11 @@ bool Decode(const std::string& path, int& width, int& height, std::vector<float>
         return false;
     }
 }
+
 struct Source {
     int width = 0, height = 0;
     std::vector<float> pixels;
+
     Vec3 Sample(Vec3 d) const {
         if (pixels.empty()) {
             const float sky = std::max(0.f, d.y);
@@ -137,6 +144,7 @@ struct Source {
                (at(x, y + 1) * (1 - fx) + at(x + 1, y + 1) * fx) * fy;
     }
 };
+
 template <class Sample> EnvironmentImage Cube(uint32 size, uint32 levels, Sample sample) {
     EnvironmentImage image{size, levels, 6, {}};
     for (uint32 level = 0; level < levels; ++level) {
@@ -242,11 +250,13 @@ bool EnvironmentData::ValidateFile(const std::string& path, std::string& error) 
     error.clear();
     return Decode(path, w, h, pixels, error);
 }
+
 uint64 EnvironmentData::Revision(const std::string& path) {
     std::lock_guard lock(revisionsMutex);
     auto it = revisions.find(Key(path));
     return it == revisions.end() ? 0 : it->second;
 }
+
 bool EnvironmentData::Reload(const std::string& path, std::string& error) {
     if (!path.empty() && !ValidateFile(path, error))
         return false;

@@ -12,37 +12,45 @@
 namespace {
 using namespace LuxEngine;
 namespace fs = std::filesystem;
+
 void Check(bool value, const std::string& message) {
     if (!value)
         throw std::runtime_error(message);
 }
+
 std::string Utf8(const fs::path& path) {
     const auto text = path.u8string();
     return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
+
 struct Files {
     fs::path root = fs::temp_directory_path() /
                     ("lux-scene-manager-" +
                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+
     Files() {
         fs::create_directories(root / "Scenes");
     }
+
     ~Files() {
         std::error_code error;
         fs::remove_all(root, error);
     }
 };
+
 uint32 AddSprite(Scene& scene, const std::string& name, float x) {
     auto entity = scene.CreateEntity(name);
     entity.GetComponent<TransformComponent>().position.x = x;
     entity.AddComponent<SpriteRendererComponent>();
     return entity.GetId();
 }
+
 void Save(Scene& scene, const fs::path& file) {
     std::string error;
     Check(SceneManager::Save(scene, file, {}, error), "save source: " + error);
     scene.SetSourcePath(Utf8(file));
 }
+
 uint32 Mapped(Scene& scene, uint32 root, uint32 source) {
     for (const auto& [sourceId, local] :
          scene.GetComponent<SceneReferenceComponent>(root).entityMap)
@@ -50,6 +58,7 @@ uint32 Mapped(Scene& scene, uint32 root, uint32 source) {
             return local;
     return 0;
 }
+
 std::string Snapshot(Scene& scene) {
     std::string text;
     Check(scene.SerializeToString(text), "snapshot serializes");
@@ -90,11 +99,13 @@ void TestLoadingAndCache(const fs::path& directory) {
     {
         struct RestoreDirectory {
             fs::path previous = fs::current_path();
+
             ~RestoreDirectory() {
                 std::error_code error;
                 fs::current_path(previous, error);
             }
         } restore;
+
         fs::current_path(directory);
         auto submitted = manager.LoadAsync("Scenes/base.lux");
         fs::current_path(directory / "Scenes");
@@ -404,6 +415,7 @@ std::string ReadFile(const fs::path& path) {
     std::ifstream file(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
+
 void TestCyclesAndFailurePreservation(const fs::path& directory) {
     Scene first, second;
     auto reference = first.CreateEntity("first reference");

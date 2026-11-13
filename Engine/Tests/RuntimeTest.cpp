@@ -16,14 +16,17 @@
 
 namespace {
 int checks = 0;
+
 void Check(bool ok, const char* message) {
     ++checks;
     if (!ok)
         throw std::runtime_error(message);
 }
+
 bool Near(float a, float b) {
     return std::abs(a - b) < 0.001f;
 }
+
 using Args = std::vector<std::string>;
 using LuxEngine::ParseScenePlayerArguments;
 
@@ -167,17 +170,21 @@ void WriteScene(const std::string& path) {
 
 int SceneManagementGpu() {
     namespace fs = std::filesystem;
+
     struct Files {
         fs::path root = fs::temp_directory_path() / fs::path(u8"lux-runtime-씬") /
                         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+
         Files() {
             fs::create_directories(root);
         }
+
         ~Files() {
             std::error_code error;
             fs::remove_all(root, error);
         }
     } files;
+
     const auto text = [](const fs::path& path) {
         const auto bytes = path.u8string();
         return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());

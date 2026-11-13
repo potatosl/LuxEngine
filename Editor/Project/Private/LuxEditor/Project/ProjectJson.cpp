@@ -7,14 +7,17 @@
 namespace LuxEditor {
 namespace {
 using Json = nlohmann::ordered_json;
+
 void RequireValidProject(bool condition) {
     if (!condition)
         throw std::runtime_error("Invalid project JSON");
 }
+
 std::string ReadText(const Json& value) {
     RequireValidProject(value.is_string());
     return value.get<std::string>();
 }
+
 unsigned ReadUnsigned(const Json& value) {
     RequireValidProject(value.is_number_integer());
     if (value.is_number_unsigned()) {
@@ -27,6 +30,7 @@ unsigned ReadUnsigned(const Json& value) {
                         static_cast<uint64_t>(number) <= std::numeric_limits<unsigned>::max());
     return static_cast<unsigned>(number);
 }
+
 bool ReadBoolean(const Json& value) {
     RequireValidProject(value.is_boolean());
     return value.get<bool>();

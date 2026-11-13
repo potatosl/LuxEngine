@@ -25,10 +25,12 @@ private:
         LuxEngine::Ref<LuxEngine::GpuTexture> texture;
         float width = 0, height = 0, offsetX = 0, offsetY = 0, advance = 0;
     };
+
     struct Draw {
         LuxEngine::GpuTexture* texture;
         std::array<LuxEngine::RenderVertex, 6> vertices;
     };
+
     void Queue(LuxEngine::GpuTexture* texture, LuxEngine::Vec2 position, LuxEngine::Vec2 size,
                LuxEngine::Vec4 tint, float angle, LuxEngine::Vec4 uv = {0, 0, 1, 1});
     LuxEngine::Ref<LuxEngine::GpuTexture> white_;

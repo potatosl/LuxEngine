@@ -20,24 +20,31 @@ void RequireValidScene(bool valid) {
 template <class T> Json ToJson(const T& value) {
     return value;
 }
+
 Json ToJson(const Vec2& value) {
     return Json::array({value.x, value.y});
 }
+
 Json ToJson(const Vec3& value) {
     return Json::array({value.x, value.y, value.z});
 }
+
 Json ToJson(const Vec4& value) {
     return Json::array({value.x, value.y, value.z, value.w});
 }
+
 Json ToJson(BodyType value) {
     return static_cast<int>(value);
 }
+
 Json ToJson(SceneReferenceMode value) {
     return static_cast<int>(value);
 }
+
 Json ToJson(Render3DMode value) {
     return static_cast<int>(value);
 }
+
 Json ToJson(const std::vector<Keyframe>& keys) {
     Json result = Json::array();
     for (const auto& key : keys)
@@ -73,17 +80,20 @@ template <class T> void ReadJsonValue(const Json& json, T& output) {
         RequireValidScene(json.is_string());
     output = json.template get<T>();
 }
+
 void ReadJsonValue(const Json& json, Vec2& value) {
     RequireValidScene(json.is_array() && json.size() == 2);
     ReadJsonValue(json[0], value.x);
     ReadJsonValue(json[1], value.y);
 }
+
 void ReadJsonValue(const Json& json, Vec3& value) {
     RequireValidScene(json.is_array() && json.size() == 3);
     ReadJsonValue(json[0], value.x);
     ReadJsonValue(json[1], value.y);
     ReadJsonValue(json[2], value.z);
 }
+
 void ReadJsonValue(const Json& json, Vec4& value) {
     RequireValidScene(json.is_array() && json.size() == 4);
     ReadJsonValue(json[0], value.x);
@@ -91,24 +101,28 @@ void ReadJsonValue(const Json& json, Vec4& value) {
     ReadJsonValue(json[2], value.z);
     ReadJsonValue(json[3], value.w);
 }
+
 void ReadJsonValue(const Json& json, BodyType& value) {
     int number;
     ReadJsonValue(json, number);
     RequireValidScene(number >= 0 && number <= 2);
     value = static_cast<BodyType>(number);
 }
+
 void ReadJsonValue(const Json& json, SceneReferenceMode& value) {
     int number;
     ReadJsonValue(json, number);
     RequireValidScene(number >= 0 && number <= 2);
     value = static_cast<SceneReferenceMode>(number);
 }
+
 void ReadJsonValue(const Json& json, Render3DMode& value) {
     int number;
     ReadJsonValue(json, number);
     RequireValidScene(number >= 0 && number <= 1);
     value = static_cast<Render3DMode>(number);
 }
+
 void ReadJsonValue(const Json& json, std::vector<uint8_t>& tiles) {
     RequireValidScene(json.is_array() && json.size() <= 256 * 256);
     tiles.clear();
@@ -120,6 +134,7 @@ void ReadJsonValue(const Json& json, std::vector<uint8_t>& tiles) {
         tiles.push_back(number);
     }
 }
+
 void ReadJsonValue(const Json& json, std::vector<Keyframe>& keys) {
     RequireValidScene(json.is_array() && json.size() <= 4096);
     keys.clear();
@@ -136,6 +151,7 @@ void ReadJsonValue(const Json& json, std::vector<Keyframe>& keys) {
         keys.push_back(key);
     }
 }
+
 void ReadJsonValue(const Json& json, std::vector<std::pair<uint32, uint32>>& map) {
     RequireValidScene(json.is_array() && json.size() <= MaxEntities);
     map.clear();

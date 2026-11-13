@@ -37,6 +37,7 @@ public:
     void Close() {
         running_ = false;
     }
+
     virtual void OnEvent(Event& e);
 
     static Application& Get();
@@ -45,8 +46,11 @@ public:
 
 protected:
     virtual void OnInit() {}
+
     virtual void OnUpdate(double /*dt*/) {}
+
     virtual void OnRender(float /*elapsedSeconds*/) {}
+
     virtual void OnShutdown() {}
 
 private:

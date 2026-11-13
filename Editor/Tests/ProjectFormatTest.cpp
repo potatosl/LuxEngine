@@ -10,31 +10,38 @@
 
 using namespace LuxEditor;
 using Json = nlohmann::ordered_json;
+
 namespace {
 void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 struct Files {
     std::filesystem::path root =
         std::filesystem::temp_directory_path() /
         ("lux-project-json-" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+
     Files() {
         std::filesystem::create_directories(root);
     }
+
     ~Files() {
         std::error_code error;
         std::filesystem::remove_all(root, error);
     }
 };
+
 std::string Read(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
+
 void Write(const std::filesystem::path& path, const std::string& data) {
     std::ofstream(path, std::ios::binary | std::ios::trunc) << data;
 }
+
 void Test() {
     Files files;
     std::string error;
@@ -124,6 +131,7 @@ void Test() {
           "restore preserves the original .luxproj path and backed-up metadata");
 }
 } // namespace
+
 int main() {
     try {
         Test();

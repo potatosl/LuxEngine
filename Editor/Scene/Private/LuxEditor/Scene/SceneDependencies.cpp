@@ -78,11 +78,13 @@ private:
         if (depth > MaximumDepth)
             throw std::runtime_error("씬 참조 검증의 중첩 한도 16을 넘었습니다.");
     }
+
     void Charge(std::uintmax_t bytes) {
         if (bytes > remaining_)
             throw std::runtime_error("씬 참조 검증 데이터가 128 MiB를 넘었습니다.");
         remaining_ -= bytes;
     }
+
     fs::path RequireFile(const fs::path& path) const {
         std::error_code error;
         const auto resolved = fs::canonical(path, error);
@@ -93,6 +95,7 @@ private:
                                      GenericPathUtf8(path));
         return resolved;
     }
+
     std::string Read(const fs::path& path) {
         std::error_code error;
         const auto size = fs::file_size(path, error);
@@ -107,6 +110,7 @@ private:
                                      GenericPathUtf8(path));
         return data;
     }
+
     void Inspect(LuxEngine::Scene& scene, const fs::path& owner, size_t depth) {
         CheckDepth(depth);
         const auto& environment = scene.GetSettings().render3D.environmentPath;

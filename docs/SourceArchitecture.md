@@ -47,3 +47,5 @@ Engine/Scene/
 3. 다른 모듈의 Private 헤더를 참조하거나 저장소 루트를 include 경로로 추가하지 않는다.
 4. 의존성은 해당 모듈의 CMakeLists.txt에 선언한다. 컴파일 오류를 전체 include 경로 추가로 우회하지 않는다.
 5. 구조 변경 시 엔진·에디터·샘플 빌드와 설치 SDK 소비자 및 독립 에디터 빌드를 검증한다.
+
+코드 포맷은 루트 `.clang-format`을 따른다. `SeparateDefinitionBlocks: Always`를 사용해 함수·타입 정의 사이에 빈 줄을 둔다. 생성 게임의 C++ 템플릿도 같은 간격으로 정리했다.

@@ -31,10 +31,12 @@ namespace {
 std::mutex s_AssetMutex, s_AssetKeyMutex;
 std::unordered_map<std::string, std::string> s_AssetKeys;
 std::unordered_map<std::string, size_t> s_TextureSizes;
+
 size_t MeshBytes(const RawMeshData& mesh) {
     return (mesh.vertices.size() + mesh.normals.size() + mesh.texCoords.size()) * sizeof(float) +
            mesh.indices.size() * sizeof(uint32);
 }
+
 std::unordered_map<std::string, uint64> s_MeshVersions, s_TextureVersions;
 std::unordered_map<std::string, uint64> s_MeshRequests, s_TextureRequests;
 std::unordered_map<std::string, std::string> s_MeshErrors, s_TextureErrors;
@@ -54,6 +56,7 @@ std::filesystem::path Path(const std::string& path) {
     return std::filesystem::path(
         std::u8string(reinterpret_cast<const char8_t*>(path.data()), path.size()));
 }
+
 std::string Key(const std::string& path) {
     const auto input = Path(path);
     const bool absolute = input.is_absolute();
@@ -75,6 +78,7 @@ std::string Key(const std::string& path) {
     }
     return key;
 }
+
 bool ReadTextureFile(const std::string& filepath, std::vector<uint8>& data) {
     data.clear();
     if (filepath.empty() || filepath.find('\0') != std::string::npos)
@@ -105,6 +109,7 @@ bool ReadTextureFile(const std::string& filepath, std::vector<uint8>& data) {
         return false;
     }
 }
+
 stbi_uc* DecodeTexture(const std::string& filepath, int& width, int& height) {
     std::vector<uint8> fileData;
     if (!ReadTextureFile(filepath, fileData)) {
@@ -214,9 +219,11 @@ void AssetManager::EvictUnusedUnderBudget(size_t incomingBytes) {
 void AssetManager::Init() {
     Clear();
 }
+
 void AssetManager::Shutdown() {
     Clear();
 }
+
 Ref<GpuTexture> AssetManager::LoadTexture(const std::string& filepath, GpuDevice* device) {
     if (!device || !device->IsReady())
         return {};
@@ -311,6 +318,7 @@ bool AssetManager::HasTexture(const std::string& filepath) {
     const auto it = s_TextureCache.find(Key(filepath));
     return it != s_TextureCache.end() && it->second && it->second->IsValid();
 }
+
 void AssetManager::UnloadTexture(const std::string& filepath) {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     const auto key = Key(filepath);
@@ -321,6 +329,7 @@ void AssetManager::UnloadTexture(const std::string& filepath) {
         s_TextureSizes.erase(it);
     }
 }
+
 bool AssetManager::LoadShaderBytes(const std::string& filepath, std::vector<uint8>& outBytes) {
     outBytes.clear();
     if (filepath.empty() || filepath.find('\0') != std::string::npos)
@@ -344,6 +353,7 @@ bool AssetManager::LoadShaderBytes(const std::string& filepath, std::vector<uint
     outBytes.swap(bytes);
     return true;
 }
+
 namespace {
 bool ReadMeshFile(const std::string& filepath, RawMeshData& outMesh) {
     std::error_code ec;
@@ -523,12 +533,14 @@ bool ReadMeshFile(const std::string& filepath, RawMeshData& outMesh) {
     outMesh = std::move(mesh);
     return true;
 }
+
 void RecordAssetError(const std::string& key, const std::string& message, bool texture) {
     auto& errors = texture ? s_TextureErrors : s_MeshErrors;
     if (errors.size() >= 128 && !errors.contains(key))
         errors.erase(errors.begin());
     errors[key] = message;
 }
+
 void RecordAssetVersion(const std::string& key, uint64 version, bool texture) {
     auto& versions = texture ? s_TextureVersions : s_MeshVersions;
     if (versions.size() >= 4096 && !versions.contains(key))
@@ -742,6 +754,7 @@ uint64 AssetManager::GetMeshRevision(const std::string& filepath) {
         return 0;
     }
 }
+
 uint64 AssetManager::GetTextureRevision(const std::string& filepath) {
     try {
         const auto key = Key(filepath);
@@ -752,6 +765,7 @@ uint64 AssetManager::GetTextureRevision(const std::string& filepath) {
         return 0;
     }
 }
+
 std::string AssetManager::GetAssetError(const std::string& filepath, bool texture) {
     try {
         const auto key = Key(filepath);
@@ -804,31 +818,38 @@ void AssetManager::Clear() {
     s_TextureCacheMemoryBytes = 0;
     s_MeshCacheMemoryBytes = 0;
 }
+
 size_t AssetManager::GetCachedTextureCount() {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     return s_TextureCache.size();
 }
+
 size_t AssetManager::GetCachedMeshCount() {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     return s_MeshCache.size();
 }
+
 size_t AssetManager::GetTextureCacheMemoryBytes() {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     return s_TextureCacheMemoryBytes;
 }
+
 size_t AssetManager::GetMeshCacheMemoryBytes() {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     return s_MeshCacheMemoryBytes;
 }
+
 size_t AssetManager::GetTotalCacheMemoryBytes() {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     return s_TextureCacheMemoryBytes + s_MeshCacheMemoryBytes;
 }
+
 void AssetManager::SetCacheMemoryBudget(size_t maxBytes) {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     s_CacheMemoryBudget = maxBytes;
     EvictUnusedUnderBudget(0);
 }
+
 size_t AssetManager::GetCacheMemoryBudget() {
     std::lock_guard<std::mutex> lock(s_AssetMutex);
     return s_CacheMemoryBudget;

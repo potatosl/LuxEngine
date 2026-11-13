@@ -4,11 +4,13 @@
 #include <iostream>
 #include <stdexcept>
 namespace le = LuxEngine;
+
 namespace {
 class Basic2D final : public LuxSamples::SampleApplication {
 public:
     static constexpr std::string_view Help =
         "기본 2D: WASD·방향키·게임패드 십자키로 캐릭터를 이동합니다.";
+
     explicit Basic2D(LuxSamples::Options options)
         : SampleApplication("기본 2D", "WASD / 방향키 / 게임패드 십자키로 이동",
                             std::move(options)) {}
@@ -16,6 +18,7 @@ public:
 private:
     le::Scene scene_;
     le::Entity player_;
+
     void Reset() override {
         for (auto entity : scene_.GetEntities())
             scene_.DestroyEntity(entity);
@@ -23,6 +26,7 @@ private:
         player_.GetComponent<le::TransformComponent>().scale = {.8f, 1.1f, 1};
         player_.AddComponent<le::SpriteRendererComponent>().color = {.96f, .76f, .37f, 1};
     }
+
     void Step(float dt) override {
         const auto move = LuxSamples::Movement();
         auto& transform = player_.GetComponent<le::TransformComponent>();
@@ -31,6 +35,7 @@ private:
         transform.position.y = std::clamp(transform.position.y + move.y * dt * 4, -4.5f, 3.5f);
         transform.rotation.z = move.x * .12f;
     }
+
     void Draw(float elapsed) override {
         for (int y = -5; y <= 4; ++y)
             for (int x = -14; x <= 14; ++x)

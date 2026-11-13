@@ -26,16 +26,20 @@ namespace {
 QString Q(const std::string& value) {
     return QString::fromUtf8(value);
 }
+
 QString Q(const std::filesystem::path& value) {
     return Q(PathUtf8(value));
 }
+
 std::string Utf8(const QString& value) {
     return value.toUtf8().toStdString();
 }
+
 std::filesystem::path SuggestedPath(const std::string& name) {
     return PathFromUtf8(Utf8(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))) /
            PathFromUtf8(name);
 }
+
 QDialogButtonBox* Buttons(QDialog& dialog, QVBoxLayout* layout) {
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);

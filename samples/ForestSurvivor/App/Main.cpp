@@ -15,6 +15,7 @@ unsigned Number(std::string_view text) {
     return number;
 }
 } // namespace
+
 int RunForestSurvivor(int argc, char** argv) {
     ForestGame::RunOptions options;
     for (int index = 1; index < argc; ++index) {

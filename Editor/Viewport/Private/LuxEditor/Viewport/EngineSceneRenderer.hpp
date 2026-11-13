@@ -38,21 +38,26 @@ public:
     bool Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                   const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
                   QImage& output, QImage* skyboxBackground = nullptr);
+
     const QString& LastError() const {
         return error_;
     }
+
     LuxEngine::GpuDevice* GetGpuDevice() noexcept;
     const LuxEngine::GpuDevice* GetGpuDevice() const noexcept;
     bool GetMeshBounds(const std::string& path, LuxEngine::Vec3& minimum,
                        LuxEngine::Vec3& maximum) const;
+
     LuxEngine::uint32 GetRecoveryCount() const noexcept {
         return recoveries_;
     }
+
     // Disabled for offscreen/minimal Qt platforms unless SetForceAllowed(true) or
     // LUX_EDITOR_FORCE_GPU_VIEWPORT is set, and disabled when LUX_EDITOR_SOFTWARE_VIEWPORT is set.
     static bool Allowed();
     static void SetForceAllowed(bool force);
     static void SetDefaultValidation(int validationMode);
+
     void SetPostSceneHookForTesting(std::function<void()> hook) {
         postSceneHook_ = std::move(hook);
     }

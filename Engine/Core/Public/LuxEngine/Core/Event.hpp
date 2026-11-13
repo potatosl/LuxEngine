@@ -67,12 +67,15 @@ public:
     static EventType GetStaticType() {
         return EventType::WindowClose;
     }
+
     EventType GetEventType() const override {
         return GetStaticType();
     }
+
     const char* GetName() const override {
         return "WindowClose";
     }
+
     int GetCategoryFlags() const override {
         return EventCategoryApplication;
     }
@@ -85,6 +88,7 @@ public:
     uint32 GetWidth() const {
         return width_;
     }
+
     uint32 GetHeight() const {
         return height_;
     }
@@ -92,12 +96,15 @@ public:
     static EventType GetStaticType() {
         return EventType::WindowResize;
     }
+
     EventType GetEventType() const override {
         return GetStaticType();
     }
+
     const char* GetName() const override {
         return "WindowResize";
     }
+
     int GetCategoryFlags() const override {
         return EventCategoryApplication;
     }
@@ -115,6 +122,7 @@ public:
     int32 GetKeyCode() const {
         return keycode_;
     }
+
     bool IsRepeat() const {
         return isRepeat_;
     }
@@ -122,12 +130,15 @@ public:
     static EventType GetStaticType() {
         return EventType::KeyPressed;
     }
+
     EventType GetEventType() const override {
         return GetStaticType();
     }
+
     const char* GetName() const override {
         return "KeyPressed";
     }
+
     int GetCategoryFlags() const override {
         return EventCategoryInput | EventCategoryKeyboard;
     }
@@ -148,12 +159,15 @@ public:
     static EventType GetStaticType() {
         return EventType::KeyReleased;
     }
+
     EventType GetEventType() const override {
         return GetStaticType();
     }
+
     const char* GetName() const override {
         return "KeyReleased";
     }
+
     int GetCategoryFlags() const override {
         return EventCategoryInput | EventCategoryKeyboard;
     }
@@ -169,6 +183,7 @@ public:
     float GetX() const {
         return mouseX_;
     }
+
     float GetY() const {
         return mouseY_;
     }
@@ -176,12 +191,15 @@ public:
     static EventType GetStaticType() {
         return EventType::MouseMoved;
     }
+
     EventType GetEventType() const override {
         return GetStaticType();
     }
+
     const char* GetName() const override {
         return "MouseMoved";
     }
+
     int GetCategoryFlags() const override {
         return EventCategoryInput | EventCategoryMouse;
     }
@@ -198,6 +216,7 @@ public:
     float GetXOffset() const {
         return xOffset_;
     }
+
     float GetYOffset() const {
         return yOffset_;
     }
@@ -205,12 +224,15 @@ public:
     static EventType GetStaticType() {
         return EventType::MouseScrolled;
     }
+
     EventType GetEventType() const override {
         return GetStaticType();
     }
+
     const char* GetName() const override {
         return "MouseScrolled";
     }
+
     int GetCategoryFlags() const override {
         return EventCategoryInput | EventCategoryMouse;
     }
@@ -231,12 +253,15 @@ public:
     static EventType GetStaticType() {
         return EventType::MouseButtonPressed;
     }
+
     EventType GetEventType() const override {
         return GetStaticType();
     }
+
     const char* GetName() const override {
         return "MouseButtonPressed";
     }
+
     int GetCategoryFlags() const override {
         return EventCategoryInput | EventCategoryMouse | EventCategoryMouseButton;
     }
@@ -256,12 +281,15 @@ public:
     static EventType GetStaticType() {
         return EventType::MouseButtonReleased;
     }
+
     EventType GetEventType() const override {
         return GetStaticType();
     }
+
     const char* GetName() const override {
         return "MouseButtonReleased";
     }
+
     int GetCategoryFlags() const override {
         return EventCategoryInput | EventCategoryMouse | EventCategoryMouseButton;
     }

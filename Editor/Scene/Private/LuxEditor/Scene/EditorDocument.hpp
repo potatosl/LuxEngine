@@ -13,6 +13,7 @@ namespace LuxEditor {
 class EditorDocument final {
 public:
     using TabId = std::uint64_t;
+
     struct TabInfo {
         TabId id = 0;
         std::string path;
@@ -50,14 +51,17 @@ public:
     const LuxEngine::Scene* GetScene(TabId tab) const noexcept;
     std::string GetPath(TabId tab) const;
     const std::string& GetLoadWarning(TabId tab) const noexcept;
+
     const std::string& GetLoadWarning() const noexcept {
         return Active().loadWarning;
     }
+
     bool IsDirty(TabId tab) const noexcept;
     bool SetDirty(TabId tab, bool dirty) noexcept;
     bool Save(TabId tab);
     std::optional<LuxEngine::uint32> GetSelectedId(TabId tab) const noexcept;
     void Select(TabId tab, std::optional<LuxEngine::uint32> id);
+
     const std::string& GetLastError() const noexcept {
         return error_;
     }
@@ -65,12 +69,15 @@ public:
     bool IsDirty() const noexcept {
         return Active().dirty;
     }
+
     void MarkDirty() noexcept {
         Active().dirty = true;
     }
+
     void SetDirty(bool dirty) noexcept {
         Active().dirty = dirty;
     }
+
     const std::string& GetPath() const noexcept {
         return Active().path;
     }
@@ -83,6 +90,7 @@ public:
     LuxEngine::Scene& GetScene() noexcept {
         return *Active().scene;
     }
+
     const LuxEngine::Scene& GetScene() const noexcept {
         return *Active().scene;
     }
@@ -96,12 +104,15 @@ private:
         bool dirty = false;
         std::string loadWarning;
     };
+
     TabState& Active() noexcept {
         return tabs_[activeIndex_];
     }
+
     const TabState& Active() const noexcept {
         return tabs_[activeIndex_];
     }
+
     TabState* Find(TabId tab) noexcept;
     const TabState* Find(TabId tab) const noexcept;
     TabId NextId();

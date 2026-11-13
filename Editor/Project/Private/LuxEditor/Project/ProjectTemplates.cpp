@@ -121,8 +121,8 @@ protected:
         const char* base = SDL_GetBasePath();
         if (!base)
             throw std::runtime_error("게임 실행 경로를 찾을 수 없습니다.");
-        const auto basePath = std::filesystem::path(std::u8string(
-            reinterpret_cast<const char8_t*>(base), std::strlen(base)));
+        const auto basePath = std::filesystem::path(
+            std::u8string(reinterpret_cast<const char8_t*>(base), std::strlen(base)));
         const auto sceneFile = FindStartScene(basePath / "Content");
         std::string error;
         scene_ = manager_.Load(sceneFile, error);
@@ -169,8 +169,8 @@ protected:
         if (streamingElapsed_ < .1)
             return;
         streamingElapsed_ = 0;
-        const auto observer = player_ ? scene_->GetWorldTransform(player_.GetId()).position
-                                      : le::Vec3{};
+        const auto observer =
+            player_ ? scene_->GetWorldTransform(player_.GetId()).position : le::Vec3{};
         std::string error;
         bool changed = false;
         if (!manager_.UpdateStreaming(*scene_, {observer.x, observer.y}, error, &changed)) {
@@ -247,11 +247,12 @@ protected:
 
     void OnRender(float) override {
         const auto& settings = scene_->GetSettings();
-        GetGpuDevice().Clear(settings.clearColor.x, settings.clearColor.y,
-                             settings.clearColor.z, settings.clearColor.w);
+        GetGpuDevice().Clear(settings.clearColor.x, settings.clearColor.y, settings.clearColor.z,
+                             settings.clearColor.w);
         auto renderSettings = scene_->GetSettings().render3D;
         if (!renderSettings.environmentPath.empty())
-            renderSettings.environmentPath = scene_->ResolveAssetPath(renderSettings.environmentPath);
+            renderSettings.environmentPath =
+                scene_->ResolveAssetPath(renderSettings.environmentPath);
         if (scene_->GetSettings().render3D.mode == le::Render3DMode::Pbr)
             le::Renderer3D::BeginScene(camera3D_, renderSettings, scene_->GetSettings().exposure);
         else

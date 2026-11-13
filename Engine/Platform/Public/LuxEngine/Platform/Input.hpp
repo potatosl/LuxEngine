@@ -140,12 +140,15 @@ struct InputBinding {
     static InputBinding Key(LuxKey key) {
         return {InputDevice::Keyboard, static_cast<int32>(key)};
     }
+
     static InputBinding Mouse(LuxMouseButton button) {
         return {InputDevice::MouseButton, static_cast<int32>(button)};
     }
+
     static InputBinding Gamepad(LuxGamepadButton button) {
         return {InputDevice::GamepadButton, static_cast<int32>(button)};
     }
+
     bool operator==(const InputBinding&) const = default;
 };
 
@@ -154,25 +157,33 @@ public:
     static void Initialize();
     static void Shutdown();
     static bool BindAction(std::string_view action, InputBinding binding);
+
     static bool BindAction(std::string_view action, LuxKey key) {
         return BindAction(action, InputBinding::Key(key));
     }
+
     static bool BindAction(std::string_view action, LuxMouseButton button) {
         return BindAction(action, InputBinding::Mouse(button));
     }
+
     static bool BindAction(std::string_view action, LuxGamepadButton button) {
         return BindAction(action, InputBinding::Gamepad(button));
     }
+
     static bool UnbindAction(std::string_view action, InputBinding binding);
+
     static bool UnbindAction(std::string_view action, LuxKey key) {
         return UnbindAction(action, InputBinding::Key(key));
     }
+
     static bool UnbindAction(std::string_view action, LuxMouseButton button) {
         return UnbindAction(action, InputBinding::Mouse(button));
     }
+
     static bool UnbindAction(std::string_view action, LuxGamepadButton button) {
         return UnbindAction(action, InputBinding::Gamepad(button));
     }
+
     static bool ClearAction(std::string_view action);
     static void ClearBindings();
     static bool IsActionDown(std::string_view action);
@@ -182,13 +193,17 @@ public:
     static void AdvanceFrame();
 
     static bool IsKeyPressed(int32 keycode);
+
     static bool IsKeyPressed(LuxKey key) {
         return IsKeyPressed(static_cast<int32>(key));
     }
+
     static bool IsMouseButtonPressed(int32 button);
+
     static bool IsMouseButtonPressed(LuxMouseButton button) {
         return IsMouseButtonPressed(static_cast<int32>(button));
     }
+
     static bool IsGamepadButtonPressed(LuxGamepadButton button);
     static std::pair<float, float> GetMousePosition();
     static float GetMouseX();

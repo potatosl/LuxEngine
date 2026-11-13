@@ -52,22 +52,27 @@ namespace {
 using namespace LuxEngine;
 using namespace LuxEditor;
 using TabId = EditorDocument::TabId;
+
 void Check(bool condition, const char* description) {
     if (!condition)
         throw std::runtime_error(description);
 }
+
 bool Near(float a, float b, float epsilon = 1e-4f) {
     return std::abs(a - b) < epsilon;
 }
+
 void EqualMatrix(const Mat4& a, const Mat4& b, const char* description) {
     for (size_t index = 0; index < 16; ++index)
         Check(Near(a.elements[index], b.elements[index]), description);
 }
+
 std::string Data(Scene& scene) {
     std::string result;
     Check(scene.SerializeToString(result), "UI fixture serializes");
     return result;
 }
+
 void Pump(int milliseconds = 0) {
     QElapsedTimer timer;
     timer.start();
@@ -77,6 +82,7 @@ void Pump(int milliseconds = 0) {
             QThread::msleep(1);
     } while (timer.elapsed() < milliseconds);
 }
+
 template <typename Predicate> void Wait(Predicate condition, const char* description) {
     QElapsedTimer timer;
     timer.start();
@@ -84,30 +90,36 @@ template <typename Predicate> void Wait(Predicate condition, const char* descrip
         Pump(2);
     Check(condition(), description);
 }
+
 QAction* Action(EditorWindow& window, const char* name) {
     auto* result = window.findChild<QAction*>(QString::fromLatin1(name));
     Check(result != nullptr, "required scene menu action exists");
     return result;
 }
+
 QUndoStack* History(EditorWindow& window) {
     auto* result = window.findChild<QUndoStack*>();
     Check(result != nullptr, "global scene history exists");
     return result;
 }
+
 QTreeWidget* Outliner(EditorWindow& window) {
     auto* result = window.findChild<QTreeWidget*>(QStringLiteral("sceneOutliner"));
     Check(result != nullptr, "scene outliner exists");
     return result;
 }
+
 QTreeWidgetItem* Find(QTreeWidget& tree, uint32 id) {
     for (QTreeWidgetItemIterator item(&tree); *item; ++item)
         if ((*item)->data(0, Qt::UserRole).toUInt() == id)
             return *item;
     throw std::runtime_error("entity is missing from the visible scene hierarchy");
 }
+
 struct Fixture {
     QTemporaryDir files;
     std::unique_ptr<EditorWindow> window;
+
     Fixture() {
         Check(files.isValid(), "temporary fixture directory exists");
         QSettings().clear();
@@ -116,15 +128,18 @@ struct Fixture {
         window->show();
         Pump();
     }
+
     ~Fixture() {
         for (const auto& tab : window->GetDocument().ListTabs())
             window->GetDocument().SetDirty(tab.id, false);
         window->close();
         Pump();
     }
+
     std::filesystem::path Path(const char* name) const {
         return PathFromUtf8(files.path().toUtf8().toStdString()) / name;
     }
+
     TabId Open(Scene& scene, const char* name) {
         const auto file = Path(name);
         Check(scene.Serialize(PathUtf8(file)) && window->OpenSceneDocument(file),
@@ -528,6 +543,7 @@ void Click(QWidget& view, QPointF point) {
     QApplication::sendEvent(&view, &press);
     QApplication::sendEvent(&view, &release);
 }
+
 void Drag(QWidget& view, QPointF start, QPointF end) {
     QMouseEvent press(QEvent::MouseButtonPress, start, view.mapToGlobal(start.toPoint()),
                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -539,6 +555,7 @@ void Drag(QWidget& view, QPointF start, QPointF end) {
     QApplication::sendEvent(&view, &move);
     QApplication::sendEvent(&view, &release);
 }
+
 void ViewportAffinePicking() {
     {
         EditorDocument dragDocument;
@@ -648,6 +665,7 @@ void ViewportAffinePicking() {
         begin == 1 && end == 1 && edits == 0,
         "an invalidated parent cancels a drag without throwing through Qt or leaving an open edit");
 }
+
 void ViewportWorldEditing() {
     EditorDocument document;
     auto& scene = document.GetScene();
@@ -956,6 +974,7 @@ void DuplicateRestoresPreviewSource() {
 struct ProjectSessionFixture {
     QTemporaryDir files;
     EditorProject project;
+
     ProjectSessionFixture() {
         Check(files.isValid(), "project session fixture directory exists");
         std::string error;

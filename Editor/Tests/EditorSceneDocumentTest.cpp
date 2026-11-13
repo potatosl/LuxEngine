@@ -21,24 +21,29 @@ void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 struct Files {
     fs::path root = fs::temp_directory_path() /
                     ("lux-scene-documents-" +
                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+
     Files() {
         fs::create_directories(root);
     }
+
     ~Files() {
         Scene::ClearSaveFaults();
         std::error_code error;
         fs::remove_all(root, error);
     }
 };
+
 std::string Bytes(const fs::path& file) {
     std::ifstream input(file, std::ios::binary);
     Check(input.is_open(), "fixture file can be read");
     return {std::istreambuf_iterator<char>(input), {}};
 }
+
 std::string Snapshot(Scene* scene) {
     std::string data;
     Check(scene && scene->SerializeToString(data), "scene snapshot serializes");
@@ -131,16 +136,20 @@ void TestTabsAndHistory() {
 
 void TestInvalidFilePaths() {
     Files files;
+
     struct WorkingDirectory {
         fs::path previous = fs::current_path();
+
         explicit WorkingDirectory(const fs::path& root) {
             fs::current_path(root);
         }
+
         ~WorkingDirectory() {
             std::error_code error;
             fs::current_path(previous, error);
         }
     } directory(files.root);
+
     EditorDocument document;
     document.CreateEntity("Saved");
     const auto file = files.root / "original.lux";
@@ -369,13 +378,16 @@ void TestExternalAliasesAndNativePaths() {
     fs::create_directory_symlink(files.root / "outside/child", link, error);
     if (error)
         return;
+
     struct CurrentDirectory {
         fs::path previous = fs::current_path();
+
         ~CurrentDirectory() {
             std::error_code error;
             fs::current_path(previous, error);
         }
     } restoreDirectory;
+
     fs::current_path(files.root);
     const auto requested = fs::path("inside/link/../native.lux");
     Scene expected;

@@ -4,12 +4,14 @@
 #include <iostream>
 #include <stdexcept>
 namespace le = LuxEngine;
+
 namespace {
 class InputBindings final : public LuxSamples::SampleApplication {
 public:
     static constexpr std::string_view Help =
         "입력 바인딩: WASD·방향키·십자키로 이동하고 Space·마우스 왼쪽·게임패드 "
         "아래쪽 버튼으로 발사합니다. F로 Space와 Enter 바인딩을 전환합니다.";
+
     explicit InputBindings(LuxSamples::Options options)
         : SampleApplication("입력 바인딩", "Space / 마우스 왼쪽 / 게임패드 A 발사 · F 키 변경",
                             std::move(options)) {}
@@ -19,6 +21,7 @@ private:
     unsigned presses_ = 0;
     bool alternate_ = false;
     float flash_ = 0;
+
     void Reset() override {
         position_ = {};
         presses_ = 0;
@@ -30,6 +33,7 @@ private:
         le::Input::BindAction("fire", le::LuxGamepadButton::South);
         le::Input::BindAction("rebind", le::LuxKey::F);
     }
+
     void Step(float dt) override {
         position_ += LuxSamples::Movement() * (dt * 3.5f);
         position_.x = std::clamp(position_.x, -7.0f, 7.0f);
@@ -45,6 +49,7 @@ private:
         }
         flash_ = std::max(0.0f, flash_ - dt);
     }
+
     void Draw(float elapsed) override {
         for (int y = -5; y <= 4; ++y)
             for (int x = -14; x <= 14; ++x)

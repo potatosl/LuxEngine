@@ -6,11 +6,13 @@
 
 using namespace LuxEngine;
 using Json = nlohmann::ordered_json;
+
 namespace {
 void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 void Test() {
     Scene scene;
     auto root = scene.CreateEntity("한국어 \"이름\"\n둘째 줄");
@@ -94,6 +96,7 @@ void Test() {
           "legacy scene next save upgrades to JSON");
 }
 } // namespace
+
 int main() {
     try {
         Test();

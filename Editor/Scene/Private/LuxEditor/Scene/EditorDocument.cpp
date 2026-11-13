@@ -21,6 +21,7 @@ std::string AnchoredPath(const std::string& path) {
     const auto absolute = std::filesystem::absolute(input, error);
     return error ? path : PathUtf8(absolute);
 }
+
 std::string SourcePath(const std::string& path) {
     if (path.empty() || path.find('\0') != std::string::npos)
         return {};
@@ -28,6 +29,7 @@ std::string SourcePath(const std::string& path) {
     const auto canonical = std::filesystem::weakly_canonical(PathFromUtf8(path), error);
     return error ? path : GenericPathUtf8(canonical);
 }
+
 bool SameFile(const std::string& first, const std::string& second) {
     if (first.empty() || second.empty() || first.find('\0') != std::string::npos ||
         second.find('\0') != std::string::npos)

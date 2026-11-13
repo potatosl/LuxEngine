@@ -42,6 +42,7 @@ struct TempDirectory {
     TempDirectory() {
         std::filesystem::create_directories(path);
     }
+
     ~TempDirectory() {
         std::error_code error;
         std::filesystem::remove_all(path, error);

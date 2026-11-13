@@ -33,6 +33,7 @@ struct InstanceLifetimeCounters {
     uint32 instances = 0;
     uint32 devices = 0;
 };
+
 LUX_API InstanceLifetimeCounters GetInstanceLifetimeCounters();
 // Test counter accounting without issuing invalid Vulkan commands or polluting validation logs.
 LUX_API void InjectInstanceValidationCounters(uint32 errors, uint32 warnings);

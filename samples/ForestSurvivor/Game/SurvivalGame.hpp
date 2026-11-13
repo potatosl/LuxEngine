@@ -12,11 +12,13 @@ namespace ForestGame {
 using LuxEngine::Vec2;
 enum class Phase { Title, Playing, Paused, Upgrade, Defeat, Victory };
 enum class UpgradeId { Might, Haste, Stride, Vitality, Harvest, Orbit, Multishot, Bloom, Renewal };
+
 struct Upgrade {
     UpgradeId id{};
     std::string_view title;
     std::string_view description;
 };
+
 struct Player {
     Vec2 position{};
     float health = 100, maxHealth = 100;
@@ -25,6 +27,7 @@ struct Player {
     float invulnerable = 0, dashCooldown = 0;
     int multishot = 1;
 };
+
 struct Enemy {
     Vec2 position{};
     float health = 0, maxHealth = 0;
@@ -35,20 +38,24 @@ struct Enemy {
     std::uint32_t id = 0;
     float orbitCooldown = 0, attackTimer = 0;
 };
+
 struct Projectile {
     Vec2 position{}, direction{};
     float radius = .12f, remaining = 2.0f, damage = 0;
     bool hostile = false;
 };
+
 struct Gem {
     Vec2 position{};
     int value = 1;
 };
+
 struct Effect {
     Vec2 position{};
     float age = 0, duration = .5f, radius = 1;
     int type = 0; // 0: impact, 1: pulse, 2: level-up, 3: dash, 4: enemy spawn
 };
+
 struct Rules {
     float runDuration = 300;
     float spawnRate = 1;
@@ -77,48 +84,63 @@ public:
     Phase GetPhase() const {
         return phase_;
     }
+
     const Player& GetPlayer() const {
         return player_;
     }
+
     const std::vector<Enemy>& GetEnemies() const {
         return enemies_;
     }
+
     const std::vector<Projectile>& GetProjectiles() const {
         return projectiles_;
     }
+
     const std::vector<Gem>& GetGems() const {
         return gems_;
     }
+
     const std::vector<Effect>& GetEffects() const {
         return effects_;
     }
+
     const std::array<Upgrade, 3>& GetChoices() const {
         return choices_;
     }
+
     float Elapsed() const {
         return elapsed_;
     }
+
     float Duration() const {
         return rules_.runDuration;
     }
+
     int Kills() const {
         return kills_;
     }
+
     Vec2 LastFacing() const {
         return facing_;
     }
+
     float OrbitAngle() const {
         return orbitAngle_;
     }
+
     int OrbitCount() const {
         return orbitCount_;
     }
+
     float OrbitRadius() const {
         return orbitRadius_;
     }
+
     float PulseRadius() const {
         return pulseRadius_;
     }
+
     bool BossSpawned() const {
         return bossSpawned_;
     }

@@ -37,6 +37,7 @@ public:
         ++live_;
         return (static_cast<uint64>(slot.generation) << 32) | index;
     }
+
     T* Get(uint64 handle) {
         const auto index = static_cast<uint32>(handle);
         if (index >= slots_.size())
@@ -45,6 +46,7 @@ public:
         return slot.live && slot.generation == static_cast<uint32>(handle >> 32) ? &slot.value
                                                                                  : nullptr;
     }
+
     bool Remove(uint64 handle, T& out) {
         T* value = Get(handle);
         if (!value)
@@ -53,6 +55,7 @@ public:
         Kill(static_cast<uint32>(handle));
         return true;
     }
+
     template <class F> void Drain(F&& destroy) {
         for (uint32 index = 0; index < slots_.size(); ++index)
             if (slots_[index].live) {
@@ -60,6 +63,7 @@ public:
                 Kill(index);
             }
     }
+
     uint32 Live() const {
         return live_;
     }
@@ -70,6 +74,7 @@ private:
         uint32 generation = 1;
         bool live = false;
     };
+
     void Kill(uint32 index) {
         Slot& slot = slots_[index];
         slot.value = {};
@@ -78,6 +83,7 @@ private:
         free_.push_back(index);
         --live_;
     }
+
     std::vector<Slot> slots_;
     std::vector<uint32> free_;
     uint32 live_ = 0;
@@ -274,6 +280,7 @@ struct DeviceState {
 
     bool Fail(VkResult result, std::string_view what);
     bool Fail(GpuStatus failure, std::string_view what);
+
     bool Usable() const {
         return status == GpuStatus::Ready;
     }

@@ -13,10 +13,12 @@ struct EditorSnapshot {
     bool isEmpty() const {
         return scene.isEmpty();
     }
+
     void clear() {
         scene.clear();
         animationTimes.clear();
     }
+
     bool operator==(const EditorSnapshot&) const = default;
 };
 } // namespace LuxEditor

@@ -20,9 +20,11 @@ struct SceneUniform {
     float shadowMatrix[16];
     float shadowOptions[4];
 };
+
 struct SceneObject {
     float model[16], albedo[4], options[4];
 };
+
 static_assert(sizeof(SceneObject) == UniformObjectBytes);
 
 struct Image {
@@ -30,6 +32,7 @@ struct Image {
     VkImageView view = VK_NULL_HANDLE;
     VmaAllocation allocation = nullptr;
 };
+
 void Destroy(DeviceState& s, Image& image) {
     if (image.view)
         vkDestroyImageView(s.device, image.view, nullptr);
@@ -37,10 +40,12 @@ void Destroy(DeviceState& s, Image& image) {
         vmaDestroyImage(s.allocator, image.image, image.allocation);
     image = {};
 }
+
 void Check(VkResult result) {
     if (result != VK_SUCCESS)
         throw std::runtime_error("3D Vulkan resource creation failed: " + std::to_string(result));
 }
+
 Image CreateImage(DeviceState& s, uint32 width, uint32 height, uint32 levels, uint32 layers,
                   VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect) {
     Image image;
@@ -73,6 +78,7 @@ Image CreateImage(DeviceState& s, uint32 width, uint32 height, uint32 levels, ui
     }
     return image;
 }
+
 VkShaderModule Shader(DeviceState& s, const char* name) {
     const auto directory = s.config.shaderDirectory.empty()
                                ? Platform::ExecutableDirectory() + "shaders/"
@@ -97,6 +103,7 @@ VkShaderModule Shader(DeviceState& s, const char* name) {
               : vkCreateShaderModule(s.device, &info, nullptr, &module));
     return module;
 }
+
 VkPipeline Pipeline(DeviceState& s, VkPipelineLayout layout, VkRenderPass pass, const char* vertex,
                     const char* fragment, bool mesh, bool depth, bool shadow = false) {
     VkShaderModule modules[2]{};
@@ -186,6 +193,7 @@ VkPipeline Pipeline(DeviceState& s, VkPipelineLayout layout, VkRenderPass pass, 
         throw;
     }
 }
+
 void Viewport(VkCommandBuffer cmd, uint32 width, uint32 height) {
     const VkViewport viewport{
         0, static_cast<float>(height), static_cast<float>(width), -static_cast<float>(height), 0,
@@ -209,9 +217,11 @@ struct Scene3DRenderer::Impl {
     bool shadowInitializationAttempted = false;
     std::string shadowError;
     VkFormat outputFormat = VK_FORMAT_UNDEFINED;
+
     struct Environment {
         std::weak_ptr<DeviceState> owner;
         Image sky, diffuse, specular, brdf;
+
         ~Environment() {
             if (auto s = owner.lock(); s && s->device)
                 for (auto* image : {&sky, &diffuse, &specular, &brdf})
@@ -220,6 +230,7 @@ struct Scene3DRenderer::Impl {
                             {0, VK_NULL_HANDLE, image->image, image->view, image->allocation});
         }
     };
+
     struct Frame {
         Image hdr, depth, shadow;
         VkFramebuffer shadowFramebuffer{};
@@ -230,6 +241,7 @@ struct Scene3DRenderer::Impl {
         uint32 width = 0, height = 0;
         std::shared_ptr<Environment> environment;
     };
+
     std::array<std::vector<std::unique_ptr<Frame>>, MaxFramesInFlight> frames;
     std::array<uint64, MaxFramesInFlight> frameIndices{};
     std::array<size_t, MaxFramesInFlight> frameUses{};
@@ -243,6 +255,7 @@ struct Scene3DRenderer::Impl {
     std::string environmentError;
 
     explicit Impl(const std::shared_ptr<DeviceState>& state) : owner(state) {}
+
     void DestroyFrame(DeviceState& s, Frame& f) {
         if (f.framebuffer)
             vkDestroyFramebuffer(s.device, f.framebuffer, nullptr);
@@ -255,6 +268,7 @@ struct Scene3DRenderer::Impl {
         Destroy(s, f.depth);
         f = {};
     }
+
     ~Impl() {
         if (auto s = owner.lock(); s && s->device) {
             vkDeviceWaitIdle(s->device);
@@ -685,11 +699,14 @@ struct Scene3DRenderer::Impl {
 
 Scene3DRenderer::Scene3DRenderer(const std::shared_ptr<DeviceState>& state)
     : impl_(std::make_shared<Impl>(state)) {}
+
 Scene3DRenderer::~Scene3DRenderer() = default;
+
 bool Scene3DRenderer::EnvironmentReady() const {
     return impl_->ready && impl_->activePath == impl_->attemptedPath &&
            impl_->activeRevision == impl_->attemptedRevision && !impl_->pending.valid();
 }
+
 double Scene3DRenderer::EnvironmentPreparationMs() const {
     return impl_->preparationMs;
 }

@@ -29,6 +29,7 @@
 namespace LuxEngine {
 Scene::Scene() = default;
 Scene::~Scene() = default;
+
 Entity Scene::CreateEntity(const std::string& name) {
     if (nextEntityId_ == std::numeric_limits<uint32>::max())
         throw std::overflow_error("Entity IDs exhausted");
@@ -46,6 +47,7 @@ Entity Scene::CreateEntity(const std::string& name) {
         throw;
     }
 }
+
 void Scene::DestroyEntity(Entity entity) {
     if (entity.GetScene() != this || !entity.IsValid())
         return;
@@ -71,6 +73,7 @@ void Scene::DestroyEntity(Entity entity) {
     }
     RepairReferenceLinks();
 }
+
 std::vector<Entity> Scene::GetEntities() {
     std::vector<uint32> ids(entities_.begin(), entities_.end());
     std::sort(ids.begin(), ids.end());
@@ -80,6 +83,7 @@ std::vector<Entity> Scene::GetEntities() {
         result.emplace_back(id, this);
     return result;
 }
+
 std::vector<Entity> Scene::GetEntitiesIn2DLayerOrder() {
     auto entities = GetEntities();
     std::erase_if(entities, [](Entity entity) {
@@ -91,6 +95,7 @@ std::vector<Entity> Scene::GetEntitiesIn2DLayerOrder() {
     });
     return entities;
 }
+
 void Scene::OnUpdate(double dt) {
     if (!std::isfinite(dt) || dt <= 0.0)
         return;
@@ -153,6 +158,7 @@ void Scene::OnUpdate(double dt) {
         }
     }
 }
+
 void Scene::RemovePhysicsBody2D(uint32 id) {
     if (physics2D_)
         physics2D_->Remove(id);
@@ -161,6 +167,7 @@ void Scene::RemovePhysicsBody2D(uint32 id) {
     std::erase_if(collisionEvents2D_,
                   [id](const auto& event) { return event.entityA == id || event.entityB == id; });
 }
+
 namespace {
 Vec4 TileColor(uint8_t tile) {
     switch (tile) {
@@ -178,18 +185,23 @@ Vec4 TileColor(uint8_t tile) {
         return {0, 0, 0, 0};
     }
 }
+
 bool Finite(float v) {
     return std::isfinite(v);
 }
+
 bool Finite(const Vec2& v) {
     return Finite(v.x) && Finite(v.y);
 }
+
 bool Finite(const Vec3& v) {
     return Finite(v.x) && Finite(v.y) && Finite(v.z);
 }
+
 bool Finite(const Vec4& v) {
     return Finite(v.x) && Finite(v.y) && Finite(v.z) && Finite(v.w);
 }
+
 Vec4 Exposed(Vec4 color, float exposure) {
     color.x *= exposure;
     color.y *= exposure;
@@ -197,6 +209,7 @@ Vec4 Exposed(Vec4 color, float exposure) {
     return color;
 }
 } // namespace
+
 void Scene::OnRender() {
     // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직 연결되지 않았습니다.
     const auto entities = GetEntitiesIn2DLayerOrder();
@@ -235,6 +248,7 @@ void Scene::OnRender() {
         }
     }
 }
+
 void Scene::OnRender3D() {
     for (Entity entity : GetEntities()) {
         if (!entity.HasComponent<TransformComponent>() ||
@@ -259,6 +273,7 @@ void Scene::OnRender3D() {
         }
     }
 }
+
 namespace {
 std::filesystem::path Utf8Path(const std::string& text) {
     return std::filesystem::path(
@@ -580,13 +595,16 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
 std::istream& operator>>(std::istream& i, Vec2& v) {
     return i >> v.x >> v.y;
 }
+
 std::istream& operator>>(std::istream& i, Vec3& v) {
     return i >> v.x >> v.y >> v.z;
 }
+
 std::istream& operator>>(std::istream& i, Vec4& v) {
     return i >> v.x >> v.y >> v.z >> v.w;
 }
 } // namespace
+
 namespace {
 constexpr uint64 MaxSceneSizeBytes = 64ull * 1024ull * 1024ull; // 64 MiB
 constexpr uint64 MaxSceneEntities = 100000;                     // 100,000 entities

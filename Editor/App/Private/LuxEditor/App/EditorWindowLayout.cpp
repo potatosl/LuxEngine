@@ -59,11 +59,13 @@ QWidget* Panel(QWidget* parent, QVBoxLayout*& layout, int margin = 6) {
     layout->setSpacing(5);
     return panel;
 }
+
 QLabel* Caption(const QString& text, QWidget* parent) {
     auto* label = new QLabel(text, parent);
     label->setObjectName(QStringLiteral("sectionCaption"));
     return label;
 }
+
 QDoubleSpinBox* Number(QWidget* parent, double low, double high, double value, double step) {
     auto* control = new QDoubleSpinBox(parent);
     control->setRange(low, high);
@@ -952,6 +954,7 @@ void EditorWindow::RestoreWorkspaceLayout() {
     if (!state.isEmpty() && !restoreState(state, 3))
         restoreState(defaultLayout_, 3);
 }
+
 void EditorWindow::SaveWorkspaceLayout() {
     QSettings settings;
     settings.setValue(QStringLiteral("theme"), theme_);
@@ -979,6 +982,7 @@ void EditorWindow::SaveWorkspaceLayout() {
     settings.setValue(QStringLiteral("openSceneDocuments"),
                       QJsonDocument(scenes).toJson(QJsonDocument::Compact));
 }
+
 void EditorWindow::ResetWorkspaceLayout() {
     restoreState(defaultLayout_, 3);
     for (auto* dock : docks_)

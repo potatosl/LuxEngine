@@ -23,13 +23,16 @@ namespace {
 QString Q(const std::string& value) {
     return QString::fromUtf8(value);
 }
+
 QString Q(const std::filesystem::path& value) {
     return Q(PathUtf8(value));
 }
+
 std::string Utf8(const QString& value) {
     return value.toUtf8().toStdString();
 }
 } // namespace
+
 void EditorWindow::NewProject() {
     auto request = ShowNewProjectDialog(this);
     if (!request || !ConfirmDiscardChanges())
@@ -59,6 +62,7 @@ void EditorWindow::NewProject() {
     UpdateRecentMenu();
     RefreshAll();
 }
+
 void EditorWindow::OpenProjectDialog() {
     const QString file = QFileDialog::getOpenFileName(
         this, QStringLiteral("프로젝트 열기"), {},
@@ -66,6 +70,7 @@ void EditorWindow::OpenProjectDialog() {
     if (!file.isEmpty())
         OpenProjectFile(PathFromUtf8(Utf8(file)));
 }
+
 void EditorWindow::OpenProjectFile(const std::filesystem::path& file,
                                    const std::filesystem::path& preferredScene) {
     std::string error;
@@ -108,6 +113,7 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file,
     UpdateRecentMenu();
     RefreshAll();
 }
+
 void EditorWindow::EditProjectSettings() {
     if (!project_)
         return;
@@ -134,6 +140,7 @@ void EditorWindow::EditProjectSettings() {
     ApplyProjectPreferences();
     RefreshAll();
 }
+
 void EditorWindow::ApplyProjectPreferences() {
     autosaveTimer_.stop();
     uint32_t interval = project_ ? project_->GetSettings().autosaveSeconds : 0;
@@ -156,6 +163,7 @@ void EditorWindow::ApplyProjectPreferences() {
     else
         setWindowIcon(QIcon());
 }
+
 EditorWindow::SceneOpenResult EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
                                                               const EditorProject* recoveryProject,
                                                               EditorDocument* destination) {
@@ -215,6 +223,7 @@ bool EditorWindow::OpenProjectScene(const std::filesystem::path& file) {
     RefreshAll();
     return true;
 }
+
 void EditorWindow::RecoverAutosaveIfNeeded() {
     if (!project_ || !project_->HasNewerAutosave(PathFromUtf8(document_.GetPath())))
         return;
@@ -231,6 +240,7 @@ void EditorWindow::RecoverAutosaveIfNeeded() {
     } else
         project_->ClearAutosave(PathFromUtf8(document_.GetPath()));
 }
+
 void EditorWindow::AutoSaveScene() {
     if (previewActive_)
         return;
@@ -256,6 +266,7 @@ void EditorWindow::AutoSaveScene() {
             autosavedAt_[tab.id] = now;
     }
 }
+
 bool EditorWindow::ConfirmDiscardChanges() {
     StopPreview();
     EndTimelineEdit();
@@ -273,6 +284,7 @@ bool EditorWindow::ConfirmDiscardChanges() {
         return false;
     return answer != QMessageBox::Yes || SaveAllScenes();
 }
+
 bool EditorWindow::SaveScene(bool choosePath) {
     StopPreview();
     const auto previous = document_.GetPath();
@@ -308,6 +320,7 @@ bool EditorWindow::SaveScene(bool choosePath) {
     Log(QStringLiteral("장면을 저장했습니다."));
     return true;
 }
+
 void EditorWindow::CloneCurrentProject() {
     if (!project_ || !SaveAllScenes(true) || !project_)
         return;
@@ -331,6 +344,7 @@ void EditorWindow::CloneCurrentProject() {
     }
     OpenProjectFile(copy->GetFile());
 }
+
 void EditorWindow::ImportProjectDialog() {
     const QString file =
         QFileDialog::getOpenFileName(this, QStringLiteral("프로젝트 가져오기"), {},
@@ -352,6 +366,7 @@ void EditorWindow::ImportProjectDialog() {
     }
     OpenProjectFile(imported->GetFile());
 }
+
 void EditorWindow::ExportCurrentProject() {
     if (!project_ || !SaveAllScenes(true) || !project_)
         return;
@@ -378,6 +393,7 @@ void EditorWindow::ExportCurrentProject() {
     }
     Log(QStringLiteral("프로젝트 패키지를 내보냈습니다."));
 }
+
 void EditorWindow::BackupCurrentProject() {
     if (!project_ || !SaveAllScenes(true) || !project_)
         return;
@@ -392,6 +408,7 @@ void EditorWindow::BackupCurrentProject() {
     }
     Log(QStringLiteral("프로젝트 백업을 만들었습니다."));
 }
+
 void EditorWindow::RestoreCurrentProject() {
     if (!project_)
         return;
@@ -432,6 +449,7 @@ void EditorWindow::RestoreCurrentProject() {
     RefreshAll();
     Log(QStringLiteral("프로젝트를 백업에서 복구했습니다."));
 }
+
 void EditorWindow::RescanProjectResources() {
     if (!project_)
         return;

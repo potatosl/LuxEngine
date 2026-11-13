@@ -137,6 +137,7 @@ struct EngineSceneRenderer::State {
 };
 
 EngineSceneRenderer::EngineSceneRenderer() = default;
+
 EngineSceneRenderer::~EngineSceneRenderer() {
     Shutdown();
 }
@@ -346,14 +347,17 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
         return false;
+
     struct RenderScope {
         EngineSceneRenderer& self;
+
         ~RenderScope() {
             self.rendering_ = false;
             if (self.pendingShutdown_)
                 self.Shutdown();
         }
     } renderScope{*this};
+
     rendering_ = true;
 
     const auto width = static_cast<LuxEngine::uint32>(pixelWidth);
@@ -420,14 +424,17 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
         return false;
+
     struct RenderScope {
         EngineSceneRenderer& self;
+
         ~RenderScope() {
             self.rendering_ = false;
             if (self.pendingShutdown_)
                 self.Shutdown();
         }
     } renderScope{*this};
+
     rendering_ = true;
 
     const auto width = static_cast<LuxEngine::uint32>(pixelWidth);

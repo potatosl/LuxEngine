@@ -12,12 +12,15 @@ constexpr float kMaxGravityScale = 10'000.0f;
 bool Finite(const Vec2& v) {
     return std::isfinite(v.x) && std::isfinite(v.y);
 }
+
 bool Finite(const Vec3& v) {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
+
 bool Bounded(const Vec2& v, float limit) {
     return Finite(v) && std::abs(v.x) <= limit && std::abs(v.y) <= limit;
 }
+
 bool Bounded(const Vec3& v, float limit) {
     return Finite(v) && std::abs(v.x) <= limit && std::abs(v.y) <= limit && std::abs(v.z) <= limit;
 }

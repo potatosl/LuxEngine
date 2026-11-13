@@ -25,6 +25,7 @@ LuxEngine::PerspectiveCamera MakeViewportCamera3D(QSizeF size, LuxEngine::Vec3 f
     camera.SetUp({0, 1, 0});
     return camera;
 }
+
 std::optional<QPointF> ProjectViewportPoint(const LuxEngine::PerspectiveCamera& camera, QSizeF size,
                                             LuxEngine::Vec3 point) {
     if (size.width() <= 0 || size.height() <= 0)
@@ -41,6 +42,7 @@ std::optional<QPointF> ProjectViewportPoint(const LuxEngine::PerspectiveCamera& 
         return std::nullopt;
     return screen;
 }
+
 std::optional<ViewportRay3D> MakeViewportRay3D(const LuxEngine::PerspectiveCamera& camera,
                                                QSizeF size, QPointF point) {
     if (size.width() <= 0 || size.height() <= 0 || !std::isfinite(point.x()) ||
@@ -55,6 +57,7 @@ std::optional<ViewportRay3D> MakeViewportRay3D(const LuxEngine::PerspectiveCamer
                                     static_cast<float>(v[8] * x + v[9] * y - v[10])};
     return ViewportRay3D{camera.GetPosition(), direction.Normalized()};
 }
+
 std::optional<double> IntersectViewportBox(const ViewportRay3D& ray, const LuxEngine::Mat4& model) {
     const auto& m = model.elements;
     if (std::any_of(std::begin(m), std::end(m),
