@@ -1,6 +1,7 @@
 #include <LuxEditor/Project/EditorProject.hpp>
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Project/ProjectFileOperations.hpp>
+#include <LuxEditor/Project/ProjectJson.hpp>
 #include <LuxEditor/Project/ProjectTemplates.hpp>
 
 #include <LuxEngine/Scene/Entity.hpp>
@@ -133,21 +134,10 @@ bool WriteProjectFile(const EditorProject& project, const std::filesystem::path&
     } cleanup{temporary};
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        const auto& settings = project.GetSettings();
-        output << "LUXPROJECT 2\n"
-               << "name " << std::quoted(project.GetName()) << '\n'
-               << "engine_version " << std::quoted(project.GetEngineVersion()) << '\n'
-               << "project_version " << std::quoted(settings.version) << '\n'
-               << "template " << std::quoted(ProjectTemplateName(project.GetTemplate())) << '\n'
-               << "start_scene " << std::quoted(GenericPathUtf8(scene)) << '\n'
-               << "icon " << std::quoted(GenericPathUtf8(settings.icon)) << '\n'
-               << "autosave_seconds " << settings.autosaveSeconds << '\n'
-               << "backup_limit " << settings.backupLimit << '\n'
-               << "snap_to_grid " << settings.snapToGrid << '\n'
-               << "dependency_count " << settings.dependencies.size() << '\n';
-        for (const auto& dependency : settings.dependencies)
-            output << "dependency " << std::quoted(dependency.package) << ' '
-                   << std::quoted(dependency.version) << '\n';
+        const auto data = SerializeProjectJson(project, scene);
+        if (data.empty())
+            return false;
+        output.write(data.data(), static_cast<std::streamsize>(data.size()));
         output.close();
         if (!output)
             return false;
@@ -344,45 +334,60 @@ std::optional<EditorProject> EditorProject::Read(const std::filesystem::path& fi
         return std::nullopt;
     }
     std::ifstream input(file, std::ios::binary);
-    std::string magic;
-    int version = 0;
-    if (!(input >> magic >> version) || magic != "LUXPROJECT" || (version != 1 && version != 2)) {
-        error = "지원하지 않는 프로젝트 파일 형식입니다.";
-        return std::nullopt;
-    }
     EditorProject project;
     std::string projectTemplate;
     std::string scene;
-    if (!ReadField(input, "name", project.settings_.name) ||
-        !ReadField(input, "engine_version", project.engineVersion_) ||
-        (version == 2 && !ReadField(input, "project_version", project.settings_.version)) ||
-        !ReadField(input, "template", projectTemplate) || !ReadField(input, "start_scene", scene)) {
-        error = "프로젝트 메타데이터가 손상되었습니다.";
-        return std::nullopt;
-    }
-    if (version == 2) {
-        std::string icon;
-        std::string key;
-        size_t dependencyCount = 0;
-        if (!ReadField(input, "icon", icon) ||
-            !(input >> key >> project.settings_.autosaveSeconds) || key != "autosave_seconds" ||
-            !(input >> key >> project.settings_.backupLimit) || key != "backup_limit" ||
-            !(input >> key >> project.settings_.snapToGrid) || key != "snap_to_grid" ||
-            !(input >> key >> dependencyCount) || key != "dependency_count" ||
-            dependencyCount > 64) {
-            error = "프로젝트 설정이 손상되었습니다.";
+    int legacyVersion = 0;
+    input >> std::ws;
+    if (input.peek() == '{') {
+        const std::string data((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+        if (!DeserializeProjectJson(data, project.settings_, project.engineVersion_,
+                                    projectTemplate, scene)) {
+            error = "프로젝트 JSON 형식 또는 메타데이터가 올바르지 않습니다.";
             return std::nullopt;
         }
-        project.settings_.icon = PathFromUtf8(icon);
-        for (size_t index = 0; index < dependencyCount; ++index) {
-            ProjectDependency dependency;
-            if (!(input >> key >> std::quoted(dependency.package) >>
-                  std::quoted(dependency.version)) ||
-                key != "dependency") {
-                error = "프로젝트 종속성 정보가 손상되었습니다.";
+        input.peek();
+    } else {
+        std::string magic;
+        if (!(input >> magic >> legacyVersion) || magic != "LUXPROJECT" ||
+            (legacyVersion != 1 && legacyVersion != 2)) {
+            error = "지원하지 않는 프로젝트 파일 형식입니다.";
+            return std::nullopt;
+        }
+        if (!ReadField(input, "name", project.settings_.name) ||
+            !ReadField(input, "engine_version", project.engineVersion_) ||
+            (legacyVersion == 2 &&
+             !ReadField(input, "project_version", project.settings_.version)) ||
+            !ReadField(input, "template", projectTemplate) ||
+            !ReadField(input, "start_scene", scene)) {
+            error = "프로젝트 메타데이터가 손상되었습니다.";
+            return std::nullopt;
+        }
+        if (legacyVersion == 2) {
+            std::string icon;
+            std::string key;
+            size_t dependencyCount = 0;
+            if (!ReadField(input, "icon", icon) ||
+                !(input >> key >> project.settings_.autosaveSeconds) || key != "autosave_seconds" ||
+                !(input >> key >> project.settings_.backupLimit) || key != "backup_limit" ||
+                !(input >> key >> project.settings_.snapToGrid) || key != "snap_to_grid" ||
+                !(input >> key >> dependencyCount) || key != "dependency_count" ||
+                dependencyCount > 64) {
+                error = "프로젝트 설정이 손상되었습니다.";
                 return std::nullopt;
             }
-            project.settings_.dependencies.push_back(std::move(dependency));
+            project.settings_.icon = PathFromUtf8(icon);
+            for (size_t index = 0; index < dependencyCount; ++index) {
+                ProjectDependency dependency;
+                if (!(input >> key >> std::quoted(dependency.package) >>
+                      std::quoted(dependency.version)) ||
+                    key != "dependency") {
+                    error = "프로젝트 종속성 정보가 손상되었습니다.";
+                    return std::nullopt;
+                }
+                project.settings_.dependencies.push_back(std::move(dependency));
+            }
         }
     }
     std::string trailing;
@@ -426,7 +431,7 @@ std::optional<EditorProject> EditorProject::Read(const std::filesystem::path& fi
         error = "프로젝트 아이콘 파일을 찾을 수 없습니다.";
         return std::nullopt;
     }
-    if (version == 1) {
+    if (legacyVersion == 1) {
         auto backup = project.file_;
         backup += ".v1.bak";
         std::filesystem::copy_file(project.file_, backup,

@@ -35,7 +35,7 @@ if (-not (Test-Path $vcpkgExe)) {
 }
 
 # Install core vcpkg dependencies
-$vcpkgPackages = @("sdl3", "stb", "vulkan-memory-allocator")
+$vcpkgPackages = @("sdl3", "stb", "vulkan-memory-allocator", "nlohmann-json")
 if ($IncludeEditorDeps) {
     $vcpkgPackages += @("libzip", "qtbase[widgets]")
 }

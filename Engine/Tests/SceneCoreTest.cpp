@@ -91,11 +91,13 @@ void MeshAssetMetadata() {
     auto entity = scene.CreateEntity("메시 객체");
     auto& mesh = entity.AddComponent<MeshRendererComponent>();
     std::string data;
-    Check(scene.SerializeToString(data) && data.starts_with("LuxEngineScene 3 "),
-          "scenes without mesh assets retain the existing version 3 format");
+    Check(scene.SerializeToString(data) &&
+              data.find("\"format\": \"LuxEngine.Scene\"") != std::string::npos,
+          "scenes use the named JSON scene format");
     mesh.meshPath = "../Meshes/곡면.obj";
-    Check(scene.SerializeToString(data) && data.starts_with("LuxEngineScene 4 "),
-          "mesh assets use an explicit version 4 field");
+    Check(scene.SerializeToString(data) &&
+              data.find("\"format\": \"LuxEngine.Scene\"") != std::string::npos,
+          "mesh assets use named JSON fields");
     Scene loaded;
     Check(loaded.DeserializeFromString(data) &&
               loaded.GetComponent<MeshRendererComponent>(entity.GetId()).meshPath == mesh.meshPath,
@@ -107,14 +109,15 @@ void MeshAssetMetadata() {
     broken.insert(marker, 1, '\0');
     Check(!loaded.DeserializeFromString(broken) && retained.IsValid() &&
               loaded.GetEntityCount() == 1,
-          "invalid version 4 paths preserve the live scene and entity handles");
+          "invalid JSON asset paths preserve the live scene and entity handles");
     mesh.material.baseColorTexture = "../Textures/한글 색상.PnG";
     Check(
-        scene.SerializeToString(data) && data.starts_with("LuxEngineScene 5 ") &&
+        scene.SerializeToString(data) &&
+            data.find("\"format\": \"LuxEngine.Scene\"") != std::string::npos &&
             loaded.DeserializeFromString(data) &&
             loaded.GetComponent<MeshRendererComponent>(entity.GetId()).material.baseColorTexture ==
                 mesh.material.baseColorTexture,
-        "base color texture references use version 5 and retain Unicode paths");
+        "base color texture references retain Unicode paths in JSON");
     const auto valid = data;
     mesh.material.baseColorTexture += std::string(1, '\0');
     Check(!scene.SerializeToString(data), "NUL texture paths are rejected before scene saving");
@@ -202,16 +205,16 @@ void HierarchyCodecAndImport() {
     const auto serialized = Data(source);
     Scene restored;
     Check(restored.DeserializeFromString(serialized) && Data(restored) == serialized,
-          "hierarchy/group/component v3 roundtrip is deterministic");
+          "hierarchy/group/component JSON roundtrip is deterministic");
     auto stable = restored.CreateEntity("보존");
     const auto stableCount = restored.GetEntityCount();
     auto malformed = serialized;
-    Replace(malformed, "\n1 0 1\n0 \n0 \n", "\n1 2 1\n0 \n0 \n");
+    Replace(malformed, "\"parent\": 0", "\"parent\": 2");
     Check(!restored.DeserializeFromString(malformed) && stable &&
               restored.GetEntityCount() == stableCount,
           "cyclic file is rejected without replacing the active scene");
     malformed = serialized;
-    Replace(malformed, "\n1 1 0\n0 \n0 \n", "\n1 9999 0\n0 \n0 \n");
+    Replace(malformed, "\"parent\": 1", "\"parent\": 9999");
     Check(!restored.DeserializeFromString(malformed) && stable,
           "dangling parent in a file is rejected transactionally");
 

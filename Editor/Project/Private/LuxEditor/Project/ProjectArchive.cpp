@@ -317,8 +317,13 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
         }
         totalUncompressed += stat.size;
 
-        if (!directory && relative == EditorProject::FileName)
+        if (!directory && (relative == EditorProject::FileName || relative == "project.luxproj")) {
+            if (foundProjectFile) {
+                error = "압축 파일에 프로젝트 파일이 여러 개 있습니다.";
+                break;
+            }
             foundProjectFile = true;
+        }
 
         ValidatedZipEntry entry;
         entry.index = index;
@@ -443,6 +448,16 @@ bool ExtractArchive(const std::filesystem::path& archive, const std::filesystem:
     if (!error.empty())
         return false;
 
+    if (!std::filesystem::exists(staging / EditorProject::FileName) &&
+        std::filesystem::is_regular_file(staging / "project.luxproj")) {
+        std::error_code migrationError;
+        std::filesystem::rename(staging / "project.luxproj", staging / EditorProject::FileName,
+                                migrationError);
+        if (migrationError) {
+            error = "기존 프로젝트 파일 이름을 변환하지 못했습니다.";
+            return false;
+        }
+    }
     if (!std::filesystem::is_regular_file(staging / EditorProject::FileName)) {
         error = "프로젝트 파일이 압축 파일에 정상적으로 추출되지 않았습니다.";
         return false;
@@ -690,6 +705,16 @@ bool RestoreProjectBackup(const EditorProject& project, const std::filesystem::p
     if (!StageArchive(backup, staging, error))
         return false;
     std::error_code ec;
+    // Keep the caller's manifest path valid when restoring an older .luxproj project.
+    if (project.GetFile().filename() != EditorProject::FileName) {
+        std::filesystem::rename(staging / EditorProject::FileName,
+                                staging / project.GetFile().filename(), ec);
+        if (ec) {
+            error = "복구할 프로젝트 파일의 이름을 유지하지 못했습니다.";
+            std::filesystem::remove_all(staging, ec);
+            return false;
+        }
+    }
     const auto backups = root / ".lux" / "backups";
     const auto safety =
         backups / ("pre-restore-" +

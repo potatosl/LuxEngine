@@ -606,7 +606,7 @@ void EditorWindow::dropEvent(QDropEvent* event) {
     if (event->mimeData()->urls().isEmpty())
         return;
     const auto path = PathFromUtf8(Utf8(event->mimeData()->urls().first().toLocalFile()));
-    if (path.extension() == ".luxproj")
+    if (path.extension() == ".luxproject" || path.extension() == ".luxproj")
         OpenProjectFile(path);
     else if (path.extension() == ".lux")
         OpenProjectScene(path);

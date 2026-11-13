@@ -34,7 +34,7 @@ const char* ProjectTemplateName(ProjectTemplate value);
 
 class EditorProject final {
 public:
-    static constexpr const char* FileName = "project.luxproj";
+    static constexpr const char* FileName = "project.luxproject";
     static std::optional<EditorProject> Create(const std::filesystem::path& directory,
                                                const std::string& name,
                                                ProjectTemplate projectTemplate, std::string& error);

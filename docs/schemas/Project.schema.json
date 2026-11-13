@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LuxEngine Project 1",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "LuxEngine.Project"
+    },
+    "version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engine_version": {
+      "type": "string",
+      "pattern": "^\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}$"
+    },
+    "project_version": {
+      "type": "string",
+      "pattern": "^\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}$"
+    },
+    "template": {
+      "type": "string",
+      "enum": [
+        "empty",
+        "platformer",
+        "top-down",
+        "rpg",
+        "puzzle",
+        "pbr-3d"
+      ]
+    },
+    "start_scene": {
+      "type": "string",
+      "minLength": 1
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "autosave_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600
+        },
+        "backup_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "snap_to_grid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "icon",
+        "autosave_seconds",
+        "backup_limit",
+        "snap_to_grid"
+      ]
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "package": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9.]*$"
+          }
+        },
+        "required": [
+          "package",
+          "version"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 64
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "name",
+    "engine_version",
+    "project_version",
+    "template",
+    "start_scene",
+    "settings",
+    "dependencies"
+  ]
+}

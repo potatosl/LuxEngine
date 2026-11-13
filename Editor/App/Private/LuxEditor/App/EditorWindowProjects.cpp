@@ -60,9 +60,9 @@ void EditorWindow::NewProject() {
     RefreshAll();
 }
 void EditorWindow::OpenProjectDialog() {
-    const QString file =
-        QFileDialog::getOpenFileName(this, QStringLiteral("프로젝트 열기"), {},
-                                     QStringLiteral("Lux 프로젝트 (*.luxproj);;모든 파일 (*)"));
+    const QString file = QFileDialog::getOpenFileName(
+        this, QStringLiteral("프로젝트 열기"), {},
+        QStringLiteral("Lux 프로젝트 (*.luxproject *.luxproj);;모든 파일 (*)"));
     if (!file.isEmpty())
         OpenProjectFile(PathFromUtf8(Utf8(file)));
 }

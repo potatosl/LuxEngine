@@ -1,0 +1,605 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LuxEngine Scene 1",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "LuxEngine.Scene"
+    },
+    "version": {
+      "const": 1
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "clear_color": {
+          "$ref": "#/$defs/vec4"
+        },
+        "exposure": {
+          "type": "number"
+        },
+        "gravity2d": {
+          "$ref": "#/$defs/vec2"
+        },
+        "gravity3d": {
+          "$ref": "#/$defs/vec3"
+        },
+        "override_gravity": {
+          "type": "boolean"
+        },
+        "fixed_step": {
+          "type": "number"
+        },
+        "physics_substeps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "render3d": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "integer",
+              "enum": [
+                0,
+                1
+              ]
+            },
+            "sun_direction": {
+              "$ref": "#/$defs/vec3"
+            },
+            "sun_color": {
+              "$ref": "#/$defs/vec3"
+            },
+            "sun_intensity": {
+              "type": "number"
+            },
+            "environment_color": {
+              "$ref": "#/$defs/vec3"
+            },
+            "environment_intensity": {
+              "type": "number"
+            },
+            "environment_rotation": {
+              "type": "number"
+            },
+            "environment": {
+              "type": "string"
+            },
+            "image_based_lighting": {
+              "type": "boolean"
+            },
+            "skybox": {
+              "type": "boolean"
+            },
+            "tone_mapping": {
+              "type": "boolean"
+            },
+            "shadows": {
+              "type": "boolean"
+            },
+            "shadow_resolution": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "shadow_range": {
+              "type": "number"
+            },
+            "shadow_depth_bias": {
+              "type": "number"
+            },
+            "shadow_normal_bias": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "mode",
+            "sun_direction",
+            "sun_color",
+            "sun_intensity",
+            "environment_color",
+            "environment_intensity",
+            "environment_rotation",
+            "environment",
+            "image_based_lighting",
+            "skybox",
+            "tone_mapping",
+            "shadows",
+            "shadow_resolution",
+            "shadow_range",
+            "shadow_depth_bias",
+            "shadow_normal_bias"
+          ]
+        }
+      },
+      "required": [
+        "clear_color",
+        "exposure",
+        "gravity2d",
+        "gravity3d",
+        "override_gravity",
+        "fixed_step",
+        "physics_substeps",
+        "render3d"
+      ]
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967294
+          },
+          "components": {
+            "type": "object",
+            "properties": {
+              "tag": {
+                "$ref": "#/$defs/tag"
+              },
+              "transform": {
+                "$ref": "#/$defs/transform"
+              },
+              "sprite": {
+                "$ref": "#/$defs/sprite"
+              },
+              "mesh": {
+                "$ref": "#/$defs/mesh"
+              },
+              "camera": {
+                "$ref": "#/$defs/camera"
+              },
+              "rigidbody2d": {
+                "$ref": "#/$defs/rigidbody2d"
+              },
+              "box_collider2d": {
+                "$ref": "#/$defs/box_collider2d"
+              },
+              "rigidbody3d": {
+                "$ref": "#/$defs/rigidbody3d"
+              },
+              "box_collider3d": {
+                "$ref": "#/$defs/box_collider3d"
+              },
+              "tilemap": {
+                "$ref": "#/$defs/tilemap"
+              },
+              "animation": {
+                "$ref": "#/$defs/animation"
+              },
+              "hierarchy": {
+                "$ref": "#/$defs/hierarchy"
+              },
+              "scene_reference": {
+                "$ref": "#/$defs/scene_reference"
+              },
+              "instance_source": {
+                "$ref": "#/$defs/instance_source"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "components"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 100000
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "settings",
+    "entities"
+  ],
+  "$defs": {
+    "vec2": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "vec3": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "vec4": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "keyframe": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "number",
+          "minimum": 0
+        },
+        "position": {
+          "$ref": "#/$defs/vec3"
+        },
+        "rotation": {
+          "$ref": "#/$defs/vec3"
+        },
+        "scale": {
+          "$ref": "#/$defs/vec3"
+        }
+      },
+      "required": [
+        "time",
+        "position",
+        "rotation",
+        "scale"
+      ]
+    },
+    "tag": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "transform": {
+      "type": "object",
+      "properties": {
+        "position": {
+          "$ref": "#/$defs/vec3"
+        },
+        "rotation": {
+          "$ref": "#/$defs/vec3"
+        },
+        "scale": {
+          "$ref": "#/$defs/vec3"
+        }
+      },
+      "required": [
+        "position",
+        "rotation",
+        "scale"
+      ]
+    },
+    "sprite": {
+      "type": "object",
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/vec4"
+        }
+      },
+      "required": [
+        "color"
+      ]
+    },
+    "mesh": {
+      "type": "object",
+      "properties": {
+        "albedo": {
+          "$ref": "#/$defs/vec4"
+        },
+        "metallic": {
+          "type": "number"
+        },
+        "roughness": {
+          "type": "number"
+        },
+        "asset": {
+          "type": "string"
+        },
+        "base_color_texture": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "albedo",
+        "metallic",
+        "roughness",
+        "asset",
+        "base_color_texture"
+      ]
+    },
+    "camera": {
+      "type": "object",
+      "properties": {
+        "primary": {
+          "type": "boolean"
+        },
+        "perspective": {
+          "type": "boolean"
+        },
+        "fov": {
+          "type": "number"
+        },
+        "ortho_size": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "primary",
+        "perspective",
+        "fov",
+        "ortho_size"
+      ]
+    },
+    "rigidbody2d": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ]
+        },
+        "velocity": {
+          "$ref": "#/$defs/vec2"
+        },
+        "mass": {
+          "type": "number"
+        },
+        "gravity_scale": {
+          "type": "number"
+        },
+        "grounded": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "velocity",
+        "mass",
+        "gravity_scale",
+        "grounded"
+      ]
+    },
+    "box_collider2d": {
+      "type": "object",
+      "properties": {
+        "size": {
+          "$ref": "#/$defs/vec2"
+        },
+        "offset": {
+          "$ref": "#/$defs/vec2"
+        },
+        "trigger": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "size",
+        "offset",
+        "trigger"
+      ]
+    },
+    "rigidbody3d": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ]
+        },
+        "velocity": {
+          "$ref": "#/$defs/vec3"
+        },
+        "mass": {
+          "type": "number"
+        },
+        "gravity_scale": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "velocity",
+        "mass",
+        "gravity_scale"
+      ]
+    },
+    "box_collider3d": {
+      "type": "object",
+      "properties": {
+        "size": {
+          "$ref": "#/$defs/vec3"
+        },
+        "offset": {
+          "$ref": "#/$defs/vec3"
+        },
+        "trigger": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "size",
+        "offset",
+        "trigger"
+      ]
+    },
+    "tilemap": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "tile_size": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 64
+        },
+        "tiles": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "minItems": 0,
+          "maxItems": 65536
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "tile_size",
+        "tiles"
+      ]
+    },
+    "animation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "playing": {
+          "type": "boolean"
+        },
+        "keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/keyframe"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "name",
+        "duration",
+        "loop",
+        "playing",
+        "keyframes"
+      ]
+    },
+    "hierarchy": {
+      "type": "object",
+      "properties": {
+        "parent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "group": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "parent",
+        "group"
+      ]
+    },
+    "scene_reference": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2
+          ]
+        },
+        "baseline": {
+          "type": "string"
+        },
+        "suspended": {
+          "type": "string"
+        },
+        "stream_center": {
+          "$ref": "#/$defs/vec2"
+        },
+        "load_radius": {
+          "type": "number"
+        },
+        "unload_radius": {
+          "type": "number"
+        },
+        "loaded": {
+          "type": "boolean"
+        },
+        "entity_map": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "minItems": 0,
+          "maxItems": 100000
+        }
+      },
+      "required": [
+        "path",
+        "mode",
+        "baseline",
+        "suspended",
+        "stream_center",
+        "load_radius",
+        "unload_radius",
+        "loaded",
+        "entity_map"
+      ]
+    },
+    "instance_source": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "entity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "root",
+        "entity"
+      ]
+    }
+  }
+}

@@ -11,6 +11,7 @@ This document details all third-party software components bundled or linked with
 | **Khronos Vulkan Loader** | 1.3.x | Apache-2.0 | Dynamic (`vulkan-1.dll` / System) | Vulkan Driver Dispatcher | See `LICENSE-VulkanLoader.txt` |
 | **libzip** | 1.10.x | 3-Clause BSD | Shared (`zip.dll`) | Project Archive & Game Packaging | See `LICENSE-libzip.txt` |
 | **stb_image** | 2.30 | Public Domain / MIT | Header / Source | Texture Image Decoding (PNG, JPG) | See `LICENSE-stb_image.txt` |
+| **nlohmann/json** | 3.11+ | MIT | Header / Source | Scene and Project JSON | See `LICENSE-nlohmann-json.txt` |
 | **DirectX Shader Compiler (DXC)** | 1.8.x | Apache-2.0 with LLVM Exception | Build Tool | HLSL to SPIR-V Compilation | Build tool only (not bundled in runtime) |
 
 ## LGPLv3 Compliance Notice for Qt 6

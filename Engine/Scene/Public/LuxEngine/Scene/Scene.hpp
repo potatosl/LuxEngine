@@ -193,7 +193,10 @@ private:
         if (!IsAlive(id))
             throw std::out_of_range("Entity is not alive");
     }
-    bool DeserializeStream(std::istream& in);
+    bool DeserializeStream(std::istream& in); // Legacy scene versions 1–6, read only.
+    bool DeserializeJson(const std::string& data);
+    bool ValidateForSerialization();
+    void AdoptLoadedScene(Scene& parsed);
     void RepairReferenceLinks();
     void RemovePhysicsBody2D(uint32 id);
     uint32 nextEntityId_ = 1;

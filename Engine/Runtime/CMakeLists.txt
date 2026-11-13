@@ -2,6 +2,8 @@
 
 set(LUXRUNTIME_SOURCES
     Public/LuxEngine/Runtime/Runtime.hpp
+    Private/ProjectManifest.cpp
+    Public/LuxEngine/Runtime/ProjectManifest.hpp
     Private/Runtime.cpp
     Public/LuxEngine/Runtime/ScenePlayer.hpp
     Private/ScenePlayer.cpp
@@ -18,7 +20,8 @@ target_include_directories(LuxRuntime PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(LuxRuntime PUBLIC LuxEngine::Engine)
+target_link_libraries(LuxRuntime PUBLIC LuxEngine::Engine
+    PRIVATE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
 lux_set_target_warnings(LuxRuntime)
 

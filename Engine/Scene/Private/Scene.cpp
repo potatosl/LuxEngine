@@ -577,15 +577,6 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
 #endif
 }
 
-std::ostream& operator<<(std::ostream& o, const Vec2& v) {
-    return o << v.x << ' ' << v.y << ' ';
-}
-std::ostream& operator<<(std::ostream& o, const Vec3& v) {
-    return o << v.x << ' ' << v.y << ' ' << v.z << ' ';
-}
-std::ostream& operator<<(std::ostream& o, const Vec4& v) {
-    return o << v.x << ' ' << v.y << ' ' << v.z << ' ' << v.w << ' ';
-}
 std::istream& operator>>(std::istream& i, Vec2& v) {
     return i >> v.x >> v.y;
 }
@@ -708,7 +699,7 @@ bool ValidSceneMetadata(Scene& scene) {
 }
 } // namespace
 
-bool Scene::SerializeToString(std::string& output) {
+bool Scene::ValidateForSerialization() {
     if (entities_.size() > MaxSceneEntities || !ValidSceneMetadata(*this))
         return false;
     const std::unordered_set<std::type_index> supported{typeid(TagComponent),
@@ -790,107 +781,15 @@ bool Scene::SerializeToString(std::string& output) {
                 !IsValidUtf8(animation->clip.name) || !std::isfinite(animation->clip.duration) ||
                 animation->clip.duration <= 0 || animation->clip.keyframes.size() > 4096)
                 return false;
-            for (const auto& key : animation->clip.keyframes)
-                if (!std::isfinite(key.time) || key.time < 0 || !Finite(key.position) ||
-                    !Finite(key.rotation) || !Finite(key.scale))
+            float previousTime = -1;
+            for (const auto& key : animation->clip.keyframes) {
+                if (!std::isfinite(key.time) || key.time < 0 || key.time <= previousTime ||
+                    !Finite(key.position) || !Finite(key.rotation) || !Finite(key.scale))
                     return false;
+                previousTime = key.time;
+            }
         }
     }
-    const bool meshAssets = std::any_of(entities_.begin(), entities_.end(), [this](uint32 id) {
-        const auto* mesh = TryGetComponent<MeshRendererComponent>(id);
-        return mesh && (!mesh->meshPath.empty() || !mesh->material.baseColorTexture.empty());
-    });
-    const bool textureAssets = std::any_of(entities_.begin(), entities_.end(), [this](uint32 id) {
-        const auto* mesh = TryGetComponent<MeshRendererComponent>(id);
-        return mesh && !mesh->material.baseColorTexture.empty();
-    });
-    std::ostringstream out;
-    out.imbue(std::locale::classic());
-    out << std::setprecision(std::numeric_limits<float>::max_digits10) << "LuxEngineScene "
-        << (!IsDefaultRender3DSettings(settings_.render3D) ? 6
-            : textureAssets                                ? 5
-            : meshAssets                                   ? 4
-                                                           : 3)
-        << ' ' << entities_.size() << '\n';
-    out << "Settings " << settings_.clearColor << settings_.exposure << ' ' << settings_.gravity
-        << settings_.gravity3D << settings_.overrideGravity << ' ' << settings_.fixedStep << ' '
-        << settings_.physicsSubsteps << '\n';
-    if (!IsDefaultRender3DSettings(settings_.render3D)) {
-        const auto& r = settings_.render3D;
-        out << "Render3D " << static_cast<int>(r.mode) << ' ' << r.sun.direction << r.sun.color
-            << r.sun.intensity << ' ' << r.environmentColor << r.environmentIntensity << ' '
-            << r.environmentRotation << ' ' << std::quoted(r.environmentPath) << ' '
-            << r.imageBasedLighting << ' ' << r.showSkybox << ' ' << r.toneMapping << ' '
-            << r.shadows << ' ' << r.shadowResolution << ' ' << r.shadowRange << ' '
-            << r.shadowDepthBias << ' ' << r.shadowNormalBias << '\n';
-    }
-    std::vector<uint32> ids(entities_.begin(), entities_.end());
-    std::sort(ids.begin(), ids.end());
-    for (auto id : ids) {
-        out << id << '\n';
-        auto save = [&]<class T>(auto write) {
-            const bool present = HasComponent<T>(id);
-            out << present << ' ';
-            if (present)
-                write(GetComponent<T>(id));
-            out << '\n';
-        };
-        save.operator()<TagComponent>([&](const auto& c) { out << std::quoted(c.tag); });
-        save.operator()<TransformComponent>(
-            [&](const auto& c) { out << c.position << c.rotation << c.scale; });
-        save.operator()<SpriteRendererComponent>([&](const auto& c) { out << c.color; });
-        save.operator()<MeshRendererComponent>([&](const auto& c) {
-            out << c.material.albedoColor << c.material.metallic << ' ' << c.material.roughness;
-            if (meshAssets || !IsDefaultRender3DSettings(settings_.render3D))
-                out << ' ' << std::quoted(c.meshPath);
-            if (textureAssets || !IsDefaultRender3DSettings(settings_.render3D))
-                out << ' ' << std::quoted(c.material.baseColorTexture);
-        });
-        save.operator()<CameraComponent>([&](const auto& c) {
-            out << c.isPrimary << ' ' << c.isPerspective << ' ' << c.fov << ' ' << c.orthoSize;
-        });
-        save.operator()<Rigidbody2DComponent>([&](const auto& c) {
-            out << static_cast<int>(c.type) << ' ' << c.velocity << c.mass << ' ' << c.gravityScale
-                << ' ' << c.isGrounded;
-        });
-        save.operator()<BoxCollider2DComponent>(
-            [&](const auto& c) { out << c.size << c.offset << c.isTrigger; });
-        save.operator()<Rigidbody3DComponent>([&](const auto& c) {
-            out << static_cast<int>(c.type) << ' ' << c.velocity << c.mass << ' ' << c.gravityScale;
-        });
-        save.operator()<BoxCollider3DComponent>(
-            [&](const auto& c) { out << c.size << c.offset << c.isTrigger; });
-        save.operator()<TilemapComponent>([&](const auto& c) {
-            std::string cells;
-            cells.reserve(c.tiles.size());
-            for (uint8_t tile : c.tiles)
-                cells.push_back(static_cast<char>('0' + tile));
-            out << c.width << ' ' << c.height << ' ' << c.tileSize << ' ' << std::quoted(cells);
-        });
-        save.operator()<AnimationComponent>([&](const auto& c) {
-            out << std::quoted(c.clip.name) << ' ' << c.clip.duration << ' ' << c.clip.loop << ' '
-                << c.playing << ' ' << c.clip.keyframes.size();
-            for (const auto& key : c.clip.keyframes)
-                out << ' ' << key.time << ' ' << key.position << key.rotation << key.scale;
-        });
-        save.operator()<HierarchyComponent>(
-            [&](const auto& c) { out << c.parent << ' ' << c.group; });
-        save.operator()<SceneReferenceComponent>([&](const auto& c) {
-            out << std::quoted(c.path) << ' ' << static_cast<int>(c.mode) << ' '
-                << std::quoted(c.baseline) << ' ' << std::quoted(c.suspended) << ' '
-                << c.streamCenter << c.streamLoadRadius << ' ' << c.streamUnloadRadius << ' '
-                << c.loaded << ' ' << c.entityMap.size();
-            for (const auto& [source, local] : c.entityMap)
-                out << ' ' << source << ' ' << local;
-        });
-        save.operator()<InstanceSourceComponent>(
-            [&](const auto& c) { out << c.instanceRoot << ' ' << c.sourceEntity; });
-        if (!out || out.tellp() > static_cast<std::streamoff>(MaxSceneSizeBytes))
-            return false;
-    }
-    if (!out || out.tellp() > static_cast<std::streamoff>(MaxSceneSizeBytes))
-        return false;
-    output = out.str();
     return true;
 }
 
@@ -1147,20 +1046,28 @@ bool Scene::DeserializeStream(std::istream& in) {
     } catch (const std::exception&) {
         return false;
     }
+    AdoptLoadedScene(parsed);
+    return true;
+}
+
+void Scene::AdoptLoadedScene(Scene& parsed) {
+    auto nextLifetime = std::make_shared<int>(0);
     pools_.swap(parsed.pools_);
     entities_.swap(parsed.entities_);
     nextEntityId_ = parsed.nextEntityId_;
-    settings_ = parsed.settings_;
+    std::swap(settings_, parsed.settings_);
     physicsAccumulator_ = 0;
     physics2D_.reset();
     collisionEvents2D_.clear();
-    lifetime_ = std::make_shared<int>(0);
-    return true;
+    lifetime_ = std::move(nextLifetime);
 }
 
 bool Scene::DeserializeFromString(const std::string& data) {
     if (data.empty() || data.size() > MaxSceneSizeBytes)
         return false;
+    const auto first = data.find_first_not_of(" \t\r\n");
+    if (first != std::string::npos && data[first] == '{')
+        return DeserializeJson(data);
     std::istringstream in(data);
     return DeserializeStream(in);
 }

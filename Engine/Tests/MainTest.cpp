@@ -3540,20 +3540,22 @@ void Security() {
 void Pbr() {
     Scene legacy;
     std::string serialized;
-    Check(legacy.SerializeToString(serialized) && serialized.starts_with("LuxEngineScene 3 "),
-          "unchanged scenes retain legacy version");
+    Check(legacy.SerializeToString(serialized) &&
+              serialized.find("\"format\": \"LuxEngine.Scene\"") != std::string::npos,
+          "default scenes save as named JSON");
     auto settings = legacy.GetSettings();
     settings.render3D.mode = Render3DMode::Pbr;
     settings.render3D.shadows = false;
     settings.render3D.imageBasedLighting = false;
     Check(legacy.SetSettings(settings), "PBR settings accepted");
     legacy.CreateEntity("PBR").AddComponent<MeshRendererComponent>();
-    Check(legacy.SerializeToString(serialized) && serialized.starts_with("LuxEngineScene 6 "),
-          "PBR scenes select v6");
+    Check(legacy.SerializeToString(serialized) &&
+              serialized.find("\"mode\": 1") != std::string::npos,
+          "PBR scenes save their render mode in JSON");
     Scene restored;
     Check(restored.DeserializeFromString(serialized) &&
               restored.GetSettings().render3D.mode == Render3DMode::Pbr,
-          "v6 scene and default mesh roundtrip");
+          "JSON scene and default mesh roundtrip");
     settings.render3D.shadowResolution = 17;
     Check(!legacy.SetSettings(settings), "invalid shadow resolution rejected transactionally");
     settings = legacy.GetSettings();
@@ -3901,8 +3903,8 @@ void RenderingBenchmark() {
     PerspectiveCamera camera(ToRadians(55), 1920.f / 1080, .1f, 150);
     camera.SetPosition({22, 24, 32});
     camera.SetTarget({0, 1, 0});
-    const auto file = std::filesystem::path(__FILE__).parent_path().parent_path() /
-                      "examples/MeshFoundation/Assets/SmoothSphere.obj";
+    const auto file = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
+                      "samples/MeshFoundation/Assets/SmoothSphere.obj";
     const auto bytes = file.u8string();
     const std::string mesh(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     Render3DSettings settings;

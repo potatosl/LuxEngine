@@ -37,7 +37,7 @@ Visual Studio 같은 다중 구성 생성기는 `cmake --build build --config De
 `main`을 직접 작성하는 대신 진입점이 있는 `.cpp` 한 곳에서만 헤더와 매크로를 사용한다.
 
 ```cpp
-#include "Engine/EntryPoint.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 
 int RunGame(int argc, char** argv) {
     // 옵션 처리, Application 생성, Initialize()와 Run()을 호출한다.

@@ -37,7 +37,7 @@ jobs:
       - name: Install Dependencies via vcpkg
         shell: pwsh
         run: |
-          vcpkg install --triplet x64-windows --clean-after-build sdl3 stb vulkan-memory-allocator libzip
+          vcpkg install --triplet x64-windows --clean-after-build sdl3 stb vulkan-memory-allocator libzip nlohmann-json
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4

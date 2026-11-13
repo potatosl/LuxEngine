@@ -19,6 +19,7 @@ endif()
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
 find_package(libzip CONFIG REQUIRED)
+find_package(nlohmann_json 3.11 CONFIG REQUIRED)
 
 if(NOT COMMAND lux_copy_runtime)
     # Standalone build against the installed SDK: copy the engine's shaders, SDL3.dll and the
@@ -99,7 +100,8 @@ add_subdirectory(Viewport)
 
 target_include_directories(LuxEditorUi PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
 target_compile_definitions(LuxEditorUi PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
-target_link_libraries(LuxEditorUi PUBLIC LuxEngine::Engine Qt6::Widgets libzip::zip)
+target_link_libraries(LuxEditorUi PUBLIC LuxEngine::Engine Qt6::Widgets libzip::zip
+    PRIVATE nlohmann_json::nlohmann_json)
 if(COMMAND lux_set_target_warnings)
     lux_set_target_warnings(LuxEditorUi)
 endif()
@@ -124,7 +126,7 @@ if(WIN32)
     if(TARGET Qt6::Core AND TARGET Qt6::Gui AND TARGET Qt6::Widgets)
         install(FILES $<TARGET_FILE:Qt6::Core> $<TARGET_FILE:Qt6::Gui> $<TARGET_FILE:Qt6::Widgets> DESTINATION bin)
     endif()
-    if(TARGET libzip::zip)
+    if(TARGET libzip::zip nlohmann_json::nlohmann_json)
         install(FILES $<TARGET_FILE:libzip::zip> DESTINATION bin)
     endif()
     if(TARGET SDL3::SDL3-shared)
@@ -139,6 +141,15 @@ if(MSVC)
 endif()
 
 if(LUX_BUILD_TESTS)
+    add_executable(LuxProjectFormatTests Tests/ProjectFormatTest.cpp)
+    target_include_directories(LuxProjectFormatTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
+    target_link_libraries(LuxProjectFormatTests PRIVATE LuxEditorUi LuxEngine::Runtime nlohmann_json::nlohmann_json)
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxProjectFormatTests)
+    endif()
+    lux_editor_copy_runtime(LuxProjectFormatTests)
+    add_test(NAME Editor_project_json COMMAND LuxProjectFormatTests)
+    set_tests_properties(Editor_project_json PROPERTIES LABELS "headless;editor;project" TIMEOUT 60)
     add_executable(LuxEditorSceneDependencyTests Tests/EditorSceneDependencyTest.cpp)
     target_link_libraries(LuxEditorSceneDependencyTests PRIVATE LuxEditorUi)
     target_include_directories(LuxEditorSceneDependencyTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
@@ -164,12 +175,13 @@ if(LUX_BUILD_TESTS)
         Tests/EditorSceneDocumentTest.cpp
         Scene/Private/LuxEditor/Scene/EditorDocument.cpp
         Scene/Private/LuxEditor/Scene/SceneAuthoringIO.cpp
+        Project/Private/LuxEditor/Project/ProjectJson.cpp
         Project/Private/LuxEditor/Project/EditorProject.cpp
         Project/Private/LuxEditor/Project/ProjectSettings.cpp
         Project/Private/LuxEditor/Project/ProjectTemplates.cpp)
     target_include_directories(LuxEditorSceneDocumentTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_compile_definitions(LuxEditorSceneDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
-    target_link_libraries(LuxEditorSceneDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui)
+    target_link_libraries(LuxEditorSceneDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui nlohmann_json::nlohmann_json)
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorSceneDocumentTests)
     endif()
@@ -179,6 +191,7 @@ if(LUX_BUILD_TESTS)
     add_executable(LuxEditorDocumentTests
         Scene/Private/LuxEditor/Scene/EditorDocument.cpp
         Scene/Private/LuxEditor/Scene/SceneAuthoringIO.cpp
+        Project/Private/LuxEditor/Project/ProjectJson.cpp
         Project/Private/LuxEditor/Project/EditorProject.cpp
         Project/Private/LuxEditor/Project/ProjectArchive.cpp
         Project/Private/LuxEditor/Project/ProjectSettings.cpp
@@ -187,7 +200,7 @@ if(LUX_BUILD_TESTS)
     )
     target_include_directories(LuxEditorDocumentTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_compile_definitions(LuxEditorDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
-    target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui libzip::zip)
+    target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui libzip::zip nlohmann_json::nlohmann_json)
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorDocumentTests)
     endif()
@@ -290,7 +303,7 @@ if(LUX_BUILD_TESTS)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1"
         TIMEOUT 60 LABELS "headless;editor")
     add_executable(LuxEditorGameBuildTests Tests/EditorGameBuildTest.cpp)
-    target_link_libraries(LuxEditorGameBuildTests PRIVATE LuxEditorUi libzip::zip)
+    target_link_libraries(LuxEditorGameBuildTests PRIVATE LuxEditorUi libzip::zip nlohmann_json::nlohmann_json)
     target_include_directories(LuxEditorGameBuildTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(MSVC)
         target_compile_options(LuxEditorGameBuildTests PRIVATE /utf-8)

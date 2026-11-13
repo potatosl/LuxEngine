@@ -1,47 +1,168 @@
-LuxEngineScene 4 3
-Settings 0.08 0.10 0.13 1 1 0 -9.81 0 -9.81 0 0 0.0166666675 1
-1
-1 "면 단위 법선"
-1 -2.8 2.2 0 0 0 0 2.2 2.2 2.2
-0
-1 0.32 0.64 0.88 1 0 0.5 "Assets/FlatSphere.obj"
-0
-0
-0
-0
-0
-0
-0
-0
-0
-0
-2
-1 "정점 법선 · 부드러운 곡면"
-1 2.8 2.2 0 0 0 0 2.2 2.2 2.2
-0
-1 0.32 0.64 0.88 1 0 0.5 "Assets/SmoothSphere.obj"
-0
-0
-0
-0
-0
-0
-0
-0
-0
-0
-3
-1 "기본 큐브 지면"
-1 0 -0.2 0 0 0 0 14 0.4 8
-0
-1 0.22 0.25 0.28 1 0 0.5 ""
-0
-0
-0
-0
-0
-0
-0
-0
-0
-0
+{
+  "format": "LuxEngine.Scene",
+  "version": 1,
+  "settings": {
+    "clear_color": [
+      0.07999999821186066,
+      0.10000000149011612,
+      0.12999999523162842,
+      1.0
+    ],
+    "exposure": 1.0,
+    "gravity2d": [
+      0.0,
+      -9.8100004196167
+    ],
+    "gravity3d": [
+      0.0,
+      -9.8100004196167,
+      0.0
+    ],
+    "override_gravity": false,
+    "fixed_step": 0.01666666753590107,
+    "physics_substeps": 1,
+    "render3d": {
+      "mode": 0,
+      "sun_direction": [
+        0.5,
+        -1.0,
+        0.5
+      ],
+      "sun_color": [
+        1.0,
+        0.9800000190734863,
+        0.949999988079071
+      ],
+      "sun_intensity": 1.0,
+      "environment_color": [
+        0.15000000596046448,
+        0.15000000596046448,
+        0.15000000596046448
+      ],
+      "environment_intensity": 1.0,
+      "environment_rotation": 0.0,
+      "environment": "",
+      "image_based_lighting": true,
+      "skybox": false,
+      "tone_mapping": true,
+      "shadows": true,
+      "shadow_resolution": 2048,
+      "shadow_range": 50.0,
+      "shadow_depth_bias": 0.0005000000237487257,
+      "shadow_normal_bias": 0.019999999552965164
+    }
+  },
+  "entities": [
+    {
+      "id": 1,
+      "components": {
+        "tag": {
+          "name": "면 단위 법선"
+        },
+        "transform": {
+          "position": [
+            -2.799999952316284,
+            2.200000047683716,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            2.200000047683716,
+            2.200000047683716,
+            2.200000047683716
+          ]
+        },
+        "mesh": {
+          "albedo": [
+            0.3199999928474426,
+            0.6399999856948853,
+            0.8799999952316284,
+            1.0
+          ],
+          "metallic": 0.0,
+          "roughness": 0.5,
+          "asset": "Assets/FlatSphere.obj",
+          "base_color_texture": ""
+        }
+      }
+    },
+    {
+      "id": 2,
+      "components": {
+        "tag": {
+          "name": "정점 법선 · 부드러운 곡면"
+        },
+        "transform": {
+          "position": [
+            2.799999952316284,
+            2.200000047683716,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            2.200000047683716,
+            2.200000047683716,
+            2.200000047683716
+          ]
+        },
+        "mesh": {
+          "albedo": [
+            0.3199999928474426,
+            0.6399999856948853,
+            0.8799999952316284,
+            1.0
+          ],
+          "metallic": 0.0,
+          "roughness": 0.5,
+          "asset": "Assets/SmoothSphere.obj",
+          "base_color_texture": ""
+        }
+      }
+    },
+    {
+      "id": 3,
+      "components": {
+        "tag": {
+          "name": "기본 큐브 지면"
+        },
+        "transform": {
+          "position": [
+            0.0,
+            -0.20000000298023224,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            14.0,
+            0.4000000059604645,
+            8.0
+          ]
+        },
+        "mesh": {
+          "albedo": [
+            0.2199999988079071,
+            0.25,
+            0.2800000011920929,
+            1.0
+          ],
+          "metallic": 0.0,
+          "roughness": 0.5,
+          "asset": "",
+          "base_color_texture": ""
+        }
+      }
+    }
+  ]
+}

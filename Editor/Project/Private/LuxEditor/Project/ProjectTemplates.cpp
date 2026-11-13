@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(LuxEngine CONFIG REQUIRED)
 include(${CMAKE_CURRENT_SOURCE_DIR}/Dependencies.cmake OPTIONAL)
 add_executable(LuxGame Source/Main.cpp)
-target_link_libraries(LuxGame PRIVATE LuxEngine::Engine)
+target_link_libraries(LuxGame PRIVATE LuxEngine::Engine LuxEngine::Runtime)
 target_compile_definitions(LuxGame PRIVATE LUX_GAME_TEMPLATE_KIND=@KIND@)
 if(MSVC)
     # Sources are UTF-8 (Korean text); MSVC would otherwise read them in the system code page.
@@ -22,13 +22,24 @@ if(COMMAND lux_copy_runtime)
 elseif(COMMAND lux_copy_shaders)
     lux_copy_shaders(LuxGame)
 endif()
+set(_lux_manifest "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproject")
+if(NOT EXISTS "${_lux_manifest}")
+    set(_lux_manifest "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproj")
+endif()
 add_custom_target(LuxGameContent
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:LuxGame>/Content"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/project.luxproj"
-        "$<TARGET_FILE_DIR:LuxGame>/Content/project.luxproj"
+        "${_lux_manifest}"
+        "$<TARGET_FILE_DIR:LuxGame>/Content/project.luxproject"
     VERBATIM)
 add_dependencies(LuxGame LuxGameContent)
+if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Assets")
+    add_custom_command(TARGET LuxGameContent POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/Assets"
+            "$<TARGET_FILE_DIR:LuxGame>/Content/Assets"
+        VERBATIM)
+endif()
 file(GLOB_RECURSE _lux_scenes CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.lux")
 foreach(_scene IN LISTS _lux_scenes)
@@ -72,6 +83,7 @@ constexpr const char* GameSource = R"LUX(#include <LuxEngine/LuxEngine.hpp>
 #include <SDL3/SDL_filesystem.h>
 #include <LuxEngine/EntryPoint.hpp>
 #include <LuxEngine/Scene/SceneManager.hpp>
+#include <LuxEngine/Runtime/ProjectManifest.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -88,44 +100,10 @@ constexpr const char* GameSource = R"LUX(#include <LuxEngine/LuxEngine.hpp>
 namespace le = LuxEngine;
 
 std::filesystem::path FindStartScene(const std::filesystem::path& root) {
-    const auto manifest = root / "project.luxproj";
-    std::error_code error;
-    if (std::filesystem::file_size(manifest, error) > 65536 || error)
-        throw std::runtime_error("프로젝트 실행 정보를 읽을 수 없습니다.");
-    std::ifstream input(manifest, std::ios::binary);
-    std::string magic;
-    int version = 0;
-    if (!(input >> magic >> version) || magic != "LUXPROJECT" || (version != 1 && version != 2))
-        throw std::runtime_error("프로젝트 실행 정보 형식이 올바르지 않습니다.");
-    std::string line, scene;
-    bool found = false;
-    while (std::getline(input, line)) {
-        std::istringstream field(line);
-        std::string key, trailing;
-        if (!(field >> key) || key != "start_scene")
-            continue;
-        if (found || !(field >> std::quoted(scene)) || field >> trailing)
-            throw std::runtime_error("시작 씬 설정이 올바르지 않습니다.");
-        found = true;
-    }
-    const auto relative = std::filesystem::path(std::u8string(
-        reinterpret_cast<const char8_t*>(scene.data()), scene.size()));
-    if (!found || input.bad() || relative.empty() || relative.is_absolute() ||
-        relative.extension() != ".lux" || scene.find('\\') != std::string::npos ||
-        scene.find(':') != std::string::npos)
-        throw std::runtime_error("시작 씬을 지정해 주세요.");
-    for (const auto& part : relative)
-        if (part == ".." || part == ".")
-            throw std::runtime_error("시작 씬 경로가 콘텐츠 폴더를 벗어났습니다.");
-    const auto target = std::filesystem::canonical(root / relative, error);
-    if (error)
-        throw std::runtime_error("시작 씬 파일을 찾을 수 없습니다.");
-    const auto resolvedRelative = std::filesystem::relative(target, root, error);
-    if (error || resolvedRelative.empty())
-        throw std::runtime_error("시작 씬 경로를 확인할 수 없습니다.");
-    for (const auto& part : resolvedRelative)
-        if (part == "..")
-            throw std::runtime_error("시작 씬 경로가 콘텐츠 폴더를 벗어났습니다.");
+    std::filesystem::path target;
+    std::string error;
+    if (!le::ReadProjectStartScene(root, target, error))
+        throw std::runtime_error(error);
     return target;
 }
 

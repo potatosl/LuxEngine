@@ -420,12 +420,13 @@ void TestProjectOperations() {
         << EditorProject::CurrentEngineVersion()
         << "\"\ntemplate \"empty\"\nstart_scene \"Scenes/Main.lux\"\n";
     auto migrated = EditorProject::Open(legacy / EditorProject::FileName, error);
-    Check(migrated.has_value() && std::filesystem::exists(legacy / "project.luxproj.v1.bak"),
+    Check(migrated.has_value() &&
+              std::filesystem::exists(legacy / (std::string(EditorProject::FileName) + ".v1.bak")),
           "v1 project migrates with original manifest backup");
     std::ifstream migratedFile(migrated->GetFile());
     std::string firstLine;
     std::getline(migratedFile, firstLine);
-    Check(firstLine == "LUXPROJECT 2", "migration writes current project format");
+    Check(firstLine == "{", "migration writes current project format");
     Check(std::filesystem::is_regular_file(legacy / "Source" / "Main.cpp") &&
               std::filesystem::is_regular_file(legacy / "CMakeLists.txt"),
           "migration supplies template source to legacy projects");
@@ -436,10 +437,11 @@ void TestProjectOperations() {
     std::ifstream source(incompatible);
     std::string text((std::istreambuf_iterator<char>(source)), std::istreambuf_iterator<char>());
     source.close();
-    const auto engineVersion = "engine_version \"" + EditorProject::CurrentEngineVersion() + "\"";
+    const auto engineVersion =
+        "\"engine_version\": \"" + EditorProject::CurrentEngineVersion() + "\"";
     const auto location = text.find(engineVersion);
     Check(location != std::string::npos, "fixture engine version exists");
-    text.replace(location, engineVersion.size(), "engine_version \"99.0.0\"");
+    text.replace(location, engineVersion.size(), "\"engine_version\": \"99.0.0\"");
     std::ofstream(incompatible) << text;
     Check(!EditorProject::Open(incompatible, error), "incompatible engine version is rejected");
 
