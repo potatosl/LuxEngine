@@ -165,6 +165,7 @@ if(WIN32)
 elseif(APPLE)
     target_compile_options(TheForge PRIVATE -Wno-deprecated-declarations $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
     target_link_libraries(TheForge PUBLIC "-framework Metal" "-framework MetalKit"
+        "-framework MetalPerformanceShaders"
         "-framework Cocoa" "-framework QuartzCore" "-framework IOKit" "-framework CoreVideo")
 else()
     target_link_libraries(TheForge PUBLIC X11::X11 PkgConfig::ForgeWayland)
