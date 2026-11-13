@@ -1,0 +1,286 @@
+{
+  "schema": "luxengine.basic_model_provenance.v1",
+  "name": "Kenney Prototype Kit — basic model selection",
+  "author": "Kenney",
+  "version": "1.0",
+  "license": "CC0-1.0",
+  "source": {
+    "official_page": "https://kenney.nl/assets/prototype-kit",
+    "author_upload_page": "https://opengameart.org/content/prototype-kit",
+    "archive_url": "https://opengameart.org/sites/default/files/kenney_prototype-kit.zip",
+    "archive_name": "kenney_prototype-kit.zip",
+    "archive_bytes": 2961396,
+    "archive_sha256": "213b522fb12bcc9b9ac66c4f7581f7c74623293272212e40a70c39936ad3da95",
+    "original_license_path": "License.txt"
+  },
+  "admission": {
+    "method": "direct_verified_copy",
+    "authorization": "The user explicitly approved direct verification and copying of this selected FBX pack after the canonical tool reported that FBX packaging was unsupported.",
+    "canonical_package_created": false,
+    "tool": {
+      "name": "game-dev",
+      "version": "1.5.1",
+      "operation": "package.build --dry-run",
+      "result": "INVALID_INPUT",
+      "reason": "portable packages require a binary .glb model; normalize or convert .gltf first"
+    },
+    "verification": [
+      "Source ZIP byte count and SHA-256 matched the reviewed download.",
+      "ZIP CRC checks passed, and every selected source entry was unique.",
+      "All 12 staged source files matched the ZIP entries byte for byte.",
+      "All 12 copied files matched their source byte counts and SHA-256 digests."
+    ],
+    "evidence_limit": "This manifest records copied-byte integrity and provenance. It is not a Game Development Studio canonical receipt and does not prove engine import, rendering, or visual approval."
+  },
+  "model_notes": {
+    "fbx_format": "Binary FBX 7700",
+    "pivot": "The reference OBJ files place these shapes on Y=0. Bounds below describe the source OBJ companions, not a separate claim about imported FBX transforms.",
+    "texture_relative_path": "Textures/colormap.png",
+    "texture_dimensions": [
+      512,
+      512
+    ],
+    "unavailable_primitives": [
+      "sphere",
+      "cone",
+      "capsule",
+      "torus"
+    ]
+  },
+  "files": [
+    {
+      "path": "shape-cube.fbx",
+      "source_path": "Models/FBX format/shape-cube.fbx",
+      "role": "model",
+      "id": "shape-cube",
+      "display_name": "큐브",
+      "bytes": 27488,
+      "sha256": "6c0ad280b04a5c5e032d2998d60e984b90b5eab4941d38f69d078a09929d41a6",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        [
+          0.5,
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "shape-cylinder.fbx",
+      "source_path": "Models/FBX format/shape-cylinder.fbx",
+      "role": "model",
+      "id": "shape-cylinder",
+      "display_name": "원기둥",
+      "bytes": 25648,
+      "sha256": "b9cd02148e8035dc61cdb50831e6ed46bcac35c554f291bf1efe4ab570030939",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        [
+          0.5,
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "floor-square.fbx",
+      "source_path": "Models/FBX format/floor-square.fbx",
+      "role": "model",
+      "id": "floor-square",
+      "display_name": "평면",
+      "bytes": 26224,
+      "sha256": "d38d1e87841f104f7c19a6b80d75620f4aaf49d9118950ff231fec7f3e146cc4",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        [
+          0.5,
+          0.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "shape-cube-rounded.fbx",
+      "source_path": "Models/FBX format/shape-cube-rounded.fbx",
+      "role": "model",
+      "id": "shape-cube-rounded",
+      "display_name": "둥근 큐브",
+      "bytes": 34528,
+      "sha256": "99ed00cb46d7fa9c007e486d9ad0c2aef99e000c66e9a26b856d7e028bd9a443",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        [
+          0.5,
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "shape-slope.fbx",
+      "source_path": "Models/FBX format/shape-slope.fbx",
+      "role": "model",
+      "id": "shape-slope",
+      "display_name": "경사면",
+      "bytes": 26096,
+      "sha256": "d8b9ce46d70e37f150234e79f37313c0a65d8502507d4cbe0c8e8d5db0f54ebf",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        [
+          0.5,
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "shape-triangular-prism.fbx",
+      "source_path": "Models/FBX format/shape-triangular-prism.fbx",
+      "role": "model",
+      "id": "shape-triangular-prism",
+      "display_name": "삼각기둥",
+      "bytes": 26128,
+      "sha256": "03af4363f21d7b89505b6569dfe07e8e61862e807b435c8968952a8ba686f657",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        [
+          0.5,
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "shape-hexagon.fbx",
+      "source_path": "Models/FBX format/shape-hexagon.fbx",
+      "role": "model",
+      "id": "shape-hexagon",
+      "display_name": "육각기둥",
+      "bytes": 26352,
+      "sha256": "afc3e1e3e2a86fcf320e36e4e554bb608137200b750473aa7cf3cf61c18ca8d4",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.4330127,
+          0.0,
+          -0.5
+        ],
+        [
+          0.4330127,
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "shape-cube-half.fbx",
+      "source_path": "Models/FBX format/shape-cube-half.fbx",
+      "role": "model",
+      "id": "shape-cube-half",
+      "display_name": "반높이 큐브",
+      "bytes": 27504,
+      "sha256": "6eb64e7773626bf561866cc9e40ede8f753191f454eb4e75f96b42bef19d6dd3",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        [
+          0.5,
+          0.5,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "shape-cylinder-detailed.fbx",
+      "source_path": "Models/FBX format/shape-cylinder-detailed.fbx",
+      "role": "model",
+      "id": "shape-cylinder-detailed",
+      "display_name": "세밀한 원기둥",
+      "bytes": 25984,
+      "sha256": "a7a0366af67c425dc5308a989cc48f3578c7128a6db04de238df1652623d1878",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        [
+          0.5,
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "shape-cylinder-half.fbx",
+      "source_path": "Models/FBX format/shape-cylinder-half.fbx",
+      "role": "model",
+      "id": "shape-cylinder-half",
+      "display_name": "반원기둥",
+      "bytes": 26976,
+      "sha256": "189d2723fe650d7975d40d1bc6c01d0cf6b1abeaeb844f241a5bcdc58eca3ed2",
+      "fbx_version": 7700,
+      "reference_obj_bounds": [
+        [
+          -0.25,
+          0.0,
+          -0.5
+        ],
+        [
+          0.25,
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "path": "Textures/colormap.png",
+      "source_path": "Models/FBX format/Textures/colormap.png",
+      "role": "texture",
+      "bytes": 8706,
+      "sha256": "0d4947d34ff32acf4a359c7f22ca784e057e7e72f622170a9a77b6fc88fdb70e"
+    },
+    {
+      "path": "License.txt",
+      "source_path": "License.txt",
+      "role": "license",
+      "bytes": 716,
+      "sha256": "ec05660e0dca843cc52d9bdd98412bf8a1ce91606ecf23ab38c39af71e629e62"
+    }
+  ]
+}
