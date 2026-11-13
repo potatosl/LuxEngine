@@ -10,7 +10,8 @@ case "$(uname -s)" in
     Linux)
         sudo apt-get update
         sudo apt-get install --no-install-recommends -y \
-            build-essential ninja-build pkg-config libzip-dev nlohmann-json3-dev \
+            build-essential ninja-build pkg-config libzip-dev zipcmp zipmerge ziptool \
+            nlohmann-json3-dev \
             libvulkan-dev glslang-tools libx11-dev libxext-dev libxcursor-dev \
             libxi-dev libxrandr-dev libxfixes-dev libxss-dev libxtst-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libegl1-mesa-dev \
@@ -74,4 +75,19 @@ if [[ ! -f "$prefix/include/stb/stb_image.h" ||
         9600522de53973336fa033a289858a4354cbb04c "$stb_source"
     mkdir -p "$prefix/include/stb"
     cp "$stb_source"/*.h "$prefix/include/stb/"
+fi
+
+# CMake keeps deployed runtime RPATHs relative. CI dependencies live in a separate prefix,
+# so make that installation discoverable without changing the package's relocation contract.
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+    case "$(uname -s)" in
+        Linux)
+            printf 'LD_LIBRARY_PATH=%s/lib%s\n' "$prefix" \
+                "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+            ;;
+        Darwin)
+            printf 'DYLD_LIBRARY_PATH=%s/lib%s\n' "$prefix" \
+                "${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+            ;;
+    esac
 fi
