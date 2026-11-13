@@ -143,7 +143,7 @@ set_target_properties(TheForge PROPERTIES CXX_STANDARD 17 C_STANDARD 11
 target_include_directories(TheForge PUBLIC "${LUX_FORGE_CONFIG_DIR}" "${TF}"
     PRIVATE "${TF}/Resources/ResourceLoader" "${TF}/Graphics/Vulkan")
 target_compile_definitions(TheForge PUBLIC EXTERNAL_CONFIG_FILEPATH="LuxForgeConfig.h"
-    ZSTD_DISABLE_ASM)
+    ZSTD_DISABLE_ASM ENABLE_GRAPHICS_RUNTIME_CHECK)
 target_link_libraries(TheForge PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 if(WIN32)
     target_compile_definitions(TheForge PUBLIC _WINDOWS UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
