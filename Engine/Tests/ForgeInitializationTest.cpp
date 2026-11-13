@@ -1,10 +1,10 @@
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <unknwn.h>
 #include "Forge/LuxForgeApi.h"
 #include <cstdio>
 #include <cstring>
+#include <unknwn.h>
 #include <unordered_map>
+#include <windows.h>
 
 namespace {
 using GetProcAddressFn = FARPROC(WINAPI*)(HMODULE, LPCSTR);
@@ -50,20 +50,24 @@ public:
         const auto& imports = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
         if (!imports.VirtualAddress)
             return;
-        auto* descriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + imports.VirtualAddress);
+        auto* descriptor =
+            reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + imports.VirtualAddress);
         for (; descriptor->Name; ++descriptor) {
             if (!descriptor->OriginalFirstThunk)
                 continue;
-            auto* names = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->OriginalFirstThunk);
+            auto* names =
+                reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->OriginalFirstThunk);
             auto* slots = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->FirstThunk);
             for (; names->u1.AddressOfData; ++names, ++slots) {
                 if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal))
                     continue;
-                const auto* entry = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
+                const auto* entry =
+                    reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
                 if (std::strcmp(reinterpret_cast<const char*>(entry->Name), "GetProcAddress") != 0)
                     continue;
                 DWORD protection = 0;
-                if (!VirtualProtect(&slots->u1.Function, sizeof(slots->u1.Function), PAGE_READWRITE, &protection))
+                if (!VirtualProtect(&slots->u1.Function, sizeof(slots->u1.Function), PAGE_READWRITE,
+                                    &protection))
                     return;
                 slot_ = &slots->u1.Function;
                 original_ = *slot_;
@@ -85,25 +89,29 @@ public:
         }
     }
 
-    explicit operator bool() const { return slot_ != nullptr; }
+    explicit operator bool() const {
+        return slot_ != nullptr;
+    }
 
 private:
     ULONG_PTR* slot_ = nullptr;
     ULONG_PTR original_ = 0;
 };
-}
+} // namespace
 
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     HMODULE module = LoadLibraryW(L"LuxForge.dll");
     if (!module)
         return 1;
-    const auto getApi = reinterpret_cast<LuxForgeGetApiFn>(GetProcAddress(module, "LuxForgeGetApi"));
+    const auto getApi =
+        reinterpret_cast<LuxForgeGetApiFn>(GetProcAddress(module, "LuxForgeGetApi"));
     const auto* api = getApi ? getApi() : nullptr;
     if (!api || api->version != LUX_FORGE_API_VERSION)
         return 1;
-    HWND window = CreateWindowExW(0, L"STATIC", L"Forge initialization regression", WS_OVERLAPPEDWINDOW,
-                                  0, 0, 320, 240, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    HWND window =
+        CreateWindowExW(0, L"STATIC", L"Forge initialization regression", WS_OVERLAPPEDWINDOW, 0, 0,
+                        320, 240, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!window)
         return 1;
     LuxForgeInitDesc desc = {};

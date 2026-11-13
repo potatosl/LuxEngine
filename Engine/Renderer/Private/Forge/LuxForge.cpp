@@ -314,8 +314,8 @@ bool AcquirePlatform(std::string& error) {
         resourceDirsSet = true;
     }
     initLog("LuxForge", static_cast<LogLevel>(LogLevel::eWARNING | LogLevel::eERROR));
-    addLogCallback("LuxForgeInitialization", LogLevel::eERROR, nullptr,
-                   CaptureInitializationError, nullptr, nullptr);
+    addLogCallback("LuxForgeInitialization", LogLevel::eERROR, nullptr, CaptureInitializationError,
+                   nullptr, nullptr);
     return true;
 }
 
@@ -947,7 +947,8 @@ LuxForgeDevice* Create(const LuxForgeInitDesc* desc, char* error, size_t errorSi
             exitGPUConfiguration();
             delete device;
             ReleasePlatform();
-            CopyText(error, errorSize, reason.empty() ? "The Forge renderer failed to start" : reason);
+            CopyText(error, errorSize,
+                     reason.empty() ? "The Forge renderer failed to start" : reason);
             return nullptr;
         }
         setupGPUConfigurationPlatformParameters(g_SharedRenderer, settings.pExtendedSettings);

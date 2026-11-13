@@ -239,8 +239,8 @@ void Ownership() {
         const bool captured = second.gpu.EndFrame() && second.gpu.ReadFrameCapture(capture);
         Check(captured, "local mesh frame captured");
         if (captured) {
-            const auto pixel = (static_cast<size_t>(capture.height / 2) * capture.width +
-                                capture.width / 2) * 4;
+            const auto pixel =
+                (static_cast<size_t>(capture.height / 2) * capture.width + capture.width / 2) * 4;
             Check(capture.rgba[pixel] > 16 && capture.rgba[pixel + 1] > 16,
                   "local mesh still reaches the screen");
         }
