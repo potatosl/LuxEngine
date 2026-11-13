@@ -5,4 +5,4 @@
 /samples/MeshFoundation/*.lux text eol=lf
 # Keep upstream formatting byte-exact; verify these sources by their recorded hashes.
 /Engine/Resources/Models/Primitives/KenneyPrototype/** -text -whitespace
-/Engine/ThirdParty/ufbx/** -text -whitespace
+/Engine/ThirdParty/ufbx/** -text -whitespace linguist-vendored

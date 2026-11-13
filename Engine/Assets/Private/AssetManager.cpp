@@ -1,4 +1,5 @@
 #include <LuxEngine/Assets/AssetManager.hpp>
+#include <LuxEngine/Assets/FbxImporter.hpp>
 #include <LuxEngine/Core/Log.hpp>
 #include <LuxEngine/Renderer/RHI/GpuDevice.hpp>
 #include <SDL3/SDL.h>
@@ -355,7 +356,18 @@ bool AssetManager::LoadShaderBytes(const std::string& filepath, std::vector<uint
 }
 
 namespace {
-bool ReadMeshFile(const std::string& filepath, RawMeshData& outMesh) {
+bool ReadMeshFile(const std::string& filepath, RawMeshData& outMesh, std::string* error = nullptr) {
+    auto extension = Path(filepath).extension().u8string();
+    std::string format(reinterpret_cast<const char*>(extension.data()), extension.size());
+    std::transform(format.begin(), format.end(), format.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (format == ".fbx") {
+        std::string detail;
+        const bool loaded = Detail::ReadFbxMesh(filepath, outMesh, detail);
+        if (error)
+            *error = std::move(detail);
+        return loaded;
+    }
     std::error_code ec;
     const auto fileSize = std::filesystem::file_size(Path(filepath), ec);
     if (ec || fileSize == 0 || fileSize > MaxMeshSizeBytes)
@@ -601,9 +613,10 @@ bool AssetManager::LoadMeshImpl(const std::string& filepath, RawMeshData& outMes
             s_MeshRequests[key] = ticket;
         }
         RawMeshData mesh;
-        if (!ReadMeshFile(filepath, mesh)) {
+        if (!ReadMeshFile(filepath, mesh, &error)) {
             std::lock_guard lock(s_AssetMutex);
-            error = "OBJ 메시 파일을 읽을 수 없거나 내용이 올바르지 않습니다: " + filepath;
+            if (error.empty())
+                error = "모델 메시 파일을 읽을 수 없거나 내용이 올바르지 않습니다: " + filepath;
             const auto request = s_MeshRequests.find(key);
             if (epoch == s_AssetEpoch && request != s_MeshRequests.end() &&
                 request->second == ticket)
@@ -611,7 +624,7 @@ bool AssetManager::LoadMeshImpl(const std::string& filepath, RawMeshData& outMes
             return false;
         }
         if (requireTexCoords && !mesh.hasTexCoords) {
-            error = "텍스처를 적용할 UV 좌표가 없는 OBJ입니다: " + filepath;
+            error = "텍스처를 적용할 UV 좌표가 없는 모델입니다: " + filepath;
             std::lock_guard lock(s_AssetMutex);
             const auto request = s_MeshRequests.find(key);
             if (epoch == s_AssetEpoch && request != s_MeshRequests.end() &&

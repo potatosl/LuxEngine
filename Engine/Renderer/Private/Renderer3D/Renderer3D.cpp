@@ -645,8 +645,8 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
                 cached.maximum = path.empty() ? Vec3{.5f, .5f, .5f} : raw.boundsMax;
             } else {
                 const auto asset = path.empty() ? std::string("기본 큐브") : path;
-                cached.error = missingUv ? "텍스처를 적용할 UV 좌표가 없는 OBJ입니다: " + asset
-                               : !loaded ? "OBJ 메시를 읽지 못했습니다: " + asset
+                cached.error = missingUv ? "텍스처를 적용할 UV 좌표가 없는 모델입니다: " + asset
+                               : !loaded ? "모델 메시를 읽지 못했습니다: " + asset
                                : !room   ? "메시 캐시 예산을 초과했습니다: " + asset
                                        : "GPU 메시 업로드 실패: " + impl_->device->GetLastError() +
                                              " / " + asset;
