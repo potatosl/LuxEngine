@@ -44,10 +44,21 @@ bool Begin(Window& window, GpuDevice& gpu) {
         const auto start = gpu.BeginFrame();
         if (start == GpuDevice::FrameStart::Ready)
             return true;
-        if (start == GpuDevice::FrameStart::Error)
+        if (start == GpuDevice::FrameStart::Error) {
+            std::printf("  BeginFrame failed: status=%s error=%s\n", ToString(gpu.GetStatus()),
+                        gpu.GetLastError().c_str());
             return false;
+        }
         SDL_Delay(5);
     }
+    uint32 width = 0, height = 0;
+    window.GetFramebufferSize(width, height);
+    std::printf("  BeginFrame timed out: framebuffer=%ux%u minimized=%d flags=0x%llx "
+                "skipped=%llu status=%s error=%s\n",
+                width, height, window.IsMinimized(),
+                static_cast<unsigned long long>(SDL_GetWindowFlags(window.GetNativeHandle())),
+                static_cast<unsigned long long>(gpu.GetCounters().framesSkipped),
+                ToString(gpu.GetStatus()), gpu.GetLastError().c_str());
     return false;
 }
 
@@ -55,6 +66,23 @@ bool CaptureClear(Window& window, GpuDevice& gpu, float r, float g, float b, Gpu
     return gpu.RequestFrameCapture() && Begin(window, gpu) && gpu.Clear(r, g, b, 1) &&
            gpu.EndFrame() && gpu.ReadFrameCapture(out) &&
            out.rgba.size() == static_cast<size_t>(out.width) * out.height * 4;
+}
+
+bool RestoreForCapture(Window& window) {
+    auto* native = window.GetNativeHandle();
+    if (!native)
+        return false;
+    const auto start = SDL_GetTicks();
+    do {
+        window.PollEvents();
+        if (SDL_ShowWindow(native) && SDL_RestoreWindow(native) && SDL_SyncWindow(native)) {
+            window.PollEvents();
+            if (!window.IsMinimized())
+                return true;
+        }
+        SDL_Delay(10);
+    } while (SDL_GetTicks() - start < 2000);
+    return false;
 }
 
 bool Near(int a, int b) {
@@ -178,7 +206,7 @@ void Resizing() {
     }
     if (s.window.IsMinimized()) {
         Check(s.gpu.BeginFrame() == GpuDevice::FrameStart::Skipped, "minimized frame skipped");
-        SDL_RestoreWindow(s.window.GetNativeHandle());
+        Check(RestoreForCapture(s.window), "minimized window restore completes");
         GpuFrameCapture capture;
         Check(CaptureClear(s.window, s.gpu, .5f, .5f, .5f, capture) &&
                   CentreIs(capture, 128, 128, 128),
@@ -208,6 +236,7 @@ void Lifecycle() {
         Check(gpu.Initialize(window, config), "re-initialize on the same window");
         Check(gpu.GetInfo().framesInFlight == config.framesInFlight,
               "requested frame count retained");
+        Check(RestoreForCapture(window), "lifecycle window restored for capture");
         GpuFrameCapture capture;
         const float shade = round / 4.f;
         Check(CaptureClear(window, gpu, shade, shade, shade, capture), "capture after re-init");
@@ -225,6 +254,7 @@ void Lifecycle() {
     Check(same.Initialize(window), "start again");
     same.Shutdown();
     Check(same.Initialize(window), "same GpuDevice starts after Shutdown");
+    Check(RestoreForCapture(window), "restarted window restored for capture");
     GpuFrameCapture capture;
     Check(CaptureClear(window, same, 0, 0, 1, capture) && CentreIs(capture, 0, 0, 255),
           "renders after restart");
