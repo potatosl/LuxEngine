@@ -1,5 +1,5 @@
 #include "Common/SampleApplication.hpp"
-#include "Engine/EntryPoint.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <SDL3/SDL_timer.h>
 #include <csignal>
 #include <filesystem>

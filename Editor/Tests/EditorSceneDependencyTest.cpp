@@ -1,9 +1,9 @@
-#include "Engine/Assets/AssetManager.hpp"
-#include "Engine/EntryPoint.hpp"
-#include "Engine/Scene/Entity.hpp"
-#include "Project/EditorProject.hpp"
-#include "Project/PathEncoding.hpp"
-#include "Scene/SceneDependencies.hpp"
+#include <LuxEditor/Project/EditorProject.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
+#include <LuxEditor/Scene/SceneDependencies.hpp>
+#include <LuxEngine/Assets/AssetManager.hpp>
+#include <LuxEngine/EntryPoint.hpp>
+#include <LuxEngine/Scene/Entity.hpp>
 #include <QColor>
 #include <QImage>
 #include <chrono>

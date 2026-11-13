@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Engine/Core/Math.hpp"
+#include <LuxEngine/Core/Math.hpp>
 #include <array>
 #include <cstdint>
 #include <random>

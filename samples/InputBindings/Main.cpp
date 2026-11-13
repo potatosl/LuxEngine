@@ -1,5 +1,5 @@
 #include "Common/SampleApplication.hpp"
-#include "Engine/EntryPoint.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>

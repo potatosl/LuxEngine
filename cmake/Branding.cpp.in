@@ -1,4 +1,4 @@
-#include "Engine/Platform/Branding.hpp"
+#include <LuxEngine/Platform/Branding.hpp>
 namespace LuxEngine::Branding {
 namespace {
 constexpr unsigned char darkIcon[] = { @LUX_ICON_dark@ };

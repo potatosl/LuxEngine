@@ -1,5 +1,5 @@
 #include "Common/Utf8.hpp"
-#include "Engine/EntryPoint.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <array>
 #include <iostream>
 #include <limits>

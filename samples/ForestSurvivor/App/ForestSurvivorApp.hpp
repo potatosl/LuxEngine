@@ -1,7 +1,7 @@
 #pragma once
-#include "Engine/Application.hpp"
 #include "Game/SurvivalGame.hpp"
 #include "Presentation/ForestRenderer.hpp"
+#include <LuxEngine/Application.hpp>
 #include <array>
 #include <cstdint>
 #include <string>

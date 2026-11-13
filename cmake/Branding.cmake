@@ -1,8 +1,8 @@
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/Assets/Branding/dark.png"
-    "${CMAKE_SOURCE_DIR}/Assets/Branding/light.png")
+    "${CMAKE_SOURCE_DIR}/Engine/Resources/Branding/dark.png"
+    "${CMAKE_SOURCE_DIR}/Engine/Resources/Branding/light.png")
 foreach(theme dark light)
-    file(READ "${CMAKE_SOURCE_DIR}/Assets/Branding/${theme}.png" icon HEX)
+    file(READ "${CMAKE_SOURCE_DIR}/Engine/Resources/Branding/${theme}.png" icon HEX)
     string(REGEX REPLACE "(..)" "0x\\1," icon "${icon}")
     set(LUX_ICON_${theme} "${icon}")
 endforeach()

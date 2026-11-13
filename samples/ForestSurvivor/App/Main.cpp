@@ -1,5 +1,5 @@
-#include "Engine/EntryPoint.hpp"
 #include "ForestSurvivorApp.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <charconv>
 #include <iostream>
 #include <stdexcept>

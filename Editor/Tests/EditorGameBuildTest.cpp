@@ -1,11 +1,11 @@
 // End-to-end check of what the editor's Build menu does: create a template game, configure and
 // build it against the installed engine SDK, run it, and zip it. Skips (exit 77) when no SDK or
 // cmake is available, because nothing here is downloaded.
-#include "Build/BuildOutput.hpp"
-#include "Build/ProjectBuild.hpp"
-#include "Engine/Scene/Entity.hpp"
-#include "Project/EditorProject.hpp"
-#include "Project/PathEncoding.hpp"
+#include <LuxEditor/Build/BuildOutput.hpp>
+#include <LuxEditor/Build/ProjectBuild.hpp>
+#include <LuxEditor/Project/EditorProject.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
+#include <LuxEngine/Scene/Entity.hpp>
 
 #include <QColor>
 #include <QCoreApplication>

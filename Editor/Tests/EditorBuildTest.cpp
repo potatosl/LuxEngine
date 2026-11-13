@@ -1,6 +1,6 @@
-#include "Build/ProjectBuild.hpp"
-#include "Project/ErrorEncoding.hpp"
-#include "Project/PathEncoding.hpp"
+#include <LuxEditor/Build/ProjectBuild.hpp>
+#include <LuxEditor/Project/ErrorEncoding.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
 
 #include <algorithm>
 #include <chrono>

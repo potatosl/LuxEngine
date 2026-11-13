@@ -1,6 +1,6 @@
 #include "Game/SurvivalGame.hpp"
-#include "Engine/EntryPoint.hpp"
 #include "Presentation/TextLayout.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <cmath>
 #include <iostream>
 #include <limits>

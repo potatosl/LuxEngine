@@ -1,10 +1,10 @@
-#include "App/EditorWindow.hpp"
-#include "Engine/Renderer/RHI/GpuDevice.hpp"
-#include "Project/PathEncoding.hpp"
-#include "Viewport/EngineSceneRenderer.hpp"
-#include "Viewport/SceneViewport2D.hpp"
-#include "Viewport/SceneViewport3D.hpp"
-#include "Viewport/ViewportCamera3D.hpp"
+#include <LuxEditor/App/EditorWindow.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
+#include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
+#include <LuxEditor/Viewport/SceneViewport2D.hpp>
+#include <LuxEditor/Viewport/SceneViewport3D.hpp>
+#include <LuxEditor/Viewport/ViewportCamera3D.hpp>
+#include <LuxEngine/Renderer/RHI/GpuDevice.hpp>
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>

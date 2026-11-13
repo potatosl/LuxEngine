@@ -1,4 +1,4 @@
-#include "Engine/EntryPoint.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <iostream>
 #include <stdexcept>
 namespace {

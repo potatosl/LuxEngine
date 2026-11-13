@@ -1,7 +1,7 @@
-#include "App/EditorWindow.hpp"
-#include "Engine/Scene/Scene.hpp"
-#include "Project/PathEncoding.hpp"
-#include "Project/ProjectArchive.hpp"
+#include <LuxEditor/App/EditorWindow.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
+#include <LuxEditor/Project/ProjectArchive.hpp>
+#include <LuxEngine/Scene/Scene.hpp>
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>

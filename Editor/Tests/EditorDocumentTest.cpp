@@ -1,8 +1,8 @@
-#include "Scene/EditorDocument.hpp"
-#include "Project/EditorProject.hpp"
-#include "Project/PathEncoding.hpp"
-#include "Project/ProjectArchive.hpp"
-#include "Project/ProjectFileOperations.hpp"
+#include <LuxEditor/Project/EditorProject.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
+#include <LuxEditor/Project/ProjectArchive.hpp>
+#include <LuxEditor/Project/ProjectFileOperations.hpp>
+#include <LuxEditor/Scene/EditorDocument.hpp>
 
 #include <QImage>
 #include <QString>

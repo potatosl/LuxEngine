@@ -1,8 +1,8 @@
 #include "ForestSurvivorApp.hpp"
-#include "Engine/Audio/AudioEngine.hpp"
-#include "Engine/Platform/Input.hpp"
-#include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
-#include "Runtime/Runtime.hpp"
+#include <LuxEngine/Audio/AudioEngine.hpp>
+#include <LuxEngine/Platform/Input.hpp>
+#include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
+#include <LuxEngine/Runtime/Runtime.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>

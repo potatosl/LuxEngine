@@ -1,6 +1,6 @@
 #pragma once
 #include "Artwork.hpp"
-#include "Engine/LuxEngine.hpp"
+#include <LuxEngine/LuxEngine.hpp>
 #include <filesystem>
 #include <iostream>
 #include <string>

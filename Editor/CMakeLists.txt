@@ -76,40 +76,36 @@ function(lux_editor_copy_qt_plugins target)
     endif()
 endfunction()
 
-add_library(LuxEditorUi STATIC
-    Build/ProjectBuild.cpp
-    App/EditorWindow.cpp
-    Animation/AnimationWorkspace.cpp
-    App/EditorWindowLayout.cpp
-    App/EditorWindowProjects.cpp
-    App/EditorWindowScenes.cpp
-    App/EditorWindowPlay.cpp
-    App/EditorWindowBuild.cpp
-    Debug/DebugPanel.cpp
-    Project/EditorProject.cpp
-    Project/ProjectArchive.cpp
-    Project/ProjectDialog.cpp
-    Project/ProjectSettings.cpp
-    Project/ProjectTemplates.cpp
-    Scene/EditorDocument.cpp
-    Scene/SceneAuthoringIO.cpp
-    Scene/SceneHierarchy.cpp
-    Scene/SceneSettingsDialog.cpp
-    Scene/SceneDependencies.cpp
-    Ui/IconFactory.cpp
-    Viewport/EngineSceneRenderer.cpp
-    Viewport/SceneViewport2D.cpp
-    Viewport/SceneViewport3D.cpp
-    Viewport/ViewportCamera3D.cpp
+set(LUX_EDITOR_PRIVATE_INCLUDE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Animation/Private"
+    "${CMAKE_CURRENT_SOURCE_DIR}/App/Private"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Build/Private"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Debug/Private"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Project/Private"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scene/Private"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Ui/Private"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Viewport/Private"
 )
-target_include_directories(LuxEditorUi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(LuxEditorUi STATIC)
+add_subdirectory(Build)
+add_subdirectory(App)
+add_subdirectory(Animation)
+add_subdirectory(Debug)
+add_subdirectory(Project)
+add_subdirectory(Scene)
+add_subdirectory(Ui)
+add_subdirectory(Viewport)
+
+target_include_directories(LuxEditorUi PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
 target_compile_definitions(LuxEditorUi PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
 target_link_libraries(LuxEditorUi PUBLIC LuxEngine::Engine Qt6::Widgets libzip::zip)
 if(COMMAND lux_set_target_warnings)
     lux_set_target_warnings(LuxEditorUi)
 endif()
-add_executable(LuxEditor WIN32 MACOSX_BUNDLE App/Main.cpp)
+add_executable(LuxEditor WIN32 MACOSX_BUNDLE App/Private/LuxEditor/App/Main.cpp)
 target_link_libraries(LuxEditor PRIVATE LuxEditorUi)
+target_include_directories(LuxEditor PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
 target_compile_definitions(LuxEditor PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
 lux_editor_copy_runtime(LuxEditor)
 lux_editor_copy_qt_plugins(LuxEditor)
@@ -135,7 +131,7 @@ if(WIN32)
         install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
     endif()
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/../shaders/" DESTINATION bin/shaders)
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../licenses/" DESTINATION bin/licenses)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/licenses/" DESTINATION bin/licenses)
 endif()
 
 if(MSVC)
@@ -145,6 +141,7 @@ endif()
 if(LUX_BUILD_TESTS)
     add_executable(LuxEditorSceneDependencyTests Tests/EditorSceneDependencyTest.cpp)
     target_link_libraries(LuxEditorSceneDependencyTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxEditorSceneDependencyTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorSceneDependencyTests)
     endif()
@@ -154,6 +151,7 @@ if(LUX_BUILD_TESTS)
     set_tests_properties(Editor_scene_dependencies PROPERTIES LABELS "headless;editor;scene" TIMEOUT 90)
     add_executable(LuxEditorSceneUiTests Tests/EditorSceneUiTest.cpp)
     target_link_libraries(LuxEditorSceneUiTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxEditorSceneUiTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorSceneUiTests)
     endif()
@@ -164,12 +162,12 @@ if(LUX_BUILD_TESTS)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1")
     add_executable(LuxEditorSceneDocumentTests
         Tests/EditorSceneDocumentTest.cpp
-        Scene/EditorDocument.cpp
-        Scene/SceneAuthoringIO.cpp
-        Project/EditorProject.cpp
-        Project/ProjectSettings.cpp
-        Project/ProjectTemplates.cpp)
-    target_include_directories(LuxEditorSceneDocumentTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        Scene/Private/LuxEditor/Scene/EditorDocument.cpp
+        Scene/Private/LuxEditor/Scene/SceneAuthoringIO.cpp
+        Project/Private/LuxEditor/Project/EditorProject.cpp
+        Project/Private/LuxEditor/Project/ProjectSettings.cpp
+        Project/Private/LuxEditor/Project/ProjectTemplates.cpp)
+    target_include_directories(LuxEditorSceneDocumentTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_compile_definitions(LuxEditorSceneDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
     target_link_libraries(LuxEditorSceneDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui)
     if(COMMAND lux_set_target_warnings)
@@ -179,15 +177,15 @@ if(LUX_BUILD_TESTS)
     add_test(NAME Editor_scene_documents COMMAND LuxEditorSceneDocumentTests)
     set_tests_properties(Editor_scene_documents PROPERTIES LABELS "headless;editor;scene" TIMEOUT 90)
     add_executable(LuxEditorDocumentTests
-        Scene/EditorDocument.cpp
-        Scene/SceneAuthoringIO.cpp
-        Project/EditorProject.cpp
-        Project/ProjectArchive.cpp
-        Project/ProjectSettings.cpp
-        Project/ProjectTemplates.cpp
+        Scene/Private/LuxEditor/Scene/EditorDocument.cpp
+        Scene/Private/LuxEditor/Scene/SceneAuthoringIO.cpp
+        Project/Private/LuxEditor/Project/EditorProject.cpp
+        Project/Private/LuxEditor/Project/ProjectArchive.cpp
+        Project/Private/LuxEditor/Project/ProjectSettings.cpp
+        Project/Private/LuxEditor/Project/ProjectTemplates.cpp
         Tests/EditorDocumentTest.cpp
     )
-    target_include_directories(LuxEditorDocumentTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(LuxEditorDocumentTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_compile_definitions(LuxEditorDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
     target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui libzip::zip)
     if(COMMAND lux_set_target_warnings)
@@ -198,10 +196,10 @@ if(LUX_BUILD_TESTS)
     add_test(NAME Editor_archive_limits COMMAND LuxEditorDocumentTests archive-limits)
     set_tests_properties(Editor_archive_limits PROPERTIES TIMEOUT 180 LABELS "headless;editor")
     add_executable(LuxEditorBuildTests
-        Build/ProjectBuild.cpp
+        Build/Private/LuxEditor/Build/ProjectBuild.cpp
         Tests/EditorBuildTest.cpp
     )
-    target_include_directories(LuxEditorBuildTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(LuxEditorBuildTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_link_libraries(LuxEditorBuildTests PRIVATE libzip::zip)
     if(MSVC)
         target_compile_options(LuxEditorBuildTests PRIVATE /utf-8)
@@ -212,6 +210,7 @@ if(LUX_BUILD_TESTS)
     add_test(NAME Editor_build COMMAND LuxEditorBuildTests)
     add_executable(LuxEditorUiTests Tests/EditorUiTest.cpp)
     target_link_libraries(LuxEditorUiTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxEditorUiTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(MSVC)
         target_compile_options(LuxEditorUiTests PRIVATE /utf-8)
     endif()
@@ -223,6 +222,7 @@ if(LUX_BUILD_TESTS)
     add_test(NAME Editor_ui COMMAND LuxEditorUiTests ui)
     add_executable(LuxEditorStateTests Tests/EditorStateTest.cpp)
     target_link_libraries(LuxEditorStateTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxEditorStateTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(MSVC)
         target_compile_options(LuxEditorStateTests PRIVATE /utf-8)
     endif()
@@ -242,6 +242,7 @@ if(LUX_BUILD_TESTS)
         TIMEOUT 60 LABELS "headless;editor")
     add_executable(LuxEditorRegressionTests Tests/EditorRegressionTest.cpp)
     target_link_libraries(LuxEditorRegressionTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxEditorRegressionTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(MSVC)
         target_compile_options(LuxEditorRegressionTests PRIVATE /utf-8)
     endif()
@@ -275,6 +276,7 @@ if(LUX_BUILD_TESTS)
     # Builds a template game against the installed SDK (LUX_ENGINE_DIR), runs it and zips it.
     add_executable(LuxEditorInspectorTests Tests/EditorInspectorTest.cpp)
     target_link_libraries(LuxEditorInspectorTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxEditorInspectorTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(MSVC)
         target_compile_options(LuxEditorInspectorTests PRIVATE /utf-8)
     endif()
@@ -289,6 +291,7 @@ if(LUX_BUILD_TESTS)
         TIMEOUT 60 LABELS "headless;editor")
     add_executable(LuxEditorGameBuildTests Tests/EditorGameBuildTest.cpp)
     target_link_libraries(LuxEditorGameBuildTests PRIVATE LuxEditorUi libzip::zip)
+    target_include_directories(LuxEditorGameBuildTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(MSVC)
         target_compile_options(LuxEditorGameBuildTests PRIVATE /utf-8)
     endif()

@@ -1,7 +1,7 @@
 # HLSL is compiled to SPIR-V for the native Vulkan renderer. The Windows SDK dxc
 # lacks SPIR-V code generation, so only the Vulkan SDK or portable DXC builds are searched first.
 find_program(LUX_DXC NAMES dxc
-    HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" "${CMAKE_SOURCE_DIR}/Tools/dxc/bin/x64"
+    HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" "${CMAKE_SOURCE_DIR}/tools/dxc/bin/x64"
     NO_DEFAULT_PATH)
 if(NOT LUX_DXC)
     find_program(LUX_GLSLC NAMES glslc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
@@ -10,7 +10,7 @@ if(NOT LUX_DXC AND NOT LUX_GLSLC AND NOT WIN32)
     find_program(LUX_DXC NAMES dxc)
 endif()
 if(NOT LUX_DXC AND NOT LUX_GLSLC)
-    message(FATAL_ERROR "No SPIR-V capable shader compiler found. Install the Vulkan SDK (dxc or glslc) or run Tools/SetupShaderCompiler.ps1.")
+    message(FATAL_ERROR "No SPIR-V capable shader compiler found. Install the Vulkan SDK (dxc or glslc) or run tools/SetupShaderCompiler.ps1.")
 endif()
 find_program(LUX_SPIRV_VAL NAMES spirv-val HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
 
@@ -22,7 +22,7 @@ foreach(shader Basic.vert Basic.frag Modern.frag Tone.vert Tone.frag Sky.frag Sh
     else()
         set(profile ps_6_0)
     endif()
-    set(source "${CMAKE_SOURCE_DIR}/Shaders/${shader}.hlsl")
+    set(source "${CMAKE_SOURCE_DIR}/Engine/Shaders/${shader}.hlsl")
     set(output "${CMAKE_BINARY_DIR}/shaders/${shader}.spv")
     if(LUX_DXC)
         set(compile_command "${LUX_DXC}" -spirv -fspv-target-env=vulkan1.1 -T ${profile} -E main
@@ -39,7 +39,7 @@ foreach(shader Basic.vert Basic.frag Modern.frag Tone.vert Tone.frag Sky.frag Sh
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/shaders"
         COMMAND ${compile_command}
         ${validate_command}
-        DEPENDS "${source}" "${CMAKE_SOURCE_DIR}/Shaders/Basic.frag.hlsl" "${CMAKE_SOURCE_DIR}/Shaders/Scene3D.hlsli"
+        DEPENDS "${source}" "${CMAKE_SOURCE_DIR}/Engine/Shaders/Basic.frag.hlsl" "${CMAKE_SOURCE_DIR}/Engine/Shaders/Scene3D.hlsli"
         VERBATIM)
     list(APPEND LUX_SHADER_OUTPUTS "${output}")
 endforeach()

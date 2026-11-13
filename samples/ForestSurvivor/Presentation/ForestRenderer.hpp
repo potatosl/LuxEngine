@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Engine/Renderer/RHI/GpuDevice.hpp"
+#include <LuxEngine/Renderer/RHI/GpuDevice.hpp>
 #include <filesystem>
 #include <memory>
 

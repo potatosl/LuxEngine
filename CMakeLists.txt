@@ -64,14 +64,13 @@ endif()
 # Subdirectories
 # -------------------------------------------------------------
 add_subdirectory(Engine)
-add_subdirectory(Runtime)
 add_subdirectory(samples)
 if(LUX_BUILD_EDITOR)
     add_subdirectory(Editor)
 endif()
 
 if(LUX_BUILD_TESTS)
-    add_subdirectory(Tests)
+    add_subdirectory(Engine/Tests)
 endif()
 
 include(CMakePackageConfigHelpers)
@@ -95,13 +94,11 @@ install(TARGETS LuxEngine LuxRuntime EXPORT LuxEngineTargets
 if(WIN32 AND TARGET SDL3::SDL3-shared)
     install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
 endif()
-install(DIRECTORY Engine/ DESTINATION include/Engine FILES_MATCHING PATTERN "*.hpp")
-install(DIRECTORY Runtime/ DESTINATION include/Runtime FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders/" DESTINATION share/LuxEngine/shaders)
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION share/LuxEngine/licenses)
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION licenses)
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/examples/MinimalGame/" DESTINATION share/LuxEngine/examples/MinimalGame)
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/examples/MinimalGame/" DESTINATION examples/MinimalGame)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/licenses/" DESTINATION share/LuxEngine/licenses)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/licenses/" DESTINATION licenses)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/samples/MinimalGame/" DESTINATION share/LuxEngine/examples/MinimalGame)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/samples/MinimalGame/" DESTINATION examples/MinimalGame)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md" DESTINATION .)
 install(EXPORT LuxEngineTargets NAMESPACE LuxEngine:: DESTINATION lib/cmake/LuxEngine)
 install(FILES

@@ -1,8 +1,8 @@
-#include "Engine/EntryPoint.hpp"
-#include "Engine/Scene/SceneManager.hpp"
-#include "Project/EditorProject.hpp"
-#include "Project/PathEncoding.hpp"
-#include "Scene/EditorDocument.hpp"
+#include <LuxEditor/Project/EditorProject.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
+#include <LuxEditor/Scene/EditorDocument.hpp>
+#include <LuxEngine/EntryPoint.hpp>
+#include <LuxEngine/Scene/SceneManager.hpp>
 #include <QColor>
 #include <QImage>
 #include <chrono>

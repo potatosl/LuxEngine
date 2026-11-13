@@ -1,6 +1,6 @@
 #include "App/ForestSurvivorApp.hpp"
-#include "Engine/Audio/AudioEngine.hpp"
-#include "Engine/EntryPoint.hpp"
+#include <LuxEngine/Audio/AudioEngine.hpp>
+#include <LuxEngine/EntryPoint.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>

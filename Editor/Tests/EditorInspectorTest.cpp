@@ -1,4 +1,4 @@
-#include "App/EditorWindow.hpp"
+#include <LuxEditor/App/EditorWindow.hpp>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
