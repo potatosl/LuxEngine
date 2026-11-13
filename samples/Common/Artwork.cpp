@@ -6,14 +6,17 @@
 #include <memory>
 #include <stb_truetype.h>
 #include <stdexcept>
+
 namespace LuxSamples {
 namespace le = LuxEngine;
+
 namespace {
 std::string Utf8(const std::filesystem::path& p) {
     auto bytes = p.u8string();
     return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
 }
 } // namespace
+
 Artwork::Artwork(le::GpuDevice& device, std::filesystem::path root)
     : device_(device), root_(std::move(root)) {
     std::ifstream stream(root_ / "DungGeunMo/DungGeunMo.ttf", std::ios::binary);
@@ -33,7 +36,9 @@ Artwork::Artwork(le::GpuDevice& device, std::filesystem::path root)
     if (!white_->Initialize(&device_, 1, 1, pixel))
         throw std::runtime_error("샘플 렌더링을 초기화하지 못했습니다.");
 }
+
 Artwork::~Artwork() = default;
+
 le::GpuTexture* Artwork::Texture(const std::string& relative) {
     const auto path = Utf8(root_ / relative);
     auto it = textures_.find(path);
@@ -51,10 +56,12 @@ le::GpuTexture* Artwork::Texture(const std::string& relative) {
     }
     return it->second.get();
 }
+
 void Artwork::Sprite(const std::string& relative, le::Vec2 position, le::Vec2 size, le::Vec4 tint,
                      float angle) {
     Queue(Texture(relative), position, size, tint, angle);
 }
+
 void Artwork::Panel(le::Vec2 position, le::Vec2 size) {
     const float edge = std::min(.14f, std::min(size.x, size.y) * .25f);
     const std::array<float, 4> x{position.x - size.x * .5f, position.x - size.x * .5f + edge,
@@ -69,6 +76,7 @@ void Artwork::Panel(le::Vec2 position, le::Vec2 size) {
                   {x[col + 1] - x[col], y[row] - y[row + 1]}, {1, 1, 1, 1}, 0,
                   {uv[col], uv[row], uv[col + 1], uv[row + 1]});
 }
+
 Artwork::Glyph& Artwork::GetGlyph(std::uint32_t character) {
     auto it = glyphs_.find(character);
     if (it != glyphs_.end())
@@ -106,6 +114,7 @@ Artwork::Glyph& Artwork::GetGlyph(std::uint32_t character) {
     }
     return glyphs_.emplace(character, std::move(glyph)).first->second;
 }
+
 void Artwork::Text(std::string_view text, le::Vec2 position, float pixel, le::Vec4 color) {
     const float factor = pixel * 7 / 32;
     const float start = position.x;
@@ -145,9 +154,11 @@ void Artwork::Queue(le::GpuTexture* texture, le::Vec2 position, le::Vec2 size, l
     draws_.push_back(
         {texture, {corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]}});
 }
+
 void Artwork::Quad(le::Vec2 position, le::Vec2 size, le::Vec4 color, float angle) {
     Queue(white_.get(), position, size, color, angle);
 }
+
 void Artwork::Flush(const le::Mat4& projection) {
     std::vector<le::RenderVertex> batch;
     le::GpuTexture* texture = nullptr;

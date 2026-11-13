@@ -1,6 +1,6 @@
 #include "Game/SurvivalGame.hpp"
-#include "Engine/EntryPoint.hpp"
 #include "Presentation/TextLayout.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -8,13 +8,16 @@
 
 namespace {
 using namespace ForestGame;
+
 void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 float Length(Vec2 value) {
     return std::sqrt(value.x * value.x + value.y * value.y);
 }
+
 Vec2 BotMovement(const SurvivalGame& game) {
     Vec2 target = game.GetPlayer().position;
     float closest = std::numeric_limits<float>::max();
@@ -37,6 +40,7 @@ Vec2 BotMovement(const SurvivalGame& game) {
     const float length = Length(movement);
     return length > .1f ? movement * (1 / length) : Vec2{};
 }
+
 void TestKoreanWrapping() {
     const auto width = [](std::string_view text) {
         size_t offset = 0;
@@ -62,6 +66,7 @@ void TestKoreanWrapping() {
     Check(!WrapText("힣", .5f, 2, width).complete,
           "a glyph wider than its container reports overflow without splitting its bytes");
 }
+
 void TestMovementAndTime() {
     Rules rules;
     rules.spawnRate = 0;
@@ -104,6 +109,7 @@ void TestMovementAndTime() {
               std::abs(axis.GetPlayer().position.y) < SurvivalGame::ArenaHalfSize,
           "the player stays inside the arena");
 }
+
 void TestCombatAndUpgrade() {
     Rules rules;
     rules.runDuration = 100;
@@ -138,6 +144,7 @@ void TestCombatAndUpgrade() {
               game.GetProjectiles().empty() && game.GetEffects().empty() && game.OrbitCount() == 0,
           "restart clears progression, combat entities and effects");
 }
+
 void TestOpeningSurvival() {
     SurvivalGame game;
     game.Start();
@@ -156,6 +163,7 @@ void TestOpeningSurvival() {
     Check(game.Elapsed() > 58 && game.Kills() >= 20 && game.GetPlayer().level >= 2,
           "the first minute contains combat, collected XP and meaningful character growth");
 }
+
 void TestEndStatesAndLimits() {
     Rules quick;
     quick.runDuration = .5f;
@@ -203,6 +211,7 @@ void TestEndStatesAndLimits() {
           "the density test reaches the enemy cap");
 }
 } // namespace
+
 int RunForestSurvivorTests(int, char**) {
     try {
         TestKoreanWrapping();

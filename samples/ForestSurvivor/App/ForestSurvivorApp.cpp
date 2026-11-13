@@ -1,8 +1,8 @@
 #include "ForestSurvivorApp.hpp"
-#include "Engine/Audio/AudioEngine.hpp"
-#include "Engine/Platform/Input.hpp"
-#include "Engine/Renderer/Renderer2D/Renderer2D.hpp"
-#include "Runtime/Runtime.hpp"
+#include <LuxEngine/Audio/AudioEngine.hpp>
+#include <LuxEngine/Platform/Input.hpp>
+#include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
+#include <LuxEngine/Runtime/Runtime.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
@@ -13,11 +13,13 @@
 
 namespace ForestGame {
 namespace le = LuxEngine;
+
 namespace {
 constexpr std::array<const char*, 13> Actions{
     "Forest.Left",       "Forest.Right",    "Forest.Up",      "Forest.Down",    "Forest.Confirm",
     "Forest.Dash",       "Forest.Pause",    "Forest.Choice1", "Forest.Choice2", "Forest.Choice3",
     "Forest.Fullscreen", "Forest.Previous", "Forest.Next"};
+
 bool Pressed(const char* action) {
     return le::Input::WasActionPressed(action);
 }

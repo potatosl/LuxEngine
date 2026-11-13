@@ -1,5 +1,5 @@
 #include "Common/Utf8.hpp"
-#include "Engine/EntryPoint.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <array>
 #include <iostream>
 #include <limits>
@@ -13,6 +13,7 @@ void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 std::vector<std::uint32_t> Decode(std::string_view text) {
     std::vector<std::uint32_t> result;
     std::size_t offset = 0;

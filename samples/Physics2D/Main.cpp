@@ -1,14 +1,16 @@
 #include "Common/SampleApplication.hpp"
-#include "Engine/EntryPoint.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
 namespace le = LuxEngine;
+
 namespace {
 class Physics2D final : public LuxSamples::SampleApplication {
 public:
     static constexpr std::string_view Help =
         "2D 물리: Space·마우스 왼쪽 버튼·게임패드 아래쪽 버튼으로 상자를 떨어뜨립니다.";
+
     explicit Physics2D(LuxSamples::Options options)
         : SampleApplication("2D 물리", "Space / 마우스 왼쪽 / 게임패드 A로 상자 추가",
                             std::move(options)) {}
@@ -17,6 +19,7 @@ private:
     le::Scene scene_;
     le::Random random_{42};
     unsigned spawned_ = 0;
+
     le::Entity Box(le::Vec2 position, le::Vec2 size, le::Vec4 color, bool dynamic) {
         auto entity = scene_.CreateEntity(dynamic ? "동적 상자" : "고정 바닥");
         auto& transform = entity.GetComponent<le::TransformComponent>();
@@ -28,6 +31,7 @@ private:
             entity.AddComponent<le::Rigidbody2DComponent>();
         return entity;
     }
+
     void Spawn() {
         if (spawned_ >= 64)
             return;
@@ -37,6 +41,7 @@ private:
         box.GetComponent<le::TransformComponent>().rotation.z = random_.Range(-.3f, .3f);
         ++spawned_;
     }
+
     void Reset() override {
         for (auto entity : scene_.GetEntities())
             scene_.DestroyEntity(entity);
@@ -57,11 +62,13 @@ private:
             ++spawned_;
         }
     }
+
     void Step(float dt) override {
         if (le::Input::WasActionPressed("drop"))
             Spawn();
         scene_.OnUpdate(dt);
     }
+
     void Draw(float) override {
         for (int y = -5; y <= 4; ++y)
             for (int x = -12; x <= 12; ++x)

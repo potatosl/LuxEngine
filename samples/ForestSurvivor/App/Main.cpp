@@ -1,5 +1,5 @@
-#include "Engine/EntryPoint.hpp"
 #include "ForestSurvivorApp.hpp"
+#include <LuxEngine/EntryPoint.hpp>
 #include <charconv>
 #include <iostream>
 #include <stdexcept>
@@ -15,6 +15,7 @@ unsigned Number(std::string_view text) {
     return number;
 }
 } // namespace
+
 int RunForestSurvivor(int argc, char** argv) {
     ForestGame::RunOptions options;
     for (int index = 1; index < argc; ++index) {

@@ -32,12 +32,12 @@ jobs:
       - name: Setup Portable DXC Shader Compiler
         shell: pwsh
         run: |
-          & powershell -ExecutionPolicy Bypass -File Tools/SetupShaderCompiler.ps1
+          & powershell -ExecutionPolicy Bypass -File tools/SetupShaderCompiler.ps1
 
       - name: Install Dependencies via vcpkg
         shell: pwsh
         run: |
-          vcpkg install --triplet x64-windows --clean-after-build sdl3 stb vulkan-memory-allocator libzip
+          vcpkg install --triplet x64-windows --clean-after-build sdl3 stb vulkan-memory-allocator libzip nlohmann-json
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -143,37 +143,37 @@ jobs:
       - name: Package LuxEngine SDK
         shell: pwsh
         run: |
-          & pwsh Tools/PackageSdk.ps1 -BuildDir build -OutputDir dist
+          & pwsh tools/PackageSdk.ps1 -BuildDir build -OutputDir dist
 
       - name: Verify Relocated SDK & MinimalGame Consumer
         shell: pwsh
         run: |
-          & pwsh Tools/VerifySdkRelocation.ps1 -BuildDir build
+          & pwsh tools/VerifySdkRelocation.ps1 -BuildDir build
 
       - name: Verify SDK Relocation Safety & Data Preservation
         shell: pwsh
         run: |
-          & pwsh Tests/TestSdkRelocationSafety.ps1
+          & pwsh tools/Tests/TestSdkRelocationSafety.ps1
 
       - name: Package LuxEditor Standalone Portable
         shell: pwsh
         run: |
-          & pwsh Tools/PackageEditor.ps1 -BuildDir build -OutputDir dist
+          & pwsh tools/PackageEditor.ps1 -BuildDir build -OutputDir dist
 
       - name: Verify Standalone Editor in Isolated Environment
         shell: pwsh
         run: |
-          & pwsh Tools/VerifyEditorStandalone.ps1
+          & pwsh tools/VerifyEditorStandalone.ps1
 
       - name: Package LuxPlayer Standalone Portable
         shell: pwsh
         run: |
-          & pwsh Tools/PackageRuntime.ps1 -BuildDir build -OutputDir dist
+          & pwsh tools/PackageRuntime.ps1 -BuildDir build -OutputDir dist
 
       - name: Verify Standalone LuxPlayer in Isolated Environment
         shell: pwsh
         run: |
-          & pwsh Tools/VerifyRuntimeStandalone.ps1
+          & pwsh tools/VerifyRuntimeStandalone.ps1
 
       - name: Upload Distribution Artifacts
         uses: actions/upload-artifact@v4

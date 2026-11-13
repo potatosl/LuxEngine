@@ -11,9 +11,11 @@
 
 namespace LuxSamples {
 namespace le = LuxEngine;
+
 namespace {
 Artwork* activeArtwork = nullptr;
 }
+
 Options ParseOptions(int argc, char** argv) {
     Options options;
     for (int index = 1; index < argc; ++index) {
@@ -39,23 +41,28 @@ Options ParseOptions(int argc, char** argv) {
     }
     return options;
 }
+
 void Text(std::string_view text, le::Vec2 position, float pixel, le::Vec4 color) {
     if (activeArtwork)
         activeArtwork->Text(text, position, pixel, color);
 }
+
 void Sprite(const std::string& relative, le::Vec2 position, le::Vec2 size, le::Vec4 tint,
             float angle) {
     if (activeArtwork)
         activeArtwork->Sprite(relative, position, size, tint, angle);
 }
+
 void Quad(le::Vec2 position, le::Vec2 size, le::Vec4 tint, float angle) {
     if (activeArtwork)
         activeArtwork->Quad(position, size, tint, angle);
 }
+
 void Panel(le::Vec2 center, le::Vec2 size) {
     if (activeArtwork)
         activeArtwork->Panel(center, size);
 }
+
 void BindMovement() {
     for (auto [action, key] : {std::pair{"left", le::LuxKey::A},
                                {"left", le::LuxKey::Left},
@@ -71,15 +78,18 @@ void BindMovement() {
     le::Input::BindAction("up", le::LuxGamepadButton::DpadUp);
     le::Input::BindAction("down", le::LuxGamepadButton::DpadDown);
 }
+
 le::Vec2 Movement() {
     le::Vec2 move{float(le::Input::IsActionDown("right")) - float(le::Input::IsActionDown("left")),
                   float(le::Input::IsActionDown("up")) - float(le::Input::IsActionDown("down"))};
     const float length = std::hypot(move.x, move.y);
     return length > 1 ? move * (1 / length) : move;
 }
+
 SampleApplication::SampleApplication(std::string title, std::string instructions, Options options)
     : le::Application({title, 1280, 720}), title_(std::move(title)),
       instructions_(std::move(instructions)), options_(std::move(options)) {}
+
 void SampleApplication::OnInit() {
     SDL_SetWindowMinimumSize(GetWindow().GetNativeHandle(), 640, 360);
     const char* base = SDL_GetBasePath();
@@ -98,6 +108,7 @@ void SampleApplication::OnInit() {
     if (!options_.capture.empty() && !GetGpuDevice().RequestFrameCapture())
         throw std::runtime_error("화면 캡처를 요청하지 못했습니다.");
 }
+
 void SampleApplication::OnUpdate(double dt) {
     if (le::Input::WasActionPressed("quit"))
         Close();
@@ -110,6 +121,7 @@ void SampleApplication::OnUpdate(double dt) {
     if (!paused_)
         Step(static_cast<float>(dt));
 }
+
 void SampleApplication::OnRender(float elapsed) {
     halfWidth_ =
         6.0f * float(GetWindow().GetWidth()) / float(std::max(1u, GetWindow().GetHeight()));
@@ -128,6 +140,7 @@ void SampleApplication::OnRender(float elapsed) {
     artwork_->Flush(camera_.GetViewProjectionMatrix());
     ++rendered_;
 }
+
 int SampleApplication::Run() {
     for (;;) {
         const auto result = RunFrame();
@@ -145,6 +158,7 @@ int SampleApplication::Run() {
             Close();
     }
 }
+
 void SampleApplication::Capture() {
     le::GpuFrameCapture image;
     if (!GetGpuDevice().ReadFrameCapture(image))
@@ -159,6 +173,7 @@ void SampleApplication::Capture() {
         throw std::runtime_error("화면 캡처를 저장하지 못했습니다.");
     options_.capture.clear();
 }
+
 void SampleApplication::OnShutdown() {
     activeArtwork = nullptr;
     artwork_.reset();

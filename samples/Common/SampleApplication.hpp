@@ -1,6 +1,6 @@
 #pragma once
 #include "Artwork.hpp"
-#include "Engine/LuxEngine.hpp"
+#include <LuxEngine/LuxEngine.hpp>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -12,6 +12,7 @@ struct Options {
     bool help = false;
     std::filesystem::path capture;
 };
+
 Options ParseOptions(int argc, char** argv);
 void Text(std::string_view text, LuxEngine::Vec2 position, float pixel = .035f,
           LuxEngine::Vec4 color = {.22f, .16f, .12f, 1});
@@ -25,10 +26,13 @@ LuxEngine::Vec2 Movement();
 class SampleApplication : public LuxEngine::Application {
 public:
     SampleApplication(std::string title, std::string instructions, Options options);
+
     ~SampleApplication() override {
         Shutdown();
     }
+
     int Run();
+
     float HalfWidth() const {
         return halfWidth_;
     }
@@ -52,6 +56,7 @@ private:
     unsigned rendered_ = 0;
     bool paused_ = false;
 };
+
 template <class App> int RunSample(int argc, char** argv) {
     auto options = ParseOptions(argc, argv);
     if (options.help) {

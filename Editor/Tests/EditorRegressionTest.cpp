@@ -1,10 +1,10 @@
-#include "App/EditorWindow.hpp"
-#include "Engine/Renderer/RHI/GpuDevice.hpp"
-#include "Project/PathEncoding.hpp"
-#include "Viewport/EngineSceneRenderer.hpp"
-#include "Viewport/SceneViewport2D.hpp"
-#include "Viewport/SceneViewport3D.hpp"
-#include "Viewport/ViewportCamera3D.hpp"
+#include <LuxEditor/App/EditorWindow.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
+#include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
+#include <LuxEditor/Viewport/SceneViewport2D.hpp>
+#include <LuxEditor/Viewport/SceneViewport3D.hpp>
+#include <LuxEditor/Viewport/ViewportCamera3D.hpp>
+#include <LuxEngine/Renderer/RHI/GpuDevice.hpp>
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
@@ -33,13 +33,16 @@
 namespace {
 using namespace LuxEngine;
 using namespace LuxEditor;
+
 struct GpuUnavailable : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
+
 void Check(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+
 std::unique_ptr<EditorWindow> OpenScene(QApplication& app, Scene& scene, QTemporaryDir& files) {
     const QString path = files.filePath(QStringLiteral("regression.lux"));
     Check(scene.Serialize(path.toUtf8().toStdString()), "regression scene saves");
@@ -53,6 +56,7 @@ std::unique_ptr<EditorWindow> OpenScene(QApplication& app, Scene& scene, QTempor
     hierarchy->setCurrentItem(hierarchy->topLevelItem(0));
     return window;
 }
+
 void TestTimeline(QApplication& app) {
     for (const bool stationary : {false, true}) {
         QTemporaryDir files;
@@ -101,6 +105,7 @@ void TestTimeline(QApplication& app) {
         window->close();
     }
 }
+
 void TestNameLimits(QApplication& app) {
     QTemporaryDir files;
     Scene scene;
@@ -165,6 +170,7 @@ void TestNameLimits(QApplication& app) {
     window->GetDocument().SetDirty(false);
     window->close();
 }
+
 void TestSparseCopy(QApplication& app) {
     for (const auto [hasTag, hasTransform] :
          {std::pair{false, true}, std::pair{true, false}, std::pair{false, false}}) {
@@ -229,6 +235,7 @@ void TestSparseCopy(QApplication& app) {
         window->close();
     }
 }
+
 void Click(QWidget& view, QPointF point) {
     const QPointF global = view.mapToGlobal(point.toPoint());
     QMouseEvent press(QEvent::MouseButtonPress, point, global, Qt::LeftButton, Qt::LeftButton,
@@ -238,6 +245,7 @@ void Click(QWidget& view, QPointF point) {
     QApplication::sendEvent(&view, &press);
     QApplication::sendEvent(&view, &release);
 }
+
 void TestSparseTilemap(QApplication& app) {
     for (const auto tool : {EditorTool::TileBrush, EditorTool::TileErase}) {
         for (const bool selected : {false, true}) {
@@ -266,6 +274,7 @@ void TestSparseTilemap(QApplication& app) {
         }
     }
 }
+
 void TestPicking2D(QApplication& app, bool gpu = false) {
     std::shared_ptr<EngineSceneRenderer> renderer;
     if (gpu) {
@@ -324,6 +333,7 @@ void TestPicking2D(QApplication& app, bool gpu = false) {
         Check(renderer->GetGpuDevice()->GetCounters().validationErrors == 0,
               "2D regression emits no Vulkan validation errors");
 }
+
 QPointF ReferenceProjection(Vec3 point, QSize size, double yaw, double pitch) {
     const double cy = std::cos(yaw), sy = std::sin(yaw);
     const double cp = std::cos(pitch), sp = std::sin(pitch);
@@ -333,6 +343,7 @@ QPointF ReferenceProjection(Vec3 point, QSize size, double yaw, double pitch) {
             size.height() * .5 -
                 (point.x * sy * sp + point.y * cp + point.z * cy * sp) * focal / depth};
 }
+
 void TestPicking3D(QApplication& app, bool gpu = false) {
     std::shared_ptr<EngineSceneRenderer> renderer;
     if (gpu) {
@@ -547,6 +558,7 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
               "3D regression emits no Vulkan validation errors");
 }
 } // namespace
+
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("LuxRegressionTests"));

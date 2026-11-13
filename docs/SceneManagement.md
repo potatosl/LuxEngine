@@ -39,11 +39,11 @@
 
 | 영역 | 주요 코드 | 검사 |
 | --- | --- | --- |
-| 계층·월드 변환·직렬화·물리 상태 교체 | `Engine/Scene/Scene.hpp`, `Scene.cpp`, `SceneHierarchy.cpp` | `Engine_scene_management`, `Engine_scene_hierarchy_gpu` |
-| 합성·상속·비동기 로딩·캐시·스트리밍 | `Engine/Scene/SceneManager.cpp` | `Engine_scene_loading` |
+| 계층·월드 변환·직렬화·물리 상태 교체 | `Engine/Scene/Public/LuxEngine/Scene/Scene.hpp`, `Scene.cpp`, `SceneHierarchy.cpp` | `Engine_scene_management`, `Engine_scene_hierarchy_gpu` |
+| 합성·상속·비동기 로딩·캐시·스트리밍 | `Engine/Scene/Private/SceneManager.cpp` | `Engine_scene_loading` |
 | 다중 문서·저장·자동 저장·복구 | `Editor/Scene/EditorDocument*`, `Editor/Project/EditorProject*` | `Editor_scene_documents`, `Editor_recovery_history`, `Editor_session_scene` |
-| 프로젝트 참조 경계·순환·검증 예산 | `Editor/Scene/SceneDependencies.cpp` | `Editor_scene_dependencies` |
-| 메뉴·문서 탭·Outliner·작업 이력·뷰포트 | `Editor/App/EditorWindowScenes.cpp`, `Editor/Scene/SceneHistory.hpp`, `Editor/Viewport/` | `Editor_scene_ui` |
+| 프로젝트 참조 경계·순환·검증 예산 | `Editor/Scene/Private/LuxEditor/Scene/SceneDependencies.cpp` | `Editor_scene_dependencies` |
+| 메뉴·문서 탭·Outliner·작업 이력·뷰포트 | `Editor/App/Private/LuxEditor/App/EditorWindowScenes.cpp`, `Editor/Scene/Private/LuxEditor/Scene/SceneHistory.hpp`, `Editor/Viewport/` | `Editor_scene_ui` |
 
 UI 회귀는 실제 `EditorWindow`, QAction, 문서 탭과 마우스 이벤트를 사용한다. 다른 씬의 Undo, 양쪽 씬 이동 복원, 그룹 복사, 부모 변환 아래의 선택·드래그·타일 페인트, 전단·반전이 있는 3D 경계 선택과 드래그 취소, 비동기 결과 경쟁, 설정 정밀도, 기록 한도, 미리보기 중 복제와 세션 복구를 확인한다. GPU 검사는 실제 렌더 결과로 부모 행렬과 노출 적용을 확인한다.
 

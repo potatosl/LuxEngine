@@ -1,7 +1,7 @@
-#include "App/EditorWindow.hpp"
-#include "Engine/Scene/Scene.hpp"
-#include "Project/PathEncoding.hpp"
-#include "Project/ProjectArchive.hpp"
+#include <LuxEditor/App/EditorWindow.hpp>
+#include <LuxEditor/Project/PathEncoding.hpp>
+#include <LuxEditor/Project/ProjectArchive.hpp>
+#include <LuxEngine/Scene/Scene.hpp>
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
@@ -28,18 +28,22 @@
 namespace {
 namespace fs = std::filesystem;
 using namespace LuxEditor;
+
 void Check(bool value, const char* message) {
     if (!value)
         throw std::runtime_error(message);
 }
+
 QString Q(const fs::path& path) {
     return QString::fromUtf8(PathUtf8(path));
 }
+
 struct ProjectFixture {
     QTemporaryDir directory;
     EditorProject project;
     fs::path secondary;
     fs::path external;
+
     ProjectFixture() {
         Check(directory.isValid(), "temporary project directory exists");
         const auto root = PathFromUtf8(directory.path().toStdString());
@@ -55,6 +59,7 @@ struct ProjectFixture {
         Check(scene.Serialize(PathUtf8(secondary)) && scene.Serialize(PathUtf8(external)),
               "secondary and external scene fixtures save");
     }
+
     std::unique_ptr<EditorWindow> Open(QApplication& app) {
         QSettings().clear();
         QSettings().setValue("lastProject", Q(project.GetFile()));
@@ -64,6 +69,7 @@ struct ProjectFixture {
         return window;
     }
 };
+
 void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
     QTimer chooser;
     QObject::connect(&chooser, &QTimer::timeout, &window, [&] {
@@ -77,6 +83,7 @@ void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
     Check(action, "scene open action exists");
     action->trigger();
 }
+
 void DropScene(EditorWindow& window, const fs::path& path) {
     QMimeData mime;
     mime.setUrls({QUrl::fromLocalFile(Q(path))});
@@ -86,6 +93,7 @@ void DropScene(EditorWindow& window, const fs::path& path) {
     QDropEvent drop({50, 50}, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(&window, &drop);
 }
+
 void TestSceneContext(QApplication& app) {
     for (const int route : {0, 1, 2}) {
         ProjectFixture fixture;
@@ -126,6 +134,7 @@ void TestSceneContext(QApplication& app) {
               "external scenes detach from the previous project consistently");
     }
 }
+
 void TestRecoveryHistory(QApplication& app) {
     ProjectFixture fixture;
     LuxEngine::Scene recovered;
@@ -178,6 +187,7 @@ void TestRecoveryHistory(QApplication& app) {
     undo->undo();
     Check(!document.IsDirty(), "undo back to the saved baseline is clean");
 }
+
 void TestBrokenSceneRecovery(QApplication& app) {
     for (const bool missing : {false, true})
         for (const bool accept : {false, true}) {
@@ -279,6 +289,7 @@ void TestBrokenSceneRecovery(QApplication& app) {
               window->findChild<QAction*>("projectSettings")->isEnabled(),
           "cancelling recovery preserves the prior document, unsaved edits, history and project");
 }
+
 void TestSessionScene(QApplication& app) {
     ProjectFixture fixture;
     {
@@ -451,6 +462,7 @@ void TestRestoreOpenedProject(QApplication& app) {
           "saving after restore cannot overwrite the backup with stale pre-restore content");
 }
 } // namespace
+
 int main(int argc, char** argv) {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);

@@ -8,17 +8,21 @@ namespace ForestGame {
 namespace {
 constexpr float Pi = std::numbers::pi_v<float>;
 constexpr double StepSeconds = 1.0 / 120.0;
+
 float LengthSquared(Vec2 v) {
     return v.x * v.x + v.y * v.y;
 }
+
 Vec2 Normalized(Vec2 value) {
     const float length = std::sqrt(LengthSquared(value));
     return length > .00001f ? value * (1.0f / length) : Vec2{};
 }
+
 Vec2 ClampPosition(Vec2 position, float radius = .4f) {
     const float extent = SurvivalGame::ArenaHalfSize - radius;
     return {std::clamp(position.x, -extent, extent), std::clamp(position.y, -extent, extent)};
 }
+
 constexpr std::array<Upgrade, 9> Upgrades{{
     {UpgradeId::Might, "야생 가시", "무기 피해량 30% 증가"},
     {UpgradeId::Haste, "재빠른 새싹", "공격 대기 시간 18% 감소"},
@@ -48,6 +52,7 @@ SurvivalGame::SurvivalGame(std::uint32_t seed, Rules rules)
     rules_.bossHealth = sane(rules_.bossHealth, 800, 1, 100000);
     Reset();
 }
+
 void SurvivalGame::Reset() {
     random_.seed(seed_);
     player_ = {};
@@ -66,20 +71,24 @@ void SurvivalGame::Reset() {
     accumulator_ = 0;
     nextEnemyId_ = 1;
 }
+
 void SurvivalGame::Start() {
     if (phase_ == Phase::Title || phase_ == Phase::Defeat || phase_ == Phase::Victory)
         Restart();
 }
+
 void SurvivalGame::Restart() {
     Reset();
     phase_ = Phase::Playing;
 }
+
 void SurvivalGame::TogglePause() {
     if (phase_ == Phase::Playing)
         phase_ = Phase::Paused;
     else if (phase_ == Phase::Paused)
         phase_ = Phase::Playing;
 }
+
 bool SurvivalGame::ChooseUpgrade(int index) {
     if (phase_ != Phase::Upgrade || index < 0 || index >= static_cast<int>(choices_.size()))
         return false;
@@ -117,9 +126,11 @@ bool SurvivalGame::ChooseUpgrade(int index) {
     phase_ = Phase::Playing;
     return true;
 }
+
 float SurvivalGame::Random(float minimum, float maximum) {
     return std::uniform_real_distribution<float>(minimum, maximum)(random_);
 }
+
 void SurvivalGame::Tick(double dt, Vec2 movement, bool dash) {
     if (phase_ != Phase::Playing || !std::isfinite(dt) || dt <= 0)
         return;
@@ -144,6 +155,7 @@ void SurvivalGame::Tick(double dt, Vec2 movement, bool dash) {
     if (phase_ != Phase::Playing)
         accumulator_ = 0;
 }
+
 void SurvivalGame::Step(float dt, Vec2 movement) {
     elapsed_ += dt;
     player_.invulnerable = std::max(0.0f, player_.invulnerable - dt);
@@ -211,6 +223,7 @@ void SurvivalGame::Step(float dt, Vec2 movement) {
         OfferUpgrade();
     }
 }
+
 void SurvivalGame::SpawnEnemy(bool boss) {
     if (enemies_.size() >= MaxEnemies) {
         if (!boss)
@@ -242,6 +255,7 @@ void SurvivalGame::SpawnEnemy(bool boss) {
     if (boss)
         AddEffect(enemy.position, 2.0f, 4);
 }
+
 void SurvivalGame::Shoot() {
     const Enemy* nearest = nullptr;
     float best = std::numeric_limits<float>::max();
@@ -265,6 +279,7 @@ void SurvivalGame::Shoot() {
         projectiles_.push_back(projectile);
     }
 }
+
 void SurvivalGame::UpdateEnemies(float dt) {
     for (auto& enemy : enemies_) {
         if (enemy.health <= 0)
@@ -326,6 +341,7 @@ void SurvivalGame::UpdateEnemies(float dt) {
         }
     }
 }
+
 void SurvivalGame::UpdateProjectiles(float dt) {
     for (auto& projectile : projectiles_) {
         projectile.remaining -= dt;
@@ -353,6 +369,7 @@ void SurvivalGame::UpdateProjectiles(float dt) {
     std::erase_if(projectiles_,
                   [](const Projectile& projectile) { return projectile.remaining <= 0; });
 }
+
 void SurvivalGame::ApplyDamage(float damage) {
     if (player_.invulnerable > 0 || rules_.incomingDamageScale <= 0)
         return;
@@ -362,6 +379,7 @@ void SurvivalGame::ApplyDamage(float damage) {
     if (player_.health <= 0)
         phase_ = Phase::Defeat;
 }
+
 void SurvivalGame::ResolveKills() {
     for (const auto& enemy : enemies_) {
         if (enemy.health > 0)
@@ -384,6 +402,7 @@ void SurvivalGame::ResolveKills() {
     }
     std::erase_if(enemies_, [](const Enemy& enemy) { return enemy.health <= 0; });
 }
+
 void SurvivalGame::UpdateGems(float dt) {
     for (auto& gem : gems_) {
         const Vec2 delta = player_.position - gem.position;
@@ -397,6 +416,7 @@ void SurvivalGame::UpdateGems(float dt) {
     }
     std::erase_if(gems_, [](const Gem& gem) { return gem.value == 0; });
 }
+
 void SurvivalGame::OfferUpgrade() {
     phase_ = Phase::Upgrade;
     AddEffect(player_.position, 1.3f, 2);
@@ -416,6 +436,7 @@ void SurvivalGame::OfferUpgrade() {
             break;
     }
 }
+
 void SurvivalGame::AddEffect(Vec2 position, float radius, int type) {
     if (effects_.size() >= MaxEffects)
         effects_.erase(effects_.begin());

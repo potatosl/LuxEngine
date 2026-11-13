@@ -1,0 +1,8 @@
+add_executable(LuxSceneConvert SceneConvert/Main.cpp)
+target_link_libraries(LuxSceneConvert PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxSceneConvert)
+lux_copy_runtime(LuxSceneConvert)
+if(LUX_BUILD_TESTS)
+    add_test(NAME Tools_scene_convert_help COMMAND LuxSceneConvert --help)
+    set_tests_properties(Tools_scene_convert_help PROPERTIES LABELS "headless;tools" TIMEOUT 10)
+endif()

@@ -1,7 +1,7 @@
 #pragma once
-#include "Engine/Application.hpp"
 #include "Game/SurvivalGame.hpp"
 #include "Presentation/ForestRenderer.hpp"
+#include <LuxEngine/Application.hpp>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -22,15 +22,19 @@ struct RunOptions {
 class ForestSurvivorApp final : public LuxEngine::Application {
 public:
     explicit ForestSurvivorApp(RunOptions options);
+
     const SurvivalGame& GetGame() const {
         return game_;
     }
+
     UiAction ActionAt(float normalizedX, float normalizedY) const {
         return renderer_.HitAction(normalizedX, normalizedY);
     }
+
     bool UiTextFits() const {
         return renderer_.TextLayoutFits();
     }
+
     void OnEvent(LuxEngine::Event& event) override;
 
 protected:
