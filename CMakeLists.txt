@@ -53,6 +53,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Dependencies)
 include(Shaders)
+include(Models)
 include(Branding)
 include(Dotnet)
 option(LUX_BUILD_TESTS "Build engine tests" ON)
@@ -84,6 +85,12 @@ endif()
 
 # The Forge supplies the native renderer for each supported desktop platform.
 include(TheForge)
+if(LUX_BUILD_TESTS)
+    add_test(NAME Assets_basic_models_integrity COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_SOURCE_DIR}/tools/VerifyBasicModels.py" --json)
+    set_tests_properties(Assets_basic_models_integrity PROPERTIES
+        LABELS "headless;assets;fbx" TIMEOUT 30)
+endif()
 
 include(CMakePackageConfigHelpers)
 configure_package_config_file(

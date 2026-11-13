@@ -288,6 +288,7 @@ void EditorWindow::BuildLayout() {
                            this, [this] { AddEntity(); });
             menu.addAction(MakeEditorIcon(EditorIcon::Mesh), QStringLiteral("3D 메시 엔티티 추가"),
                            this, [this] { AddMeshEntity(); });
+            AddBasicModelMenu(&menu);
             menu.addSeparator();
             menu.addAction(QStringLiteral("복사"), this, [this] { CopyEntity(); });
             menu.addAction(QStringLiteral("붙여넣기"), this, [this] { PasteEntity(); });
@@ -317,9 +318,10 @@ void EditorWindow::BuildLayout() {
     assetHeader->addWidget(assetBreadcrumb_, 1);
     assetHeader->addStretch();
     assetFilter_ = new QComboBox(assetsPanel);
+    assetFilter_->setObjectName(QStringLiteral("assetTypeFilter"));
     assetFilter_->addItems({QStringLiteral("전체"), QStringLiteral("장면"),
                             QStringLiteral("이미지"), QStringLiteral("오디오"),
-                            QStringLiteral("기타")});
+                            QStringLiteral("모델"), QStringLiteral("기타")});
     assetHeader->addWidget(assetFilter_);
     auto* gridMode = new QToolButton(assetsPanel);
     gridMode->setIcon(MakeEditorIcon(EditorIcon::Grid));
@@ -412,9 +414,14 @@ void EditorWindow::BuildLayout() {
     });
     connect(projectFiles_, &QListWidget::itemDoubleClicked, this, [this] {
         const int row = projectFiles_->currentRow();
-        if (row >= 0 && static_cast<size_t>(row) < projectFilePaths_.size() &&
-            projectFilePaths_[static_cast<size_t>(row)].extension() == ".lux")
-            OpenProjectScene(projectFilePaths_[static_cast<size_t>(row)]);
+        if (row < 0 || static_cast<size_t>(row) >= projectFilePaths_.size())
+            return;
+        const auto& path = projectFilePaths_[static_cast<size_t>(row)];
+        const auto suffix = QString::fromUtf8(PathUtf8(path.extension())).toLower();
+        if (suffix == QLatin1String(".lux"))
+            OpenProjectScene(path);
+        else if (suffix == QLatin1String(".obj") || suffix == QLatin1String(".fbx"))
+            AddModelAsset(path);
     });
 
     auto* inspectorScroll = new QScrollArea(this);
@@ -514,11 +521,13 @@ void EditorWindow::BuildLayout() {
     meshPath_->setObjectName(QStringLiteral("meshAssetPath"));
     meshPath_->setReadOnly(true);
     meshPath_->setPlaceholderText(QStringLiteral("기본 큐브"));
-    meshLayout->addRow(QStringLiteral("OBJ 메시"), meshPath_);
+    meshLayout->addRow(QStringLiteral("모델"), meshPath_);
+    meshPath_->setToolTip(QStringLiteral("OBJ·FBX 정적 메시를 지원합니다. FBX 재질·스킨·애니메이션 "
+                                         "자동 가져오기는 개발 중입니다."));
     auto* meshButtons = new QWidget(meshGroup);
     auto* meshButtonsLayout = new QHBoxLayout(meshButtons);
     meshButtonsLayout->setContentsMargins(0, 0, 0, 0);
-    auto* chooseMesh = new QPushButton(QStringLiteral("OBJ 선택"), meshButtons);
+    auto* chooseMesh = new QPushButton(QStringLiteral("모델 선택"), meshButtons);
     chooseMesh->setObjectName(QStringLiteral("chooseMeshAsset"));
     auto* clearMesh = new QPushButton(QStringLiteral("기본 큐브"), meshButtons);
     clearMesh->setObjectName(QStringLiteral("clearMeshAsset"));
@@ -627,45 +636,7 @@ void EditorWindow::BuildLayout() {
             !errors.isEmpty());
         RefreshAll();
     });
-    connect(chooseMesh, &QPushButton::clicked, this, [this] {
-        if (previewActive_ || !document_.GetSelected())
-            return;
-        const auto tab = document_.GetActiveTabId();
-        const auto entity = document_.GetSelected().GetId();
-        const auto file =
-            QFileDialog::getOpenFileName(this, QStringLiteral("OBJ 메시 선택"), meshPath_->text(),
-                                         QStringLiteral("Wavefront OBJ (*.obj);;모든 파일 (*)"));
-        if (file.isEmpty())
-            return;
-        if (document_.GetActiveTabId() != tab || document_.GetSelectedId(tab) != entity) {
-            Log(QStringLiteral("선택이 변경되어 메시 적용을 취소했습니다."), true);
-            return;
-        }
-        LuxEngine::RawMeshData data;
-        const auto path = file.toUtf8().toStdString();
-        if (!LuxEngine::AssetManager::LoadMesh(path, data, true)) {
-            ShowError(QStringLiteral("메시 불러오기"),
-                      QStringLiteral("OBJ 메시 파일을 읽을 수 없습니다."));
-            return;
-        }
-        const auto selected = document_.GetSelected();
-        if (selected.HasComponent<LuxEngine::MeshRendererComponent>() &&
-            !selected.GetComponent<LuxEngine::MeshRendererComponent>()
-                 .material.baseColorTexture.empty() &&
-            !data.hasTexCoords) {
-            ShowError(QStringLiteral("메시 불러오기"),
-                      QStringLiteral("텍스처를 유지하려면 UV 좌표가 있는 OBJ가 필요합니다."));
-            return;
-        }
-        RecordEdit(QStringLiteral("메시 파일 변경"), [this, path] {
-            auto selected = document_.GetSelected();
-            if (!selected.HasComponent<LuxEngine::MeshRendererComponent>())
-                selected.AddComponent<LuxEngine::MeshRendererComponent>();
-            selected.GetComponent<LuxEngine::MeshRendererComponent>().meshPath = path;
-            document_.MarkDirty();
-        });
-        RefreshAll();
-    });
+    connect(chooseMesh, &QPushButton::clicked, this, [this] { ChooseModelAsset(); });
     connect(clearMesh, &QPushButton::clicked, this, [this] {
         if (previewActive_ || !document_.GetSelected() ||
             !document_.GetSelected().HasComponent<LuxEngine::MeshRendererComponent>())
@@ -895,6 +866,7 @@ void EditorWindow::BuildLayout() {
                           [this] { AddEntity(); });
     createMenu->addAction(MakeEditorIcon(EditorIcon::Mesh), QStringLiteral("메시"), this,
                           [this] { AddMeshEntity(); });
+    AddBasicModelMenu(createMenu);
     createMenu->addAction(MakeEditorIcon(EditorIcon::Grid), QStringLiteral("타일맵"), this,
                           [this] { AddTilemap(); });
     createMenu

@@ -25,6 +25,14 @@ function Get-LuxWindowsRuntimeFiles {
         "DIRECT3D12/luxsky.frag",
         "DIRECT3D12/luxtone.frag"
     )
+    foreach ($file in @(
+        "shape-cube.fbx", "shape-cube-half.fbx", "shape-cube-rounded.fbx",
+        "shape-cylinder.fbx", "shape-cylinder-detailed.fbx", "shape-cylinder-half.fbx",
+        "shape-hexagon.fbx", "shape-slope.fbx", "shape-triangular-prism.fbx", "floor-square.fbx",
+        "Textures/colormap.png", "License.txt", "Provenance.json"
+    )) {
+        "Resources/Models/Primitives/KenneyPrototype/$file"
+    }
 }
 
 function Assert-LuxWindowsRuntime {
@@ -53,7 +61,7 @@ function Copy-LuxWindowsRuntime {
     foreach ($file in @("gpu.data", "gpu.cfg")) {
         Copy-Item -LiteralPath (Join-Path $Source $file) -Destination $Destination -Force
     }
-    foreach ($directory in @("DIRECT3D12", "managed")) {
+    foreach ($directory in @("DIRECT3D12", "managed", "Resources")) {
         Copy-Item -LiteralPath (Join-Path $Source $directory) -Destination $Destination -Recurse -Force
     }
     Assert-LuxWindowsRuntime -Directory $Destination

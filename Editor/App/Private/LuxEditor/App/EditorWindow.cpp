@@ -280,6 +280,7 @@ void EditorWindow::BuildMenus() {
         QKeySequence(Qt::CTRL | Qt::Key_E), [this] { AddEntity(); });
     add(edit, QStringLiteral("3D 메시 엔티티 추가"), QStringLiteral("addMeshEntity"), {},
         [this] { AddMeshEntity(); });
+    AddBasicModelMenu(edit);
     add(edit, QStringLiteral("타일맵 추가"), QStringLiteral("addTilemap"), {},
         [this] { AddTilemap(); });
     add(edit, QStringLiteral("선택 삭제"), QStringLiteral("deleteEntity"), QKeySequence::Delete,
@@ -716,14 +717,17 @@ void EditorWindow::RefreshProjectExplorer() {
                                suffix == QLatin1String(".webp") || suffix == QLatin1String(".bmp");
             const bool audio = suffix == QLatin1String(".wav") || suffix == QLatin1String(".ogg") ||
                                suffix == QLatin1String(".mp3");
+            const bool model = suffix == QLatin1String(".obj") || suffix == QLatin1String(".fbx");
             if ((filter.isEmpty() || label.contains(filter, Qt::CaseInsensitive)) &&
                 (category == 0 || (category == 1 && scene) || (category == 2 && image) ||
-                 (category == 3 && audio) || (category == 4 && !scene && !image && !audio))) {
+                 (category == 3 && audio) || (category == 4 && model) ||
+                 (category == 5 && !scene && !image && !audio && !model))) {
                 projectFilePaths_.push_back(it->path());
                 auto* item = new QListWidgetItem(label);
                 const QPixmap thumbnail(Q(it->path()));
-                item->setIcon(thumbnail.isNull() ? icons.icon(QFileInfo(Q(it->path())))
-                                                 : QIcon(thumbnail));
+                item->setIcon(model                ? MakeEditorIcon(EditorIcon::Mesh)
+                              : thumbnail.isNull() ? icons.icon(QFileInfo(Q(it->path())))
+                                                   : QIcon(thumbnail));
                 item->setToolTip(label);
                 projectFiles_->addItem(item);
             }
