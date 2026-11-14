@@ -36,6 +36,55 @@ uint32 FindNode(const Scene& scene, const ModelImportResult& imported, uint32 in
     throw std::runtime_error("Imported source node is missing");
 }
 
+void AnimatedFirstFrame(const fs::path& root) {
+    const auto fixture = fs::path(__FILE__).parent_path().parent_path().parent_path() / "Engine" /
+                         "Tests" / "Fixtures" / "AnimatedTriangle.fbx";
+    std::ifstream input(fixture, std::ios::binary);
+    std::string data(std::istreambuf_iterator<char>(input), {});
+    Check(!data.empty(), "Animated FBX fixture could not be read");
+    const auto replace = [&](const std::string& old, const std::string& replacement) {
+        const auto offset = data.find(old);
+        Check(offset != std::string::npos, "Animated FBX fixture contract changed");
+        data.replace(offset, old.size(), replacement);
+    };
+    replace("KeyValueFloat:*2 {a:0,2}", "KeyValueFloat:*2 {a:2,4}");
+    replace("C:\"OP\",6003,3001,\"Lcl Translation\"", "C:\"OP\",6003,2001,\"Lcl Translation\"");
+    const auto file = root / "first-key-offset.fbx";
+    std::ofstream output(file, std::ios::binary);
+    output << data;
+    output.close();
+    Check(static_cast<bool>(output), "Animated first-frame fixture could not be written");
+    std::string error;
+    const auto model = ModelAsset::LoadFbx(PathUtf8(file), error);
+    Check(model && model->animations.size() == 1 && model->submeshes.size() == 1, error.c_str());
+    ModelPose pose;
+    Check(model->Evaluate(0, 0, pose, error), error.c_str());
+    const auto nodeIndex = model->submeshes.front().node;
+    Check(Near(model->nodes[nodeIndex].localTransform.position.x, 0) &&
+              Near(pose.nodeLocalTransforms[nodeIndex].position.x, 2),
+          "FBX fixture must have a first animation key that differs from its rest transform");
+    Scene scene;
+    ModelImportResult imported;
+    Check(ImportModelAsset(scene, *model, root, imported, error), error.c_str());
+    const auto meshNode = FindNode(scene, imported, nodeIndex);
+    const auto& animation = scene.GetComponent<ModelAnimationComponent>(meshNode);
+    Check(animation.clip == 0 && animation.time == 0 && animation.playing,
+          "Imported default animation does not match the first clip frame");
+    const auto world = scene.GetWorldMatrix(meshNode);
+    for (size_t index = 0; index < 16; ++index)
+        Check(Near(world.elements[index], pose.nodeWorldTransforms[nodeIndex].elements[index]),
+              "Stopped Game View node transforms disagree with the sampled first FBX frame");
+    scene.GetComponent<TransformComponent>(imported.root).position = {6, 0, 0};
+    scene.GetComponent<TransformComponent>(meshNode).position = {0, 0, 0};
+    ModelImportResult refreshed;
+    Check(ReimportModelAsset(scene, meshNode, root, refreshed, error), error.c_str());
+    const auto expected = Mat4::Translate({6, 0, 0}) * pose.nodeWorldTransforms[nodeIndex];
+    const auto actual = scene.GetWorldMatrix(FindNode(scene, refreshed, nodeIndex));
+    for (size_t index = 0; index < 16; ++index)
+        Check(Near(actual.elements[index], expected.elements[index]),
+              "Reimport did not restore the first FBX pose while preserving model placement");
+}
+
 void Service(const fs::path& root, const BasicModelInstallation& installed) {
     std::string error;
     const auto source = ModelAsset::LoadFbx(PathUtf8(installed.modelPath), error);
@@ -218,6 +267,7 @@ int main(int argc, char** argv) {
         std::string error;
         Check(BasicModelLibrary::InstallIntoProject("shape-cube", root, installed, error),
               error.c_str());
+        AnimatedFirstFrame(root);
         Service(root, installed);
         Editor(root, installed);
         std::cout

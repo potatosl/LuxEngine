@@ -208,6 +208,14 @@ void Validate(const ModelAsset& model) {
 uint32 Build(Scene& prepared, const ModelAsset& model, const fs::path& root,
              ModelImportResult& result) {
     Validate(model);
+    ModelPose initialPose;
+    if (!model.animations.empty()) {
+        std::string error;
+        if (!model.Evaluate(0, 0, initialPose, error))
+            throw std::runtime_error("모델의 첫 애니메이션 포즈를 평가하지 못했습니다: " + error);
+        if (initialPose.nodeLocalTransforms.size() != model.nodes.size())
+            throw std::runtime_error("모델의 첫 애니메이션 포즈와 노드 계층이 일치하지 않습니다.");
+    }
     for (const auto& warning : model.warnings)
         Warn(result, warning);
     const auto textures = ResolveTextures(model, root, result);
@@ -227,11 +235,15 @@ uint32 Build(Scene& prepared, const ModelAsset& model, const fs::path& root,
     nodes.reserve(model.nodes.size());
     for (uint32 index = 0; index < model.nodes.size(); ++index) {
         const auto& source = model.nodes[index];
+        // The renderer samples clip zero at time zero even before play starts. Use that same
+        // pose for scene nodes so an authored first key differing from rest cannot offset the
+        // rendered geometry. Vertices remain node-local; no geometric transform is reapplied.
+        const auto& transform = model.animations.empty() ? source.localTransform
+                                                         : initialPose.nodeLocalTransforms[index];
         auto entity = prepared.CreateEntity(source.name.empty() ? "Node " + std::to_string(index)
                                                                 : source.name);
-        entity.GetComponent<TransformComponent>() = {source.localTransform.position,
-                                                     source.localTransform.rotation,
-                                                     source.localTransform.scale};
+        entity.GetComponent<TransformComponent>() = {transform.position, transform.rotation,
+                                                     transform.scale};
         entity.AddComponent<ModelAnimationComponent>(animation(index, true));
         nodes.push_back(entity.GetId());
     }
