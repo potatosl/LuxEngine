@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <locale>
 #include <map>
 #include <numbers>
 #include <stdexcept>
@@ -165,6 +166,11 @@ void Options() {
               Near(*valid.fixedTime, 2.0) && valid.width == 960 && valid.height == 640 &&
               valid.lighting == rc::Lighting::Dusk && valid.frames == 5,
           "Valid command-line options were not preserved");
+    for (const auto* value : {"2.5", "2.5e0", ".25e1"})
+        Check(Near(*Parse({"--time", value}).fixedTime, 2.5),
+              "Decimal or exponent capture time was rejected");
+    for (const auto* value : {"0", "-0", "86400", "8.64e4"})
+        Check(Parse({"--time", value}).fixedTime.has_value(), "Capture time boundary was rejected");
     Check(Parse({"--help"}).help, "Help option was ignored");
     Check(Parse({"--validate-assets"}).validate, "Asset validation option was ignored");
     const auto smoke = Parse({"--smoke-test"});
@@ -194,6 +200,9 @@ void Options() {
     rejects({"--time", "inf"});
     rejects({"--time", "-1"});
     rejects({"--time", "86401"});
+    for (const auto* value :
+         {"", "+1", " 1", "1 ", "1junk", "1e", "1e999", "1,5", "0x1p1", "0X1P1", "0x1", "-0x1p1"})
+        rejects({"--time", value});
     rejects({"--size", "bad"});
     rejects({"--size", "960x640x2"});
     rejects({"--size", "20x20"});
@@ -201,6 +210,25 @@ void Options() {
     rejects({"--capture", "capture.jpg"});
     rejects({"--time"});
     rejects({"--unknown"});
+
+    struct CommaDecimal : std::numpunct<char> {
+        char do_decimal_point() const override {
+            return ',';
+        }
+    };
+
+    struct RestoreLocale {
+        std::locale previous = std::locale();
+
+        ~RestoreLocale() {
+            std::locale::global(previous);
+        }
+    } restoreLocale;
+
+    std::locale::global(std::locale(restoreLocale.previous, new CommaDecimal));
+    Check(Near(*Parse({"--time", "2.5"}).fixedTime, 2.5),
+          "Global decimal locale changed capture time parsing");
+    rejects({"--time", "2,5"});
 }
 
 int RunStateTests(int, char**) {

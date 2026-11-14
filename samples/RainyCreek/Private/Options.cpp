@@ -4,6 +4,8 @@
 #include <charconv>
 #include <cmath>
 #include <iostream>
+#include <locale>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 
@@ -20,9 +22,12 @@ unsigned Unsigned(std::string_view text, unsigned minimum, unsigned maximum) {
 
 double Time(std::string_view text) {
     double result = 0;
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), result);
-    if (error != std::errc{} || end != text.data() + text.size() || !std::isfinite(result) ||
-        result < 0 || result > 86400)
+    std::istringstream input{std::string(text)};
+    input.imbue(std::locale::classic());
+    input >> std::noskipws >> result;
+    if (text.empty() || text.front() == '+' ||
+        text.find_first_not_of("0123456789.eE+-") != std::string_view::npos || input.fail() ||
+        !input.eof() || !std::isfinite(result) || result < 0 || result > 86400)
         throw std::runtime_error("캡처 시간은 0~86400초 사이여야 합니다.");
     return result;
 }
