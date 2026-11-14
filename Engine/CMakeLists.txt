@@ -16,7 +16,7 @@ target_include_directories(LuxEngine PUBLIC $<INSTALL_INTERFACE:include>)
 target_compile_features(LuxEngine PUBLIC cxx_std_20)
 find_package(Threads REQUIRED)
 # Static SDK consumers still need these link dependencies; module headers do not expose them.
-target_link_libraries(LuxEngine PUBLIC SDL3::SDL3 PRIVATE box2d::box2d Threads::Threads)
+target_link_libraries(LuxEngine PUBLIC SDL3::SDL3 PRIVATE Jolt::Jolt Threads::Threads)
 if(MSVC)
     target_compile_options(LuxEngine PUBLIC $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/utf-8>)
 endif()

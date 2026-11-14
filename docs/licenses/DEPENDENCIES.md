@@ -5,7 +5,7 @@ This document details all third-party software components bundled or linked with
 | Component | Version | License | Linkage | Purpose | Redistribution Notice |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **SDL3** | 3.2.x | zlib | Shared (`SDL3.dll`) | Windowing, Input, Audio, Event Loop | See `LICENSE-SDL3.txt` |
-| **Box2D** | 2.4.1 | zlib | Static (`box2d.lib`) | 2D Rigid Body Physics Simulation | See `LICENSE-Box2D.txt` |
+| **Jolt Physics** | 5.6.0 | MIT | Static (`Jolt.lib` / `libJolt.a`) | 3D rigid bodies and constrained XY-plane 2D simulation | See `LICENSE-Jolt.txt`; official revision `e77f175595e64cb44218cc9d9d56fc365ad0e36a` |
 | **Qt 6** | 6.x | LGPLv3 | Shared (`Qt6*.dll`) | LuxEditor Desktop UI Framework | See `LICENSE-Qt6.txt` & `LICENSE-LGPLv3.txt` |
 | **Vulkan Memory Allocator (VMA)** | 3.x | MIT | Header / Source | Vulkan GPU Memory Management | See `LICENSE-VMA.txt` |
 | **Khronos Vulkan Loader** | 1.3.x | Apache-2.0 | Dynamic (`vulkan-1.dll` / System) | Vulkan Driver Dispatcher | See `LICENSE-VulkanLoader.txt` |

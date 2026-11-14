@@ -39,7 +39,7 @@ if(NOT DEFINED CMAKE_DEBUG_POSTFIX)
     set(CMAKE_DEBUG_POSTFIX d)
 endif()
 
-# Fallback mapping for imported targets (e.g. Box2D) that only provide Debug and/or Release builds,
+# Fallback mapping for imported targets (e.g. Jolt) that only provide Debug and/or Release builds,
 # preventing Visual Studio multi-config generators from failing on RelWithDebInfo or MinSizeRel.
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;MinSizeRel;Debug;None;NOCONFIG;")
 set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;RelWithDebInfo;Debug;None;NOCONFIG;")
@@ -112,6 +112,10 @@ install(TARGETS LuxEngine LuxRuntime EXPORT LuxEngineTargets
 )
 if(WIN32 AND TARGET SDL3::SDL3-shared)
     install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
+endif()
+get_target_property(_lux_jolt_library_type Jolt::Jolt TYPE)
+if(_lux_jolt_library_type STREQUAL "SHARED_LIBRARY")
+    install(FILES $<TARGET_FILE:Jolt::Jolt> DESTINATION bin)
 endif()
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/licenses/" DESTINATION share/LuxEngine/licenses)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/licenses/" DESTINATION licenses)

@@ -350,7 +350,7 @@ void SettingsAndPhysics() {
         parented.OnUpdate(1.0 / 60);
     Check(Near(parented.GetWorldTransform(body.GetId()).position.x, 5, .01f) &&
               Near(body.GetComponent<TransformComponent>().position.x, 2, .01f),
-          "Box2D integrates world coordinates and writes back parent-local coordinates");
+          "Jolt integrates world coordinates and writes back parent-local coordinates");
 
     Scene independentBodies;
     auto movingChild = independentBodies.CreateEntity("먼저 생성된 자식");

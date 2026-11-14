@@ -2,7 +2,7 @@
 #include <LuxEngine/Animation/AnimationEngine.hpp>
 #include <LuxEngine/Core/Core.hpp>
 #include <LuxEngine/ECS/ECS.hpp>
-#include <LuxEngine/Physics/PhysicsEngine.hpp>
+#include <LuxEngine/Physics/PhysicsWorld.hpp>
 #include <algorithm>
 #include <iosfwd>
 #include <stdexcept>
@@ -15,7 +15,7 @@
 
 namespace LuxEngine {
 class Entity;
-class PhysicsWorld2D;
+class ScenePhysicsWorld;
 
 struct SceneSettings {
     Vec4 clearColor{.12f, .14f, .16f, 1};
@@ -23,7 +23,8 @@ struct SceneSettings {
     Render3DSettings render3D;
     Vec2 gravity{0, -9.81f};
     Vec3 gravity3D{0, -9.81f, 0};
-    // Existing framework applications can continue setting PhysicsEngine's global gravity.
+    // Existing framework applications can continue setting PhysicsEngine's global
+    // gravity.
     bool overrideGravity = false;
     float fixedStep = 1.0f / 60.0f;
     uint32 physicsSubsteps = 1;
@@ -53,10 +54,12 @@ public:
     std::unordered_map<uint32, uint32> ImportEntities(const Scene& source,
                                                       const std::vector<uint32>& roots = {},
                                                       uint32 parent = 0, bool preserveIds = false);
-    // Replace built-in authored data while preserving the destination's hierarchy/provenance.
+    // Replace built-in authored data while preserving the destination's
+    // hierarchy/provenance.
     bool CopyEntityComponents(const Scene& source, uint32 sourceId, uint32 targetId);
-    // Commit validated authored data while retaining unchanged native physics bodies/runtime.
-    // Both scenes' previously obtained entity handles are invalidated; the target origin stays.
+    // Commit validated authored data while retaining unchanged native physics
+    // bodies/runtime. Both scenes' previously obtained entity handles are
+    // invalidated; the target origin stays.
     bool ApplyState(Scene& prepared);
 
     const SceneSettings& GetSettings() const noexcept;
@@ -72,8 +75,10 @@ public:
     void OnRender3D();
     std::string ResolveAssetPath(const std::string& path) const;
 
-    // BeginContact events from the most recent 2D physics step, including sensors.
+    // BeginContact events from the most recent 2D physics step, including
+    // sensors.
     const std::vector<Collision2DEvent>& GetCollisionEvents2D() const;
+    const std::vector<Collision3DEvent>& GetCollisionEvents3D() const;
     enum class SaveFault {
         None,
         TempWriteFailure,
@@ -109,7 +114,8 @@ public:
 
     template <class T> bool HasComponent(uint32 id) const;
 
-    // Query a component pool directly without allocating/sorting every entity in the scene.
+    // Query a component pool directly without allocating/sorting every entity in
+    // the scene.
     template <class T> std::vector<uint32> GetComponentEntityIds() const;
 
     template <class T> void RemoveComponent(uint32 id);
@@ -141,12 +147,14 @@ private:
     bool ValidateForSerialization();
     void AdoptLoadedScene(Scene& parsed);
     void RepairReferenceLinks();
-    void RemovePhysicsBody2D(uint32 id);
+    void RemovePhysicsBody(uint32 id);
     uint32 nextEntityId_ = 1;
     std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
     std::unordered_set<uint32> entities_;
     std::unordered_map<std::type_index, std::unique_ptr<PoolBase>> pools_;
-    std::unique_ptr<PhysicsWorld2D> physics2D_;
+    std::unique_ptr<ScenePhysicsWorld> physics2D_;
+    std::unique_ptr<ScenePhysicsWorld> physics3D_;
+    std::vector<Collision3DEvent> collisionEvents3D_;
     std::vector<Collision2DEvent> collisionEvents2D_;
     std::vector<uint32> updateBuffer_;
     SceneSettings settings_;

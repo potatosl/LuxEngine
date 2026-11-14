@@ -1,15 +1,15 @@
 lux_engine_module(Scene
     PUBLIC_DEPENDENCIES LuxModuleCore LuxModuleECS LuxModuleAnimation LuxModulePhysics
-    PRIVATE_DEPENDENCIES LuxModuleRenderer box2d::box2d Threads::Threads nlohmann_json::nlohmann_json
+    PRIVATE_DEPENDENCIES LuxModuleRenderer Threads::Threads nlohmann_json::nlohmann_json
     HEADERS
-        Private/PhysicsWorld2D.hpp
+        Private/ScenePhysicsWorld.hpp
         Public/LuxEngine/Scene/Entity.hpp
         Public/LuxEngine/Scene/Scene.hpp
         Public/LuxEngine/Scene/SceneManager.hpp
         Public/LuxEngine/Scene/PrefabLibrary.hpp
     SOURCES
         Private/Entity.cpp
-        Private/PhysicsWorld2D.cpp
+        Private/ScenePhysicsWorld.cpp
         Private/SceneJson.cpp
         Private/Scene.cpp
         Private/SceneHierarchy.cpp

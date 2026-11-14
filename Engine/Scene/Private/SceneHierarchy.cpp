@@ -1,4 +1,4 @@
-#include "PhysicsWorld2D.hpp"
+#include "ScenePhysicsWorld.hpp"
 #include <LuxEngine/Scene/Entity.hpp>
 #include <LuxEngine/Scene/Scene.hpp>
 #include <algorithm>
@@ -36,8 +36,9 @@ bool Decompose(const Mat4& matrix, TransformComponent& value, bool requireTrs) {
     x = x * (1 / value.scale.x);
     y = y * (1 / value.scale.y);
     z = z * (1 / value.scale.z);
-    // A rotated child below a non-uniformly scaled parent can contain shear. Keep-world edits
-    // reject a non-TRS result rather than silently moving or stretching the object.
+    // A rotated child below a non-uniformly scaled parent can contain shear.
+    // Keep-world edits reject a non-TRS result rather than silently moving or
+    // stretching the object.
     if (requireTrs &&
         (std::abs(x.Dot(y)) > 1e-4f || std::abs(x.Dot(z)) > 1e-4f || std::abs(y.Dot(z)) > 1e-4f))
         return false;
@@ -218,8 +219,9 @@ bool Scene::SetWorldTransform(uint32 id, const TransformComponent& value) {
         return a.x == b.x && a.y == b.y && a.z == b.z;
     };
     if (same(value.rotation, current.rotation) && same(value.scale, current.scale)) {
-        // Translation does not require decomposing a sheared linear matrix. Preserve the
-        // original local rotation/scale and transform only the requested world position.
+        // Translation does not require decomposing a sheared linear matrix.
+        // Preserve the original local rotation/scale and transform only the
+        // requested world position.
         const auto* m = inverse.elements;
         const auto p = value.position;
         const Vec3 localPosition{m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12],
@@ -310,15 +312,16 @@ bool Scene::CopyEntityComponents(const Scene& source, uint32 sourceId, uint32 ta
             if (const auto* component = source.TryGetComponent<T>(sourceId))
                 prepared.AddComponent<T>(targetId, *component);
             prepared.GetPool<T>();
-            // Allocate before replacing any authored component. Prepared map nodes are moved
-            // into the destination below; no vector/string allocations occur during commit.
+            // Allocate before replacing any authored component. Prepared map nodes
+            // are moved into the destination below; no vector/string allocations
+            // occur during commit.
             auto& destination = GetPool<T>().values;
             destination.reserve(destination.size() + 1);
         });
     } catch (...) {
         return false;
     }
-    RemovePhysicsBody2D(targetId);
+    RemovePhysicsBody(targetId);
     ForEachType<AuthoredComponents>([&]<typename T> {
         auto& destination = GetPool<T>().values;
         destination.erase(targetId);
@@ -341,18 +344,22 @@ bool Scene::ApplyState(Scene& prepared) {
         nextLifetime = std::make_shared<int>(0);
         preparedLifetime = std::make_shared<int>(0);
         removedBodies.reserve(entities_.size());
-        for (const auto id : entities_)
-            if (!prepared.HasComponent<TransformComponent>(id) ||
-                !prepared.HasComponent<BoxCollider2DComponent>(id) ||
-                (!prepared.HasComponent<Rigidbody2DComponent>(id) &&
-                 prepared.HasComponent<Rigidbody3DComponent>(id) &&
-                 prepared.HasComponent<BoxCollider3DComponent>(id)))
+        for (const auto id : entities_) {
+            const bool had2D = HasComponent<BoxCollider2DComponent>(id) &&
+                               (HasComponent<Rigidbody2DComponent>(id) ||
+                                !HasComponent<BoxCollider3DComponent>(id));
+            const bool has2D = prepared.HasComponent<BoxCollider2DComponent>(id) &&
+                               (prepared.HasComponent<Rigidbody2DComponent>(id) ||
+                                !prepared.HasComponent<BoxCollider3DComponent>(id));
+            if (!prepared.HasComponent<TransformComponent>(id) || had2D != has2D ||
+                (!has2D && !prepared.HasComponent<BoxCollider3DComponent>(id)))
                 removedBodies.push_back(id);
+        }
     } catch (...) {
         return false;
     }
     for (const auto id : removedBodies)
-        RemovePhysicsBody2D(id);
+        RemovePhysicsBody(id);
     const bool timingChanged = settings_.fixedStep != prepared.settings_.fixedStep ||
                                settings_.physicsSubsteps != prepared.settings_.physicsSubsteps;
     pools_.swap(prepared.pools_);
@@ -369,10 +376,15 @@ bool Scene::ApplyState(Scene& prepared) {
     std::erase_if(collisionEvents2D_, [this](const auto& event) {
         return !IsAlive(event.entityA) || !IsAlive(event.entityB);
     });
+    std::erase_if(collisionEvents3D_, [this](const auto& event) {
+        return !IsAlive(event.entityA) || !IsAlive(event.entityB);
+    });
     updateBuffer_.clear();
     prepared.physics2D_.reset();
+    prepared.physics3D_.reset();
     prepared.physicsAccumulator_ = 0;
     prepared.collisionEvents2D_.clear();
+    prepared.collisionEvents3D_.clear();
     prepared.updateBuffer_.clear();
     return true;
 }

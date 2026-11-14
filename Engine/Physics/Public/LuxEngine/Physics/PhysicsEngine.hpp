@@ -52,13 +52,6 @@ public:
 
     static void SetGravity3D(const Vec3& gravity);
     static Vec3 GetGravity3D();
-
-    static void Step2D(Vec3& position, Rigidbody2DComponent& rb,
-                       const BoxCollider2DComponent& collider, double dt);
-    static void Step3D(Vec3& position, Rigidbody3DComponent& rb,
-                       const BoxCollider3DComponent& collider, double dt);
-    static void Step3D(Vec3& position, Rigidbody3DComponent& rb,
-                       const BoxCollider3DComponent& collider, double dt, const Vec3& gravity);
 };
 
 } // namespace LuxEngine

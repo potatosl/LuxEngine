@@ -116,7 +116,7 @@ Double-click `LuxEditor.exe` to launch the editor.
 See the `licenses/` directory for full license texts and dependency details.
 - Qt 6 (LGPLv3)
 - SDL3 (zlib)
-- Box2D (zlib)
+- Jolt Physics (MIT)
 - libzip (3-clause BSD)
 - The Forge (Apache-2.0)
 - .NET 10 runtime is required to execute C# game scripts

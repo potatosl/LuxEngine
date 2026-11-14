@@ -314,36 +314,15 @@ void Core() {
           "animation update loop keeps time wrapped and bounded");
     Throws([&] { clip.AddKeyframe({-1}); }, "invalid keyframe rejected");
     PhysicsEngine::Init();
-    Vec3 p{0, 0.5f, 0};
-    Rigidbody2DComponent body;
-    BoxCollider2DComponent collider;
-    PhysicsEngine::Step2D(p, body, collider, 1.0 / 60);
-    Check(body.isGrounded && Near(p.y, 0.5f), "ground contact");
-    body.velocity.y = 2;
-    PhysicsEngine::Step2D(p, body, collider, 1.0 / 60);
-    Check(p.y > 0.5f && !body.isGrounded, "jump leaves ground");
-    p = {0, 0, 0};
-    body = {};
-    collider.isTrigger = true;
-    PhysicsEngine::Step2D(p, body, collider, 1.0 / 60);
-    Check(p.y < 0 && !body.isGrounded, "trigger does not block");
-    body.type = BodyType::Kinematic;
-    body.velocity = {3, 0};
-    p = {0, 5, 0};
-    PhysicsEngine::Step2D(p, body, collider, 0.1);
-    Check(Near(p.x, 0.3f) && Near(p.y, 5), "kinematic motion");
-    const auto before = p;
-    PhysicsEngine::Step2D(p, body, collider, -1);
-    Check(Near(p.x, before.x), "invalid timestep ignored");
-    body.velocity = {std::numeric_limits<float>::quiet_NaN(), 0};
-    PhysicsEngine::Step2D(p, body, collider, 0.1);
-    Check(Near(p.x, before.x) && Near(p.y, before.y), "NaN velocity in Step2D ignored safely");
-    Vec3 p3{0, 2, 0};
-    Rigidbody3DComponent body3;
-    BoxCollider3DComponent collider3;
-    body3.velocity = {0, std::numeric_limits<float>::infinity(), 0};
-    PhysicsEngine::Step3D(p3, body3, collider3, 0.1);
-    Check(Near(p3.y, 2.0f), "infinite velocity in Step3D ignored safely");
+    PhysicsEngine::SetGravity2D({2, -3});
+    PhysicsEngine::SetGravity2D({std::numeric_limits<float>::quiet_NaN(), 0});
+    Check(Near(PhysicsEngine::GetGravity2D().x, 2) && Near(PhysicsEngine::GetGravity2D().y, -3),
+          "invalid 2D gravity preserves the configured Jolt gravity");
+    PhysicsEngine::SetGravity3D({1, -2, 3});
+    PhysicsEngine::SetGravity3D({0, std::numeric_limits<float>::infinity(), 0});
+    Check(Near(PhysicsEngine::GetGravity3D().y, -2),
+          "invalid 3D gravity preserves the configured Jolt gravity");
+    PhysicsEngine::Shutdown();
     Check(!Input::IsMouseButtonPressed(0) && !Input::IsMouseButtonPressed(33),
           "invalid mouse buttons");
     Check(!Input::IsGamepadButtonPressed(static_cast<LuxGamepadButton>(-1)),
@@ -382,7 +361,7 @@ void Physics2D() {
         const auto& body = falling.GetComponent<Rigidbody2DComponent>();
         Check(contact, "static collider receives falling body contact");
         Check(transform.position.y > 0.4f && transform.position.y < 0.65f,
-              "Box2D body rests on static floor");
+              "Jolt body rests on static floor");
         Check(Near(transform.position.z, 7), "2D physics preserves Z position");
         Check(body.isGrounded && std::abs(body.velocity.y) < 0.2f,
               "resting body reports grounded state");
@@ -593,7 +572,7 @@ void Physics2D() {
         for (int i = 0; i < 60; ++i)
             scene.OnUpdate(1.0 / 60.0);
         Check(std::abs(mover.GetComponent<TransformComponent>().position.x - 2.0f) < 0.1f,
-              "runtime velocity change reaches Box2D body");
+              "runtime velocity change reaches Jolt body");
         const float positionBeforeRemoval = mover.GetComponent<TransformComponent>().position.x;
         mover.RemoveComponent<Rigidbody2DComponent>();
         for (int i = 0; i < 60; ++i)

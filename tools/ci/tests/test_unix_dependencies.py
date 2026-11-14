@@ -16,7 +16,9 @@ class UnixDependenciesTests(unittest.TestCase):
             prefix = root / prefix_name
             for relative in [
                 "lib/cmake/SDL3/SDL3Config.cmake",
-                "lib/cmake/box2d/box2dConfig.cmake",
+                "lib/cmake/Jolt/JoltConfig.cmake",
+                "lib/cmake/Jolt/JoltConfig-debug.cmake",
+                "lib/cmake/Jolt/JoltConfig-release.cmake",
                 "include/stb/stb_image.h",
                 "include/stb/stb_truetype.h",
             ]:

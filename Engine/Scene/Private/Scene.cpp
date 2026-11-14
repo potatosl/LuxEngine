@@ -1,4 +1,4 @@
-#include "PhysicsWorld2D.hpp"
+#include "ScenePhysicsWorld.hpp"
 #include <LuxEngine/Core/Log.hpp>
 #include <LuxEngine/Physics/PhysicsEngine.hpp>
 #include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
@@ -66,7 +66,7 @@ void Scene::DestroyEntity(Entity entity) {
             pending.insert(pending.end(), found->second.begin(), found->second.end());
     }
     for (const auto id : removed) {
-        RemovePhysicsBody2D(id);
+        RemovePhysicsBody(id);
         for (auto& [type, pool] : pools_)
             pool->Erase(id);
         entities_.erase(id);
@@ -111,46 +111,58 @@ void Scene::OnUpdate(double dt) {
                                         static_cast<float>(dt),
                                         GetComponent<TransformComponent>(id));
     }
-    if (!physics2D_)
-        physics2D_ = std::make_unique<PhysicsWorld2D>();
+    const auto colliders2D = GetComponentEntityIds<BoxCollider2DComponent>();
+    const auto colliders3D = GetComponentEntityIds<BoxCollider3DComponent>();
+    const bool has2D = std::any_of(colliders2D.begin(), colliders2D.end(), [this](uint32 id) {
+        return HasComponent<TransformComponent>(id) && (HasComponent<Rigidbody2DComponent>(id) ||
+                                                        !HasComponent<BoxCollider3DComponent>(id));
+    });
+    const bool has3D = std::any_of(colliders3D.begin(), colliders3D.end(), [this](uint32 id) {
+        return HasComponent<TransformComponent>(id) && (!HasComponent<BoxCollider2DComponent>(id) ||
+                                                        !HasComponent<Rigidbody2DComponent>(id));
+    });
+    if (!has2D)
+        physics2D_.reset();
+    if (!has3D)
+        physics3D_.reset();
     collisionEvents2D_.clear();
+    collisionEvents3D_.clear();
     physicsAccumulator_ += std::min(dt, .25);
     const double fixedStep = settings_.fixedStep;
     while (physicsAccumulator_ + 1e-8 >= fixedStep) {
         physicsAccumulator_ = std::max(0.0, physicsAccumulator_ - fixedStep);
         const double substep = fixedStep / settings_.physicsSubsteps;
         for (uint32 index = 0; index < settings_.physicsSubsteps; ++index) {
-            std::unordered_map<uint32, TransformComponent> world3D;
-            std::unordered_map<uint32, Rigidbody3DComponent> bodies3D;
+            if (has2D && !physics2D_)
+                physics2D_ = std::make_unique<ScenePhysicsWorld>(true);
+            if (has3D && !physics3D_)
+                physics3D_ = std::make_unique<ScenePhysicsWorld>(false);
             const auto hierarchy = GetEntitiesInHierarchyOrder();
-            for (const auto& entity : hierarchy) {
-                const auto id = entity.GetId();
-                if (!HasComponent<TransformComponent>(id) ||
-                    (HasComponent<Rigidbody2DComponent>(id) &&
-                     HasComponent<BoxCollider2DComponent>(id)) ||
-                    !HasComponent<Rigidbody3DComponent>(id) ||
-                    !HasComponent<BoxCollider3DComponent>(id))
-                    continue;
-                auto world = GetWorldTransform(id);
-                auto body = GetComponent<Rigidbody3DComponent>(id);
-                PhysicsEngine::Step3D(world.position, body,
-                                      GetComponent<BoxCollider3DComponent>(id), substep,
-                                      settings_.overrideGravity ? settings_.gravity3D
-                                                                : PhysicsEngine::GetGravity3D());
-                world3D.emplace(id, world);
-                bodies3D.emplace(id, body);
+            if (physics2D_) {
+                physics2D_->Step(*this, substep);
+                for (const auto& contact : physics2D_->BeganContacts())
+                    collisionEvents2D_.push_back({contact.entityA,
+                                                  contact.entityB,
+                                                  {contact.normal.x, contact.normal.y},
+                                                  contact.isTrigger});
             }
-            std::vector<Collision2DEvent> contacts;
-            physics2D_->Step(*this, substep, contacts);
-            collisionEvents2D_.insert(collisionEvents2D_.end(), contacts.begin(), contacts.end());
-            const auto world2D = physics2D_->GetWorldPoses(*this);
-            // Apply every physics family together, parent before child. A hierarchy may contain
-            // both 2D and 3D bodies; each simulation's absolute world pose must remain independent.
+            if (physics3D_) {
+                physics3D_->Step(*this, substep);
+                const auto& contacts = physics3D_->BeganContacts();
+                collisionEvents3D_.insert(collisionEvents3D_.end(), contacts.begin(),
+                                          contacts.end());
+            }
+            const auto world2D = physics2D_ ? physics2D_->GetWorldPoses(*this)
+                                            : std::unordered_map<uint32, TransformComponent>{};
+            const auto world3D = physics3D_ ? physics3D_->GetWorldPoses(*this)
+                                            : std::unordered_map<uint32, TransformComponent>{};
+            // Apply every physics family together, parent before child. A hierarchy
+            // may contain both 2D and 3D bodies; each simulation's absolute world
+            // pose must remain independent.
             for (const auto& entity : hierarchy) {
                 const auto id = entity.GetId();
                 if (const auto pose = world3D.find(id); pose != world3D.end()) {
-                    if (SetWorldTransform(id, pose->second))
-                        GetComponent<Rigidbody3DComponent>(id) = bodies3D.at(id);
+                    SetWorldTransform(id, pose->second);
                 } else if (const auto pose2D = world2D.find(id); pose2D != world2D.end()) {
                     SetWorldTransform(id, pose2D->second);
                 }
@@ -159,9 +171,14 @@ void Scene::OnUpdate(double dt) {
     }
 }
 
-void Scene::RemovePhysicsBody2D(uint32 id) {
+void Scene::RemovePhysicsBody(uint32 id) {
     if (physics2D_)
         physics2D_->Remove(id);
+    if (physics3D_)
+        physics3D_->Remove(id);
+    std::erase_if(collisionEvents3D_, [id](const auto& contact) {
+        return contact.entityA == id || contact.entityB == id;
+    });
     if (auto* body = TryGetComponent<Rigidbody2DComponent>(id))
         body->isGrounded = false;
     std::erase_if(collisionEvents2D_,
@@ -211,7 +228,8 @@ Vec4 Exposed(Vec4 color, float exposure) {
 } // namespace
 
 void Scene::OnRender() {
-    // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직 연결되지 않았습니다.
+    // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직
+    // 연결되지 않았습니다.
     const auto entities = GetEntitiesIn2DLayerOrder();
     for (const bool tilemaps : {true, false}) {
         for (Entity entity : entities) {
@@ -342,7 +360,8 @@ bool WriteTempFileFlushed(const std::filesystem::path& tempPath, const std::stri
     namespace fs = std::filesystem;
     std::error_code ec;
     if (ConsumeSaveFault(Scene::SaveFault::TempWriteFailure)) {
-        SetSaveError("Scene save failed: injected temporary file write failure (Win32 error 5: "
+        SetSaveError("Scene save failed: injected temporary file write failure "
+                     "(Win32 error 5: "
                      "ERROR_ACCESS_DENIED) for " +
                      PathToUtf8(tempPath));
         return false;
@@ -464,8 +483,8 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
                          "' failed (Win32 error " + std::to_string(moveErr) + ")");
             return false;
         }
-        // If another writer created targetPath concurrently, fall through to atomic ReplaceFileW
-        // with backup.
+        // If another writer created targetPath concurrently, fall through to atomic
+        // ReplaceFileW with backup.
     }
 
     const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -482,7 +501,8 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
         replaceSucceeded = false;
         replaceErr = ERROR_ACCESS_DENIED;
     } else if (ConsumeSaveFault(Scene::SaveFault::ReplaceFailedAfterBackup)) {
-        // Simulate step 1 of ReplaceFileW succeeding (target moved to backup) and step 2 failing.
+        // Simulate step 1 of ReplaceFileW succeeding (target moved to backup) and
+        // step 2 failing.
         if (MoveFileExW(targetW.c_str(), backupW.c_str(), MOVEFILE_WRITE_THROUGH)) {
             replaceSucceeded = false;
             replaceErr = ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
@@ -491,7 +511,8 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
             replaceErr = GetLastError();
         }
     } else if (ConsumeSaveFault(Scene::SaveFault::BackupRestoreFailure)) {
-        // Simulate target moved to backup, replacement failing, AND backup restoration failing.
+        // Simulate target moved to backup, replacement failing, AND backup
+        // restoration failing.
         if (MoveFileExW(targetW.c_str(), backupW.c_str(), MOVEFILE_WRITE_THROUGH)) {
             replaceSucceeded = false;
             replaceErr = ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
@@ -518,20 +539,21 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
         replaceErr = ERROR_FILE_NOT_FOUND;
     }
 
-    // Replacement failed. Absolute priority: preserve the original file and never clobber it with
-    // tempW.
+    // Replacement failed. Absolute priority: preserve the original file and never
+    // clobber it with tempW.
     const bool backupExists = (GetFileAttributesW(backupW.c_str()) != INVALID_FILE_ATTRIBUTES);
     if (!backupExists) {
         // Original target file was never renamed to backup and remains intact.
         DeleteFileW(tempW.c_str());
-        SetSaveError("Scene save failed: ReplaceFileW failed before backup replacement for '" +
+        SetSaveError("Scene save failed: ReplaceFileW failed before backup "
+                     "replacement for '" +
                      PathToUtf8(targetPath) + "' (Win32 error " + std::to_string(replaceErr) +
                      "). Original file preserved.");
         return false;
     }
 
-    // Backup exists: the original file was moved to backupW. Attempt safe restoration of backupW ->
-    // targetW.
+    // Backup exists: the original file was moved to backupW. Attempt safe
+    // restoration of backupW -> targetW.
     bool restored = false;
     DWORD restoreErr = ERROR_SUCCESS;
     if (injectRestoreFailure) {
@@ -573,7 +595,8 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
         return false;
     }
 
-    // Backup restoration failed! NEVER delete backupW — it holds the user's original scene data.
+    // Backup restoration failed! NEVER delete backupW — it holds the user's
+    // original scene data.
     SetSaveError("CRITICAL: Scene save failed for '" + PathToUtf8(targetPath) + "' (Win32 error " +
                  std::to_string(replaceErr) + ") and backup restoration failed (Win32 error " +
                  std::to_string(restoreErr) +
@@ -666,7 +689,8 @@ bool ValidSceneMetadata(Scene& scene) {
     std::unordered_map<uint32, std::vector<uint32>> children;
     for (const auto& entity : entities)
         children[scene.GetParent(entity.GetId())].push_back(entity.GetId());
-    // Pre/post indices make ancestry validation linear even for a very deep hierarchy.
+    // Pre/post indices make ancestry validation linear even for a very deep
+    // hierarchy.
     std::unordered_map<uint32, std::pair<uint32, uint32>> intervals;
     std::vector<std::pair<uint32, bool>> pending;
     for (const auto root : children[0])
@@ -1102,7 +1126,9 @@ void Scene::AdoptLoadedScene(Scene& parsed) {
     std::swap(settings_, parsed.settings_);
     physicsAccumulator_ = 0;
     physics2D_.reset();
+    physics3D_.reset();
     collisionEvents2D_.clear();
+    collisionEvents3D_.clear();
     lifetime_ = std::move(nextLifetime);
 }
 
@@ -1168,4 +1194,10 @@ void Scene::RequireAlive(uint32 id) const {
 }
 
 Scene::PoolBase::~PoolBase() = default;
+} // namespace LuxEngine
+
+namespace LuxEngine {
+const std::vector<Collision3DEvent>& Scene::GetCollisionEvents3D() const {
+    return collisionEvents3D_;
+}
 } // namespace LuxEngine

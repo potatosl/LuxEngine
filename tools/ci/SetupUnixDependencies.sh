@@ -42,7 +42,7 @@ fetch_source() {
     git -C "$directory" checkout --quiet --detach FETCH_HEAD
 }
 
-# These versions are shared by Debug and Release jobs. Unix dependency ABIs are compatible.
+# SDL shares its ABI across configurations. Jolt installs matching Debug and Release archives.
 if [[ ! -f "$prefix/lib/cmake/SDL3/SDL3Config.cmake" ]]; then
     sdl_source="$source_root/SDL"
     fetch_source https://github.com/libsdl-org/SDL.git \
@@ -55,17 +55,25 @@ if [[ ! -f "$prefix/lib/cmake/SDL3/SDL3Config.cmake" ]]; then
     cmake --install "$source_root/sdl-build"
 fi
 
-# Homebrew's Box2D is 3.x; LuxEngine deliberately requires the incompatible 2.4 API.
-if [[ ! -f "$prefix/lib/cmake/box2d/box2dConfig.cmake" ]]; then
-    box_source="$source_root/box2d"
-    fetch_source https://github.com/erincatto/box2d.git \
-        9ebbbcd960ad424e03e5de6e66a40764c16f51bc "$box_source" # Box2D 2.4.1
-    cmake -S "$box_source" -B "$source_root/box2d-build" -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" \
+# Offline project configuration consumes this separately installed Jolt package.
+if [[ ! -f "$prefix/lib/cmake/Jolt/JoltConfig.cmake" ||
+      ! -f "$prefix/lib/cmake/Jolt/JoltConfig-debug.cmake" ||
+      ! -f "$prefix/lib/cmake/Jolt/JoltConfig-release.cmake" ]]; then
+    jolt_source="$source_root/jolt"
+    fetch_source https://github.com/jrouwe/JoltPhysics.git \
+        e77f175595e64cb44218cc9d9d56fc365ad0e36a "$jolt_source" # Jolt 5.6.0
+    for configuration in Debug Release; do
+    cmake -S "$jolt_source/Build" -B "$source_root/jolt-build" -G Ninja \
+        -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_DEBUG_POSTFIX=d -DCMAKE_INSTALL_PREFIX="$prefix" \
         -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DBOX2D_BUILD_UNIT_TESTS=OFF -DBOX2D_BUILD_TESTBED=OFF -DBOX2D_BUILD_DOCS=OFF
-    cmake --build "$source_root/box2d-build" --parallel "$jobs"
-    cmake --install "$source_root/box2d-build"
+        -DTARGET_UNIT_TESTS=OFF -DTARGET_HELLO_WORLD=OFF -DTARGET_SAMPLES=OFF \
+        -DTARGET_VIEWER=OFF -DTARGET_PERFORMANCE_TEST=OFF \
+        -DJPH_USE_DX12=OFF -DJPH_USE_VK=OFF -DJPH_USE_MTL=OFF -DJPH_USE_CPU_COMPUTE=OFF \
+        -DINTERPROCEDURAL_OPTIMIZATION=OFF -DOVERRIDE_CXX_FLAGS=OFF \
+        -DDEBUG_RENDERER_IN_DEBUG_AND_RELEASE=OFF -DPROFILER_IN_DEBUG_AND_RELEASE=OFF
+    cmake --build "$source_root/jolt-build" --parallel "$jobs"
+    cmake --install "$source_root/jolt-build"
+    done
 fi
 
 if [[ ! -f "$prefix/include/stb/stb_image.h" ||

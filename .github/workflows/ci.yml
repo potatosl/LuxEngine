@@ -87,16 +87,16 @@ jobs:
           arch: win64_msvc2022_64
           cache: true
 
-      - name: Build and Install Box2D 2.4.1
+      - name: Build and Install Jolt Physics 5.6.0
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Path C:/LuxDeps/src -Force | Out-Null
-          git clone --depth 1 -b v2.4.1 https://github.com/erincatto/box2d C:/LuxDeps/src/box2d
-          cmake -S C:/LuxDeps/src/box2d -B C:/LuxDeps/build/box2d -G "Visual Studio 17 2022" -A x64 -DBOX2D_BUILD_UNIT_TESTS=OFF -DBOX2D_BUILD_TESTBED=OFF -DBOX2D_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX=C:/LuxDeps -DCMAKE_DEBUG_POSTFIX=d
+          git clone --depth 1 -b v5.6.0 https://github.com/jrouwe/JoltPhysics C:/LuxDeps/src/jolt
+          cmake -S C:/LuxDeps/src/jolt/Build -B C:/LuxDeps/build/jolt -G "Visual Studio 17 2022" -A x64 -DTARGET_UNIT_TESTS=OFF -DTARGET_HELLO_WORLD=OFF -DTARGET_SAMPLES=OFF -DTARGET_VIEWER=OFF -DTARGET_PERFORMANCE_TEST=OFF -DUSE_STATIC_MSVC_RUNTIME_LIBRARY=OFF -DINTERPROCEDURAL_OPTIMIZATION=OFF -DDEBUG_RENDERER_IN_DEBUG_AND_RELEASE=OFF -DPROFILER_IN_DEBUG_AND_RELEASE=OFF -DJPH_USE_DX12=OFF -DJPH_USE_VK=OFF -DJPH_USE_MTL=OFF -DJPH_USE_CPU_COMPUTE=OFF -DCMAKE_INSTALL_PREFIX=C:/LuxDeps -DCMAKE_DEBUG_POSTFIX=d
           foreach ($configuration in @('Debug', 'Release')) {
-            cmake --build C:/LuxDeps/build/box2d --config $configuration --parallel 2
-            cmake --install C:/LuxDeps/build/box2d --config $configuration
+            cmake --build C:/LuxDeps/build/jolt --config $configuration --parallel 2
+            cmake --install C:/LuxDeps/build/jolt --config $configuration
           }
 
       - name: Configure Engine, Editor & Tests
