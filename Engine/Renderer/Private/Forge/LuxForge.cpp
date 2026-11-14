@@ -10,6 +10,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -291,12 +292,28 @@ bool AcquirePlatform(std::string& error) {
     if (dllDir.empty()) {
 #if defined(_WIN32)
         HMODULE self = nullptr;
-        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCSTR>(&AcquirePlatform), &self);
-        char path[32768] = {};
-        GetModuleFileNameA(self, path, sizeof(path));
-        dllDir = path;
+        wchar_t path[32768] = {};
+        const bool foundModule =
+            GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               reinterpret_cast<LPCWSTR>(&AcquirePlatform), &self) != 0;
+        const DWORD length = foundModule ? GetModuleFileNameW(self, path, 32768) : 0;
+        const int bytes =
+            length && length < 32768
+                ? WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, path, static_cast<int>(length),
+                                      nullptr, 0, nullptr, nullptr)
+                : 0;
+        std::string utf8Directory(static_cast<size_t>(bytes), '\0');
+        if (!bytes ||
+            WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, path, static_cast<int>(length),
+                                utf8Directory.data(), bytes, nullptr, nullptr) != bytes) {
+            error = "The Forge renderer directory could not be resolved as UTF-8";
+            exitFileSystem();
+            exitMemAlloc();
+            --g_PlatformUsers;
+            return false;
+        }
+        dllDir = std::move(utf8Directory);
 #else
         Dl_info module = {};
         if (!dladdr(reinterpret_cast<void*>(&AcquirePlatform), &module) || !module.dli_fname) {
