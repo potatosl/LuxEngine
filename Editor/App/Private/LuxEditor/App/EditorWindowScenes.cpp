@@ -7,31 +7,7 @@
 #include <LuxEditor/Scene/SceneSettingsDialog.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
-#include <QAction>
-#include <QApplication>
-#include <QCheckBox>
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QDoubleSpinBox>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QFormLayout>
-#include <QGraphicsOpacityEffect>
-#include <QInputDialog>
-#include <QLabel>
-#include <QMenu>
-#include <QMenuBar>
-#include <QMessageBox>
-#include <QProgressBar>
-#include <QPropertyAnimation>
-#include <QScopedValueRollback>
-#include <QSettings>
-#include <QSignalBlocker>
-#include <QTabBar>
-#include <QTabWidget>
-#include <QTreeWidget>
-#include <QUndoStack>
-#include <QVBoxLayout>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 #include <chrono>
 #include <stdexcept>
@@ -39,12 +15,12 @@
 
 namespace LuxEditor {
 namespace {
-QString Q(const std::filesystem::path& path) {
-    return QString::fromUtf8(PathUtf8(path));
+LuxUI::String Q(const std::filesystem::path& path) {
+    return LuxUI::String::fromUtf8(PathUtf8(path));
 }
 
-QString Q(const std::string& text) {
-    return QString::fromUtf8(text);
+LuxUI::String Q(const std::string& text) {
+    return LuxUI::String::fromUtf8(text);
 }
 
 bool SameFile(const std::filesystem::path& left, const std::filesystem::path& right) {
@@ -71,108 +47,108 @@ bool OwnsLoadedScene(const EditorProject& project, const LuxEngine::Scene& scene
            relative.extension() == ".lux";
 }
 
-QString SceneName(const EditorDocument::TabInfo& tab) {
-    return tab.path.empty() ? QStringLiteral("새 씬 %1").arg(tab.id)
-                            : QFileInfo(Q(tab.path)).fileName();
+LuxUI::String SceneName(const EditorDocument::TabInfo& tab) {
+    return tab.path.empty() ? LUX_UI_TEXT("새 씬 %1").arg(tab.id)
+                            : LuxUI::FileInfo(Q(tab.path)).fileName();
 }
 } // namespace
 
 void EditorWindow::BuildSceneMenus() {
-    auto* menu = menuBar()->addMenu(QStringLiteral("씬"));
-    menu->setObjectName(QStringLiteral("sceneMenu"));
+    auto* menu = menuBar()->addMenu(LUX_UI_TEXT("씬"));
+    menu->setObjectName(LUX_UI_TEXT("sceneMenu"));
     BuildPrefabMenus(menu);
-    const auto add = [&](const QString& label, const char* name, auto callback) {
+    const auto add = [&](const LuxUI::String& label, const char* name, auto callback) {
         auto* action = menu->addAction(label);
-        action->setObjectName(QString::fromLatin1(name));
-        connect(action, &QAction::triggered, this, callback);
+        action->setObjectName(LuxUI::String::fromLatin1(name));
+        connect(action, &LuxUI::Action::triggered, this, callback);
         return action;
     };
-    add(QStringLiteral("모든 씬 저장"), "saveAllScenes", [this] { SaveAllScenes(); });
-    add(QStringLiteral("씬 닫기 / 언로드"), "closeScene",
+    add(LUX_UI_TEXT("모든 씬 저장"), "saveAllScenes", [this] { SaveAllScenes(); });
+    add(LUX_UI_TEXT("씬 닫기 / 언로드"), "closeScene",
         [this] { RequestCloseScene(document_.GetActiveTabId()); });
-    add(QStringLiteral("씬 복제..."), "duplicateScene", [this] { DuplicateScene(); });
-    add(QStringLiteral("씬 파일 삭제..."), "deleteSceneFile", [this] { DeleteSceneFile(); });
-    add(QStringLiteral("시작 씬으로 지정"), "setStartupScene", [this] { SetStartupScene(); });
-    add(QStringLiteral("시작 씬 실행"), "runStartupScene", [this] {
+    add(LUX_UI_TEXT("씬 복제..."), "duplicateScene", [this] { DuplicateScene(); });
+    add(LUX_UI_TEXT("씬 파일 삭제..."), "deleteSceneFile", [this] { DeleteSceneFile(); });
+    add(LUX_UI_TEXT("시작 씬으로 지정"), "setStartupScene", [this] { SetStartupScene(); });
+    add(LUX_UI_TEXT("시작 씬 실행"), "runStartupScene", [this] {
         if (project_ && OpenSceneDocument(project_->GetSceneFile()))
             RunSceneInWindow();
     });
     menu->addSeparator();
-    add(QStringLiteral("비동기 씬 열기..."), "openSceneAsync", [this] {
-        const auto file = QFileDialog::getOpenFileName(this, QStringLiteral("씬 열기"), {},
-                                                       QStringLiteral("Lux 씬 (*.lux)"));
+    add(LUX_UI_TEXT("비동기 씬 열기..."), "openSceneAsync", [this] {
+        const auto file = LuxUI::FileDialog::getOpenFileName(this, LUX_UI_TEXT("씬 열기"), {},
+                                                             LUX_UI_TEXT("Lux 씬 (*.lux)"));
         if (!file.isEmpty())
             LoadSceneAsync(PathFromUtf8(file.toUtf8().toStdString()), false);
     });
-    add(QStringLiteral("씬 프리로드..."), "preloadScene", [this] {
-        const auto file = QFileDialog::getOpenFileName(this, QStringLiteral("씬 프리로드"), {},
-                                                       QStringLiteral("Lux 씬 (*.lux)"));
+    add(LUX_UI_TEXT("씬 프리로드..."), "preloadScene", [this] {
+        const auto file = LuxUI::FileDialog::getOpenFileName(this, LUX_UI_TEXT("씬 프리로드"), {},
+                                                             LUX_UI_TEXT("Lux 씬 (*.lux)"));
         if (!file.isEmpty())
             LoadSceneAsync(PathFromUtf8(file.toUtf8().toStdString()), true);
     });
-    add(QStringLiteral("프리로드 캐시 비우기"), "unloadSceneCache",
+    add(LUX_UI_TEXT("프리로드 캐시 비우기"), "unloadSceneCache",
         [this] { sceneManager_.ClearCache(); });
     menu->addSeparator();
-    add(QStringLiteral("씬 중첩 / 인스턴스 추가..."), "instanceScene",
+    add(LUX_UI_TEXT("씬 중첩 / 인스턴스 추가..."), "instanceScene",
         [this] { AddSceneReference(LuxEngine::SceneReferenceMode::Nested); });
-    add(QStringLiteral("씬 상속..."), "inheritScene",
+    add(LUX_UI_TEXT("씬 상속..."), "inheritScene",
         [this] { AddSceneReference(LuxEngine::SceneReferenceMode::Inherited); });
-    add(QStringLiteral("Additive 씬 로드..."), "additiveScene",
+    add(LUX_UI_TEXT("Additive 씬 로드..."), "additiveScene",
         [this] { AddSceneReference(LuxEngine::SceneReferenceMode::Additive); });
-    add(QStringLiteral("참조 씬 갱신"), "refreshSceneReferences",
+    add(LUX_UI_TEXT("참조 씬 갱신"), "refreshSceneReferences",
         [this] { RefreshSceneReferences(); });
-    add(QStringLiteral("선택 참조 씬 경로 변경..."), "relinkSceneReference",
+    add(LUX_UI_TEXT("선택 참조 씬 경로 변경..."), "relinkSceneReference",
         [this] { RelinkSceneReference(); });
-    add(QStringLiteral("선택 참조 씬 다시 로드"), "loadSceneReference", [this] {
+    add(LUX_UI_TEXT("선택 참조 씬 다시 로드"), "loadSceneReference", [this] {
         const auto selected = document_.GetSelected();
         if (!selected || !selected.HasComponent<LuxEngine::SceneReferenceComponent>())
             return;
         const auto root = selected.GetId();
-        RecordEdit(QStringLiteral("참조 씬 다시 로드"), [this, root] {
+        RecordEdit(LUX_UI_TEXT("참조 씬 다시 로드"), [this, root] {
             std::string error;
             if (!sceneManager_.RefreshInstance(document_.GetScene(), root, error))
                 throw std::runtime_error(error);
         });
         RefreshAll();
     });
-    add(QStringLiteral("선택 참조 씬 언로드"), "unloadSceneReference", [this] {
+    add(LUX_UI_TEXT("선택 참조 씬 언로드"), "unloadSceneReference", [this] {
         const auto selected = document_.GetSelected();
         if (!selected || !selected.HasComponent<LuxEngine::SceneReferenceComponent>())
             return;
         const auto root = selected.GetId();
-        RecordEdit(QStringLiteral("참조 씬 언로드"), [this, root] {
+        RecordEdit(LUX_UI_TEXT("참조 씬 언로드"), [this, root] {
             std::string error;
             if (!sceneManager_.UnloadInstance(document_.GetScene(), root, error))
                 throw std::runtime_error(error);
         });
         RefreshAll();
     });
-    add(QStringLiteral("선택 씬 스트리밍..."), "configureSceneStreaming",
+    add(LUX_UI_TEXT("선택 씬 스트리밍..."), "configureSceneStreaming",
         [this] { ConfigureSceneStreaming(); });
     menu->addSeparator();
-    add(QStringLiteral("선택 항목 그룹화"), "groupEntities", [this] { GroupSelection(); });
-    add(QStringLiteral("그룹 해제"), "ungroupEntities", [this] { UngroupSelection(); });
-    add(QStringLiteral("부모 연결 해제"), "detachEntity", [this] {
+    add(LUX_UI_TEXT("선택 항목 그룹화"), "groupEntities", [this] { GroupSelection(); });
+    add(LUX_UI_TEXT("그룹 해제"), "ungroupEntities", [this] { UngroupSelection(); });
+    add(LUX_UI_TEXT("부모 연결 해제"), "detachEntity", [this] {
         const auto selected = document_.GetSelected();
         if (selected)
             ReparentSelection({selected.GetId()}, 0);
     });
-    add(QStringLiteral("다른 씬으로 이동..."), "moveEntityToScene",
+    add(LUX_UI_TEXT("다른 씬으로 이동..."), "moveEntityToScene",
         [this] { ChooseMoveDestination(); });
     menu->addSeparator();
-    add(QStringLiteral("씬 설정..."), "sceneSettings", [this] { EditSceneSettings(); });
-    auto* transitions = add(QStringLiteral("씬 전환 효과"), "sceneTransitions", [] {});
+    add(LUX_UI_TEXT("씬 설정..."), "sceneSettings", [this] { EditSceneSettings(); });
+    auto* transitions = add(LUX_UI_TEXT("씬 전환 효과"), "sceneTransitions", [] {});
     transitions->setCheckable(true);
-    sceneTransitions_ = QSettings().value(QStringLiteral("sceneTransitions"), true).toBool();
+    sceneTransitions_ = LuxUI::Settings().value(LUX_UI_TEXT("sceneTransitions"), true).toBool();
     transitions->setChecked(sceneTransitions_);
-    connect(transitions, &QAction::toggled, this, [this](bool enabled) {
+    connect(transitions, &LuxUI::Action::toggled, this, [this](bool enabled) {
         sceneTransitions_ = enabled;
-        QSettings().setValue(QStringLiteral("sceneTransitions"), enabled);
+        LuxUI::Settings().setValue(LUX_UI_TEXT("sceneTransitions"), enabled);
     });
     for (const auto& [name, next] : std::array<std::pair<const char*, bool>, 2>{
              {{"nextScene", true}, {"previousScene", false}}}) {
         auto* action =
-            add(next ? QStringLiteral("다음 씬") : QStringLiteral("이전 씬"), name, [this, next] {
+            add(next ? LUX_UI_TEXT("다음 씬") : LUX_UI_TEXT("이전 씬"), name, [this, next] {
                 const auto tabs = document_.ListTabs();
                 const auto current =
                     std::find_if(tabs.begin(), tabs.end(), [this](const auto& tab) {
@@ -181,8 +157,9 @@ void EditorWindow::BuildSceneMenus() {
                 const auto index = static_cast<size_t>(std::distance(tabs.begin(), current));
                 SwitchSceneDocument(tabs[(index + (next ? 1 : tabs.size() - 1)) % tabs.size()].id);
             });
-        action->setShortcut(next ? QKeySequence(Qt::CTRL | Qt::Key_Tab)
-                                 : QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Tab));
+        action->setShortcut(next ? LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::Key_Tab)
+                                 : LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::SHIFT |
+                                                      LuxUI::Flags::Key_Tab));
     }
 }
 
@@ -190,18 +167,19 @@ void EditorWindow::RefreshSceneTabs() {
     if (!sceneTabs_)
         return;
     refreshingSceneTabs_ = true;
-    const QSignalBlocker block(sceneTabs_);
+    const LuxUI::SignalBlocker block(sceneTabs_);
     const auto tabs = document_.ListTabs();
     while (sceneTabs_->count() > static_cast<int>(tabs.size()))
         sceneTabs_->removeTab(sceneTabs_->count() - 1);
     for (size_t index = 0; index < tabs.size(); ++index) {
         const auto& tab = tabs[index];
-        const auto label = SceneName(tab) + (tab.dirty ? QStringLiteral(" *") : QString());
+        const auto label = SceneName(tab) + (tab.dirty ? LUX_UI_TEXT(" *") : LuxUI::String());
         if (static_cast<int>(index) >= sceneTabs_->count())
             sceneTabs_->addTab(label);
         else
             sceneTabs_->setTabText(static_cast<int>(index), label);
-        sceneTabs_->setTabData(static_cast<int>(index), QVariant::fromValue<qulonglong>(tab.id));
+        sceneTabs_->setTabData(static_cast<int>(index),
+                               LuxUI::Variant::fromValue<qulonglong>(tab.id));
         sceneTabs_->setTabToolTip(static_cast<int>(index), Q(tab.path));
         if (tab.id == document_.GetActiveTabId())
             sceneTabs_->setCurrentIndex(static_cast<int>(index));
@@ -237,8 +215,8 @@ bool EditorWindow::SwitchSceneDocument(EditorDocument::TabId id, bool animate) {
     canvas_->CancelInteraction();
     overviewCanvas_->CancelInteraction();
     canvas3D_->CancelInteraction();
-    const QPixmap previous =
-        animate && sceneTransitions_ && isVisible() ? viewportTabs_->grab() : QPixmap();
+    const LuxUI::Pixmap previous =
+        animate && sceneTransitions_ && isVisible() ? viewportTabs_->grab() : LuxUI::Pixmap();
     sceneProjects_[document_.GetActiveTabId()] = project_;
     if (!document_.ActivateTab(id))
         return false;
@@ -292,10 +270,12 @@ bool EditorWindow::RequestCloseScene(EditorDocument::TabId id) {
     if (document_.IsDirty(id)) {
         if (!SwitchSceneDocument(id, false))
             return false;
-        const auto answer = QMessageBox::question(
-            this, QStringLiteral("씬 닫기"), QStringLiteral("변경 사항을 저장하시겠습니까?"),
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
-        if (answer == QMessageBox::Cancel || (answer == QMessageBox::Save && !SaveScene(false)))
+        const auto answer = LuxUI::MessageBox::question(
+            this, LUX_UI_TEXT("씬 닫기"), LUX_UI_TEXT("변경 사항을 저장하시겠습니까?"),
+            LuxUI::MessageBox::Save | LuxUI::MessageBox::Discard | LuxUI::MessageBox::Cancel,
+            LuxUI::MessageBox::Save);
+        if (answer == LuxUI::MessageBox::Cancel ||
+            (answer == LuxUI::MessageBox::Save && !SaveScene(false)))
             return false;
     }
     return CloseSceneDocument(id, true);
@@ -330,7 +310,7 @@ void EditorWindow::LoadSceneAsync(const std::filesystem::path& path, bool preloa
             SameFile(path, pending.path))
             return;
     if (pendingSceneLoads_.size() >= 8) {
-        Log(QStringLiteral("진행 중인 씬 로드가 끝난 후 다시 시도해 주세요."), true);
+        Log(LUX_UI_TEXT("진행 중인 씬 로드가 끝난 후 다시 시도해 주세요."), true);
         return;
     }
     PendingSceneLoad request;
@@ -342,14 +322,14 @@ void EditorWindow::LoadSceneAsync(const std::filesystem::path& path, bool preloa
     try {
         request.result = preload ? sceneManager_.PreloadAsync(path) : sceneManager_.LoadAsync(path);
     } catch (const std::exception& error) {
-        Log(QStringLiteral("씬 로드를 시작하지 못했습니다: %1")
-                .arg(QString::fromUtf8(error.what())),
+        Log(LUX_UI_TEXT("씬 로드를 시작하지 못했습니다: %1")
+                .arg(LuxUI::String::fromUtf8(error.what())),
             true);
         return;
     }
     pendingSceneLoads_.push_back(std::move(request));
     sceneLoadProgress_->setToolTip(
-        QStringLiteral("씬 로드 %1개 진행 중").arg(pendingSceneLoads_.size()));
+        LUX_UI_TEXT("씬 로드 %1개 진행 중").arg(pendingSceneLoads_.size()));
     sceneLoadProgress_->show();
     sceneLoadTimer_.start();
 }
@@ -379,7 +359,7 @@ void EditorWindow::PollSceneLoads() {
                 warning = originalError;
         }
         if (!result) {
-            Log(QStringLiteral("씬 로드 실패: %1").arg(Q(result.error)), true);
+            Log(LUX_UI_TEXT("씬 로드 실패: %1").arg(Q(result.error)), true);
             continue;
         }
         if (request.preload)
@@ -400,7 +380,8 @@ void EditorWindow::PollSceneLoads() {
             }
         }
         if (const auto existing = document_.FindTabByPath(PathUtf8(request.path))) {
-            if (document_.GetActiveTabId() == request.origin && !QApplication::activeModalWidget())
+            if (document_.GetActiveTabId() == request.origin &&
+                !LuxUI::Application::activeModalWidget())
                 SwitchSceneDocument(existing);
             continue;
         }
@@ -409,7 +390,8 @@ void EditorWindow::PollSceneLoads() {
         CancelViewportEdit();
         sceneProjects_[document_.GetActiveTabId()] = project_;
         const auto previous = document_.GetActiveTabId();
-        const bool foreground = previous == request.origin && !QApplication::activeModalWidget();
+        const bool foreground =
+            previous == request.origin && !LuxUI::Application::activeModalWidget();
         const auto id = document_.AdoptTab(PathUtf8(request.path), std::move(result.scene), false,
                                            std::move(warning));
         if (!id) {
@@ -457,7 +439,7 @@ EditorSnapshot EditorWindow::SnapshotScene(EditorDocument::TabId id) {
     if (!scene || !scene->SerializeToString(serialized))
         return {};
     EditorSnapshot snapshot;
-    snapshot.scene = QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+    snapshot.scene = LuxUI::ByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
     snapshot.selection = document_.GetSelection(id);
     for (const auto& entity : scene->GetEntities())
         if (const auto* animation = entity.TryGetComponent<LuxEngine::AnimationComponent>())
@@ -470,10 +452,10 @@ void EditorWindow::RestoreSceneAt(EditorDocument::TabId id, const EditorSnapshot
     if (snapshot.isEmpty() || !document_.GetScene(id))
         return;
     CancelViewportEdit();
-    const QScopedValueRollback<bool> restoring(restoringHistory_, true);
+    const LuxUI::ScopedValueRollback<bool> restoring(restoringHistory_, true);
     const std::string data(snapshot.scene.constData(), static_cast<size_t>(snapshot.scene.size()));
     if (!document_.ReplaceSceneFromData(id, data, selected)) {
-        Log(QStringLiteral("씬 편집 이력을 복원하지 못했습니다."), true);
+        Log(LUX_UI_TEXT("씬 편집 이력을 복원하지 못했습니다."), true);
         return;
     }
     document_.SetSelection(id, snapshot.selection, selected);
@@ -489,8 +471,8 @@ void EditorWindow::RestoreSceneAt(EditorDocument::TabId id, const EditorSnapshot
 
 void EditorWindow::InvalidateSceneHistory(EditorDocument::TabId id) {
     for (int index = 0; index < undo_->count(); ++index)
-        if (auto* command =
-                dynamic_cast<SceneEditCommand*>(const_cast<QUndoCommand*>(undo_->command(index)));
+        if (auto* command = dynamic_cast<SceneEditCommand*>(
+                const_cast<LuxUI::UndoCommand*>(undo_->command(index)));
             command && command->Touches(id))
             command->Discard();
 }
@@ -503,8 +485,8 @@ void EditorWindow::PushSceneCommand(SceneEditCommand* command) {
             bytes += previous->Bytes();
     const auto limit = std::max(Budget, command->Bytes());
     for (int index = 0; index < undo_->index() && bytes > limit; ++index)
-        if (auto* previous =
-                dynamic_cast<SceneEditCommand*>(const_cast<QUndoCommand*>(undo_->command(index)))) {
+        if (auto* previous = dynamic_cast<SceneEditCommand*>(
+                const_cast<LuxUI::UndoCommand*>(undo_->command(index)))) {
             bytes -= previous->Bytes();
             previous->Discard();
         }
@@ -538,16 +520,16 @@ void EditorWindow::DuplicateScene() {
     StopPreview();
     EndTimelineEdit();
     CancelViewportEdit();
-    auto path = QFileDialog::getSaveFileName(this, QStringLiteral("씬 복제"), {},
-                                             QStringLiteral("Lux 씬 (*.lux)"));
+    auto path = LuxUI::FileDialog::getSaveFileName(this, LUX_UI_TEXT("씬 복제"), {},
+                                                   LUX_UI_TEXT("Lux 씬 (*.lux)"));
     if (path.isEmpty())
         return;
-    if (QFileInfo(path).suffix().isEmpty())
-        path += QStringLiteral(".lux");
+    if (LuxUI::FileInfo(path).suffix().isEmpty())
+        path += LUX_UI_TEXT(".lux");
     const auto context = project_;
     const auto id = document_.DuplicateTab(document_.GetActiveTabId(), path.toUtf8().toStdString());
     if (!id) {
-        ShowError(QStringLiteral("씬 복제 실패"), Q(document_.GetLastError()));
+        ShowError(LUX_UI_TEXT("씬 복제 실패"), Q(document_.GetLastError()));
         return;
     }
     project_ = context && context->ContainsScene(PathFromUtf8(document_.GetPath())) ? context
@@ -561,21 +543,22 @@ void EditorWindow::DuplicateScene() {
 void EditorWindow::DeleteSceneFile() {
     const auto path = PathFromUtf8(document_.GetPath());
     if (!project_ || path.empty() || !project_->ContainsScene(path)) {
-        Log(QStringLiteral("프로젝트에 저장된 씬을 선택해 주세요."), true);
+        Log(LUX_UI_TEXT("프로젝트에 저장된 씬을 선택해 주세요."), true);
         return;
     }
     if (SameFile(path, project_->GetSceneFile())) {
-        Log(QStringLiteral("다른 시작 씬을 지정한 후 삭제해 주세요."), true);
+        Log(LUX_UI_TEXT("다른 시작 씬을 지정한 후 삭제해 주세요."), true);
         return;
     }
-    if (QMessageBox::question(this, QStringLiteral("씬 파일 삭제"),
-                              QStringLiteral("%1 파일을 삭제하시겠습니까?").arg(Q(path.filename())),
-                              QMessageBox::Yes | QMessageBox::Cancel,
-                              QMessageBox::Cancel) != QMessageBox::Yes)
+    if (LuxUI::MessageBox::question(
+            this, LUX_UI_TEXT("씬 파일 삭제"),
+            LUX_UI_TEXT("%1 파일을 삭제하시겠습니까?").arg(Q(path.filename())),
+            LuxUI::MessageBox::Yes | LuxUI::MessageBox::Cancel,
+            LuxUI::MessageBox::Cancel) != LuxUI::MessageBox::Yes)
         return;
     std::error_code error;
     if (!std::filesystem::remove(path, error)) {
-        ShowError(QStringLiteral("씬 삭제 실패"),
+        ShowError(LUX_UI_TEXT("씬 삭제 실패"),
                   Q(error ? ErrorMessageUtf8(error) : "씬 파일을 찾을 수 없습니다."));
         return;
     }
@@ -589,12 +572,12 @@ void EditorWindow::SetStartupScene() {
     if ((document_.GetPath().empty() || document_.IsDirty()) && !SaveScene(false))
         return;
     if (!project_) {
-        Log(QStringLiteral("시작 씬은 프로젝트 안에 저장해 주세요."), true);
+        Log(LUX_UI_TEXT("시작 씬은 프로젝트 안에 저장해 주세요."), true);
         return;
     }
     std::string error;
     if (!project_->SetStartScene(PathFromUtf8(document_.GetPath()), error)) {
-        ShowError(QStringLiteral("시작 씬 지정 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("시작 씬 지정 실패"), Q(error));
         return;
     }
     for (auto& [id, context] : sceneProjects_)
@@ -613,7 +596,7 @@ void EditorWindow::EditSceneSettings() {
                                                   document_.GetScene().GetSourcePath());
     if (!settings)
         return;
-    RecordEdit(QStringLiteral("씬 설정"), [this, &settings] {
+    RecordEdit(LUX_UI_TEXT("씬 설정"), [this, &settings] {
         if (!document_.GetScene().SetSettings(*settings))
             throw std::runtime_error("씬 설정 값이 유효하지 않습니다.");
     });
@@ -623,13 +606,13 @@ void EditorWindow::EditSceneSettings() {
 void EditorWindow::AddSceneReference(LuxEngine::SceneReferenceMode mode) {
     if (previewActive_)
         return;
-    const auto file = QFileDialog::getOpenFileName(this, QStringLiteral("참조 씬 선택"), {},
-                                                   QStringLiteral("Lux 씬 (*.lux)"));
+    const auto file = LuxUI::FileDialog::getOpenFileName(this, LUX_UI_TEXT("참조 씬 선택"), {},
+                                                         LUX_UI_TEXT("Lux 씬 (*.lux)"));
     if (file.isEmpty())
         return;
     const auto path = PathFromUtf8(file.toUtf8().toStdString());
     if (SameFile(path, PathFromUtf8(document_.GetPath()))) {
-        Log(QStringLiteral("씬 자체를 참조할 수 없습니다."), true);
+        Log(LUX_UI_TEXT("씬 자체를 참조할 수 없습니다."), true);
         return;
     }
     if (project_) {
@@ -637,12 +620,11 @@ void EditorWindow::AddSceneReference(LuxEngine::SceneReferenceMode mode) {
         auto source = sceneManager_.Load(path, error);
         if (!project_->ContainsScene(path) || !source ||
             !ValidateProjectSceneReferences(*project_, *source, error)) {
-            Log(error.empty() ? QStringLiteral("프로젝트 안의 씬을 선택해 주세요.") : Q(error),
-                true);
+            Log(error.empty() ? LUX_UI_TEXT("프로젝트 안의 씬을 선택해 주세요.") : Q(error), true);
             return;
         }
     }
-    RecordEdit(QStringLiteral("씬 참조 추가"), [this, path, mode] {
+    RecordEdit(LUX_UI_TEXT("씬 참조 추가"), [this, path, mode] {
         std::string error;
         const auto root = sceneManager_.AddSceneInstance(document_.GetScene(), path, mode, error);
         if (!root)
@@ -653,7 +635,7 @@ void EditorWindow::AddSceneReference(LuxEngine::SceneReferenceMode mode) {
 }
 
 void EditorWindow::RefreshSceneReferences() {
-    RecordEdit(QStringLiteral("참조 씬 갱신"), [this] {
+    RecordEdit(LUX_UI_TEXT("참조 씬 갱신"), [this] {
         std::string error;
         if (!sceneManager_.RefreshInstances(document_.GetScene(), error))
             throw std::runtime_error(error);
@@ -665,16 +647,16 @@ void EditorWindow::RelinkSceneReference() {
     const auto selected = document_.GetSelected();
     if (previewActive_ || !selected || !selected.HasComponent<LuxEngine::SceneReferenceComponent>())
         return;
-    const auto file = QFileDialog::getOpenFileName(
-        this, QStringLiteral("참조 씬 경로 변경"),
+    const auto file = LuxUI::FileDialog::getOpenFileName(
+        this, LUX_UI_TEXT("참조 씬 경로 변경"),
         Q(selected.GetComponent<LuxEngine::SceneReferenceComponent>().path),
-        QStringLiteral("Lux 씬 (*.lux)"));
+        LUX_UI_TEXT("Lux 씬 (*.lux)"));
     if (file.isEmpty())
         return;
     const auto path = PathFromUtf8(file.toUtf8().toStdString());
     if (SameFile(path, PathFromUtf8(document_.GetPath())) ||
         (project_ && !project_->ContainsScene(path))) {
-        Log(QStringLiteral("참조할 다른 프로젝트 씬을 선택해 주세요."), true);
+        Log(LUX_UI_TEXT("참조할 다른 프로젝트 씬을 선택해 주세요."), true);
         return;
     }
     std::string error;
@@ -684,7 +666,7 @@ void EditorWindow::RelinkSceneReference() {
         return;
     }
     const auto root = selected.GetId();
-    RecordEdit(QStringLiteral("참조 씬 경로 변경"), [this, root, path] {
+    RecordEdit(LUX_UI_TEXT("참조 씬 경로 변경"), [this, root, path] {
         auto& scene = document_.GetScene();
         scene.GetComponent<LuxEngine::SceneReferenceComponent>(root).path =
             PathUtf8(std::filesystem::weakly_canonical(path));
@@ -700,44 +682,45 @@ void EditorWindow::ConfigureSceneStreaming() {
     if (!selected || !selected.HasComponent<LuxEngine::SceneReferenceComponent>() || previewActive_)
         return;
     const auto reference = selected.GetComponent<LuxEngine::SceneReferenceComponent>();
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("씬 스트리밍"));
-    auto* layout = new QFormLayout(&dialog);
-    auto number = [&](const QString& label, float value, float minimum, float maximum) {
-        auto* field = new QDoubleSpinBox(&dialog);
+    LuxUI::Dialog dialog(this);
+    dialog.setWindowTitle(LUX_UI_TEXT("씬 스트리밍"));
+    auto* layout = new LuxUI::FormLayout(&dialog);
+    auto number = [&](const LuxUI::String& label, float value, float minimum, float maximum) {
+        auto* field = new LuxUI::DoubleSpinBox(&dialog);
         field->setDecimals(2);
         field->setRange(minimum, maximum);
         field->setValue(value);
         layout->addRow(label, field);
         return field;
     };
-    auto* enabled = new QCheckBox(QStringLiteral("거리 기반 스트리밍"), &dialog);
+    auto* enabled = new LuxUI::CheckBox(LUX_UI_TEXT("거리 기반 스트리밍"), &dialog);
     enabled->setChecked(reference.streamLoadRadius > 0);
     layout->addRow(enabled);
     const auto position = document_.GetScene().GetWorldTransform(selected.GetId()).position;
-    auto* x = number(QStringLiteral("중심 X"),
+    auto* x = number(LUX_UI_TEXT("중심 X"),
                      reference.streamLoadRadius > 0 ? reference.streamCenter.x : position.x,
                      -100000, 100000);
-    auto* y = number(QStringLiteral("중심 Y"),
+    auto* y = number(LUX_UI_TEXT("중심 Y"),
                      reference.streamLoadRadius > 0 ? reference.streamCenter.y : position.y,
                      -100000, 100000);
     auto* load =
-        number(QStringLiteral("로드 반경"),
+        number(LUX_UI_TEXT("로드 반경"),
                reference.streamLoadRadius > 0 ? reference.streamLoadRadius : 30, .1f, 100000);
     auto* unload =
-        number(QStringLiteral("언로드 반경"),
+        number(LUX_UI_TEXT("언로드 반경"),
                reference.streamUnloadRadius > 0 ? reference.streamUnloadRadius : 40, .1f, 100000);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    auto* buttons = new LuxUI::DialogButtonBox(
+        LuxUI::DialogButtonBox::Ok | LuxUI::DialogButtonBox::Cancel, &dialog);
     layout->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    if (dialog.exec() != QDialog::Accepted)
+    connect(buttons, &LuxUI::DialogButtonBox::accepted, &dialog, &LuxUI::Dialog::accept);
+    connect(buttons, &LuxUI::DialogButtonBox::rejected, &dialog, &LuxUI::Dialog::reject);
+    if (dialog.exec() != LuxUI::Dialog::Accepted)
         return;
     const auto id = selected.GetId();
     const LuxEngine::Vec2 center{static_cast<float>(x->value()), static_cast<float>(y->value())};
     const float radius = enabled->isChecked() ? static_cast<float>(load->value()) : 0;
     const float outer = enabled->isChecked() ? static_cast<float>(unload->value()) : 0;
-    RecordEdit(QStringLiteral("씬 스트리밍 설정"), [this, id, center, radius, outer] {
+    RecordEdit(LUX_UI_TEXT("씬 스트리밍 설정"), [this, id, center, radius, outer] {
         std::string error;
         if (!sceneManager_.ConfigureStreaming(document_.GetScene(), id, center, radius, outer,
                                               error))
@@ -766,14 +749,14 @@ void EditorWindow::TickSceneStreaming() {
         return;
     }
     if (changed) {
-        setProperty("streamingError", QString());
+        setProperty("streamingError", LuxUI::String());
         RefreshAll();
     }
 }
 
 void EditorWindow::ReparentSelection(const std::vector<LuxEngine::uint32>& children,
                                      LuxEngine::uint32 parent) {
-    RecordEdit(QStringLiteral("부모 변경"), [this, children, parent] {
+    RecordEdit(LUX_UI_TEXT("부모 변경"), [this, children, parent] {
         for (const auto id : children)
             if (!document_.GetScene().SetParent(id, parent, true))
                 throw std::runtime_error("부모 관계 또는 변환을 적용할 수 없습니다.");
@@ -793,7 +776,7 @@ void EditorWindow::GroupSelection() {
     });
     if (selected.empty())
         return;
-    RecordEdit(QStringLiteral("그룹 만들기"), [this, selected] {
+    RecordEdit(LUX_UI_TEXT("그룹 만들기"), [this, selected] {
         std::array<double, 3> center{};
         for (const auto id : selected) {
             const auto matrix = document_.GetScene().GetWorldMatrix(id);
@@ -819,7 +802,7 @@ void EditorWindow::UngroupSelection() {
         !selected.GetComponent<LuxEngine::HierarchyComponent>().group)
         return;
     const auto id = selected.GetId();
-    RecordEdit(QStringLiteral("그룹 해제"), [this, id] {
+    RecordEdit(LUX_UI_TEXT("그룹 해제"), [this, id] {
         auto& scene = document_.GetScene();
         const auto parent = scene.GetParent(id);
         for (const auto child : scene.GetChildren(id))
@@ -832,18 +815,18 @@ void EditorWindow::UngroupSelection() {
 }
 
 void EditorWindow::ChooseMoveDestination() {
-    QStringList names;
+    LuxUI::StringList names;
     std::vector<EditorDocument::TabId> ids;
     for (const auto& tab : document_.ListTabs())
         if (tab.id != document_.GetActiveTabId()) {
-            names.push_back(SceneName(tab) + QStringLiteral(" (#%1)").arg(tab.id));
+            names.push_back(SceneName(tab) + LUX_UI_TEXT(" (#%1)").arg(tab.id));
             ids.push_back(tab.id);
         }
     if (names.isEmpty() || !document_.GetSelected())
         return;
     bool accepted = false;
-    const auto name = QInputDialog::getItem(this, QStringLiteral("씬 간 이동"),
-                                            QStringLiteral("대상 씬"), names, 0, false, &accepted);
+    const auto name = LuxUI::InputDialog::getItem(
+        this, LUX_UI_TEXT("씬 간 이동"), LUX_UI_TEXT("대상 씬"), names, 0, false, &accepted);
     if (accepted)
         MoveSelectionToScene(ids[static_cast<size_t>(names.indexOf(name))]);
 }
@@ -892,7 +875,7 @@ bool EditorWindow::MoveSelectionToScene(EditorDocument::TabId targetId) {
         return false;
     }
     PushSceneCommand(new SceneEditCommand(
-        QStringLiteral("씬 간 오브젝트 이동"),
+        LUX_UI_TEXT("씬 간 오브젝트 이동"),
         [this, restore, sourceBefore, targetBefore, sourceSelected, targetSelected, sourceId] {
             restore(sourceBefore, targetBefore, sourceSelected, targetSelected);
             SwitchSceneDocument(sourceId, false);
@@ -911,22 +894,22 @@ bool EditorWindow::MoveSelectionToScene(EditorDocument::TabId targetId) {
     return true;
 }
 
-void EditorWindow::AnimateSceneTransition(const QPixmap& previous) {
-    if (auto* old = viewportTabs_->findChild<QLabel*>(QStringLiteral("sceneTransition")))
+void EditorWindow::AnimateSceneTransition(const LuxUI::Pixmap& previous) {
+    if (auto* old = viewportTabs_->findChild<LuxUI::Label*>(LUX_UI_TEXT("sceneTransition")))
         delete old;
-    auto* overlay = new QLabel(viewportTabs_);
-    overlay->setObjectName(QStringLiteral("sceneTransition"));
-    overlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+    auto* overlay = new LuxUI::Label(viewportTabs_);
+    overlay->setObjectName(LUX_UI_TEXT("sceneTransition"));
+    overlay->setAttribute(LuxUI::Flags::WA_TransparentForMouseEvents);
     overlay->setGeometry(viewportTabs_->rect());
     overlay->setPixmap(previous);
     overlay->setScaledContents(true);
-    auto* opacity = new QGraphicsOpacityEffect(overlay);
+    auto* opacity = new LuxUI::GraphicsOpacityEffect(overlay);
     overlay->setGraphicsEffect(opacity);
-    auto* animation = new QPropertyAnimation(opacity, "opacity", overlay);
+    auto* animation = new LuxUI::PropertyAnimation(opacity, "opacity", overlay);
     animation->setStartValue(1.0);
     animation->setEndValue(0.0);
     animation->setDuration(160);
-    connect(animation, &QPropertyAnimation::finished, overlay, &QLabel::deleteLater);
+    connect(animation, &LuxUI::PropertyAnimation::finished, overlay, &LuxUI::Label::deleteLater);
     overlay->show();
     overlay->raise();
     animation->start();

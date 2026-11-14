@@ -1,8 +1,6 @@
 #include <LuxEditor/Animation/AnimationTimeline.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
-#include <QApplication>
-#include <QMouseEvent>
-#include <QPalette>
+#include <LuxUI/Widgets.hpp>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -13,15 +11,15 @@ void Check(bool condition, const char* message) {
         throw std::runtime_error(message);
 }
 
-void Mouse(QWidget* widget, QEvent::Type type, QPointF point, Qt::MouseButton button,
-           Qt::MouseButtons buttons) {
-    QMouseEvent event(type, point, point, button, buttons, Qt::NoModifier);
-    QApplication::sendEvent(widget, &event);
+void Mouse(LuxUI::Widget* widget, LuxUI::Event::Type type, LuxUI::PointF point,
+           LuxUI::Flags::MouseButton button, LuxUI::Flags::MouseButtons buttons) {
+    LuxUI::MouseEvent event(type, point, point, button, buttons, LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(widget, &event);
 }
 } // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    LuxUI::Application app(argc, argv);
     try {
         LuxEngine::Scene scene;
         auto entity = scene.CreateEntity("Timeline");
@@ -38,11 +36,12 @@ int main(int argc, char** argv) {
             {[entity] { return entity; }, [&] { return selected; }, [] { return 30; },
              [&](int key) { selected = key; }, [&](int, float time) { moved = time; }, [] {}, [] {},
              [&](double time) { animation.currentTime = static_cast<float>(time); }, [] {}});
-        QPalette palette;
-        palette.setColor(QPalette::Window, QColor("#242424"));
-        palette.setColor(QPalette::WindowText, QColor("#dedede"));
-        palette.setColor(QPalette::Base, Qt::white); // Regression: style Base remains light.
-        palette.setColor(QPalette::Highlight, QColor("#3269a8"));
+        LuxUI::Palette palette;
+        palette.setColor(LuxUI::Palette::Window, LuxUI::Color("#242424"));
+        palette.setColor(LuxUI::Palette::WindowText, LuxUI::Color("#dedede"));
+        palette.setColor(LuxUI::Palette::Base,
+                         LuxUI::Flags::white); // Regression: style Base remains light.
+        palette.setColor(LuxUI::Palette::Highlight, LuxUI::Color("#3269a8"));
         timeline.setPalette(palette);
         timeline.resize(1000, 240);
         timeline.show();
@@ -51,11 +50,14 @@ int main(int argc, char** argv) {
         Check(image.pixelColor(800, 230).lightness() < 90,
               "Dark animation timeline used the style's white Base color");
         const double span = timeline.width() - 174 - 18;
-        const QPointF start(174 + span / 2, 86);
-        const QPointF end(174 + span * .75, 86);
-        Mouse(&timeline, QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
-        Mouse(&timeline, QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton);
-        Mouse(&timeline, QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton);
+        const LuxUI::PointF start(174 + span / 2, 86);
+        const LuxUI::PointF end(174 + span * .75, 86);
+        Mouse(&timeline, LuxUI::Event::MouseButtonPress, start, LuxUI::Flags::LeftButton,
+              LuxUI::Flags::LeftButton);
+        Mouse(&timeline, LuxUI::Event::MouseMove, end, LuxUI::Flags::NoButton,
+              LuxUI::Flags::LeftButton);
+        Mouse(&timeline, LuxUI::Event::MouseButtonRelease, end, LuxUI::Flags::LeftButton,
+              LuxUI::Flags::NoButton);
         Check(selected == 1 && std::abs(moved - 1.5f) < .0001f,
               "Timeline did not select and drag a key to its snapped time");
         Check(!timeline.isSliderDown(), "Timeline did not end its editing gesture");

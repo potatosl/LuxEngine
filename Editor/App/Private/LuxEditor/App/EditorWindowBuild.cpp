@@ -2,103 +2,93 @@
 #include <LuxEditor/Build/BuildOutput.hpp>
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Scene/SceneDependencies.hpp>
-#include <QApplication>
-#include <QDir>
-#include <QDockWidget>
-#include <QFile>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QPlainTextEdit>
-#include <QProcess>
-#include <QProcessEnvironment>
-#include <QProgressBar>
-#include <QSettings>
-#include <QStatusBar>
+#include <LuxUI/Widgets.hpp>
 
 namespace LuxEditor {
 namespace {
 constexpr size_t MaxStoredDiagnostics = 300;
 constexpr const char* GameExecutable = "LuxGame";
 
-QString Q(const std::filesystem::path& path) {
-    return QString::fromUtf8(PathUtf8(path));
+LuxUI::String Q(const std::filesystem::path& path) {
+    return LuxUI::String::fromUtf8(PathUtf8(path));
 }
 
-std::filesystem::path FromQ(const QString& text) {
+std::filesystem::path FromQ(const LuxUI::String& text) {
     return PathFromUtf8(text.toUtf8().toStdString());
 }
 
-QString SafeFileName(QString name) {
-    for (const QChar c : QStringLiteral("/\\:*?\"<>|"))
+LuxUI::String SafeFileName(LuxUI::String name) {
+    for (const LuxUI::Char c : LUX_UI_TEXT("/\\:*?\"<>|"))
         name.replace(c, u'_');
     name = name.trimmed();
-    return name.isEmpty() ? QStringLiteral("LuxGame") : name;
+    return name.isEmpty() ? LUX_UI_TEXT("LuxGame") : name;
 }
 
-QString SizeText(uint64_t bytes) {
+LuxUI::String SizeText(uint64_t bytes) {
     constexpr double mebi = 1024.0 * 1024.0;
-    return bytes >= 1024 * 1024 ? QStringLiteral("%1 MB").arg(bytes / mebi, 0, 'f', 1)
-                                : QStringLiteral("%1 KB").arg(bytes / 1024.0, 0, 'f', 1);
+    return bytes >= 1024 * 1024 ? LUX_UI_TEXT("%1 MB").arg(bytes / mebi, 0, 'f', 1)
+                                : LUX_UI_TEXT("%1 KB").arg(bytes / 1024.0, 0, 'f', 1);
 }
 } // namespace
 
 void EditorWindow::ChooseEnginePackage() {
-    QSettings settings;
-    const QString current = settings.value(QStringLiteral("build/engineSdk")).toString();
-    const QString directory = QFileDialog::getExistingDirectory(
-        this, QStringLiteral("설치된 LuxEngine 폴더 선택 (lib/cmake/LuxEngine이 들어 있는 폴더)"),
+    LuxUI::Settings settings;
+    const LuxUI::String current = settings.value(LUX_UI_TEXT("build/engineSdk")).toString();
+    const LuxUI::String directory = LuxUI::FileDialog::getExistingDirectory(
+        this, LUX_UI_TEXT("설치된 LuxEngine 폴더 선택 (lib/cmake/LuxEngine이 들어 있는 폴더)"),
         current);
     if (directory.isEmpty())
         return;
-    BuildTools tools =
-        DetectBuildTools(FromQ(QCoreApplication::applicationDirPath()), [&](const char* name) {
+    BuildTools tools = DetectBuildTools(
+        FromQ(LuxUI::CoreApplication::applicationDirPath()), [&](const char* name) {
             return std::string(name) == "LUX_ENGINE_DIR" ? directory.toUtf8().toStdString()
                                                          : std::string{};
         });
     if (tools.enginePackage.empty()) {
-        ShowError(QStringLiteral("엔진 SDK"),
-                  QStringLiteral("이 폴더에서 LuxEngineConfig.cmake를 찾을 수 없습니다.\n"
-                                 "엔진을 `cmake --install`로 설치한 폴더를 선택하세요."));
+        ShowError(LUX_UI_TEXT("엔진 SDK"),
+                  LUX_UI_TEXT("이 폴더에서 LuxEngineConfig.cmake를 찾을 수 없습니다.\n"
+                              "엔진을 `cmake --install`로 설치한 폴더를 선택하세요."));
         return;
     }
-    settings.setValue(QStringLiteral("build/engineSdk"), directory);
-    Log(QStringLiteral("엔진 SDK 경로를 설정했습니다: %1").arg(Q(tools.enginePackage)));
+    settings.setValue(LUX_UI_TEXT("build/engineSdk"), directory);
+    Log(LUX_UI_TEXT("엔진 SDK 경로를 설정했습니다: %1").arg(Q(tools.enginePackage)));
 }
 
 void EditorWindow::StartBuild(BuildConfiguration configuration, bool clean,
                               BuildFollowUp followUp) {
     if (!project_) {
-        ShowError(QStringLiteral("빌드"), QStringLiteral("열려 있는 프로젝트가 없습니다."));
+        ShowError(LUX_UI_TEXT("빌드"), LUX_UI_TEXT("열려 있는 프로젝트가 없습니다."));
         return;
     }
     if (buildProcess_) {
-        Log(QStringLiteral("이미 빌드가 진행 중입니다."), true);
+        Log(LUX_UI_TEXT("이미 빌드가 진행 중입니다."), true);
         return;
     }
     if (!SaveAllScenes(true) || !project_)
         return;
 
     // The SDK path set in the editor wins over the environment variable.
-    const QString savedSdk = QSettings().value(QStringLiteral("build/engineSdk")).toString();
-    BuildTools tools =
-        DetectBuildTools(FromQ(QCoreApplication::applicationDirPath()), [&](const char* name) {
+    const LuxUI::String savedSdk =
+        LuxUI::Settings().value(LUX_UI_TEXT("build/engineSdk")).toString();
+    BuildTools tools = DetectBuildTools(
+        FromQ(LuxUI::CoreApplication::applicationDirPath()), [&](const char* name) {
             if (std::string(name) == "LUX_ENGINE_DIR" && !savedSdk.isEmpty())
                 return savedSdk.toUtf8().toStdString();
             return qEnvironmentVariable(name).toUtf8().toStdString();
         });
     std::string error;
     if (!ValidateProjectScenes(*project_, error)) {
-        ShowError(QStringLiteral("씬 의존성 오류"), QString::fromUtf8(error));
+        ShowError(LUX_UI_TEXT("씬 의존성 오류"), LuxUI::String::fromUtf8(error));
         return;
     }
     auto plan =
         PlanBuild(project_->GetFile().parent_path(), configuration, tools, GameExecutable, error);
     if (!plan) {
-        ShowError(QStringLiteral("빌드"), QString::fromUtf8(error));
+        ShowError(LUX_UI_TEXT("빌드"), LuxUI::String::fromUtf8(error));
         return;
     }
     if (clean && !CleanBuildDirectory(*plan, error)) {
-        ShowError(QStringLiteral("클린 빌드"), QString::fromUtf8(error));
+        ShowError(LUX_UI_TEXT("클린 빌드"), LuxUI::String::fromUtf8(error));
         return;
     }
     buildPlan_ = std::move(plan);
@@ -107,15 +97,16 @@ void EditorWindow::StartBuild(BuildConfiguration configuration, bool clean,
     buildDiagnostics_.clear();
     issuesOutput_->clear();
     if (!buildProgress_) {
-        buildProgress_ = new QProgressBar(this);
+        buildProgress_ = new LuxUI::ProgressBar(this);
         buildProgress_->setMaximumWidth(160);
         buildProgress_->setRange(0, 100);
         statusBar()->addPermanentWidget(buildProgress_);
     }
     buildProgress_->setRange(0, 0); // busy until a percentage shows up
     buildProgress_->show();
-    Log(QStringLiteral("%1 빌드를 시작합니다: %2")
-            .arg(QString::fromLatin1(ToString(configuration)), Q(buildPlan_->projectDirectory)));
+    Log(LUX_UI_TEXT("%1 빌드를 시작합니다: %2")
+            .arg(LuxUI::String::fromLatin1(ToString(configuration)),
+                 Q(buildPlan_->projectDirectory)));
     RunNextBuildStep();
 }
 
@@ -125,30 +116,31 @@ void EditorWindow::RunNextBuildStep() {
         return;
     }
     const BuildStep& step = buildPlan_->steps[buildStep_];
-    Log(QStringLiteral("[%1/%2] %3")
+    Log(LUX_UI_TEXT("[%1/%2] %3")
             .arg(buildStep_ + 1)
             .arg(buildPlan_->steps.size())
-            .arg(QString::fromUtf8(step.title)));
+            .arg(LuxUI::String::fromUtf8(step.title)));
     buildLineBuffer_.clear();
-    buildProcess_ = new QProcess(this);
+    buildProcess_ = new LuxUI::Process(this);
     buildProcess_->setProcessEnvironment(Utf8BuildEnvironment());
-    buildProcess_->setProcessChannelMode(QProcess::MergedChannels);
+    buildProcess_->setProcessChannelMode(LuxUI::Process::MergedChannels);
     buildProcess_->setWorkingDirectory(Q(buildPlan_->projectDirectory));
-    connect(buildProcess_, &QProcess::readyReadStandardOutput, this,
+    connect(buildProcess_, &LuxUI::Process::readyReadStandardOutput, this,
             [this] { HandleBuildOutput(buildProcess_->readAllStandardOutput()); });
-    connect(buildProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) {
-            Log(QStringLiteral("빌드 도구를 시작하지 못했습니다."), true);
-            FinishBuild(false);
-        }
-    });
-    connect(buildProcess_, &QProcess::finished, this,
-            [this](int exitCode, QProcess::ExitStatus status) {
+    connect(buildProcess_, &LuxUI::Process::errorOccurred, this,
+            [this](LuxUI::Process::ProcessError error) {
+                if (error == LuxUI::Process::FailedToStart) {
+                    Log(LUX_UI_TEXT("빌드 도구를 시작하지 못했습니다."), true);
+                    FinishBuild(false);
+                }
+            });
+    connect(buildProcess_, &LuxUI::Process::finished, this,
+            [this](int exitCode, LuxUI::Process::ExitStatus status) {
                 if (!buildProcess_)
                     return;
                 HandleBuildOutput({}); // flush the last partial line
-                if (status == QProcess::CrashExit || exitCode != 0) {
-                    Log(QStringLiteral("단계가 실패했습니다 (종료 코드 %1).").arg(exitCode), true);
+                if (status == LuxUI::Process::CrashExit || exitCode != 0) {
+                    Log(LUX_UI_TEXT("단계가 실패했습니다 (종료 코드 %1).").arg(exitCode), true);
                     FinishBuild(false);
                     return;
                 }
@@ -157,13 +149,13 @@ void EditorWindow::RunNextBuildStep() {
                 ++buildStep_;
                 RunNextBuildStep();
             });
-    QStringList arguments;
+    LuxUI::StringList arguments;
     for (const std::string& argument : step.arguments)
-        arguments << QString::fromUtf8(argument);
+        arguments << LuxUI::String::fromUtf8(argument);
     buildProcess_->start(Q(step.program), arguments);
 }
 
-void EditorWindow::HandleBuildOutput(const QByteArray& chunk) {
+void EditorWindow::HandleBuildOutput(const LuxUI::ByteArray& chunk) {
     buildLineBuffer_ += chunk;
     // chunk is empty when flushing: treat the remaining text as a final line.
     const bool flush = chunk.isEmpty();
@@ -174,9 +166,9 @@ void EditorWindow::HandleBuildOutput(const QByteArray& chunk) {
                 break;
             end = buildLineBuffer_.size();
         }
-        const QByteArray rawLine = buildLineBuffer_.left(end);
+        const LuxUI::ByteArray rawLine = buildLineBuffer_.left(end);
         buildLineBuffer_.remove(0, end + 1);
-        const QString line = DecodeBuildOutput(rawLine).trimmed();
+        const LuxUI::String line = DecodeBuildOutput(rawLine).trimmed();
         if (line.isEmpty())
             continue;
         const std::string text = line.toUtf8().toStdString();
@@ -207,35 +199,35 @@ void EditorWindow::FinishBuild(bool success) {
     for (const BuildDiagnostic& d : buildDiagnostics_) {
         const bool isError = d.severity == DiagnosticSeverity::Error;
         (isError ? errors : warnings) += 1;
-        QString location = QString::fromUtf8(d.file);
+        LuxUI::String location = LuxUI::String::fromUtf8(d.file);
         if (d.line > 0)
-            location += QStringLiteral("(%1%2)").arg(d.line).arg(
-                d.column > 0 ? QStringLiteral(",%1").arg(d.column) : QString());
+            location += LUX_UI_TEXT("(%1%2)").arg(d.line).arg(
+                d.column > 0 ? LUX_UI_TEXT(",%1").arg(d.column) : LuxUI::String());
         issuesOutput_->appendPlainText(
-            QStringLiteral("%1 %2%3: %4")
-                .arg(isError ? QStringLiteral("오류") : QStringLiteral("경고"), location,
-                     d.code.empty() ? QString()
-                                    : QStringLiteral(" [%1]").arg(QString::fromUtf8(d.code)),
-                     QString::fromUtf8(d.message)));
+            LUX_UI_TEXT("%1 %2%3: %4")
+                .arg(isError ? LUX_UI_TEXT("오류") : LUX_UI_TEXT("경고"), location,
+                     d.code.empty() ? LuxUI::String()
+                                    : LUX_UI_TEXT(" [%1]").arg(LuxUI::String::fromUtf8(d.code)),
+                     LuxUI::String::fromUtf8(d.message)));
     }
     if (!success) {
-        Log(QStringLiteral("빌드 실패: 오류 %1개, 경고 %2개").arg(errors).arg(warnings), true);
+        Log(LUX_UI_TEXT("빌드 실패: 오류 %1개, 경고 %2개").arg(errors).arg(warnings), true);
         buildPlan_.reset();
         return;
     }
-    Log(QStringLiteral("빌드 성공: 오류 0개, 경고 %1개").arg(warnings));
+    Log(LUX_UI_TEXT("빌드 성공: 오류 0개, 경고 %1개").arg(warnings));
     const auto executable = buildPlan_ ? FindBuiltExecutable(*buildPlan_) : std::nullopt;
     if (!executable) {
-        ShowError(QStringLiteral("빌드"),
-                  QStringLiteral("빌드는 끝났지만 실행 파일(%1)을 찾을 수 없습니다.")
-                      .arg(QString::fromLatin1(GameExecutable)));
+        ShowError(LUX_UI_TEXT("빌드"),
+                  LUX_UI_TEXT("빌드는 끝났지만 실행 파일(%1)을 찾을 수 없습니다.")
+                      .arg(LuxUI::String::fromLatin1(GameExecutable)));
         buildPlan_.reset();
         return;
     }
-    Log(QStringLiteral("실행 파일: %1").arg(Q(*executable)));
+    Log(LUX_UI_TEXT("실행 파일: %1").arg(Q(*executable)));
     if (followUp == BuildFollowUp::Run) {
-        if (!QProcess::startDetached(Q(*executable), {}, Q(executable->parent_path())))
-            ShowError(QStringLiteral("실행"), QStringLiteral("게임을 실행하지 못했습니다."));
+        if (!LuxUI::Process::startDetached(Q(*executable), {}, Q(executable->parent_path())))
+            ShowError(LUX_UI_TEXT("실행"), LUX_UI_TEXT("게임을 실행하지 못했습니다."));
     } else if (followUp == BuildFollowUp::Package) {
         PackageBuild();
     }
@@ -246,26 +238,27 @@ void EditorWindow::PackageBuild() {
     const auto executable = buildPlan_ ? FindBuiltExecutable(*buildPlan_) : std::nullopt;
     if (!executable || !project_)
         return;
-    const QString name = SafeFileName(QString::fromUtf8(project_->GetName()));
-    const QString version = SafeFileName(QString::fromUtf8(project_->GetSettings().version));
-    const QString suggested = QDir(Q(buildPlan_->projectDirectory))
-                                  .filePath(QStringLiteral("%1-%2-win.zip").arg(name, version));
-    const QString file = QFileDialog::getSaveFileName(
-        this, QStringLiteral("배포 ZIP 저장"), suggested, QStringLiteral("ZIP 파일 (*.zip)"));
+    const LuxUI::String name = SafeFileName(LuxUI::String::fromUtf8(project_->GetName()));
+    const LuxUI::String version =
+        SafeFileName(LuxUI::String::fromUtf8(project_->GetSettings().version));
+    const LuxUI::String suggested = LuxUI::Dir(Q(buildPlan_->projectDirectory))
+                                        .filePath(LUX_UI_TEXT("%1-%2-win.zip").arg(name, version));
+    const LuxUI::String file = LuxUI::FileDialog::getSaveFileName(
+        this, LUX_UI_TEXT("배포 ZIP 저장"), suggested, LUX_UI_TEXT("ZIP 파일 (*.zip)"));
     if (file.isEmpty())
         return;
     std::string error;
     std::optional<PackageResult> result;
-    RunWithProgress(QStringLiteral("배포 패키지를 만드는 중..."), [&] {
+    RunWithProgress(LUX_UI_TEXT("배포 패키지를 만드는 중..."), [&] {
         result = CreateDistributionArchive(
             *executable, FromQ(file),
-            QStringLiteral("%1-%2").arg(name, version).toUtf8().toStdString(), error);
+            LUX_UI_TEXT("%1-%2").arg(name, version).toUtf8().toStdString(), error);
     });
     if (!result) {
-        ShowError(QStringLiteral("배포"), QString::fromUtf8(error));
+        ShowError(LUX_UI_TEXT("배포"), LuxUI::String::fromUtf8(error));
         return;
     }
-    Log(QStringLiteral("배포 패키지를 만들었습니다: %1 (파일 %2개, 압축 전 %3)")
+    Log(LUX_UI_TEXT("배포 패키지를 만들었습니다: %1 (파일 %2개, 압축 전 %3)")
             .arg(file)
             .arg(result->fileCount)
             .arg(SizeText(result->uncompressedBytes)));
@@ -274,10 +267,10 @@ void EditorWindow::PackageBuild() {
 void EditorWindow::CancelBuild() {
     if (!buildProcess_)
         return;
-    QProcess* process = buildProcess_;
+    LuxUI::Process* process = buildProcess_;
     buildProcess_ = nullptr;
     process->disconnect(this);
-    if (process->state() != QProcess::NotRunning) {
+    if (process->state() != LuxUI::Process::NotRunning) {
         process->kill();
         process->waitForFinished(2000);
     }
@@ -286,6 +279,6 @@ void EditorWindow::CancelBuild() {
     buildPlan_.reset();
     if (buildProgress_)
         buildProgress_->hide();
-    Log(QStringLiteral("빌드를 중지했습니다."), true);
+    Log(LUX_UI_TEXT("빌드를 중지했습니다."), true);
 }
 } // namespace LuxEditor

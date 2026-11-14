@@ -6,31 +6,20 @@
 #include <LuxEditor/Ui/IconFactory.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
-#include <QApplication>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QIcon>
-#include <QInputDialog>
-#include <QMessageBox>
-#include <QProgressDialog>
-#include <QSettings>
-#include <QStatusBar>
-#include <QTabWidget>
-#include <QTimer>
-#include <QUndoStack>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 
 namespace LuxEditor {
 namespace {
-QString Q(const std::string& value) {
-    return QString::fromUtf8(value);
+LuxUI::String Q(const std::string& value) {
+    return LuxUI::String::fromUtf8(value);
 }
 
-QString Q(const std::filesystem::path& value) {
+LuxUI::String Q(const std::filesystem::path& value) {
     return Q(PathUtf8(value));
 }
 
-std::string Utf8(const QString& value) {
+std::string Utf8(const LuxUI::String& value) {
     return value.toUtf8().toStdString();
 }
 } // namespace
@@ -43,7 +32,7 @@ void EditorWindow::NewProject() {
     auto created =
         EditorProject::Create(request->directory, request->name, request->projectTemplate, error);
     if (!created) {
-        ShowError(QStringLiteral("프로젝트 생성 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 생성 실패"), Q(error));
         return;
     }
     const auto previousTab = document_.GetActiveTabId();
@@ -51,8 +40,8 @@ void EditorWindow::NewProject() {
     if (!document_.Open(PathUtf8(created->GetSceneFile()))) {
         document_.CloseTab(newTab, true);
         document_.ActivateTab(previousTab);
-        ShowError(QStringLiteral("프로젝트 열기 실패"),
-                  QStringLiteral("생성한 시작 장면을 열 수 없습니다."));
+        ShowError(LUX_UI_TEXT("프로젝트 열기 실패"),
+                  LUX_UI_TEXT("생성한 시작 장면을 열 수 없습니다."));
         return;
     }
     ResetSceneWorkspace();
@@ -66,9 +55,9 @@ void EditorWindow::NewProject() {
 }
 
 void EditorWindow::OpenProjectDialog() {
-    const QString file = QFileDialog::getOpenFileName(
-        this, QStringLiteral("프로젝트 열기"), {},
-        QStringLiteral("Lux 프로젝트 (*.luxproject *.luxproj);;모든 파일 (*)"));
+    const LuxUI::String file = LuxUI::FileDialog::getOpenFileName(
+        this, LUX_UI_TEXT("프로젝트 열기"), {},
+        LUX_UI_TEXT("Lux 프로젝트 (*.luxproject *.luxproj);;모든 파일 (*)"));
     if (!file.isEmpty())
         OpenProjectFile(PathFromUtf8(Utf8(file)));
 }
@@ -78,7 +67,7 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file,
     std::string error;
     auto opened = EditorProject::OpenForRecovery(file, error);
     if (!opened) {
-        ShowError(QStringLiteral("프로젝트 열기 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 열기 실패"), Q(error));
         recentProjects_.Load();
         UpdateRecentMenu();
         return;
@@ -96,8 +85,7 @@ void EditorWindow::OpenProjectFile(const std::filesystem::path& file,
     const auto result = LoadSceneDocument(sceneFile, &*opened, &candidate);
     if (result == SceneOpenResult::Cancelled || result == SceneOpenResult::Failed) {
         if (result == SceneOpenResult::Failed)
-            ShowError(QStringLiteral("프로젝트 열기 실패"),
-                      QStringLiteral("시작 씬을 열 수 없습니다."));
+            ShowError(LUX_UI_TEXT("프로젝트 열기 실패"), LUX_UI_TEXT("시작 씬을 열 수 없습니다."));
         return;
     }
     document_ = std::move(candidate);
@@ -124,13 +112,13 @@ void EditorWindow::EditProjectSettings() {
         return;
     std::string error;
     if (!request->iconSource.empty() && !project_->SetIcon(request->iconSource, error)) {
-        ShowError(QStringLiteral("프로젝트 설정 저장 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 설정 저장 실패"), Q(error));
         return;
     }
     if (!request->iconSource.empty())
         request->settings.icon = project_->GetIcon();
     if (!project_->UpdateSettings(request->settings, error)) {
-        ShowError(QStringLiteral("프로젝트 설정 저장 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 설정 저장 실패"), Q(error));
         return;
     }
     for (auto& [id, context] : sceneProjects_)
@@ -152,19 +140,14 @@ void EditorWindow::ApplyProjectPreferences() {
                                      : std::min(interval, context->GetSettings().autosaveSeconds);
     if (interval > 0)
         autosaveTimer_.start(static_cast<int>(interval * 1000));
-    const bool snap = project_ ? project_->GetSettings().snapToGrid : true;
-    if (snapAction_)
-        snapAction_->setChecked(snap);
-    canvas_->SetSnapToGrid(snap);
-    canvas3D_->SetSnapToGrid(snap);
     if (!project_) {
-        setWindowIcon(MakeBrandIcon(theme_ != QLatin1String("light")));
+        setWindowIcon(MakeBrandIcon(theme_ != LuxUI::Latin1String("light")));
         return;
     }
     if (!project_->GetIcon().empty())
-        setWindowIcon(QIcon(Q(project_->GetFile().parent_path() / project_->GetIcon())));
+        setWindowIcon(LuxUI::Icon(Q(project_->GetFile().parent_path() / project_->GetIcon())));
     else
-        setWindowIcon(MakeBrandIcon(theme_ != QLatin1String("light")));
+        setWindowIcon(MakeBrandIcon(theme_ != LuxUI::Latin1String("light")));
 }
 
 EditorWindow::SceneOpenResult EditorWindow::LoadSceneDocument(const std::filesystem::path& file,
@@ -182,11 +165,11 @@ EditorWindow::SceneOpenResult EditorWindow::LoadSceneDocument(const std::filesys
     LuxEngine::Scene validation;
     if (autosave.empty() || !validation.Deserialize(PathUtf8(autosave)))
         return SceneOpenResult::Failed;
-    const auto answer = QMessageBox::question(
-        this, QStringLiteral("장면 자동 저장 복구"),
-        QStringLiteral("원본 장면을 읽을 수 없습니다. 자동 저장본으로 복구하시겠습니까?"),
-        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-    if (answer != QMessageBox::Yes)
+    const auto answer = LuxUI::MessageBox::question(
+        this, LUX_UI_TEXT("장면 자동 저장 복구"),
+        LUX_UI_TEXT("원본 장면을 읽을 수 없습니다. 자동 저장본으로 복구하시겠습니까?"),
+        LuxUI::MessageBox::Yes | LuxUI::MessageBox::Cancel, LuxUI::MessageBox::Cancel);
+    if (answer != LuxUI::MessageBox::Yes)
         return SceneOpenResult::Cancelled;
     return target.Recover(PathUtf8(file), PathUtf8(autosave)) ? SceneOpenResult::Recovered
                                                               : SceneOpenResult::Failed;
@@ -212,7 +195,7 @@ bool EditorWindow::OpenProjectScene(const std::filesystem::path& file) {
             document_.CloseTab(nextTab, true);
         document_.ActivateTab(previousTab);
         if (result == SceneOpenResult::Failed)
-            ShowError(QStringLiteral("씬 열기 실패"), Q(document_.GetLastError()));
+            ShowError(LUX_UI_TEXT("씬 열기 실패"), Q(document_.GetLastError()));
         return false;
     }
     project_ = context;
@@ -231,13 +214,12 @@ void EditorWindow::RecoverAutosaveIfNeeded() {
     if (!project_ || !project_->HasNewerAutosave(PathFromUtf8(document_.GetPath())))
         return;
     const auto path = project_->GetAutosaveFile(PathFromUtf8(document_.GetPath()));
-    const auto answer = QMessageBox::question(
-        this, QStringLiteral("장면 자동 저장 복구"),
-        QStringLiteral("저장된 장면보다 새 자동 저장본이 있습니다. 복구하시겠습니까?"));
-    if (answer == QMessageBox::Yes) {
+    const auto answer = LuxUI::MessageBox::question(
+        this, LUX_UI_TEXT("장면 자동 저장 복구"),
+        LUX_UI_TEXT("저장된 장면보다 새 자동 저장본이 있습니다. 복구하시겠습니까?"));
+    if (answer == LuxUI::MessageBox::Yes) {
         if (!document_.Recover(document_.GetPath(), PathUtf8(path)))
-            ShowError(QStringLiteral("복구 실패"),
-                      QStringLiteral("자동 저장본을 읽을 수 없습니다."));
+            ShowError(LUX_UI_TEXT("복구 실패"), LUX_UI_TEXT("자동 저장본을 읽을 수 없습니다."));
         else
             undo_->resetClean();
     } else
@@ -281,13 +263,14 @@ bool EditorWindow::ConfirmDiscardChanges() {
         std::count_if(tabs.begin(), tabs.end(), [](const auto& tab) { return tab.dirty; });
     if (count == 0)
         return true;
-    const auto answer = QMessageBox::question(
-        this, QStringLiteral("LuxEditor"),
-        QStringLiteral("저장하지 않은 씬 %1개의 변경 사항을 저장하시겠습니까?").arg(count),
-        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
-    if (answer == QMessageBox::Cancel)
+    const auto answer = LuxUI::MessageBox::question(
+        this, LUX_UI_TEXT("LuxEditor"),
+        LUX_UI_TEXT("저장하지 않은 씬 %1개의 변경 사항을 저장하시겠습니까?").arg(count),
+        LuxUI::MessageBox::Yes | LuxUI::MessageBox::No | LuxUI::MessageBox::Cancel,
+        LuxUI::MessageBox::Yes);
+    if (answer == LuxUI::MessageBox::Cancel)
         return false;
-    return answer != QMessageBox::Yes || SaveAllScenes();
+    return answer != LuxUI::MessageBox::Yes || SaveAllScenes();
 }
 
 bool EditorWindow::SaveScene(bool choosePath) {
@@ -296,18 +279,17 @@ bool EditorWindow::SaveScene(bool choosePath) {
     const auto previous = document_.GetPath();
     bool saved = false;
     if (choosePath || previous.empty()) {
-        QString file =
-            QFileDialog::getSaveFileName(this, QStringLiteral("장면 저장"), {},
-                                         QStringLiteral("Lux 장면 (*.lux);;모든 파일 (*)"));
+        LuxUI::String file = LuxUI::FileDialog::getSaveFileName(
+            this, LUX_UI_TEXT("장면 저장"), {}, LUX_UI_TEXT("Lux 장면 (*.lux);;모든 파일 (*)"));
         if (file.isEmpty())
             return false;
-        if (QFileInfo(file).suffix().isEmpty())
-            file += QStringLiteral(".lux");
+        if (LuxUI::FileInfo(file).suffix().isEmpty())
+            file += LUX_UI_TEXT(".lux");
         saved = document_.SaveAs(Utf8(file));
     } else
         saved = document_.Save();
     if (!saved) {
-        ShowError(QStringLiteral("저장 실패"), Q(document_.GetLastError()));
+        ShowError(LUX_UI_TEXT("저장 실패"), Q(document_.GetLastError()));
         return false;
     }
     RefreshProjectExplorer();
@@ -323,7 +305,7 @@ bool EditorWindow::SaveScene(bool choosePath) {
     sceneProjects_[document_.GetActiveTabId()] = project_;
     RefreshSceneTabs();
     UpdateChrome();
-    Log(QStringLiteral("장면을 저장했습니다."));
+    Log(LUX_UI_TEXT("장면을 저장했습니다."));
     return true;
 }
 
@@ -331,10 +313,9 @@ void EditorWindow::CloneCurrentProject() {
     if (!project_ || !SaveAllScenes(true) || !project_)
         return;
     bool accepted = false;
-    const QString name = QInputDialog::getText(
-        this, QStringLiteral("프로젝트 복제"),
-        QStringLiteral("복제할 프로젝트의 이름을 입력해 주세요."), QLineEdit::Normal,
-        Q(project_->GetName()) + QStringLiteral(" 복제"), &accepted);
+    const LuxUI::String name = LuxUI::InputDialog::getText(
+        this, LUX_UI_TEXT("프로젝트 복제"), LUX_UI_TEXT("복제할 프로젝트의 이름을 입력해 주세요."),
+        LuxUI::LineEdit::Normal, Q(project_->GetName()) + LUX_UI_TEXT(" 복제"), &accepted);
     if (!accepted)
         return;
     auto destination = ShowProjectDestinationDialog(this, "프로젝트 복제", Utf8(name));
@@ -342,19 +323,19 @@ void EditorWindow::CloneCurrentProject() {
         return;
     std::string error;
     std::optional<EditorProject> copy;
-    RunWithProgress(QStringLiteral("프로젝트를 복제하고 있습니다..."),
+    RunWithProgress(LUX_UI_TEXT("프로젝트를 복제하고 있습니다..."),
                     [&] { copy = CloneProject(*project_, *destination, Utf8(name), error); });
     if (!copy) {
-        ShowError(QStringLiteral("프로젝트 복제 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 복제 실패"), Q(error));
         return;
     }
     OpenProjectFile(copy->GetFile());
 }
 
 void EditorWindow::ImportProjectDialog() {
-    const QString file =
-        QFileDialog::getOpenFileName(this, QStringLiteral("프로젝트 가져오기"), {},
-                                     QStringLiteral("Lux 프로젝트 패키지 (*.luxpack *.luxbackup)"));
+    const LuxUI::String file = LuxUI::FileDialog::getOpenFileName(
+        this, LUX_UI_TEXT("프로젝트 가져오기"), {},
+        LUX_UI_TEXT("Lux 프로젝트 패키지 (*.luxpack *.luxbackup)"));
     if (file.isEmpty())
         return;
     const auto archive = PathFromUtf8(Utf8(file));
@@ -364,10 +345,10 @@ void EditorWindow::ImportProjectDialog() {
         return;
     std::string error;
     std::optional<EditorProject> imported;
-    RunWithProgress(QStringLiteral("프로젝트를 가져오고 있습니다..."),
+    RunWithProgress(LUX_UI_TEXT("프로젝트를 가져오고 있습니다..."),
                     [&] { imported = ImportProject(archive, *destination, error); });
     if (!imported) {
-        ShowError(QStringLiteral("프로젝트 가져오기 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 가져오기 실패"), Q(error));
         return;
     }
     OpenProjectFile(imported->GetFile());
@@ -378,12 +359,12 @@ void EditorWindow::ExportCurrentProject() {
         return;
     std::string validationError;
     if (!ValidateProjectScenes(*project_, validationError)) {
-        ShowError(QStringLiteral("씬 의존성 오류"), Q(validationError));
+        ShowError(LUX_UI_TEXT("씬 의존성 오류"), Q(validationError));
         return;
     }
-    QString file = QFileDialog::getSaveFileName(this, QStringLiteral("프로젝트 내보내기"),
-                                                Q(project_->GetName()) + QStringLiteral(".luxpack"),
-                                                QStringLiteral("Lux 프로젝트 패키지 (*.luxpack)"));
+    LuxUI::String file = LuxUI::FileDialog::getSaveFileName(
+        this, LUX_UI_TEXT("프로젝트 내보내기"), Q(project_->GetName()) + LUX_UI_TEXT(".luxpack"),
+        LUX_UI_TEXT("Lux 프로젝트 패키지 (*.luxpack)"));
     if (file.isEmpty())
         return;
     auto archive = PathFromUtf8(Utf8(file));
@@ -391,13 +372,13 @@ void EditorWindow::ExportCurrentProject() {
         archive += ".luxpack";
     std::string error;
     bool success = false;
-    RunWithProgress(QStringLiteral("프로젝트 패키지를 만들고 있습니다..."),
+    RunWithProgress(LUX_UI_TEXT("프로젝트 패키지를 만들고 있습니다..."),
                     [&] { success = ExportProject(*project_, archive, error); });
     if (!success) {
-        ShowError(QStringLiteral("프로젝트 내보내기 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 내보내기 실패"), Q(error));
         return;
     }
-    Log(QStringLiteral("프로젝트 패키지를 내보냈습니다."));
+    Log(LUX_UI_TEXT("프로젝트 패키지를 내보냈습니다."));
 }
 
 void EditorWindow::BackupCurrentProject() {
@@ -406,43 +387,43 @@ void EditorWindow::BackupCurrentProject() {
     std::filesystem::path backup;
     std::string error;
     bool success = false;
-    RunWithProgress(QStringLiteral("프로젝트를 백업하고 있습니다..."),
+    RunWithProgress(LUX_UI_TEXT("프로젝트를 백업하고 있습니다..."),
                     [&] { success = CreateProjectBackup(*project_, backup, error); });
     if (!success) {
-        ShowError(QStringLiteral("프로젝트 백업 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 백업 실패"), Q(error));
         return;
     }
-    Log(QStringLiteral("프로젝트 백업을 만들었습니다."));
+    Log(LUX_UI_TEXT("프로젝트 백업을 만들었습니다."));
 }
 
 void EditorWindow::RestoreCurrentProject() {
     if (!project_)
         return;
     const auto directory = project_->GetFile().parent_path() / ".lux" / "backups";
-    const QString file =
-        QFileDialog::getOpenFileName(this, QStringLiteral("프로젝트 백업 복구"), Q(directory),
-                                     QStringLiteral("Lux 백업 (*.luxbackup)"));
+    const LuxUI::String file =
+        LuxUI::FileDialog::getOpenFileName(this, LUX_UI_TEXT("프로젝트 백업 복구"), Q(directory),
+                                           LUX_UI_TEXT("Lux 백업 (*.luxbackup)"));
     if (file.isEmpty() || !ConfirmDiscardChanges() || !project_)
         return;
-    if (QMessageBox::question(this, QStringLiteral("프로젝트 백업 복구"),
-                              QStringLiteral("현재 프로젝트를 선택한 백업으로 복구하시겠습니까? "
-                                             "복구 전 상태도 별도 백업합니다.")) !=
-        QMessageBox::Yes)
+    if (LuxUI::MessageBox::question(this, LUX_UI_TEXT("프로젝트 백업 복구"),
+                                    LUX_UI_TEXT("현재 프로젝트를 선택한 백업으로 복구하시겠습니까? "
+                                                "복구 전 상태도 별도 백업합니다.")) !=
+        LuxUI::MessageBox::Yes)
         return;
     const auto projectFile = project_->GetFile();
     std::string error;
     bool success = false;
-    RunWithProgress(QStringLiteral("프로젝트를 복구하고 있습니다..."), [&] {
+    RunWithProgress(LUX_UI_TEXT("프로젝트를 복구하고 있습니다..."), [&] {
         success = RestoreProjectBackup(*project_, PathFromUtf8(Utf8(file)), error);
     });
     if (!success) {
-        ShowError(QStringLiteral("프로젝트 백업 복구 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("프로젝트 백업 복구 실패"), Q(error));
         return;
     }
     auto restored = EditorProject::Open(projectFile, error);
     EditorDocument candidate;
     if (!restored || !candidate.Open(PathUtf8(restored->GetSceneFile()))) {
-        ShowError(QStringLiteral("프로젝트 백업 복구 실패"),
+        ShowError(LUX_UI_TEXT("프로젝트 백업 복구 실패"),
                   error.empty() ? Q(candidate.GetLastError()) : Q(error));
         return;
     }
@@ -453,7 +434,7 @@ void EditorWindow::RestoreCurrentProject() {
     RememberSceneBaseline();
     ApplyProjectPreferences();
     RefreshAll();
-    Log(QStringLiteral("프로젝트를 백업에서 복구했습니다."));
+    Log(LUX_UI_TEXT("프로젝트를 백업에서 복구했습니다."));
 }
 
 void EditorWindow::RescanProjectResources() {
@@ -461,13 +442,13 @@ void EditorWindow::RescanProjectResources() {
         return;
     std::string error;
     size_t count = 0;
-    RunWithProgress(QStringLiteral("리소스를 재검색하고 있습니다..."),
+    RunWithProgress(LUX_UI_TEXT("리소스를 재검색하고 있습니다..."),
                     [&] { count = project_->RescanResources(error); });
     if (!error.empty()) {
-        ShowError(QStringLiteral("리소스 재검색 실패"), Q(error));
+        ShowError(LUX_UI_TEXT("리소스 재검색 실패"), Q(error));
         return;
     }
     RefreshProjectExplorer();
-    Log(QStringLiteral("리소스 %1개를 재검색했습니다.").arg(count));
+    Log(LUX_UI_TEXT("리소스 %1개를 재검색했습니다.").arg(count));
 }
 } // namespace LuxEditor

@@ -1,28 +1,28 @@
 #include <LuxEditor/Scene/SceneHierarchy.hpp>
-#include <QDropEvent>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 
 namespace LuxEditor {
-SceneHierarchy::SceneHierarchy(QWidget* parent) : QTreeWidget(parent) {
+SceneHierarchy::SceneHierarchy(LuxUI::Widget* parent) : LuxUI::TreeWidget(parent) {
     setColumnCount(1);
     setHeaderHidden(true);
-    setSelectionMode(QAbstractItemView::ExtendedSelection);
+    setSelectionMode(LuxUI::AbstractItemView::ExtendedSelection);
     setDragEnabled(true);
     setAcceptDrops(true);
     setDropIndicatorShown(true);
-    setDragDropMode(QAbstractItemView::InternalMove);
-    setDefaultDropAction(Qt::MoveAction);
+    setDragDropMode(LuxUI::AbstractItemView::InternalMove);
+    setDefaultDropAction(LuxUI::Flags::MoveAction);
 }
 
-void SceneHierarchy::dropEvent(QDropEvent* event) {
+void SceneHierarchy::dropEvent(LuxUI::DropEvent* event) {
     if (event->source() != this || !reparent) {
         event->ignore();
         return;
     }
     auto* target = itemAt(event->position().toPoint());
-    if (target && dropIndicatorPosition() != QAbstractItemView::OnItem)
+    if (target && dropIndicatorPosition() != LuxUI::AbstractItemView::OnItem)
         target = target->parent();
-    const auto parent = target ? target->data(0, Qt::UserRole).toUInt() : 0;
+    const auto parent = target ? target->data(0, LuxUI::Flags::UserRole).toUInt() : 0;
     std::vector<LuxEngine::uint32> roots;
     for (auto* item : selectedItems()) {
         bool descendant = false;
@@ -32,7 +32,7 @@ void SceneHierarchy::dropEvent(QDropEvent* event) {
                 break;
             }
         if (!descendant)
-            roots.push_back(item->data(0, Qt::UserRole).toUInt());
+            roots.push_back(item->data(0, LuxUI::Flags::UserRole).toUInt());
     }
     if (roots.empty() || std::find(roots.begin(), roots.end(), parent) != roots.end()) {
         event->ignore();

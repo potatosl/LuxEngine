@@ -3,9 +3,8 @@
 #include <LuxEditor/Project/ProjectArchive.hpp>
 #include <LuxEditor/Project/ProjectFileOperations.hpp>
 #include <LuxEditor/Scene/EditorDocument.hpp>
+#include <LuxUI/Widgets.hpp>
 
-#include <QImage>
-#include <QString>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -338,9 +337,10 @@ void TestProjectOperations() {
     Check(project->BumpVersion(1, error) && project->GetSettings().version == "1.3.0",
           "minor version resets patch");
     const auto icon = files.path / "icon.png";
-    QImage iconImage(1, 1, QImage::Format_RGB32);
-    iconImage.fill(QColor(255, 100, 50));
-    Check(iconImage.save(QString::fromUtf8(PathUtf8(icon)), "PNG"), "icon fixture saves as PNG");
+    LuxUI::Image iconImage(1, 1, LuxUI::Image::Format_RGB32);
+    iconImage.fill(LuxUI::Color(255, 100, 50));
+    Check(iconImage.save(LuxUI::String::fromUtf8(PathUtf8(icon)), "PNG"),
+          "icon fixture saves as PNG");
     Check(project->SetIcon(icon, error) &&
               std::filesystem::is_regular_file(files.path / "original" / project->GetIcon()),
           "project icon is copied into assets");
@@ -886,10 +886,10 @@ void TestEmptyProjectDirectories() {
     auto imported = ImportProject(archive, files.path / "imported", error);
     auto cloned = CloneProject(*original, files.path / "cloned", "Clone", error);
     Check(imported && cloned, "empty project imports and clones");
-    QImage image(2, 2, QImage::Format_RGB32);
-    image.fill(Qt::green);
+    LuxUI::Image image(2, 2, LuxUI::Image::Format_RGB32);
+    image.fill(LuxUI::Flags::green);
     const auto icon = files.path / "icon.png";
-    Check(image.save(QString::fromUtf8(PathUtf8(icon))), "icon fixture saves");
+    Check(image.save(LuxUI::String::fromUtf8(PathUtf8(icon))), "icon fixture saves");
     for (EditorProject* project : {&*imported, &*cloned}) {
         const auto root = project->GetFile().parent_path();
         Check(std::filesystem::is_directory(root / "Assets/Empty/Nested"),

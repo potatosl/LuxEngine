@@ -84,14 +84,7 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:LuxGame>)
     endif()
-    if(TARGET box2d::box2d)
-        get_target_property(_box2d_type box2d::box2d TYPE)
-        if(_box2d_type STREQUAL "SHARED_LIBRARY")
-            add_custom_command(TARGET LuxGame POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:box2d::box2d> $<TARGET_FILE_DIR:LuxGame>)
-        endif()
-    endif()
+
 endif()
 )LUX";
 

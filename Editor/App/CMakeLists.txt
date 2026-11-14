@@ -1,4 +1,6 @@
 target_sources(LuxEditorUi PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/App/EditorWindowPhysics3D.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/App/EditorWindowDevelopment.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/App/EditorWindowModels.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/App/EditorWindowPrefabs.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/App/EditorWindow.cpp"

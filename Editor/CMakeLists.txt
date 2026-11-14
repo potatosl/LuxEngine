@@ -17,7 +17,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     endforeach()
 endif()
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
+add_subdirectory(LuxUI)
 find_package(libzip CONFIG REQUIRED)
 find_package(nlohmann_json 3.11 CONFIG REQUIRED)
 
@@ -77,6 +77,10 @@ function(lux_editor_copy_qt_plugins target)
     endif()
 endfunction()
 
+if(TARGET LuxUIPanelsTests)
+    lux_editor_copy_qt_plugins(LuxUIPanelsTests)
+endif()
+
 set(LUX_EDITOR_PRIVATE_INCLUDE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/Animation/Private"
     "${CMAKE_CURRENT_SOURCE_DIR}/App/Private"
@@ -100,7 +104,8 @@ add_subdirectory(Viewport)
 
 target_include_directories(LuxEditorUi PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
 target_compile_definitions(LuxEditorUi PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
-target_link_libraries(LuxEditorUi PUBLIC LuxEngine::Engine Qt6::Widgets libzip::zip
+target_link_libraries(LuxEditorUi PUBLIC LuxEngine::Engine LuxUI::LuxUI libzip::zip
+    LuxEngine::Runtime
     PRIVATE nlohmann_json::nlohmann_json)
 if(COMMAND lux_set_target_warnings)
     lux_set_target_warnings(LuxEditorUi)
@@ -175,6 +180,9 @@ if(LUX_BUILD_TESTS)
     add_test(NAME Editor_viewport_foundation COMMAND LuxViewportFoundationTests)
     set_tests_properties(Editor_viewport_foundation PROPERTIES LABELS "headless;editor;viewport"
         TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1")
+    add_test(NAME Editor_viewport_foundation_hidpi COMMAND LuxViewportFoundationTests)
+    set_tests_properties(Editor_viewport_foundation_hidpi PROPERTIES LABELS "headless;editor;viewport"
+        TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1;QT_SCALE_FACTOR=2")
     add_executable(LuxEditorBuildOutputTests Tests/BuildOutputTest.cpp)
     target_link_libraries(LuxEditorBuildOutputTests PRIVATE LuxEditorUi)
     target_include_directories(LuxEditorBuildOutputTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
@@ -191,6 +199,8 @@ if(LUX_BUILD_TESTS)
     set_tests_properties(Editor_project_json PROPERTIES LABELS "headless;editor;project" TIMEOUT 60)
     add_executable(LuxEditorSceneDependencyTests Tests/EditorSceneDependencyTest.cpp)
     target_link_libraries(LuxEditorSceneDependencyTests PRIVATE LuxEditorUi)
+    target_compile_definitions(LuxEditorSceneDependencyTests PRIVATE
+        LUX_FBX_ANIMATED_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/../Engine/Tests/Fixtures/AnimatedTriangle.fbx")
     target_include_directories(LuxEditorSceneDependencyTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorSceneDependencyTests)
@@ -224,7 +234,7 @@ if(LUX_BUILD_TESTS)
         Project/Private/LuxEditor/Project/ProjectFileOperations.cpp)
     target_include_directories(LuxEditorSceneDocumentTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_compile_definitions(LuxEditorSceneDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
-    target_link_libraries(LuxEditorSceneDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui nlohmann_json::nlohmann_json)
+    target_link_libraries(LuxEditorSceneDocumentTests PRIVATE LuxEngine::Engine LuxUI::LuxUI nlohmann_json::nlohmann_json)
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorSceneDocumentTests)
     endif()
@@ -247,7 +257,7 @@ if(LUX_BUILD_TESTS)
         Project/Private/LuxEditor/Project/ProjectFileOperations.cpp)
     target_include_directories(LuxEditorDocumentTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
     target_compile_definitions(LuxEditorDocumentTests PRIVATE LUX_EDITOR_ENGINE_VERSION="${LuxEngine_VERSION}")
-    target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine Qt6::Gui libzip::zip nlohmann_json::nlohmann_json)
+    target_link_libraries(LuxEditorDocumentTests PRIVATE LuxEngine::Engine LuxUI::LuxUI libzip::zip nlohmann_json::nlohmann_json)
     if(COMMAND lux_set_target_warnings)
         lux_set_target_warnings(LuxEditorDocumentTests)
     endif()
@@ -377,4 +387,40 @@ if(WIN32 AND _lux_engine_type STREQUAL "SHARED_LIBRARY")
                 $<TARGET_FILE_DIR:LuxEditorDocumentTests>
         )
     endif()
+endif()
+
+if(LUX_BUILD_TESTS)
+    add_executable(LuxDevelopmentWorkspaceTests Tests/DevelopmentWorkspaceTest.cpp)
+    target_link_libraries(LuxDevelopmentWorkspaceTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxDevelopmentWorkspaceTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
+    lux_editor_copy_runtime(LuxDevelopmentWorkspaceTests)
+    add_test(NAME Editor_development_workspace COMMAND LuxDevelopmentWorkspaceTests)
+    set_tests_properties(Editor_development_workspace PROPERTIES LABELS "headless;editor;luxui" TIMEOUT 60
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1")
+endif()
+
+if(LUX_BUILD_TESTS)
+    foreach(suite GameView ModelImport FbxViewport)
+        add_executable(Lux${suite}Tests Tests/${suite}Test.cpp)
+        target_link_libraries(Lux${suite}Tests PRIVATE LuxEditorUi)
+        target_include_directories(Lux${suite}Tests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
+        lux_set_target_warnings(Lux${suite}Tests)
+        lux_editor_copy_runtime(Lux${suite}Tests)
+        lux_editor_copy_qt_plugins(Lux${suite}Tests)
+        add_test(NAME Editor_${suite} COMMAND Lux${suite}Tests)
+        set_tests_properties(Editor_${suite} PROPERTIES LABELS "headless;editor" TIMEOUT 90
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_EDITOR_SOFTWARE_VIEWPORT=1")
+    endforeach()
+endif()
+
+if(LUX_BUILD_TESTS)
+    add_executable(LuxGameViewGpuTests Tests/GameViewGpuTest.cpp)
+    target_link_libraries(LuxGameViewGpuTests PRIVATE LuxEditorUi)
+    target_include_directories(LuxGameViewGpuTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
+    lux_set_target_warnings(LuxGameViewGpuTests)
+    lux_editor_copy_runtime(LuxGameViewGpuTests)
+    lux_editor_copy_qt_plugins(LuxGameViewGpuTests)
+    add_test(NAME Editor_game_view_gpu COMMAND LuxGameViewGpuTests)
+    set_tests_properties(Editor_game_view_gpu PROPERTIES LABELS "gpu;editor;play" TIMEOUT 90
+        SKIP_RETURN_CODE 77 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_VULKAN_VALIDATION=sync")
 endif()

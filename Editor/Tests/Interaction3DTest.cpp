@@ -2,10 +2,7 @@
 #include <LuxEditor/Scene/SelectionTransform.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
 #include <LuxEditor/Viewport/ViewportCamera3D.hpp>
-#include <QApplication>
-#include <QFocusEvent>
-#include <QKeyEvent>
-#include <QMouseEvent>
+#include <LuxUI/Widgets.hpp>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -19,15 +16,20 @@ void Check(bool condition, const char* message) {
         throw std::runtime_error(message);
 }
 
-void Mouse(QWidget& view, QEvent::Type type, QPointF point, Qt::MouseButton button,
-           Qt::MouseButtons buttons, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
-    QMouseEvent event(type, point, view.mapToGlobal(point.toPoint()), button, buttons, modifiers);
-    QApplication::sendEvent(&view, &event);
+void Mouse(LuxUI::Widget& view, LuxUI::Event::Type type, LuxUI::PointF point,
+           LuxUI::Flags::MouseButton button, LuxUI::Flags::MouseButtons buttons,
+           LuxUI::Flags::KeyboardModifiers modifiers = LuxUI::Flags::NoModifier) {
+    LuxUI::MouseEvent event(type, point, view.mapToGlobal(point.toPoint()), button, buttons,
+                            modifiers);
+    LuxUI::Application::sendEvent(&view, &event);
 }
 
-void Click(QWidget& view, QPointF point, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
-    Mouse(view, QEvent::MouseButtonPress, point, Qt::LeftButton, Qt::LeftButton, modifiers);
-    Mouse(view, QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton, modifiers);
+void Click(LuxUI::Widget& view, LuxUI::PointF point,
+           LuxUI::Flags::KeyboardModifiers modifiers = LuxUI::Flags::NoModifier) {
+    Mouse(view, LuxUI::Event::MouseButtonPress, point, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::LeftButton, modifiers);
+    Mouse(view, LuxUI::Event::MouseButtonRelease, point, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::NoButton, modifiers);
 }
 
 bool Near(Vec3 a, Vec3 b) {
@@ -35,7 +37,7 @@ bool Near(Vec3 a, Vec3 b) {
     return std::sqrt(delta.Dot(delta)) < .0001f;
 }
 
-void Test(QApplication& app) {
+void Test(LuxUI::Application& app) {
     EditorDocument document;
     auto first = document.GetScene().CreateEntity("First");
     auto second = document.GetScene().CreateEntity("Second");
@@ -76,72 +78,94 @@ void Test(QApplication& app) {
     Click(view, screen({-3, 2, 0}));
     Check(document.GetSelection() == std::vector<uint32>{first.GetId()},
           "Click did not replace selection");
-    Click(view, screen({3, 2, 0}), Qt::ControlModifier);
+    Click(view, screen({3, 2, 0}), LuxUI::Flags::ControlModifier);
     Check(document.GetSelection().size() == 2 && document.GetSelected().GetId() == second.GetId(),
           "Ctrl click did not add and activate an object");
-    Click(view, screen({-3, 2, 0}), Qt::ControlModifier);
+    Click(view, screen({-3, 2, 0}), LuxUI::Flags::ControlModifier);
     Check(document.GetSelection() == std::vector<uint32>{second.GetId()},
           "Ctrl click did not toggle off");
-    Click(view, screen({-3, 2, 0}), Qt::ShiftModifier);
+    Click(view, screen({-3, 2, 0}), LuxUI::Flags::ShiftModifier);
     Check(document.GetSelection().size() == 2, "Shift click did not extend selection");
     document.Select(std::nullopt);
-    Mouse(view, QEvent::MouseButtonPress, {210, 170}, Qt::LeftButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, {430, 260}, Qt::NoButton, Qt::LeftButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, {210, 170}, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, {430, 260}, LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
     Check(document.GetSelection().empty(), "Marquee changed selection before release");
-    Mouse(view, QEvent::MouseButtonRelease, {430, 260}, Qt::LeftButton, Qt::NoButton);
+    Mouse(view, LuxUI::Event::MouseButtonRelease, {430, 260}, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::NoButton);
     Check(document.GetSelection().size() == 2, "Marquee did not select both projected objects");
     const auto originalFirst = first.GetComponent<TransformComponent>().position;
     const auto originalSecond = second.GetComponent<TransformComponent>().position;
-    const QPointF pivot = screen(GetSelectionPivot(document));
+    const LuxUI::PointF pivot = screen(GetSelectionPivot(document));
     const int beforeBegins = begins, beforeCommits = commits;
     view.SetTool(EditorTool::Move);
-    Mouse(view, QEvent::MouseButtonPress, pivot, Qt::LeftButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, pivot + QPointF(35, 0), Qt::NoButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, pivot + QPointF(60, 0), Qt::NoButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseButtonRelease, pivot + QPointF(60, 0), Qt::LeftButton, Qt::NoButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, pivot, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, pivot + LuxUI::PointF(35, 0), LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, pivot + LuxUI::PointF(60, 0), LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseButtonRelease, pivot + LuxUI::PointF(60, 0),
+          LuxUI::Flags::LeftButton, LuxUI::Flags::NoButton);
     const auto firstDelta = first.GetComponent<TransformComponent>().position - originalFirst;
     const auto secondDelta = second.GetComponent<TransformComponent>().position - originalSecond;
     Check(firstDelta.x > 0 && Near(firstDelta, secondDelta),
           "Group translation changed relative spacing");
+    Check(std::abs(firstDelta.x - std::round(firstDelta.x)) > .001f,
+          "The 3D group gizmo quantized its translation to the grid");
     Check(begins == beforeBegins + 1 && commits == beforeCommits + 1,
           "Drag did not commit one gesture");
     const auto checkpointFirst = first.GetComponent<TransformComponent>().position;
     const auto checkpointSecond = second.GetComponent<TransformComponent>().position;
     const auto movedPivot = screen(GetSelectionPivot(document));
-    Mouse(view, QEvent::MouseButtonPress, movedPivot, Qt::LeftButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, movedPivot + QPointF(35, 0), Qt::NoButton, Qt::LeftButton);
-    QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
-    QApplication::sendEvent(&view, &escape);
-    Mouse(view, QEvent::MouseButtonRelease, movedPivot + QPointF(35, 0), Qt::LeftButton,
-          Qt::NoButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, movedPivot, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, movedPivot + LuxUI::PointF(35, 0), LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
+    LuxUI::KeyEvent escape(LuxUI::Event::KeyPress, LuxUI::Flags::Key_Escape,
+                           LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(&view, &escape);
+    Mouse(view, LuxUI::Event::MouseButtonRelease, movedPivot + LuxUI::PointF(35, 0),
+          LuxUI::Flags::LeftButton, LuxUI::Flags::NoButton);
     Check(cancels == 1 && commits == beforeCommits + 1 &&
               Near(first.GetComponent<TransformComponent>().position, checkpointFirst) &&
               Near(second.GetComponent<TransformComponent>().position, checkpointSecond),
           "Esc failed to restore all objects or created a commit");
-    Mouse(view, QEvent::MouseButtonPress, movedPivot, Qt::LeftButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, movedPivot + QPointF(-25, 0), Qt::NoButton, Qt::LeftButton);
-    QFocusEvent focusOut(QEvent::FocusOut);
-    QApplication::sendEvent(&view, &focusOut);
+    Mouse(view, LuxUI::Event::MouseButtonPress, movedPivot, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, movedPivot + LuxUI::PointF(-25, 0), LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
+    LuxUI::FocusEvent focusOut(LuxUI::Event::FocusOut);
+    LuxUI::Application::sendEvent(&view, &focusOut);
     Check(cancels == 2 && Near(first.GetComponent<TransformComponent>().position, checkpointFirst),
           "Focus loss did not cancel a gesture");
-    Mouse(view, QEvent::MouseButtonPress, movedPivot, Qt::LeftButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, movedPivot + QPointF(-25, 0), Qt::NoButton, Qt::LeftButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, movedPivot, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, movedPivot + LuxUI::PointF(-25, 0), LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
     view.SetTool(EditorTool::Rotate);
     Check(cancels == 3 &&
               Near(second.GetComponent<TransformComponent>().position, checkpointSecond),
           "Changing tools did not cancel the preview");
     const auto beforeMarqueeCancel = document.GetSelection();
-    Mouse(view, QEvent::MouseButtonPress, {10, 10}, Qt::LeftButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, {80, 80}, Qt::NoButton, Qt::LeftButton);
-    QApplication::sendEvent(&view, &escape);
-    Mouse(view, QEvent::MouseButtonRelease, {80, 80}, Qt::LeftButton, Qt::NoButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, {10, 10}, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, {80, 80}, LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
+    LuxUI::Application::sendEvent(&view, &escape);
+    Mouse(view, LuxUI::Event::MouseButtonRelease, {80, 80}, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::NoButton);
     Check(document.GetSelection() == beforeMarqueeCancel && cancels == 3,
           "Cancelling a selection rectangle lost the prior selection or affected history");
 
     view.SetTool(EditorTool::Move);
-    Mouse(view, QEvent::MouseButtonPress, movedPivot, Qt::LeftButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, movedPivot + QPointF(20, 0), Qt::NoButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, movedPivot + QPointF(25, 0), Qt::NoButton, Qt::NoButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, movedPivot, LuxUI::Flags::LeftButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, movedPivot + LuxUI::PointF(20, 0), LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, movedPivot + LuxUI::PointF(25, 0), LuxUI::Flags::NoButton,
+          LuxUI::Flags::NoButton);
     Check(cancels == 4 && Near(first.GetComponent<TransformComponent>().position, checkpointFirst),
           "A missing OS button release left the transform gesture active");
 
@@ -152,11 +176,12 @@ void Test(QApplication& app) {
     const auto localPivot = screen(GetSelectionPivot(document));
     const auto beforeLocalFirst = first.GetComponent<TransformComponent>().position;
     const auto beforeLocalSecond = second.GetComponent<TransformComponent>().position;
-    Mouse(view, QEvent::MouseButtonPress, localPivot - QPointF(0, 50), Qt::LeftButton,
-          Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, localPivot - QPointF(0, 95), Qt::NoButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseButtonRelease, localPivot - QPointF(0, 95), Qt::LeftButton,
-          Qt::NoButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, localPivot - LuxUI::PointF(0, 50),
+          LuxUI::Flags::LeftButton, LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, localPivot - LuxUI::PointF(0, 95), LuxUI::Flags::NoButton,
+          LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseButtonRelease, localPivot - LuxUI::PointF(0, 95),
+          LuxUI::Flags::LeftButton, LuxUI::Flags::NoButton);
     const auto localDelta = first.GetComponent<TransformComponent>().position - beforeLocalFirst;
     Check(localDelta.y > 0 && std::abs(localDelta.x) < .001f &&
               Near(second.GetComponent<TransformComponent>().position - beforeLocalSecond,
@@ -167,11 +192,12 @@ void Test(QApplication& app) {
     const auto rotationPivot = screen(GetSelectionPivot(document));
     const auto beforeSeparation = second.GetComponent<TransformComponent>().position -
                                   first.GetComponent<TransformComponent>().position;
-    Mouse(view, QEvent::MouseButtonPress, rotationPivot + QPointF(52, -52), Qt::LeftButton,
-          Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, rotationPivot + QPointF(-52, -52), Qt::NoButton, Qt::LeftButton);
-    Mouse(view, QEvent::MouseButtonRelease, rotationPivot + QPointF(-52, -52), Qt::LeftButton,
-          Qt::NoButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, rotationPivot + LuxUI::PointF(52, -52),
+          LuxUI::Flags::LeftButton, LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, rotationPivot + LuxUI::PointF(-52, -52),
+          LuxUI::Flags::NoButton, LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseButtonRelease, rotationPivot + LuxUI::PointF(-52, -52),
+          LuxUI::Flags::LeftButton, LuxUI::Flags::NoButton);
     const auto separation = second.GetComponent<TransformComponent>().position -
                             first.GetComponent<TransformComponent>().position;
     Check(std::abs(separation.x) < .01f && std::abs(separation.y - beforeSeparation.x) < .01f,
@@ -181,12 +207,12 @@ void Test(QApplication& app) {
     const auto individualFirst = first.GetComponent<TransformComponent>().position;
     const auto individualSecond = second.GetComponent<TransformComponent>().position;
     const auto individualPivot = screen(GetSelectionPivot(document));
-    Mouse(view, QEvent::MouseButtonPress, individualPivot + QPointF(52, -52), Qt::LeftButton,
-          Qt::LeftButton);
-    Mouse(view, QEvent::MouseMove, individualPivot + QPointF(-52, -52), Qt::NoButton,
-          Qt::LeftButton);
-    Mouse(view, QEvent::MouseButtonRelease, individualPivot + QPointF(-52, -52), Qt::LeftButton,
-          Qt::NoButton);
+    Mouse(view, LuxUI::Event::MouseButtonPress, individualPivot + LuxUI::PointF(52, -52),
+          LuxUI::Flags::LeftButton, LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseMove, individualPivot + LuxUI::PointF(-52, -52),
+          LuxUI::Flags::NoButton, LuxUI::Flags::LeftButton);
+    Mouse(view, LuxUI::Event::MouseButtonRelease, individualPivot + LuxUI::PointF(-52, -52),
+          LuxUI::Flags::LeftButton, LuxUI::Flags::NoButton);
     Check(Near(first.GetComponent<TransformComponent>().position, individualFirst) &&
               Near(second.GetComponent<TransformComponent>().position, individualSecond),
           "Individual-pivot rotation moved the entity origins");
@@ -196,7 +222,7 @@ void Test(QApplication& app) {
 
 int main(int argc, char** argv) {
     qputenv("LUX_EDITOR_SOFTWARE_VIEWPORT", "1");
-    QApplication app(argc, argv);
+    LuxUI::Application app(argc, argv);
     try {
         Test(app);
         std::cout << "3D multi-selection, marquee, group gesture and rollback passed\n";

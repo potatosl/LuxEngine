@@ -7,10 +7,10 @@ size_t SceneHistoryBytes(const EditorSnapshot& snapshot) {
            snapshot.animationTimes.size() * sizeof(decltype(snapshot.animationTimes)::value_type);
 }
 
-SceneEditCommand::SceneEditCommand(QString name, std::function<void()> undo,
+SceneEditCommand::SceneEditCommand(LuxUI::String name, std::function<void()> undo,
                                    std::function<void()> redo,
                                    std::vector<EditorDocument::TabId> tabs, size_t bytes)
-    : QUndoCommand(std::move(name)), undo_(std::move(undo)), redo_(std::move(redo)),
+    : LuxUI::UndoCommand(std::move(name)), undo_(std::move(undo)), redo_(std::move(redo)),
       tabs_(std::move(tabs)), bytes_(bytes) {}
 
 void SceneEditCommand::undo() {

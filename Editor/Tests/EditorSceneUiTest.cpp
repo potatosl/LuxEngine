@@ -6,39 +6,7 @@
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
 #include <LuxEditor/Viewport/ViewportCamera3D.hpp>
 #include <LuxEngine/Assets/AssetManager.hpp>
-#include <QAbstractButton>
-#include <QAction>
-#include <QApplication>
-#include <QCheckBox>
-#include <QClipboard>
-#include <QDialog>
-#include <QDir>
-#include <QDockWidget>
-#include <QDoubleSpinBox>
-#include <QElapsedTimer>
-#include <QEventLoop>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QKeyEvent>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QMessageBox>
-#include <QMimeData>
-#include <QMouseEvent>
-#include <QPixmap>
-#include <QPlainTextEdit>
-#include <QPushButton>
-#include <QSettings>
-#include <QTabBar>
-#include <QTemporaryDir>
-#include <QThread>
-#include <QTimer>
-#include <QTreeWidget>
-#include <QTreeWidgetItemIterator>
-#include <QUndoStack>
+#include <LuxUI/Widgets.hpp>
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -75,56 +43,56 @@ std::string Data(Scene& scene) {
 }
 
 void Pump(int milliseconds = 0) {
-    QElapsedTimer timer;
+    LuxUI::ElapsedTimer timer;
     timer.start();
     do {
-        QApplication::processEvents(QEventLoop::AllEvents, 10);
+        LuxUI::Application::processEvents(LuxUI::EventLoop::AllEvents, 10);
         if (milliseconds)
-            QThread::msleep(1);
+            LuxUI::Thread::msleep(1);
     } while (timer.elapsed() < milliseconds);
 }
 
 template <typename Predicate> void Wait(Predicate condition, const char* description) {
-    QElapsedTimer timer;
+    LuxUI::ElapsedTimer timer;
     timer.start();
     while (!condition() && timer.elapsed() < 5000)
         Pump(2);
     Check(condition(), description);
 }
 
-QAction* Action(EditorWindow& window, const char* name) {
-    auto* result = window.findChild<QAction*>(QString::fromLatin1(name));
+LuxUI::Action* Action(EditorWindow& window, const char* name) {
+    auto* result = window.findChild<LuxUI::Action*>(LuxUI::String::fromLatin1(name));
     Check(result != nullptr, "required scene menu action exists");
     return result;
 }
 
-QUndoStack* History(EditorWindow& window) {
-    auto* result = window.findChild<QUndoStack*>();
+LuxUI::UndoStack* History(EditorWindow& window) {
+    auto* result = window.findChild<LuxUI::UndoStack*>();
     Check(result != nullptr, "global scene history exists");
     return result;
 }
 
-QTreeWidget* Outliner(EditorWindow& window) {
-    auto* result = window.findChild<QTreeWidget*>(QStringLiteral("sceneOutliner"));
+LuxUI::TreeWidget* Outliner(EditorWindow& window) {
+    auto* result = window.findChild<LuxUI::TreeWidget*>(LUX_UI_TEXT("sceneOutliner"));
     Check(result != nullptr, "scene outliner exists");
     return result;
 }
 
-QTreeWidgetItem* Find(QTreeWidget& tree, uint32 id) {
-    for (QTreeWidgetItemIterator item(&tree); *item; ++item)
-        if ((*item)->data(0, Qt::UserRole).toUInt() == id)
+LuxUI::TreeWidgetItem* Find(LuxUI::TreeWidget& tree, uint32 id) {
+    for (LuxUI::TreeWidgetItemIterator item(&tree); *item; ++item)
+        if ((*item)->data(0, LuxUI::Flags::UserRole).toUInt() == id)
             return *item;
     throw std::runtime_error("entity is missing from the visible scene hierarchy");
 }
 
 struct Fixture {
-    QTemporaryDir files;
+    LuxUI::TemporaryDir files;
     std::unique_ptr<EditorWindow> window;
 
     Fixture() {
         Check(files.isValid(), "temporary fixture directory exists");
-        QSettings().clear();
-        QSettings().setValue(QStringLiteral("sceneTransitions"), false);
+        LuxUI::Settings().clear();
+        LuxUI::Settings().setValue(LUX_UI_TEXT("sceneTransitions"), false);
         window = std::make_unique<EditorWindow>();
         window->show();
         Pump();
@@ -155,26 +123,28 @@ void MeshAssetEditing() {
     auto& document = window.GetDocument();
     const auto model = fixture.Path("triangle.obj");
     std::ofstream(model) << "v 1 0 0\nv 3 0 0\nv 2 2 0\nvn 0 0 1\nf 1//1 2//1 3//1\n";
-    window.ExecuteRecordedEdit(QStringLiteral("메시 생성"), [&] {
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("메시 생성"), [&] {
         document.CreateEntity("OBJ").AddComponent<MeshRendererComponent>();
     });
     const auto id = document.GetSelected().GetId();
-    auto* path = window.findChild<QLineEdit*>(QStringLiteral("meshAssetPath"));
-    auto* choose = window.findChild<QPushButton*>(QStringLiteral("chooseMeshAsset"));
-    auto* clear = window.findChild<QPushButton*>(QStringLiteral("clearMeshAsset"));
+    auto* path = window.findChild<LuxUI::LineEdit*>(LUX_UI_TEXT("meshAssetPath"));
+    auto* choose = window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("chooseMeshAsset"));
+    auto* clear = window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("clearMeshAsset"));
     Check(path && choose && clear && path->text().isEmpty(), "mesh asset inspector controls exist");
-    QTimer picker;
-    QObject::connect(&picker, &QTimer::timeout, &window, [&] {
-        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
-            dialog->selectFile(QString::fromUtf8(PathUtf8(model)));
-            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+    LuxUI::Timer picker;
+    LuxUI::Object::connect(&picker, &LuxUI::Timer::timeout, &window, [&] {
+        if (auto* dialog =
+                qobject_cast<LuxUI::FileDialog*>(LuxUI::Application::activeModalWidget())) {
+            dialog->selectFile(LuxUI::String::fromUtf8(PathUtf8(model)));
+            LuxUI::MetaObject::invokeMethod(dialog, "accept", LuxUI::Flags::DirectConnection);
         }
     });
     picker.start(5);
     choose->click();
     picker.stop();
     const auto selectedPath = document.GetScene().GetComponent<MeshRendererComponent>(id).meshPath;
-    Check(PathFromUtf8(selectedPath) == model && path->text() == QString::fromUtf8(selectedPath),
+    Check(PathFromUtf8(selectedPath) == model &&
+              path->text() == LuxUI::String::fromUtf8(selectedPath),
           "OBJ selection updates the selected scene component and inspector");
     History(window)->undo();
     Check(document.GetScene().GetComponent<MeshRendererComponent>(id).meshPath.empty(),
@@ -206,12 +176,14 @@ void MeshAssetEditing() {
     Pump();
     const auto camera = MakeViewportCamera3D(view.size(), {}, .65, -.48, 22);
     const auto point = *ProjectViewportPoint(camera, view.size(), {2, 1, 0});
-    QMouseEvent press(QEvent::MouseButtonPress, point, view.mapToGlobal(point.toPoint()),
-                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent release(QEvent::MouseButtonRelease, point, view.mapToGlobal(point.toPoint()),
-                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QApplication::sendEvent(&view, &press);
-    QApplication::sendEvent(&view, &release);
+    LuxUI::MouseEvent press(LuxUI::Event::MouseButtonPress, point,
+                            view.mapToGlobal(point.toPoint()), LuxUI::Flags::LeftButton,
+                            LuxUI::Flags::LeftButton, LuxUI::Flags::NoModifier);
+    LuxUI::MouseEvent release(LuxUI::Event::MouseButtonRelease, point,
+                              view.mapToGlobal(point.toPoint()), LuxUI::Flags::LeftButton,
+                              LuxUI::Flags::NoButton, LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(&view, &press);
+    LuxUI::Application::sendEvent(&view, &release);
     Check(picking.GetSelectedId(picking.GetActiveTabId()) == object.GetId(),
           "3D picking uses actual offset OBJ bounds rather than the default unit cube");
 }
@@ -221,24 +193,26 @@ void BaseColorEditingAndReload() {
     auto& window = *fixture.window;
     auto& document = window.GetDocument();
     const auto texture = fixture.Path("base-color.PnG");
-    QImage image(4, 4, QImage::Format_RGBA8888);
-    image.fill(QColor(120, 80, 40));
-    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"), "editor texture fixture writes");
-    window.ExecuteRecordedEdit(QStringLiteral("텍스처 대상"), [&] {
+    LuxUI::Image image(4, 4, LuxUI::Image::Format_RGBA8888);
+    image.fill(LuxUI::Color(120, 80, 40));
+    Check(image.save(LuxUI::String::fromUtf8(PathUtf8(texture)), "PNG"),
+          "editor texture fixture writes");
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("텍스처 대상"), [&] {
         document.CreateEntity("Textured cube").AddComponent<MeshRendererComponent>();
     });
     const auto tab = document.GetActiveTabId();
     const auto id = document.GetSelected().GetId();
-    auto* choose = window.findChild<QPushButton*>(QStringLiteral("chooseBaseColorTexture"));
-    auto* clear = window.findChild<QPushButton*>(QStringLiteral("clearBaseColorTexture"));
-    auto* reload = window.findChild<QPushButton*>(QStringLiteral("reloadMeshAssets"));
-    auto* path = window.findChild<QLineEdit*>(QStringLiteral("baseColorTexturePath"));
+    auto* choose = window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("chooseBaseColorTexture"));
+    auto* clear = window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("clearBaseColorTexture"));
+    auto* reload = window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("reloadMeshAssets"));
+    auto* path = window.findChild<LuxUI::LineEdit*>(LUX_UI_TEXT("baseColorTexturePath"));
     Check(choose && clear && reload && path, "base color controls exist");
-    QTimer picker;
-    QObject::connect(&picker, &QTimer::timeout, &window, [&] {
-        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
-            dialog->selectFile(QString::fromUtf8(PathUtf8(texture)));
-            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+    LuxUI::Timer picker;
+    LuxUI::Object::connect(&picker, &LuxUI::Timer::timeout, &window, [&] {
+        if (auto* dialog =
+                qobject_cast<LuxUI::FileDialog*>(LuxUI::Application::activeModalWidget())) {
+            dialog->selectFile(LuxUI::String::fromUtf8(PathUtf8(texture)));
+            LuxUI::MetaObject::invokeMethod(dialog, "accept", LuxUI::Flags::DirectConnection);
         }
     });
     picker.start(5);
@@ -282,20 +256,21 @@ void BaseColorEditingAndReload() {
     Check(!window.LastLogMessage().isEmpty() && Data(document.GetScene()) == before &&
               History(window)->index() == history,
           "failed texture reload reports an error without changing editing state");
-    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"), "texture source recovers");
+    Check(image.save(LuxUI::String::fromUtf8(PathUtf8(texture)), "PNG"), "texture source recovers");
     reload->click();
     const auto oldTab = document.GetActiveTabId();
     const auto oldScene = Data(document.GetScene());
-    QTimer switchPicker;
+    LuxUI::Timer switchPicker;
     bool switched = false;
-    QObject::connect(&switchPicker, &QTimer::timeout, &window, [&] {
-        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+    LuxUI::Object::connect(&switchPicker, &LuxUI::Timer::timeout, &window, [&] {
+        if (auto* dialog =
+                qobject_cast<LuxUI::FileDialog*>(LuxUI::Application::activeModalWidget())) {
             if (!switched) {
                 window.NewSceneDocument();
                 switched = true;
             }
-            dialog->selectFile(QString::fromUtf8(PathUtf8(texture)));
-            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+            dialog->selectFile(LuxUI::String::fromUtf8(PathUtf8(texture)));
+            LuxUI::MetaObject::invokeMethod(dialog, "accept", LuxUI::Flags::DirectConnection);
         }
     });
     switchPicker.start(5);
@@ -312,18 +287,19 @@ void NormalMapEditingAndReload() {
     auto& window = *fixture.window;
     auto& document = window.GetDocument();
     const auto texture = fixture.Path("normal-only.png");
-    QImage image(4, 4, QImage::Format_RGBA8888);
-    image.fill(QColor(128, 128, 255));
-    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"), "normal map fixture writes");
-    window.ExecuteRecordedEdit(QStringLiteral("노멀 맵 대상"), [&] {
+    LuxUI::Image image(4, 4, LuxUI::Image::Format_RGBA8888);
+    image.fill(LuxUI::Color(128, 128, 255));
+    Check(image.save(LuxUI::String::fromUtf8(PathUtf8(texture)), "PNG"),
+          "normal map fixture writes");
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("노멀 맵 대상"), [&] {
         document.CreateEntity("Normal mapped cube").AddComponent<MeshRendererComponent>();
     });
     const auto id = document.GetSelected().GetId();
-    auto* field = window.findChild<QLineEdit*>(QStringLiteral("materialMap0"));
-    auto* reload = window.findChild<QPushButton*>(QStringLiteral("reloadMeshAssets"));
+    auto* field = window.findChild<LuxUI::LineEdit*>(LUX_UI_TEXT("materialMap0"));
+    auto* reload = window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("reloadMeshAssets"));
     Check(field && reload, "normal map inspector and asset reload controls exist");
-    field->setText(QString::fromUtf8(PathUtf8(texture)));
-    Check(QMetaObject::invokeMethod(field, "editingFinished", Qt::DirectConnection),
+    field->setText(LuxUI::String::fromUtf8(PathUtf8(texture)));
+    Check(LuxUI::MetaObject::invokeMethod(field, "editingFinished", LuxUI::Flags::DirectConnection),
           "normal map assignment invokes its editor action");
     const auto assigned = document.GetScene().GetComponent<MeshRendererComponent>(id).material;
     Check(assigned.baseColorTexture.empty() &&
@@ -338,8 +314,8 @@ void NormalMapEditingAndReload() {
               assigned.normalTexture,
           "normal map assignment is redoable");
     const auto revision = AssetManager::GetTextureRevision(PathUtf8(texture));
-    image.fill(QColor(150, 128, 250));
-    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"),
+    image.fill(LuxUI::Color(150, 128, 250));
+    Check(image.save(LuxUI::String::fromUtf8(PathUtf8(texture)), "PNG"),
           "normal map source can change on disk");
     const auto before = Data(document.GetScene());
     const auto history = History(window)->index();
@@ -372,12 +348,12 @@ void TabsAndGlobalUndo() {
     Fixture fixture;
     auto& window = *fixture.window;
     auto& document = window.GetDocument();
-    auto* console = window.findChild<QPlainTextEdit*>(QStringLiteral("editorConsole"));
+    auto* console = window.findChild<LuxUI::PlainTextEdit*>(LUX_UI_TEXT("editorConsole"));
     Check(console && console->toPlainText().isEmpty() && console->placeholderText().isEmpty(),
           "a fresh editor has no filler console messages");
     const auto first = document.GetActiveTabId();
     uint32 firstEntity = 0;
-    window.ExecuteRecordedEdit(QStringLiteral("첫 씬 편집"),
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("첫 씬 편집"),
                                [&] { firstEntity = document.CreateEntity("첫 선택").GetId(); });
     const auto firstData = Data(document.GetScene());
     const auto second = window.NewSceneDocument();
@@ -385,7 +361,7 @@ void TabsAndGlobalUndo() {
               !document.IsDirty(second),
           "new scene tab preserves the previous dirty document");
     uint32 secondEntity = 0;
-    window.ExecuteRecordedEdit(QStringLiteral("둘째 씬 편집"),
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("둘째 씬 편집"),
                                [&] { secondEntity = document.CreateEntity("둘째 선택").GetId(); });
     Check(window.SwitchSceneDocument(first, false) &&
               document.GetSelected().GetId() == firstEntity &&
@@ -406,9 +382,9 @@ void TabsAndGlobalUndo() {
     Check(!window.CloseSceneDocument(second) && document.GetActiveTabId() == second &&
               Data(document.GetScene()) == secondData,
           "closing a dirty tab without consent is rejected");
-    auto* tabs = window.findChild<QTabBar*>(QStringLiteral("sceneDocuments"));
-    Check(tabs && tabs->count() == 2 && tabs->tabText(0).endsWith(QLatin1Char('*')) &&
-              tabs->tabText(1).endsWith(QLatin1Char('*')),
+    auto* tabs = window.findChild<LuxUI::TabBar*>(LUX_UI_TEXT("sceneDocuments"));
+    Check(tabs && tabs->count() == 2 && tabs->tabText(0).endsWith(LuxUI::Latin1Char('*')) &&
+              tabs->tabText(1).endsWith(LuxUI::Latin1Char('*')),
           "scene tabs display the dirty state of both documents");
     Check(console->toPlainText().isEmpty(), "ordinary editing and tab switching do not spam logs");
     Check(window.CloseSceneDocument(second, true) && document.GetScene(second) == nullptr &&
@@ -541,8 +517,8 @@ void GroupClipboard() {
     auto& document = window.GetDocument();
     Outliner(window)->setCurrentItem(Find(*Outliner(window), groupId));
     Action(window, "copyEntity")->trigger();
-    Check(QApplication::clipboard()->mimeData()->hasFormat(
-              QStringLiteral("application/x-lux-scene-subtree")),
+    Check(LuxUI::Application::clipboard()->mimeData()->hasFormat(
+              LUX_UI_TEXT("application/x-lux-scene-subtree")),
           "group clipboard records the full scene subtree payload");
     Action(window, "pasteEntity")->trigger();
     const auto pasted = document.GetSelected().GetId();
@@ -597,25 +573,30 @@ void GroupClipboard() {
         "copying a child uses its world pose rather than its old parent's local coordinates");
 }
 
-void Click(QWidget& view, QPointF point) {
-    QMouseEvent press(QEvent::MouseButtonPress, point, view.mapToGlobal(point.toPoint()),
-                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent release(QEvent::MouseButtonRelease, point, view.mapToGlobal(point.toPoint()),
-                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QApplication::sendEvent(&view, &press);
-    QApplication::sendEvent(&view, &release);
+void Click(LuxUI::Widget& view, LuxUI::PointF point) {
+    LuxUI::MouseEvent press(LuxUI::Event::MouseButtonPress, point,
+                            view.mapToGlobal(point.toPoint()), LuxUI::Flags::LeftButton,
+                            LuxUI::Flags::LeftButton, LuxUI::Flags::NoModifier);
+    LuxUI::MouseEvent release(LuxUI::Event::MouseButtonRelease, point,
+                              view.mapToGlobal(point.toPoint()), LuxUI::Flags::LeftButton,
+                              LuxUI::Flags::NoButton, LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(&view, &press);
+    LuxUI::Application::sendEvent(&view, &release);
 }
 
-void Drag(QWidget& view, QPointF start, QPointF end) {
-    QMouseEvent press(QEvent::MouseButtonPress, start, view.mapToGlobal(start.toPoint()),
-                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent move(QEvent::MouseMove, end, view.mapToGlobal(end.toPoint()), Qt::NoButton,
-                     Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent release(QEvent::MouseButtonRelease, end, view.mapToGlobal(end.toPoint()),
-                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QApplication::sendEvent(&view, &press);
-    QApplication::sendEvent(&view, &move);
-    QApplication::sendEvent(&view, &release);
+void Drag(LuxUI::Widget& view, LuxUI::PointF start, LuxUI::PointF end) {
+    LuxUI::MouseEvent press(LuxUI::Event::MouseButtonPress, start,
+                            view.mapToGlobal(start.toPoint()), LuxUI::Flags::LeftButton,
+                            LuxUI::Flags::LeftButton, LuxUI::Flags::NoModifier);
+    LuxUI::MouseEvent move(LuxUI::Event::MouseMove, end, view.mapToGlobal(end.toPoint()),
+                           LuxUI::Flags::NoButton, LuxUI::Flags::LeftButton,
+                           LuxUI::Flags::NoModifier);
+    LuxUI::MouseEvent release(LuxUI::Event::MouseButtonRelease, end,
+                              view.mapToGlobal(end.toPoint()), LuxUI::Flags::LeftButton,
+                              LuxUI::Flags::NoButton, LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(&view, &press);
+    LuxUI::Application::sendEvent(&view, &move);
+    LuxUI::Application::sendEvent(&view, &release);
 }
 
 void ViewportAffinePicking() {
@@ -636,17 +617,19 @@ void ViewportAffinePicking() {
         Pump();
         const auto camera = MakeViewportCamera3D(dragView.size(), {}, .65, -.48, 22);
         const auto start = *ProjectViewportPoint(camera, dragView.size(), {});
-        const auto finish = start + QPointF(32, 18);
-        QMouseEvent press(QEvent::MouseButtonPress, start, dragView.mapToGlobal(start.toPoint()),
-                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-        QMouseEvent move(QEvent::MouseMove, finish, dragView.mapToGlobal(finish.toPoint()),
-                         Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
-        QMouseEvent release(QEvent::MouseButtonRelease, finish,
-                            dragView.mapToGlobal(finish.toPoint()), Qt::LeftButton, Qt::NoButton,
-                            Qt::NoModifier);
-        QApplication::sendEvent(&dragView, &press);
-        QApplication::sendEvent(&dragView, &move);
-        QApplication::sendEvent(&dragView, &release);
+        const auto finish = start + LuxUI::PointF(32, 18);
+        LuxUI::MouseEvent press(LuxUI::Event::MouseButtonPress, start,
+                                dragView.mapToGlobal(start.toPoint()), LuxUI::Flags::LeftButton,
+                                LuxUI::Flags::LeftButton, LuxUI::Flags::NoModifier);
+        LuxUI::MouseEvent move(LuxUI::Event::MouseMove, finish,
+                               dragView.mapToGlobal(finish.toPoint()), LuxUI::Flags::NoButton,
+                               LuxUI::Flags::LeftButton, LuxUI::Flags::NoModifier);
+        LuxUI::MouseEvent release(LuxUI::Event::MouseButtonRelease, finish,
+                                  dragView.mapToGlobal(finish.toPoint()), LuxUI::Flags::LeftButton,
+                                  LuxUI::Flags::NoButton, LuxUI::Flags::NoModifier);
+        LuxUI::Application::sendEvent(&dragView, &press);
+        LuxUI::Application::sendEvent(&dragView, &move);
+        LuxUI::Application::sendEvent(&dragView, &release);
         const auto world = dragDocument.GetScene().GetWorldTransform(object.GetId());
         const auto projected = ProjectViewportPoint(camera, dragView.size(), world.position);
         Check(projected &&
@@ -712,18 +695,21 @@ void ViewportAffinePicking() {
           "default viewport camera and affine picking select the visible sheared child");
     begin = end = edits = cancelled = 0;
     view.SetTool(EditorTool::Select);
-    QMouseEvent press(QEvent::MouseButtonPress, *screen, view.mapToGlobal(screen->toPoint()),
-                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-    QApplication::sendEvent(&view, &press);
+    LuxUI::MouseEvent press(LuxUI::Event::MouseButtonPress, *screen,
+                            view.mapToGlobal(screen->toPoint()), LuxUI::Flags::LeftButton,
+                            LuxUI::Flags::LeftButton, LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(&view, &press);
     Check(begin == 1, "drag opens a transaction for a valid parented child");
     parent.GetComponent<TransformComponent>().scale.x = std::numeric_limits<float>::infinity();
-    const auto moved = *screen + QPointF(20, 10);
-    QMouseEvent move(QEvent::MouseMove, moved, view.mapToGlobal(moved.toPoint()), Qt::NoButton,
-                     Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent release(QEvent::MouseButtonRelease, moved, view.mapToGlobal(moved.toPoint()),
-                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QApplication::sendEvent(&view, &move);
-    QApplication::sendEvent(&view, &release);
+    const auto moved = *screen + LuxUI::PointF(20, 10);
+    LuxUI::MouseEvent move(LuxUI::Event::MouseMove, moved, view.mapToGlobal(moved.toPoint()),
+                           LuxUI::Flags::NoButton, LuxUI::Flags::LeftButton,
+                           LuxUI::Flags::NoModifier);
+    LuxUI::MouseEvent release(LuxUI::Event::MouseButtonRelease, moved,
+                              view.mapToGlobal(moved.toPoint()), LuxUI::Flags::LeftButton,
+                              LuxUI::Flags::NoButton, LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(&view, &move);
+    LuxUI::Application::sendEvent(&view, &release);
     Check(begin == 1 && end == 0 && cancelled == 1 && edits == 0,
           "an invalidated parent cancels exactly once without committing or throwing through Qt");
 }
@@ -757,18 +743,18 @@ void ViewportWorldEditing() {
         },
         [&] { ++balance; }, [&] { --balance; });
     viewport.resize(960, 720);
-    viewport.SetSnapToGrid(false);
     viewport.show();
     Pump();
     const auto screen = [&](Vec3 world) {
-        return QPointF(viewport.width() * .5 + world.x * 72, viewport.height() * .5 - world.y * 72);
+        return LuxUI::PointF(viewport.width() * .5 + world.x * 72,
+                             viewport.height() * .5 - world.y * 72);
     };
     const auto initial = scene.GetWorldTransform(child.GetId());
     const auto local = child.GetComponent<TransformComponent>();
     Click(viewport, screen(initial.position));
     Check(document.GetSelected() == child, "world-space picking hits the transformed child");
     viewport.SetTool(EditorTool::Select);
-    Drag(viewport, screen(initial.position), screen(initial.position) + QPointF(72, -36));
+    Drag(viewport, screen(initial.position), screen(initial.position) + LuxUI::PointF(72, -36));
     const auto moved = scene.GetWorldTransform(child.GetId());
     Check(validMovement && movements > 0 && balance == 0 &&
               Near(moved.position.x, initial.position.x + 1) &&
@@ -812,39 +798,41 @@ void ViewportWorldEditing() {
 void AnimationWorkspace() {
     Fixture fixture;
     auto& window = *fixture.window;
-    auto* dock = window.findChild<QDockWidget*>(QStringLiteral("AnimationWorkspace"));
-    auto* enabled = window.findChild<QCheckBox*>(QStringLiteral("editorAnimation"));
+    auto* dock = window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("AnimationWorkspace"));
+    auto* enabled = window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("editorAnimation"));
     Check(dock && enabled && dock->isAncestorOf(enabled),
           "animation controls belong to their own dock");
     auto entity = window.GetDocument().CreateEntity("Animated");
-    window.ExecuteRecordedEdit(QStringLiteral("select"),
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("select"),
                                [&] { window.GetDocument().Select(entity.GetId()); });
     enabled->setChecked(true);
     Check(window.GetDocument().GetSelected().HasComponent<AnimationComponent>(),
           "workspace adds animation to the selected target");
-    auto* clip = window.findChild<QLineEdit*>(QStringLiteral("animationClipName"));
-    clip->setText(QStringLiteral("Walk"));
-    QMetaObject::invokeMethod(clip, "editingFinished", Qt::DirectConnection);
+    auto* clip = window.findChild<LuxUI::LineEdit*>(LUX_UI_TEXT("animationClipName"));
+    clip->setText(LUX_UI_TEXT("Walk"));
+    LuxUI::MetaObject::invokeMethod(clip, "editingFinished", LuxUI::Flags::DirectConnection);
     Check(window.GetDocument().GetSelected().GetComponent<AnimationComponent>().clip.name == "Walk",
           "clip rename updates engine data");
     window.GetDocument().GetSelected().GetComponent<AnimationComponent>().clip.duration = 120;
-    window.findChild<QPushButton*>(QStringLiteral("animationNextFrame"))->click();
+    window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("animationNextFrame"))->click();
     Check(window.GetDocument().GetSelected().GetComponent<AnimationComponent>().currentTime > 0,
           "frame step advances animation time");
     Check(Near(window.GetDocument().GetSelected().GetComponent<AnimationComponent>().currentTime,
                1.0f / 30),
           "frame stepping keeps sub-slider precision on long clips");
-    window.findChild<QPushButton*>(QStringLiteral("animationPlay"))->click();
+    window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("animationPlay"))->click();
     Pump(80);
-    window.findChild<QPushButton*>(QStringLiteral("animationStop"))->click();
+    window.findChild<LuxUI::PushButton*>(LUX_UI_TEXT("animationStop"))->click();
     Check(window.GetDocument().GetSelected().GetComponent<AnimationComponent>().currentTime == 0,
           "stop returns to the beginning");
-    auto* keys = window.findChild<QListWidget*>(QStringLiteral("animationKeys"));
+    auto* keys = window.findChild<LuxUI::ListWidget*>(LUX_UI_TEXT("animationKeys"));
     keys->setCurrentRow(0);
-    QKeyEvent shortcut(QEvent::ShortcutOverride, Qt::Key_Delete, Qt::NoModifier);
-    QKeyEvent erase(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
-    QApplication::sendEvent(keys, &shortcut);
-    QApplication::sendEvent(keys, &erase);
+    LuxUI::KeyEvent shortcut(LuxUI::Event::ShortcutOverride, LuxUI::Flags::Key_Delete,
+                             LuxUI::Flags::NoModifier);
+    LuxUI::KeyEvent erase(LuxUI::Event::KeyPress, LuxUI::Flags::Key_Delete,
+                          LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(keys, &shortcut);
+    LuxUI::Application::sendEvent(keys, &erase);
     Check(shortcut.isAccepted() && window.GetDocument().GetSelected() &&
               window.GetDocument()
                   .GetSelected()
@@ -863,7 +851,7 @@ void AsyncAndDuplicateOpen() {
     third.CreateEntity("비동기 C");
     const auto a = fixture.Open(first, "async-a.lux");
     const auto b = fixture.Open(second, "async-b.lux");
-    window.ExecuteRecordedEdit(QStringLiteral("B 수정"), [&] {
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("B 수정"), [&] {
         document.Select(1);
         document.GetScene().GetComponent<TransformComponent>(1).position.x = 3;
     });
@@ -888,7 +876,7 @@ void AsyncAndDuplicateOpen() {
     Check(window.OpenSceneDocument(file), "same scene synchronously opens before async completion");
     const auto c = document.GetActiveTabId();
     const auto clean = Data(document.GetScene());
-    window.ExecuteRecordedEdit(QStringLiteral("로드 완료 전 수정"), [&] {
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("로드 완료 전 수정"), [&] {
         document.Select(1);
         document.GetScene().GetComponent<TransformComponent>(1).position.y = 7;
     });
@@ -907,13 +895,13 @@ void AsyncAndDuplicateOpen() {
     const auto modalFile = fixture.Path("async-during-dialog.lux");
     Check(third.Serialize(PathUtf8(modalFile)) && window.OpenSceneDocument(modalFile, true),
           "background scene queues before a modal property or save dialog opens");
-    QDialog dialog(&window);
+    LuxUI::Dialog dialog(&window);
     dialog.setModal(true);
     dialog.show();
     Wait([&] { return window.PendingSceneLoadCount() == 0; },
          "asynchronous scene finishes while a modal dialog remains open");
     Check(document.FindTabByPath(PathUtf8(modalFile)) && document.GetActiveTabId() == c &&
-              QApplication::activeModalWidget() == &dialog,
+              LuxUI::Application::activeModalWidget() == &dialog,
           "async completion cannot redirect a modal edit or save onto another scene");
     dialog.hide();
     const auto duplicateFile = fixture.Path("async-duplicate-during-dialog.lux");
@@ -924,7 +912,7 @@ void AsyncAndDuplicateOpen() {
     dialog.show();
     Wait([&] { return window.PendingSceneLoadCount() == 0; },
          "late duplicate request completes while modal dialog remains open");
-    Check(document.GetActiveTabId() == c && QApplication::activeModalWidget() == &dialog,
+    Check(document.GetActiveTabId() == c && LuxUI::Application::activeModalWidget() == &dialog,
           "late duplicate completion also cannot redirect a modal edit or save");
     dialog.hide();
 }
@@ -946,14 +934,14 @@ void SettingsPrecisionAndHistoryBound() {
     const auto before = Data(document.GetScene());
     const auto editDialog = [&](bool changeExposure) {
         bool handled = false, fieldsFound = false;
-        QTimer timer;
+        LuxUI::Timer timer;
         timer.setSingleShot(true);
-        QObject::connect(&timer, &QTimer::timeout, &window, [&] {
-            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        LuxUI::Object::connect(&timer, &LuxUI::Timer::timeout, &window, [&] {
+            auto* dialog = qobject_cast<LuxUI::Dialog*>(LuxUI::Application::activeModalWidget());
             if (!dialog)
                 return;
-            handled = dialog->windowTitle() == QStringLiteral("씬 설정");
-            const auto fields = dialog->findChildren<QDoubleSpinBox*>();
+            handled = dialog->windowTitle() == LUX_UI_TEXT("씬 설정");
+            const auto fields = dialog->findChildren<LuxUI::DoubleSpinBox*>();
             fieldsFound = fields.size() >= 11;
             if (changeExposure && fieldsFound)
                 fields[4]->setValue(.7);
@@ -984,7 +972,7 @@ void SettingsPrecisionAndHistoryBound() {
     document.Select(entity);
     History(window)->clear();
     for (int edit = 1; edit <= 150; ++edit)
-        window.ExecuteRecordedEdit(QStringLiteral("반복 편집"), [&] {
+        window.ExecuteRecordedEdit(LUX_UI_TEXT("반복 편집"), [&] {
             document.GetScene().GetComponent<TransformComponent>(entity).position.x =
                 static_cast<float>(edit);
         });
@@ -1010,14 +998,17 @@ void DuplicateRestoresPreviewSource() {
     const auto actor = document.CreateEntity("미리보기 복원 확인").GetId();
     Action(window, "previewStart")->trigger();
     Action(window, "previewPause")->trigger();
-    document.GetScene().GetComponent<TransformComponent>(actor).position.y = 9;
+    Check(window.GetRuntimeScene() && window.GetRuntimeScene() != &document.GetScene(),
+          "preview uses a separate runtime scene");
+    window.GetRuntimeScene()->GetComponent<TransformComponent>(actor).position.y = 9;
     bool accepted = false;
-    QTimer picker;
-    QObject::connect(&picker, &QTimer::timeout, &window, [&] {
-        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
-            dialog->selectFile(QString::fromUtf8(PathUtf8(fixture.Path("duplicate.lux"))));
+    LuxUI::Timer picker;
+    LuxUI::Object::connect(&picker, &LuxUI::Timer::timeout, &window, [&] {
+        if (auto* dialog =
+                qobject_cast<LuxUI::FileDialog*>(LuxUI::Application::activeModalWidget())) {
+            dialog->selectFile(LuxUI::String::fromUtf8(PathUtf8(fixture.Path("duplicate.lux"))));
             accepted = true;
-            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+            LuxUI::MetaObject::invokeMethod(dialog, "accept", LuxUI::Flags::DirectConnection);
         }
     });
     picker.start(5);
@@ -1030,11 +1021,11 @@ void DuplicateRestoresPreviewSource() {
                    0) &&
               Near(document.GetScene(duplicate)->GetComponent<TransformComponent>(actor).position.y,
                    0),
-          "duplicating during preview restores the original and copies authored state");
+          "duplicating during preview discards runtime changes and copies authored state");
 }
 
 struct ProjectSessionFixture {
-    QTemporaryDir files;
+    LuxUI::TemporaryDir files;
     EditorProject project;
 
     ProjectSessionFixture() {
@@ -1045,10 +1036,10 @@ struct ProjectSessionFixture {
             EditorProject::Create(root / "Project", "Session", ProjectTemplate::Empty, error);
         Check(created.has_value(), error.c_str());
         project = std::move(*created);
-        QSettings().clear();
-        QSettings().setValue(QStringLiteral("sceneTransitions"), false);
-        QSettings().setValue(QStringLiteral("lastProject"),
-                             QString::fromUtf8(PathUtf8(project.GetFile())));
+        LuxUI::Settings().clear();
+        LuxUI::Settings().setValue(LUX_UI_TEXT("sceneTransitions"), false);
+        LuxUI::Settings().setValue(LUX_UI_TEXT("lastProject"),
+                                   LuxUI::String::fromUtf8(PathUtf8(project.GetFile())));
     }
 };
 
@@ -1063,18 +1054,19 @@ void InactiveSessionRecoversAutosave() {
     Check(fixture.project.SaveAutosave(secondary, source, error), "inactive newer autosave saves");
     std::filesystem::last_write_time(secondary, std::filesystem::file_time_type::clock::now() -
                                                     std::chrono::minutes(5));
-    QJsonObject record;
-    record.insert(QStringLiteral("path"), QString::fromUtf8(PathUtf8(secondary)));
-    record.insert(QStringLiteral("project"),
-                  QString::fromUtf8(PathUtf8(fixture.project.GetFile())));
-    QSettings().setValue(QStringLiteral("openSceneDocuments"),
-                         QJsonDocument(QJsonArray{record}).toJson());
+    LuxUI::JsonObject record;
+    record.insert(LUX_UI_TEXT("path"), LuxUI::String::fromUtf8(PathUtf8(secondary)));
+    record.insert(LUX_UI_TEXT("project"),
+                  LuxUI::String::fromUtf8(PathUtf8(fixture.project.GetFile())));
+    LuxUI::Settings().setValue(LUX_UI_TEXT("openSceneDocuments"),
+                               LuxUI::JsonDocument(LuxUI::JsonArray{record}).toJson());
     int prompts = 0;
-    QTimer recovery;
-    QObject::connect(&recovery, &QTimer::timeout, [&] {
-        if (auto* dialog = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+    LuxUI::Timer recovery;
+    LuxUI::Object::connect(&recovery, &LuxUI::Timer::timeout, [&] {
+        if (auto* dialog =
+                qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget())) {
             ++prompts;
-            dialog->button(QMessageBox::Yes)->click();
+            dialog->button(LuxUI::MessageBox::Yes)->click();
         }
     });
     recovery.start(5);
@@ -1109,9 +1101,10 @@ void AsyncOwnerUsesLatestStartup() {
     Wait([&] { return window.PendingSceneLoadCount() == 0; }, "pending project scene finishes");
     const auto tab = window.GetDocument().FindTabByPath(PathUtf8(pending));
     Check(tab && window.SwitchSceneDocument(tab, false), "async scene activates after completion");
-    QTimer modal;
-    QObject::connect(&modal, &QTimer::timeout, [&] {
-        if (auto* dialog = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+    LuxUI::Timer modal;
+    LuxUI::Object::connect(&modal, &LuxUI::Timer::timeout, [&] {
+        if (auto* dialog =
+                qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget()))
             dialog->accept();
     });
     const auto previousDriver = qgetenv("SDL_VIDEO_DRIVER");
@@ -1141,10 +1134,10 @@ void AsyncOwnerUsesLatestStartup() {
           "loaded canonical paths prevent external scenes from retaining project ownership");
 }
 
-void CaptureMeshScene(const QString& destination, const QString& source) {
-    Check(QFileInfo(destination).isAbsolute() && QFileInfo(source).isAbsolute(),
+void CaptureMeshScene(const LuxUI::String& destination, const LuxUI::String& source) {
+    Check(LuxUI::FileInfo(destination).isAbsolute() && LuxUI::FileInfo(source).isAbsolute(),
           "scene capture paths must be absolute");
-    QSettings().clear();
+    LuxUI::Settings().clear();
     EditorWindow window;
     window.resize(1600, 1000);
     Check(window.OpenSceneDocument(PathFromUtf8(source.toUtf8().toStdString())),
@@ -1155,7 +1148,7 @@ void CaptureMeshScene(const QString& destination, const QString& source) {
     if (window.GetDocument().GetScene().GetSettings().render3D.mode ==
         LuxEngine::Render3DMode::Pbr) {
         for (int i = 0; i < 60; ++i) {
-            for (auto* widget : window.findChildren<QWidget*>())
+            for (auto* widget : window.findChildren<LuxUI::Widget*>())
                 if (dynamic_cast<SceneViewport3D*>(widget))
                     widget->repaint();
             Pump(100);
@@ -1163,10 +1156,10 @@ void CaptureMeshScene(const QString& destination, const QString& source) {
     }
     Check(window.grab().save(destination), "mesh demonstration capture saves");
     bool viewportSaved = false;
-    for (auto* widget : window.findChildren<QWidget*>())
+    for (auto* widget : window.findChildren<LuxUI::Widget*>())
         if (auto* viewport = dynamic_cast<SceneViewport3D*>(widget)) {
-            const auto file = QFileInfo(destination).absolutePath() + '/' +
-                              QFileInfo(destination).completeBaseName() + "-viewport.png";
+            const auto file = LuxUI::FileInfo(destination).absolutePath() + '/' +
+                              LuxUI::FileInfo(destination).completeBaseName() + "-viewport.png";
             viewportSaved = viewport->grab().save(file);
         }
     Check(viewportSaved, "mesh viewport capture saves");
@@ -1176,8 +1169,9 @@ void CaptureMeshScene(const QString& destination, const QString& source) {
     Pump();
 }
 
-void CaptureEditor(const QString& destination) {
-    Check(QFileInfo(destination).isAbsolute(), "capture destination must be an absolute path");
+void CaptureEditor(const LuxUI::String& destination) {
+    Check(LuxUI::FileInfo(destination).isAbsolute(),
+          "capture destination must be an absolute path");
     ProjectSessionFixture fixture;
     Scene scene;
     auto settings = scene.GetSettings();
@@ -1244,11 +1238,11 @@ void CaptureEditor(const QString& destination) {
     tree->expandAll();
     tree->setCurrentItem(Find(*tree, selected));
     Action(window, "view3D")->trigger();
-    auto* animationEnabled = window.findChild<QCheckBox*>(QStringLiteral("editorAnimation"));
+    auto* animationEnabled = window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("editorAnimation"));
     animationEnabled->setChecked(true);
-    window.findChild<QDockWidget*>(QStringLiteral("AnimationWorkspace"))->raise();
+    window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("AnimationWorkspace"))->raise();
     Pump(80);
-    Check(QDir().mkpath(QFileInfo(destination).absolutePath()) &&
+    Check(LuxUI::Dir().mkpath(LuxUI::FileInfo(destination).absolutePath()) &&
               window.grab().save(destination, "PNG"),
           "actual editor window capture saves");
     for (const auto& tab : window.GetDocument().ListTabs())
@@ -1260,28 +1254,29 @@ void CaptureEditor(const QString& destination) {
 
 int main(int argc, char** argv) {
     qputenv("LUX_EDITOR_SOFTWARE_VIEWPORT", "1");
-    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
-    QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("LuxSceneUiTests"));
-    QCoreApplication::setApplicationName(QStringLiteral("EditorSceneUi"));
-    QTemporaryDir settings;
+    LuxUI::Application::setAttribute(LuxUI::Flags::AA_DontUseNativeDialogs);
+    LuxUI::Application app(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName(LUX_UI_TEXT("LuxSceneUiTests"));
+    LuxUI::CoreApplication::setApplicationName(LUX_UI_TEXT("EditorSceneUi"));
+    LuxUI::TemporaryDir settings;
     if (!settings.isValid())
         return 1;
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+    LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                             settings.path());
     EngineSceneRenderer::SetForceAllowed(false);
     try {
-        const QString koreanOutput = QStringLiteral("한글 빌드 경고: 프로젝트/캐릭터 🙂");
+        const LuxUI::String koreanOutput = LUX_UI_TEXT("한글 빌드 경고: 프로젝트/캐릭터 🙂");
         Check(DecodeBuildOutput(koreanOutput.toUtf8()) == koreanOutput,
               "UTF-8 build output preserves Korean paths and supplementary characters");
-        const QString replacementOutput = koreanOutput + QChar::ReplacementCharacter;
+        const LuxUI::String replacementOutput = koreanOutput + LuxUI::Char::ReplacementCharacter;
         Check(DecodeBuildOutput(replacementOutput.toUtf8()) == replacementOutput,
               "valid UTF-8 replacement characters do not trigger legacy decoding");
 #ifdef _WIN32
         // An English ANSI code page cannot encode Hangul. Use fixed non-UTF-8 bytes
         // ("한글" in CP949) and the actual system code page instead of a lossy round trip.
-        const QByteArray legacyOutput = QByteArray::fromHex("c7d1b1db");
-        Check(DecodeBuildOutput(legacyOutput) == QString::fromLocal8Bit(legacyOutput),
+        const LuxUI::ByteArray legacyOutput = LuxUI::ByteArray::fromHex("c7d1b1db");
+        Check(DecodeBuildOutput(legacyOutput) == LuxUI::String::fromLocal8Bit(legacyOutput),
               "legacy Windows tool output follows the active ANSI code page");
 #endif
         const auto capture = qEnvironmentVariable("LUX_EDITOR_SCENE_CAPTURE");

@@ -1,16 +1,12 @@
 #include <LuxEditor/Scene/EditorDocument.hpp>
 #include <LuxEditor/Scene/SelectionTransform.hpp>
 #include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
+#include <LuxEditor/Viewport/ModelViewportGeometry.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
 #include <LuxEditor/Viewport/ViewportCamera3D.hpp>
 #include <LuxEngine/Assets/AssetManager.hpp>
 #include <LuxEngine/ECS/ECS.hpp>
-#include <QFocusEvent>
-#include <QKeyEvent>
-#include <QMouseEvent>
-#include <QPainter>
-#include <QPainterPath>
-#include <QWheelEvent>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -32,9 +28,10 @@ LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity,
         const auto& mesh = entity.GetComponent<LuxEngine::MeshRendererComponent>();
         LuxEngine::Vec3 minimum, maximum;
         const auto path = entity.GetScene()->ResolveAssetPath(mesh.meshPath);
-        if (!mesh.meshPath.empty() &&
-            ((renderer && renderer->GetMeshBounds(path, minimum, maximum)) ||
-             LuxEngine::AssetManager::GetMeshBounds(path, minimum, maximum))) {
+        if (ModelViewportBounds(entity, minimum, maximum) ||
+            (!mesh.meshPath.empty() && mesh.modelSubmesh < 0 &&
+             ((renderer && renderer->GetMeshBounds(path, minimum, maximum)) ||
+              LuxEngine::AssetManager::GetMeshBounds(path, minimum, maximum)))) {
             auto size = maximum - minimum;
             size.x = std::max(size.x, .001f);
             size.y = std::max(size.y, .001f);
@@ -55,16 +52,17 @@ LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity,
     return world;
 }
 
-QPolygonF Outline(const std::vector<QPointF>& points) {
+LuxUI::PolygonF Outline(const std::vector<LuxUI::PointF>& points) {
     auto sorted = points;
-    std::sort(sorted.begin(), sorted.end(),
-              [](QPointF a, QPointF b) { return a.x() == b.x() ? a.y() < b.y() : a.x() < b.x(); });
+    std::sort(sorted.begin(), sorted.end(), [](LuxUI::PointF a, LuxUI::PointF b) {
+        return a.x() == b.x() ? a.y() < b.y() : a.x() < b.x();
+    });
     if (sorted.size() < 3)
-        return QPolygonF();
-    const auto cross = [](QPointF a, QPointF b, QPointF c) {
+        return LuxUI::PolygonF();
+    const auto cross = [](LuxUI::PointF a, LuxUI::PointF b, LuxUI::PointF c) {
         return (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
     };
-    QPolygonF hull;
+    LuxUI::PolygonF hull;
     for (const auto p : sorted) {
         while (hull.size() > 1 && cross(hull[hull.size() - 2], hull.last(), p) <= 0)
             hull.removeLast();
@@ -89,17 +87,21 @@ LuxEngine::Vec3 TransformCorner(const LuxEngine::Mat4& model, LuxEngine::Vec3 po
 } // namespace
 
 SceneViewport3D::SceneViewport3D(
-    QWidget* parent, EditorDocument& document,
+    LuxUI::Widget* parent, EditorDocument& document,
     std::function<void(std::optional<LuxEngine::uint32>)> onSelect,
     std::function<void(LuxEngine::uint32, const LuxEngine::TransformComponent&)> onTransform,
     std::function<void()> onBeginEdit, std::function<void()> onEndEdit,
     std::shared_ptr<EngineSceneRenderer> renderer)
-    : QWidget(parent), document_(document), onSelect_(std::move(onSelect)),
+    : LuxUI::Widget(parent), document_(document), onSelect_(std::move(onSelect)),
       onTransform_(std::move(onTransform)), onBeginEdit_(std::move(onBeginEdit)),
       onEndEdit_(std::move(onEndEdit)), engineRenderer_(std::move(renderer)) {
-    setFocusPolicy(Qt::StrongFocus);
+    setFocusPolicy(LuxUI::Flags::StrongFocus);
     setMouseTracking(true);
     setMinimumSize(300, 200);
+    cameraTimer_.setInterval(16);
+    connect(&cameraTimer_, &LuxUI::Timer::timeout, this, [this] { AdvanceFlyCamera(); });
+    cameraTick_ = std::chrono::steady_clock::now();
+    cameraTimer_.start();
 }
 
 void SceneViewport3D::SetCancelEditCallback(std::function<void()> callback) {
@@ -109,6 +111,7 @@ void SceneViewport3D::SetCancelEditCallback(std::function<void()> callback) {
 void SceneViewport3D::CancelInteraction() {
     const bool editing = dragging_;
     orbiting_ = panning_ = dragging_ = marquee_ = false;
+    flyKeys_.clear();
     const auto id = dragId_;
     dragId_ = 0;
     axis_ = -1;
@@ -133,17 +136,23 @@ void SceneViewport3D::CancelInteraction() {
     update();
 }
 
-void SceneViewport3D::focusOutEvent(QFocusEvent* event) {
+void SceneViewport3D::focusOutEvent(LuxUI::FocusEvent* event) {
     CancelInteraction();
-    QWidget::focusOutEvent(event);
+    LuxUI::Widget::focusOutEvent(event);
 }
 
 void SceneViewport3D::FrameBounds(bool selectedOnly) {
     LuxEngine::Vec3 minimum{INFINITY, INFINITY, INFINITY};
     LuxEngine::Vec3 maximum{-INFINITY, -INFINITY, -INFINITY};
     for (auto entity : document_.GetScene().GetEntities()) {
-        if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
-            (selectedOnly && !document_.IsSelected(entity.GetId())))
+        if (entity.HasComponent<LuxEngine::ModelAnimationComponent>() &&
+            !entity.HasComponent<LuxEngine::MeshRendererComponent>())
+            continue;
+        bool selected = document_.IsSelected(entity.GetId());
+        for (auto parent = entity.GetScene()->GetParent(entity.GetId());
+             selectedOnly && !selected && parent; parent = entity.GetScene()->GetParent(parent))
+            selected = document_.IsSelected(parent);
+        if (!entity.HasComponent<LuxEngine::TransformComponent>() || (selectedOnly && !selected))
             continue;
         const auto model = BoundsModel(entity, engineRenderer_.get());
         for (int corner = 0; corner < 8; ++corner) {
@@ -200,17 +209,12 @@ void SceneViewport3D::SetViewPreset(ViewPreset preset) {
     update();
 }
 
-void SceneViewport3D::SetSnapToGrid(bool enabled) {
-    snapToGrid_ = enabled;
-    update();
-}
-
 void SceneViewport3D::SetGridVisible(bool visible) {
     gridVisible_ = visible;
     update();
 }
 
-void SceneViewport3D::paintEvent(QPaintEvent*) {
+void SceneViewport3D::paintEvent(LuxUI::PaintEvent*) {
     // Decouple GPU render/readback phase from QPainter lifecycle.
     // Vulkan offscreen rendering must complete before QPainter opens on this QWidget
     // to prevent re-entrant Qt event loop message dispatch from invalidating the raster paint
@@ -230,27 +234,27 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         }
     }
 
-    QPainter painter(this);
+    LuxUI::Painter painter(this);
     if (!painter.isActive())
         return;
 
-    painter.fillRect(rect(), QColor(29, 30, 33));
+    painter.fillRect(rect(), LuxUI::Color(29, 30, 33));
     if (engineFrame_ && !cachedBackground_.isNull())
         painter.drawImage(rect(), cachedBackground_);
-    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(LuxUI::Painter::Antialiasing);
 
     const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
     const auto project = [&](LuxEngine::Vec3 point) {
         return ProjectViewportPoint(camera, size(), point);
     };
     const int gridAlpha = 255;
-    auto line = [gridAlpha](QColor color) {
+    auto line = [gridAlpha](LuxUI::Color color) {
         color.setAlpha(gridAlpha);
         return color;
     };
     painter.save();
     if (!engineFrame_) {
-        QPainterPath visibleGrid;
+        LuxUI::PainterPath visibleGrid;
         visibleGrid.addRect(rect());
         for (auto entity : document_.GetScene().GetEntities()) {
             if (!entity.HasComponent<LuxEngine::TransformComponent>() ||
@@ -258,7 +262,7 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
                   entity.HasComponent<LuxEngine::SpriteRendererComponent>() ||
                   entity.HasComponent<LuxEngine::TilemapComponent>()))
                 continue;
-            std::vector<QPointF> points;
+            std::vector<LuxUI::PointF> points;
             const auto model = BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr);
             for (int corner = 0; corner < 8; ++corner) {
                 auto point = project(
@@ -267,7 +271,7 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
                 if (point)
                     points.push_back(*point);
             }
-            QPainterPath object;
+            LuxUI::PainterPath object;
             object.addPolygon(Outline(points));
             visibleGrid = visibleGrid.subtracted(object);
         }
@@ -298,12 +302,14 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
             if (!segment)
                 return;
             const double index = std::round(coordinate / spacing);
-            QColor color =
-                std::abs(std::remainder(index, 5.0)) < .1 ? QColor(75, 77, 82) : QColor(47, 49, 53);
+            LuxUI::Color color = std::abs(std::remainder(index, 5.0)) < .1
+                                     ? LuxUI::Color(75, 77, 82)
+                                     : LuxUI::Color(47, 49, 53);
             if (std::abs(coordinate) < spacing * .01)
-                color = first ? (front || side ? QColor(78, 135, 92) : QColor(75, 105, 155))
-                              : (side ? QColor(75, 105, 155) : QColor(155, 75, 77));
-            painter.setPen(QPen(line(color), std::abs(coordinate) < spacing * .01 ? 1.5 : 1));
+                color =
+                    first ? (front || side ? LuxUI::Color(78, 135, 92) : LuxUI::Color(75, 105, 155))
+                          : (side ? LuxUI::Color(75, 105, 155) : LuxUI::Color(155, 75, 77));
+            painter.setPen(LuxUI::Pen(line(color), std::abs(coordinate) < spacing * .01 ? 1.5 : 1));
             painter.drawLine(*segment);
         };
         for (int unit = -48; unit <= 48; ++unit) {
@@ -316,23 +322,25 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         painter.drawImage(rect(), cachedFrame_);
     if (engineFrame_ && engineRenderer_ && !engineRenderer_->LastError().isEmpty()) {
         const auto message = painter.fontMetrics().elidedText(
-            engineRenderer_->LastError(), Qt::ElideMiddle, std::max(1, width() - 32));
-        painter.fillRect(QRect(8, 8, std::max(1, width() - 16), 30), QColor(80, 24, 28, 225));
-        painter.setPen(QColor(255, 210, 210));
-        painter.drawText(QRect(16, 8, std::max(1, width() - 32), 30), Qt::AlignVCenter, message);
+            engineRenderer_->LastError(), LuxUI::Flags::ElideMiddle, std::max(1, width() - 32));
+        painter.fillRect(LuxUI::Rect(8, 8, std::max(1, width() - 16), 30),
+                         LuxUI::Color(80, 24, 28, 225));
+        painter.setPen(LuxUI::Color(255, 210, 210));
+        painter.drawText(LuxUI::Rect(16, 8, std::max(1, width() - 32), 30),
+                         LuxUI::Flags::AlignVCenter, message);
     }
     const auto origin = project({0, 0, 0});
-    for (const auto& [tip, color] :
-         std::array<std::pair<LuxEngine::Vec3, QColor>, 3>{{{{2, 0, 0}, QColor(218, 97, 99)},
-                                                            {{0, 2, 0}, QColor(105, 190, 132)},
-                                                            {{0, 0, 2}, QColor(102, 151, 232)}}}) {
+    for (const auto& [tip, color] : std::array<std::pair<LuxEngine::Vec3, LuxUI::Color>, 3>{
+             {{{2, 0, 0}, LuxUI::Color(218, 97, 99)},
+              {{0, 2, 0}, LuxUI::Color(105, 190, 132)},
+              {{0, 0, 2}, LuxUI::Color(102, 151, 232)}}}) {
         auto end = project(tip);
         if (origin && end) {
-            painter.setPen(QPen(color, 3));
+            painter.setPen(LuxUI::Pen(color, 3));
             painter.drawLine(*origin, *end);
         }
     }
-    std::vector<QRectF> occupiedLabels;
+    std::vector<LuxUI::RectF> occupiedLabels;
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
@@ -345,20 +353,20 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         const bool active = document_.IsSelected(entity.GetId());
         if (engineFrame_ && !active)
             continue;
-        QColor color = active   ? QColor(248, 197, 91)
-                       : mesh   ? QColor(117, 183, 223)
-                       : sprite ? QColor(130, 205, 158)
-                                : QColor(176, 187, 201);
+        LuxUI::Color color = active   ? LuxUI::Color(248, 197, 91)
+                             : mesh   ? LuxUI::Color(117, 183, 223)
+                             : sprite ? LuxUI::Color(130, 205, 158)
+                                      : LuxUI::Color(176, 187, 201);
         if (engineFrame_ && !active)
             color.setAlpha(120);
         const LuxEngine::Mat4 model =
             BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr);
         const LuxEngine::Vec3 boxCenter = TransformCorner(model, {});
-        std::array<std::optional<QPointF>, 8> corners;
+        std::array<std::optional<LuxUI::PointF>, 8> corners;
         for (size_t i = 0; i < 8; ++i)
             corners[i] = project(TransformCorner(
                 model, {(i & 1) ? .5f : -.5f, (i & 2) ? .5f : -.5f, (i & 4) ? .5f : -.5f}));
-        painter.setPen(QPen(color, active ? 3 : 2));
+        painter.setPen(LuxUI::Pen(color, active ? 3 : 2));
         for (const auto [a, b] : std::array<std::pair<int, int>, 12>{{{0, 1},
                                                                       {0, 2},
                                                                       {1, 3},
@@ -376,17 +384,18 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
         auto center = project(boxCenter);
         if (center) {
             painter.setPen(color);
-            const QString label =
+            const LuxUI::String label =
                 entity.HasComponent<LuxEngine::TagComponent>()
-                    ? QString::fromUtf8(entity.GetComponent<LuxEngine::TagComponent>().tag)
-                    : QStringLiteral("#%1").arg(entity.GetId());
+                    ? LuxUI::String::fromUtf8(entity.GetComponent<LuxEngine::TagComponent>().tag)
+                    : LUX_UI_TEXT("#%1").arg(entity.GetId());
             const double textHeight = painter.fontMetrics().height();
-            QRectF labelRect(center->x() + 9, center->y() - 10 - textHeight,
-                             painter.fontMetrics().horizontalAdvance(label), textHeight);
+            LuxUI::RectF labelRect(center->x() + 9, center->y() - 10 - textHeight,
+                                   painter.fontMetrics().horizontalAdvance(label), textHeight);
             for (int attempt = 0; attempt < 8; ++attempt) {
-                if (std::none_of(
-                        occupiedLabels.begin(), occupiedLabels.end(),
-                        [&labelRect](const QRectF& other) { return labelRect.intersects(other); }))
+                if (std::none_of(occupiedLabels.begin(), occupiedLabels.end(),
+                                 [&labelRect](const LuxUI::RectF& other) {
+                                     return labelRect.intersects(other);
+                                 }))
                     break;
                 labelRect.translate(0, -textHeight - 2);
             }
@@ -396,9 +405,9 @@ void SceneViewport3D::paintEvent(QPaintEvent*) {
     }
     DrawGizmo(painter);
     if (marquee_) {
-        painter.setPen(QPen(QColor(91, 163, 230), 1, Qt::DashLine));
-        painter.setBrush(QColor(70, 140, 215, 35));
-        painter.drawRect(QRectF(marqueeStart_, marqueeEnd_).normalized());
+        painter.setPen(LuxUI::Pen(LuxUI::Color(91, 163, 230), 1, LuxUI::Flags::DashLine));
+        painter.setBrush(LuxUI::Color(70, 140, 215, 35));
+        painter.drawRect(LuxUI::RectF(marqueeStart_, marqueeEnd_).normalized());
     }
 }
 
@@ -411,19 +420,19 @@ LuxEngine::Vec3 GizmoDirection(const LuxEngine::Mat4& world, int axis) {
     return direction.Dot(direction) > .5f ? direction : GizmoAxes[axis];
 }
 
-QColor GizmoColor(int axis) {
-    return axis == 0   ? QColor(222, 92, 89)
-           : axis == 1 ? QColor(101, 193, 121)
-                       : QColor(96, 152, 232);
+LuxUI::Color GizmoColor(int axis) {
+    return axis == 0   ? LuxUI::Color(222, 92, 89)
+           : axis == 1 ? LuxUI::Color(101, 193, 121)
+                       : LuxUI::Color(96, 152, 232);
 }
 
-double SegmentDistance(QPointF point, QLineF line) {
-    const QPointF direction = line.p2() - line.p1();
-    const double lengthSquared = QPointF::dotProduct(direction, direction);
+double SegmentDistance(LuxUI::PointF point, LuxUI::LineF line) {
+    const LuxUI::PointF direction = line.p2() - line.p1();
+    const double lengthSquared = LuxUI::PointF::dotProduct(direction, direction);
     const double t =
         lengthSquared > .001
-            ? std::clamp(QPointF::dotProduct(point - line.p1(), direction) / lengthSquared, 0.0,
-                         1.0)
+            ? std::clamp(LuxUI::PointF::dotProduct(point - line.p1(), direction) / lengthSquared,
+                         0.0, 1.0)
             : 0;
     const auto nearest = line.p1() + direction * t;
     return std::hypot(point.x() - nearest.x(), point.y() - nearest.y());
@@ -445,7 +454,9 @@ LuxEngine::Vec3 RingPoint(int axis, double angle, float radius) {
 }
 } // namespace
 
-int SceneViewport3D::HitGizmo(QPointF point) const {
+int SceneViewport3D::HitGizmo(LuxUI::PointF point) const {
+    if (tool_ != EditorTool::Move && tool_ != EditorTool::Rotate && tool_ != EditorTool::Scale)
+        return -1;
     auto selected = document_.GetSelected();
     if (!selected || !selected.HasComponent<LuxEngine::TransformComponent>())
         return -1;
@@ -488,7 +499,9 @@ int SceneViewport3D::HitGizmo(QPointF point) const {
     return axis;
 }
 
-void SceneViewport3D::DrawGizmo(QPainter& painter) const {
+void SceneViewport3D::DrawGizmo(LuxUI::Painter& painter) const {
+    if (tool_ != EditorTool::Move && tool_ != EditorTool::Rotate && tool_ != EditorTool::Scale)
+        return;
     auto selected = document_.GetSelected();
     if (!selected || !selected.HasComponent<LuxEngine::TransformComponent>())
         return;
@@ -497,10 +510,10 @@ void SceneViewport3D::DrawGizmo(QPainter& painter) const {
     const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
     const float length = float(GizmoLength(camera, position, height()));
     painter.save();
-    painter.setBrush(Qt::NoBrush);
+    painter.setBrush(LuxUI::Flags::NoBrush);
     for (int axis = 0; axis < 3; ++axis) {
-        const QColor color = axis == axis_ ? QColor(255, 204, 91) : GizmoColor(axis);
-        painter.setPen(QPen(color, axis == axis_ ? 3 : 2));
+        const LuxUI::Color color = axis == axis_ ? LuxUI::Color(255, 204, 91) : GizmoColor(axis);
+        painter.setPen(LuxUI::Pen(color, axis == axis_ ? 3 : 2));
         if (tool_ == EditorTool::Rotate) {
             for (int index = 0; index < 72; ++index) {
                 const auto segment = ProjectViewportSegment(
@@ -520,24 +533,24 @@ void SceneViewport3D::DrawGizmo(QPainter& painter) const {
             if (!segment || segment->length() < 6)
                 continue;
             painter.drawLine(*segment);
-            const QPointF tip = segment->p2();
+            const LuxUI::PointF tip = segment->p2();
             painter.setBrush(color);
             if (tool_ == EditorTool::Scale) {
-                painter.drawRect(QRectF(tip - QPointF(4, 4), QSizeF(8, 8)));
+                painter.drawRect(LuxUI::RectF(tip - LuxUI::PointF(4, 4), LuxUI::SizeF(8, 8)));
             } else {
                 const double angle = std::atan2(segment->dy(), segment->dx());
-                const QPointF back(std::cos(angle) * 10, std::sin(angle) * 10);
-                const QPointF side(-std::sin(angle) * 4, std::cos(angle) * 4);
-                painter.drawPolygon(QPolygonF{tip, tip - back + side, tip - back - side});
+                const LuxUI::PointF back(std::cos(angle) * 10, std::sin(angle) * 10);
+                const LuxUI::PointF side(-std::sin(angle) * 4, std::cos(angle) * 4);
+                painter.drawPolygon(LuxUI::PolygonF{tip, tip - back + side, tip - back - side});
             }
-            painter.drawText(tip + QPointF(7, -5), QString(QChar('X' + axis)));
-            painter.setBrush(Qt::NoBrush);
+            painter.drawText(tip + LuxUI::PointF(7, -5), LuxUI::String(LuxUI::Char('X' + axis)));
+            painter.setBrush(LuxUI::Flags::NoBrush);
         }
     }
     if (auto center = ProjectViewportPoint(camera, size(), position)) {
-        painter.setPen(QPen(QColor(235, 235, 235), 1));
-        painter.setBrush(QColor(70, 72, 77));
-        painter.drawRect(QRectF(*center - QPointF(4, 4), QSizeF(8, 8)));
+        painter.setPen(LuxUI::Pen(LuxUI::Color(235, 235, 235), 1));
+        painter.setBrush(LuxUI::Color(70, 72, 77));
+        painter.drawRect(LuxUI::RectF(*center - LuxUI::PointF(4, 4), LuxUI::SizeF(8, 8)));
     }
     painter.restore();
 }
@@ -557,7 +570,7 @@ LuxEngine::Vec3 SceneViewport3D::GizmoPosition() const {
     return GetSelectionPivot(document_);
 }
 
-void SceneViewport3D::BeginDrag(LuxEngine::uint32 id, QPointF point) {
+void SceneViewport3D::BeginDrag(LuxEngine::uint32 id, LuxUI::PointF point) {
     auto selected = document_.GetSelected();
     if (!selected || selected.GetId() != id ||
         !selected.HasComponent<LuxEngine::TransformComponent>())
@@ -586,58 +599,70 @@ void SceneViewport3D::BeginDrag(LuxEngine::uint32 id, QPointF point) {
         grabMouse();
 }
 
-bool SceneViewport3D::event(QEvent* event) {
-    if (event->type() == QEvent::ShortcutOverride) {
-        const auto* key = static_cast<QKeyEvent*>(event);
-        if (key->modifiers() == Qt::NoModifier &&
-            (key->key() == Qt::Key_X || key->key() == Qt::Key_Y || key->key() == Qt::Key_Z ||
-             key->key() == Qt::Key_Escape)) {
+bool SceneViewport3D::event(LuxUI::Event* event) {
+    if (event->type() == LuxUI::Event::ShortcutOverride) {
+        const auto* key = static_cast<LuxUI::KeyEvent*>(event);
+        if (orbiting_ && (key->key() == 'W' || key->key() == 'A' || key->key() == 'S' ||
+                          key->key() == 'D' || key->key() == 'Q' || key->key() == 'E')) {
+            event->accept();
+            return true;
+        }
+        if (key->modifiers() == LuxUI::Flags::NoModifier &&
+            (key->key() == LuxUI::Flags::Key_X || key->key() == LuxUI::Flags::Key_Y ||
+             key->key() == LuxUI::Flags::Key_Z || key->key() == LuxUI::Flags::Key_Escape)) {
             event->accept();
             return true;
         }
     }
-    if ((event->type() == QEvent::Hide || event->type() == QEvent::WindowDeactivate ||
-         event->type() == QEvent::UngrabMouse) &&
-        (dragging_ || marquee_))
+    if ((event->type() == LuxUI::Event::Hide || event->type() == LuxUI::Event::WindowDeactivate ||
+         event->type() == LuxUI::Event::UngrabMouse) &&
+        (dragging_ || marquee_ || orbiting_ || panning_ || !flyKeys_.empty()))
         CancelInteraction();
-    return QWidget::event(event);
+    return LuxUI::Widget::event(event);
 }
 
-void SceneViewport3D::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Escape) {
+void SceneViewport3D::keyPressEvent(LuxUI::KeyEvent* event) {
+    if (orbiting_ && (event->key() == 'W' || event->key() == 'A' || event->key() == 'S' ||
+                      event->key() == 'D' || event->key() == 'Q' || event->key() == 'E')) {
+        flyKeys_.insert(event->key());
+        event->accept();
+        return;
+    }
+    if (event->key() == LuxUI::Flags::Key_Escape) {
         CancelInteraction();
         event->accept();
         return;
     }
-    if (!(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
+    if (!(event->modifiers() & (LuxUI::Flags::ControlModifier | LuxUI::Flags::AltModifier |
+                                LuxUI::Flags::MetaModifier))) {
         switch (event->key()) {
-        case Qt::Key_F:
+        case LuxUI::Flags::Key_F:
             FocusSelection();
             return;
-        case Qt::Key_Home:
+        case LuxUI::Flags::Key_Home:
             FrameAll();
             return;
-        case Qt::Key_1:
+        case LuxUI::Flags::Key_1:
             SetViewPreset(ViewPreset::Front);
             return;
-        case Qt::Key_3:
+        case LuxUI::Flags::Key_3:
             SetViewPreset(ViewPreset::Right);
             return;
-        case Qt::Key_7:
+        case LuxUI::Flags::Key_7:
             SetViewPreset(ViewPreset::Top);
             return;
-        case Qt::Key_5:
+        case LuxUI::Flags::Key_5:
             SetViewPreset(ViewPreset::Perspective);
             return;
-        case Qt::Key_X:
+        case LuxUI::Flags::Key_X:
             axis_ = axis_ == 0 ? -1 : 0;
             update();
             return;
-        case Qt::Key_Y:
+        case LuxUI::Flags::Key_Y:
             axis_ = axis_ == 1 ? -1 : 1;
             update();
             return;
-        case Qt::Key_Z:
+        case LuxUI::Flags::Key_Z:
             axis_ = axis_ == 2 ? -1 : 2;
             update();
             return;
@@ -645,7 +670,7 @@ void SceneViewport3D::keyPressEvent(QKeyEvent* event) {
             break;
         }
     }
-    QWidget::keyPressEvent(event);
+    LuxUI::Widget::keyPressEvent(event);
 }
 
 void SceneViewport3D::NotifySelection() {
@@ -661,15 +686,16 @@ void SceneViewport3D::NotifySelection() {
     update();
 }
 
-void SceneViewport3D::SelectRectangle(QRectF rectangle, Qt::KeyboardModifiers modifiers) {
+void SceneViewport3D::SelectRectangle(LuxUI::RectF rectangle,
+                                      LuxUI::Flags::KeyboardModifiers modifiers) {
     const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
     std::vector<LuxEngine::uint32> hits;
-    rectangle = rectangle.normalized().intersected(QRectF(rect()));
+    rectangle = rectangle.normalized().intersected(LuxUI::RectF(rect()));
     for (auto entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
         const auto model = BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr);
-        std::vector<QPointF> points;
+        std::vector<LuxUI::PointF> points;
         for (int corner = 0; corner < 8; ++corner) {
             const LuxEngine::Vec3 first{corner & 1 ? .5f : -.5f, corner & 2 ? .5f : -.5f,
                                         corner & 4 ? .5f : -.5f};
@@ -692,18 +718,18 @@ void SceneViewport3D::SelectRectangle(QRectF rectangle, Qt::KeyboardModifiers mo
         const auto hull = Outline(points);
         if (hull.isEmpty())
             continue;
-        QPainterPath shape, area;
+        LuxUI::PainterPath shape, area;
         shape.addPolygon(hull);
         area.addRect(rectangle);
         if (area.intersects(shape) || area.contains(hull.first()))
             hits.push_back(entity.GetId());
     }
-    auto selection = modifiers & (Qt::ControlModifier | Qt::ShiftModifier)
+    auto selection = modifiers & (LuxUI::Flags::ControlModifier | LuxUI::Flags::ShiftModifier)
                          ? document_.GetSelection()
                          : std::vector<LuxEngine::uint32>{};
     for (const auto id : hits) {
         const auto found = std::find(selection.begin(), selection.end(), id);
-        if ((modifiers & Qt::ControlModifier) && found != selection.end())
+        if ((modifiers & LuxUI::Flags::ControlModifier) && found != selection.end())
             selection.erase(found);
         else if (found == selection.end())
             selection.push_back(id);
@@ -712,28 +738,29 @@ void SceneViewport3D::SelectRectangle(QRectF rectangle, Qt::KeyboardModifiers mo
     NotifySelection();
 }
 
-void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
+void SceneViewport3D::mousePressEvent(LuxUI::MouseEvent* event) {
     setFocus();
     lastMouse_ = event->position();
-    if (event->button() == Qt::RightButton || event->button() == Qt::MiddleButton) {
+    if (event->button() == LuxUI::Flags::RightButton ||
+        event->button() == LuxUI::Flags::MiddleButton) {
         if (dragging_ || marquee_)
             CancelInteraction();
-        orbiting_ = event->button() == Qt::RightButton;
-        panning_ = event->button() == Qt::MiddleButton;
+        orbiting_ = event->button() == LuxUI::Flags::RightButton;
+        panning_ = event->button() == LuxUI::Flags::MiddleButton;
         return;
     }
-    if (event->button() != Qt::LeftButton)
+    if (event->button() != LuxUI::Flags::LeftButton)
         return;
     if (dragging_ || marquee_)
         CancelInteraction();
     if (auto selected = document_.GetSelected();
         selected && selected.HasComponent<LuxEngine::TransformComponent>() &&
-        !(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
+        !(event->modifiers() & (LuxUI::Flags::ControlModifier | LuxUI::Flags::ShiftModifier))) {
         const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
         const auto center = ProjectViewportPoint(camera, size(), GizmoPosition());
         if (document_.GetSelection().size() > 1 && center &&
-            !(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) &&
-            QLineF(*center, event->position()).length() < 12) {
+            !(event->modifiers() & (LuxUI::Flags::ControlModifier | LuxUI::Flags::ShiftModifier)) &&
+            LuxUI::LineF(*center, event->position()).length() < 12) {
             BeginDrag(selected.GetId(), event->position());
             return;
         }
@@ -755,8 +782,15 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
-        const auto distance = IntersectViewportBox(
-            *ray, BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr));
+        if (entity.HasComponent<LuxEngine::ModelAnimationComponent>() &&
+            !entity.HasComponent<LuxEngine::MeshRendererComponent>())
+            continue;
+        const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
+        const auto distance =
+            mesh && mesh->modelSubmesh >= 0
+                ? IntersectModelViewport(*ray, entity)
+                : IntersectViewportBox(
+                      *ray, BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr));
         if (!distance || *distance >= best)
             continue;
         const auto surface = ray->origin + ray->direction * static_cast<float>(*distance);
@@ -776,8 +810,8 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
         update();
         return;
     }
-    if (event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) {
-        document_.ModifySelection(nearest, event->modifiers() & Qt::ControlModifier
+    if (event->modifiers() & (LuxUI::Flags::ControlModifier | LuxUI::Flags::ShiftModifier)) {
+        document_.ModifySelection(nearest, event->modifiers() & LuxUI::Flags::ControlModifier
                                                ? SelectionMode::Toggle
                                                : SelectionMode::Add);
         NotifySelection();
@@ -792,12 +826,14 @@ void SceneViewport3D::mousePressEvent(QMouseEvent* event) {
         BeginDrag(*nearest, event->position());
 }
 
-void SceneViewport3D::mouseReleaseEvent(QMouseEvent* event) {
-    if (event->button() == Qt::RightButton)
+void SceneViewport3D::mouseReleaseEvent(LuxUI::MouseEvent* event) {
+    if (event->button() == LuxUI::Flags::RightButton) {
         orbiting_ = false;
-    if (event->button() == Qt::MiddleButton)
+        flyKeys_.clear();
+    }
+    if (event->button() == LuxUI::Flags::MiddleButton)
         panning_ = false;
-    if (event->button() != Qt::LeftButton)
+    if (event->button() != LuxUI::Flags::LeftButton)
         return;
     if (marquee_) {
         if (dragLifetime_.expired() || document_.GetActiveTabId() != dragTab_ ||
@@ -809,9 +845,10 @@ void SceneViewport3D::mouseReleaseEvent(QMouseEvent* event) {
         marqueeEnd_ = event->position();
         if (mouseGrabber() == this)
             releaseMouse();
-        if (QLineF(marqueeStart_, marqueeEnd_).length() >= 4)
-            SelectRectangle(QRectF(marqueeStart_, marqueeEnd_), marqueeModifiers_);
-        else if (!(marqueeModifiers_ & (Qt::ControlModifier | Qt::ShiftModifier))) {
+        if (LuxUI::LineF(marqueeStart_, marqueeEnd_).length() >= 4)
+            SelectRectangle(LuxUI::RectF(marqueeStart_, marqueeEnd_), marqueeModifiers_);
+        else if (!(marqueeModifiers_ &
+                   (LuxUI::Flags::ControlModifier | LuxUI::Flags::ShiftModifier))) {
             document_.SetSelection({});
             NotifySelection();
         }
@@ -838,13 +875,15 @@ void SceneViewport3D::mouseReleaseEvent(QMouseEvent* event) {
     }
 }
 
-void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
-    const QPointF delta = event->position() - lastMouse_;
-    if (orbiting_ && !(event->buttons() & Qt::RightButton))
+void SceneViewport3D::mouseMoveEvent(LuxUI::MouseEvent* event) {
+    const LuxUI::PointF delta = event->position() - lastMouse_;
+    if (orbiting_ && !(event->buttons() & LuxUI::Flags::RightButton)) {
         orbiting_ = false;
-    if (panning_ && !(event->buttons() & Qt::MiddleButton))
+        flyKeys_.clear();
+    }
+    if (panning_ && !(event->buttons() & LuxUI::Flags::MiddleButton))
         panning_ = false;
-    if ((dragging_ || marquee_) && !(event->buttons() & Qt::LeftButton)) {
+    if ((dragging_ || marquee_) && !(event->buttons() & LuxUI::Flags::LeftButton)) {
         CancelInteraction();
         return;
     }
@@ -858,12 +897,22 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
         update();
         return;
     }
-    if (orbiting_ && (event->buttons() & Qt::RightButton)) {
-        yaw_ += delta.x() * .008;
-        pitch_ = std::clamp(pitch_ + delta.y() * .008, -1.55, 1.55);
+    if (orbiting_ && (event->buttons() & LuxUI::Flags::RightButton)) {
+        const auto eye = GetViewCamera().GetPosition();
+        // OS pointer speed and acceleration are already included in logical position().
+        // Convert through the vertical FOV without reapplying a device-pixel ratio.
+        const double halfFovTangent = std::tan(LuxEngine::ToRadians(60) * .5);
+        const double viewportHeight = std::max(1, height());
+        const double yawDelta = 2 * std::atan(delta.x() * halfFovTangent / viewportHeight);
+        const double pitchDelta = 2 * std::atan(delta.y() * halfFovTangent / viewportHeight);
+        const bool orbit = event->modifiers() & LuxUI::Flags::AltModifier;
+        yaw_ = std::remainder(yaw_ + (orbit ? yawDelta : -yawDelta), 2 * std::numbers::pi);
+        pitch_ = std::clamp(pitch_ + (orbit ? pitchDelta : -pitchDelta), -1.55, 1.55);
+        if (!orbit)
+            focus_ += eye - GetViewCamera().GetPosition();
         preset_ = ViewPreset::Perspective;
         update();
-    } else if (panning_ && (event->buttons() & Qt::MiddleButton)) {
+    } else if (panning_ && (event->buttons() & LuxUI::Flags::MiddleButton)) {
         const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
         const auto& view = camera.GetViewMatrix().elements;
         const double scale = distance_ * 1.1547 / std::max(1, height());
@@ -871,7 +920,7 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
         const LuxEngine::Vec3 up{view[1], view[5], view[9]};
         focus_ += right * float(-delta.x() * scale) + up * float(delta.y() * scale);
         update();
-    } else if (dragging_ && (event->buttons() & Qt::LeftButton)) {
+    } else if (dragging_ && (event->buttons() & LuxUI::Flags::LeftButton)) {
         LuxEngine::Entity entity = document_.GetSelected();
         if (!entity || entity.GetId() != dragId_ ||
             !entity.HasComponent<LuxEngine::TransformComponent>() || dragLifetime_.expired() ||
@@ -893,7 +942,7 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
             CancelInteraction();
             return;
         }
-        const QPointF drag = event->position() - dragStart_;
+        const LuxUI::PointF drag = event->position() - dragStart_;
         if (tool_ == EditorTool::Move || tool_ == EditorTool::Select) {
             const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
             const auto startRay = MakeViewportRay3D(camera, size(), dragStart_);
@@ -916,14 +965,13 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
                 if (!start || !current)
                     return;
                 double amount = *current - *start;
-                if (snapToGrid_ && !(event->modifiers() & Qt::AltModifier))
-                    amount = std::round(amount);
                 movement = axis * float(amount);
             } else {
                 auto normal = (camera.GetPosition() - focus_).Normalized();
                 if (tool_ == EditorTool::Select) {
-                    normal = event->modifiers() & Qt::ShiftModifier ? LuxEngine::Vec3{0, 0, 1}
-                                                                    : LuxEngine::Vec3{0, 1, 0};
+                    normal = event->modifiers() & LuxUI::Flags::ShiftModifier
+                                 ? LuxEngine::Vec3{0, 0, 1}
+                                 : LuxEngine::Vec3{0, 1, 0};
                     if (std::abs(currentRay->direction.Dot(normal)) < .01f ||
                         std::abs(startRay->direction.Dot(normal)) < .01f)
                         normal = (camera.GetPosition() - focus_).Normalized();
@@ -936,9 +984,6 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
                     std::abs(currentRay->direction.Dot(normal)) < .0001f)
                     return;
                 movement = intersect(*currentRay) - intersect(*startRay);
-                if (snapToGrid_ && !(event->modifiers() & Qt::AltModifier))
-                    movement = {float(std::round(movement.x)), float(std::round(movement.y)),
-                                float(std::round(movement.z))};
             }
             value.position = initialPosition_ + movement;
         } else if (tool_ == EditorTool::Rotate) {
@@ -961,7 +1006,7 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
                 const auto start = direction(*from), current = direction(*to);
                 angle = std::atan2(normal.Dot(start.Cross(current)), start.Dot(current));
             }
-            if (event->modifiers() & Qt::ControlModifier)
+            if (event->modifiers() & LuxUI::Flags::ControlModifier)
                 angle = std::round(angle / LuxEngine::ToRadians(15)) * LuxEngine::ToRadians(15);
             const auto localRotation = axis == 0   ? LuxEngine::Mat4::RotateX(angle)
                                        : axis == 1 ? LuxEngine::Mat4::RotateY(angle)
@@ -992,7 +1037,7 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
                         direction * float(GizmoLength(camera, initialPosition_, height())));
                 if (!projected || projected->length() < 1)
                     return;
-                pixels = QPointF::dotProduct(drag, projected->p2() - projected->p1()) /
+                pixels = LuxUI::PointF::dotProduct(drag, projected->p2() - projected->p1()) /
                          projected->length();
             }
             const float factor = static_cast<float>(std::clamp(std::exp(pixels * .01), .05, 100.0));
@@ -1010,7 +1055,7 @@ void SceneViewport3D::mouseMoveEvent(QMouseEvent* event) {
     lastMouse_ = event->position();
 }
 
-void SceneViewport3D::wheelEvent(QWheelEvent* event) {
+void SceneViewport3D::wheelEvent(LuxUI::WheelEvent* event) {
     if (dragging_ || marquee_)
         CancelInteraction();
     distance_ = std::clamp(distance_ * std::pow(.9, event->angleDelta().y() / 120.0), .1, 100000.0);
@@ -1025,5 +1070,48 @@ void SceneViewport3D::SetTool(EditorTool tool) {
     if (tool_ != tool)
         CancelInteraction();
     tool_ = tool;
+}
+} // namespace LuxEditor
+
+namespace LuxEditor {
+LuxEngine::PerspectiveCamera SceneViewport3D::GetViewCamera() const {
+    return MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+}
+
+std::shared_ptr<EngineSceneRenderer> SceneViewport3D::GetRenderer() const {
+    return engineRenderer_;
+}
+
+void SceneViewport3D::keyReleaseEvent(LuxUI::KeyEvent* event) {
+    flyKeys_.erase(event->key());
+    LuxUI::Widget::keyReleaseEvent(event);
+}
+
+void SceneViewport3D::AdvanceFlyCamera() {
+    const auto now = std::chrono::steady_clock::now();
+    const auto dt = std::clamp(std::chrono::duration<double>(now - cameraTick_).count(), 0., .05);
+    cameraTick_ = now;
+    if (!orbiting_ || !hasFocus() || !isVisible() || flyKeys_.empty())
+        return;
+    const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    const auto forward = (camera.GetTarget() - camera.GetPosition()).Normalized();
+    const auto right = forward.Cross({0, 1, 0}).Normalized();
+    LuxEngine::Vec3 direction;
+    if (flyKeys_.contains('W'))
+        direction += forward;
+    if (flyKeys_.contains('S'))
+        direction += forward * -1;
+    if (flyKeys_.contains('D'))
+        direction += right;
+    if (flyKeys_.contains('A'))
+        direction += right * -1;
+    if (flyKeys_.contains('E'))
+        direction.y += 1;
+    if (flyKeys_.contains('Q'))
+        direction.y -= 1;
+    const auto shift = LuxUI::Application::keyboardModifiers() & LuxUI::Flags::ShiftModifier;
+    focus_ += direction.Normalized() *
+              static_cast<float>(dt * std::max(2., distance_ * .5) * (shift ? 3 : 1));
+    update();
 }
 } // namespace LuxEditor

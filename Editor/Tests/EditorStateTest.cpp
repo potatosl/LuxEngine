@@ -2,22 +2,7 @@
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Project/ProjectArchive.hpp>
 #include <LuxEngine/Scene/Scene.hpp>
-#include <QAbstractButton>
-#include <QAction>
-#include <QApplication>
-#include <QDragEnterEvent>
-#include <QDropEvent>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QMessageBox>
-#include <QMimeData>
-#include <QSettings>
-#include <QTemporaryDir>
-#include <QTimer>
-#include <QUndoStack>
-#include <QUrl>
+#include <LuxUI/Widgets.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -36,12 +21,12 @@ void Check(bool value, const char* message) {
         throw std::runtime_error(message);
 }
 
-QString Q(const fs::path& path) {
-    return QString::fromUtf8(PathUtf8(path));
+LuxUI::String Q(const fs::path& path) {
+    return LuxUI::String::fromUtf8(PathUtf8(path));
 }
 
 struct ProjectFixture {
-    QTemporaryDir directory;
+    LuxUI::TemporaryDir directory;
     EditorProject project;
     fs::path secondary;
     fs::path external;
@@ -62,9 +47,9 @@ struct ProjectFixture {
               "secondary and external scene fixtures save");
     }
 
-    std::unique_ptr<EditorWindow> Open(QApplication& app) {
-        QSettings().clear();
-        QSettings().setValue("lastProject", Q(project.GetFile()));
+    std::unique_ptr<EditorWindow> Open(LuxUI::Application& app) {
+        LuxUI::Settings().clear();
+        LuxUI::Settings().setValue("lastProject", Q(project.GetFile()));
         auto window = std::make_unique<EditorWindow>();
         window->show();
         app.processEvents();
@@ -73,14 +58,14 @@ struct ProjectFixture {
 };
 
 void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
-    QTimer chooser;
+    LuxUI::Timer chooser;
     bool configured = false, accepted = false, timedOut = false, inputAvailable = false;
     const auto start = std::chrono::steady_clock::now();
-    QObject::connect(&chooser, &QTimer::timeout, &window, [&] {
-        auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+    LuxUI::Object::connect(&chooser, &LuxUI::Timer::timeout, &window, [&] {
+        auto* dialog = qobject_cast<LuxUI::FileDialog*>(LuxUI::Application::activeModalWidget());
         if (std::chrono::steady_clock::now() - start > std::chrono::seconds(10)) {
             timedOut = true;
-            if (auto* modal = qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+            if (auto* modal = qobject_cast<LuxUI::Dialog*>(LuxUI::Application::activeModalWidget()))
                 modal->reject();
             return;
         }
@@ -89,24 +74,25 @@ void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
         if (!configured) {
             configured = true;
             dialog->setDirectory(Q(scene.parent_path()));
-            auto* filename = dialog->findChild<QLineEdit*>(QStringLiteral("fileNameEdit"));
+            auto* filename = dialog->findChild<LuxUI::LineEdit*>(LUX_UI_TEXT("fileNameEdit"));
             inputAvailable = filename != nullptr;
             if (!filename) {
                 dialog->reject();
                 return;
             }
-            QObject::connect(dialog, &QFileDialog::accepted, &window, [&] { accepted = true; });
+            LuxUI::Object::connect(dialog, &LuxUI::FileDialog::accepted, &window,
+                                   [&] { accepted = true; });
             filename->setFocus();
             filename->setText(Q(scene));
             return;
         }
         const auto selected = dialog->selectedFiles();
-        if (selected.size() == 1 && QFileInfo(selected.front()).canonicalFilePath() ==
-                                        QFileInfo(Q(scene)).canonicalFilePath())
-            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+        if (selected.size() == 1 && LuxUI::FileInfo(selected.front()).canonicalFilePath() ==
+                                        LuxUI::FileInfo(Q(scene)).canonicalFilePath())
+            LuxUI::MetaObject::invokeMethod(dialog, "accept", LuxUI::Flags::DirectConnection);
     });
     chooser.start(5);
-    auto* action = window.findChild<QAction*>("openScene");
+    auto* action = window.findChild<LuxUI::Action*>("openScene");
     Check(action, "scene open action exists");
     action->trigger();
     Check(!timedOut, "scene chooser did not accept the existing fixture file within ten seconds");
@@ -115,27 +101,30 @@ void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
 }
 
 void DropScene(EditorWindow& window, const fs::path& path) {
-    QMimeData mime;
-    mime.setUrls({QUrl::fromLocalFile(Q(path))});
-    QDragEnterEvent enter({50, 50}, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
-    QApplication::sendEvent(&window, &enter);
+    LuxUI::MimeData mime;
+    mime.setUrls({LuxUI::Url::fromLocalFile(Q(path))});
+    LuxUI::DragEnterEvent enter({50, 50}, LuxUI::Flags::CopyAction, &mime, LuxUI::Flags::LeftButton,
+                                LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(&window, &enter);
     Check(enter.isAccepted(), "scene drag enters the editor");
-    QDropEvent drop({50, 50}, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
-    QApplication::sendEvent(&window, &drop);
+    LuxUI::DropEvent drop({50, 50}, LuxUI::Flags::CopyAction, &mime, LuxUI::Flags::LeftButton,
+                          LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(&window, &drop);
 }
 
-void TestSceneContext(QApplication& app) {
+void TestSceneContext(LuxUI::Application& app) {
     for (const int route : {0, 1, 2}) {
         ProjectFixture fixture;
         auto window = fixture.Open(app);
-        auto* settings = window->findChild<QAction*>("projectSettings");
+        auto* settings = window->findChild<LuxUI::Action*>("projectSettings");
         Check(settings && settings->isEnabled(), "project starts connected");
         if (route == 0)
             OpenViaMenu(*window, fixture.secondary);
         else if (route == 1) {
-            auto* assets = window->findChild<QListWidget*>("assetGrid");
+            auto* assets = window->findChild<LuxUI::ListWidget*>("assetGrid");
             Check(assets, "asset browser exists");
-            const auto items = assets->findItems("Scenes/Secondary.lux", Qt::MatchExactly);
+            const auto items =
+                assets->findItems("Scenes/Secondary.lux", LuxUI::Flags::MatchExactly);
             Check(items.size() == 1, "secondary scene appears in asset browser");
             assets->setCurrentItem(items.front());
             assets->itemDoubleClicked(items.front());
@@ -145,9 +134,10 @@ void TestSceneContext(QApplication& app) {
                   settings->isEnabled(),
               "all scene open routes retain the owning project");
         // Failed opens keep the current document and project connection.
-        QTimer dismiss;
-        QObject::connect(&dismiss, &QTimer::timeout, &app, [] {
-            if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+        LuxUI::Timer dismiss;
+        LuxUI::Object::connect(&dismiss, &LuxUI::Timer::timeout, &app, [] {
+            if (auto* message =
+                    qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget()))
                 message->accept();
         });
         dismiss.start(5);
@@ -165,7 +155,7 @@ void TestSceneContext(QApplication& app) {
     }
 }
 
-void TestRecoveryHistory(QApplication& app) {
+void TestRecoveryHistory(LuxUI::Application& app) {
     ProjectFixture fixture;
     LuxEngine::Scene recovered;
     recovered.CreateEntity("Recovered unsaved entity");
@@ -174,10 +164,11 @@ void TestRecoveryHistory(QApplication& app) {
           error.c_str());
     fs::last_write_time(fixture.project.GetSceneFile(),
                         fs::file_time_type::clock::now() - std::chrono::minutes(5));
-    QTimer recover;
-    QObject::connect(&recover, &QTimer::timeout, &app, [] {
-        if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
-            if (auto* yes = message->button(QMessageBox::Yes))
+    LuxUI::Timer recover;
+    LuxUI::Object::connect(&recover, &LuxUI::Timer::timeout, &app, [] {
+        if (auto* message =
+                qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget()))
+            if (auto* yes = message->button(LuxUI::MessageBox::Yes))
                 yes->click();
     });
     recover.start(5);
@@ -186,8 +177,8 @@ void TestRecoveryHistory(QApplication& app) {
     auto& document = window->GetDocument();
     Check(document.IsDirty() && document.GetScene().GetEntityCount() == 1,
           "autosave recovery is unsaved");
-    auto* undo = window->findChild<QUndoStack*>();
-    window->findChild<QAction*>("addEntity")->trigger();
+    auto* undo = window->findChild<LuxUI::UndoStack*>();
+    window->findChild<LuxUI::Action*>("addEntity")->trigger();
     undo->undo();
     Check(document.IsDirty() && document.GetScene().GetEntityCount() == 1 && !undo->isClean(),
           "undo to a recovered baseline remains dirty");
@@ -196,17 +187,18 @@ void TestRecoveryHistory(QApplication& app) {
     undo->undo();
     // Closing must still ask to save the recovered changes.
     int prompts = 0;
-    QTimer cancel;
-    QObject::connect(&cancel, &QTimer::timeout, &app, [&] {
-        if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+    LuxUI::Timer cancel;
+    LuxUI::Object::connect(&cancel, &LuxUI::Timer::timeout, &app, [&] {
+        if (auto* message =
+                qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget())) {
             ++prompts;
-            message->button(QMessageBox::Cancel)->click();
+            message->button(LuxUI::MessageBox::Cancel)->click();
         }
     });
     cancel.start(5);
     Check(!window->close() && prompts == 1, "close asks to save recovered changes after undo");
     cancel.stop();
-    window->findChild<QAction*>("saveScene")->trigger();
+    window->findChild<LuxUI::Action*>("saveScene")->trigger();
     LuxEngine::Scene disk;
     Check(!document.IsDirty() && undo->isClean() &&
               disk.Deserialize(PathUtf8(fixture.project.GetSceneFile())) &&
@@ -218,7 +210,7 @@ void TestRecoveryHistory(QApplication& app) {
     Check(!document.IsDirty(), "undo back to the saved baseline is clean");
 }
 
-void TestBrokenSceneRecovery(QApplication& app) {
+void TestBrokenSceneRecovery(LuxUI::Application& app) {
     for (const bool missing : {false, true})
         for (const bool accept : {false, true}) {
             ProjectFixture fixture;
@@ -248,26 +240,28 @@ void TestBrokenSceneRecovery(QApplication& app) {
                   "recoverable projects stay accessible from recents");
             recent.Load();
             Check(recent.Get().size() == 1, "recent project reload retains recoverable metadata");
-            QTimer answer;
+            LuxUI::Timer answer;
             int prompts = 0;
-            QObject::connect(&answer, &QTimer::timeout, &app, [&] {
-                if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            LuxUI::Object::connect(&answer, &LuxUI::Timer::timeout, &app, [&] {
+                if (auto* message =
+                        qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget())) {
                     ++prompts;
-                    message->button(accept ? QMessageBox::Yes : QMessageBox::Cancel)->click();
+                    message->button(accept ? LuxUI::MessageBox::Yes : LuxUI::MessageBox::Cancel)
+                        ->click();
                 }
             });
             answer.start(5);
             auto window = fixture.Open(app);
             answer.stop();
             Check(prompts == 1, "broken-original recovery prompts once");
-            auto* settings = window->findChild<QAction*>("projectSettings");
+            auto* settings = window->findChild<LuxUI::Action*>("projectSettings");
             if (accept) {
                 Check(settings->isEnabled() && window->GetDocument().IsDirty() &&
                           window->GetDocument().GetScene().GetEntityCount() == 1,
                       "accepting recovery opens an unsaved recovered project scene");
                 Check(!EditorProject::Open(fixture.project.GetFile(), error),
                       "recovery does not overwrite the original before saving");
-                window->findChild<QAction*>("saveScene")->trigger();
+                window->findChild<LuxUI::Action*>("saveScene")->trigger();
                 Check(EditorProject::Open(fixture.project.GetFile(), error).has_value() &&
                           !window->GetDocument().IsDirty(),
                       "explicit save repairs the original scene");
@@ -294,19 +288,20 @@ void TestBrokenSceneRecovery(QApplication& app) {
     std::string before;
     Check(window->GetDocument().GetScene().SerializeToString(before),
           "existing scene snapshot saves");
-    auto* history = window->findChild<QUndoStack*>();
+    auto* history = window->findChild<LuxUI::UndoStack*>();
     const int historyIndex = history->index();
     LuxEngine::Scene candidate;
     candidate.CreateEntity("Recovery candidate");
     Check(original.project.SaveAutosave(original.secondary, candidate, error), error.c_str());
     std::ofstream(original.secondary, std::ios::trunc) << "broken secondary";
-    QTimer cancel;
-    QObject::connect(&cancel, &QTimer::timeout, &app, [] {
-        if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
-            if (auto* no = message->button(QMessageBox::No))
+    LuxUI::Timer cancel;
+    LuxUI::Object::connect(&cancel, &LuxUI::Timer::timeout, &app, [] {
+        if (auto* message =
+                qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget())) {
+            if (auto* no = message->button(LuxUI::MessageBox::No))
                 no->click();
             else
-                message->button(QMessageBox::Cancel)->click();
+                message->button(LuxUI::MessageBox::Cancel)->click();
         }
     });
     cancel.start(5);
@@ -316,11 +311,11 @@ void TestBrokenSceneRecovery(QApplication& app) {
     Check(window->GetDocument().GetScene().SerializeToString(after) && before == after &&
               history->index() == historyIndex && window->GetDocument().IsDirty() &&
               PathFromUtf8(window->GetDocument().GetPath()) == original.project.GetSceneFile() &&
-              window->findChild<QAction*>("projectSettings")->isEnabled(),
+              window->findChild<LuxUI::Action*>("projectSettings")->isEnabled(),
           "cancelling recovery preserves the prior document, unsaved edits, history and project");
 }
 
-void TestSessionScene(QApplication& app) {
+void TestSessionScene(LuxUI::Application& app) {
     ProjectFixture fixture;
     {
         auto window = fixture.Open(app);
@@ -329,7 +324,7 @@ void TestSessionScene(QApplication& app) {
         // QFileDialog uses Qt separators, while filesystem paths may use native Windows ones.
         // Verify the persisted scene identity rather than its platform-specific spelling.
         const auto stored =
-            PathFromUtf8(QSettings().value("lastScene").toString().toUtf8().toStdString());
+            PathFromUtf8(LuxUI::Settings().value("lastScene").toString().toUtf8().toStdString());
         std::error_code error;
         Check(!stored.empty() && fs::equivalent(stored, fixture.secondary, error) && !error,
               "closing stores the current project scene");
@@ -338,15 +333,15 @@ void TestSessionScene(QApplication& app) {
         EditorWindow restored;
         Check(PathFromUtf8(restored.GetDocument().GetPath()) == fixture.secondary &&
                   restored.GetDocument().GetScene().GetEntityCount() == 1 &&
-                  restored.findChild<QAction*>("projectSettings")->isEnabled(),
+                  restored.findChild<LuxUI::Action*>("projectSettings")->isEnabled(),
               "startup restores both the project and its last edited scene");
     }
     const auto missing = fixture.secondary.parent_path() / "Missing.lux";
     const auto corrupt = fixture.secondary.parent_path() / "Corrupt.lux";
     std::ofstream(corrupt) << "invalid scene";
     for (const auto& candidate : {missing, corrupt, fixture.external}) {
-        QSettings().setValue("lastProject", Q(fixture.project.GetFile()));
-        QSettings().setValue("lastScene", Q(candidate));
+        LuxUI::Settings().setValue("lastProject", Q(fixture.project.GetFile()));
+        LuxUI::Settings().setValue("lastScene", Q(candidate));
         EditorWindow restored;
         Check(PathFromUtf8(restored.GetDocument().GetPath()) == fixture.project.GetSceneFile(),
               "missing, damaged and external last scenes fall back to the start scene");
@@ -357,12 +352,13 @@ void TestSessionScene(QApplication& app) {
     recovered.CreateEntity("Recovered secondary");
     std::string error;
     Check(fixture.project.SaveAutosave(deleted, recovered, error), error.c_str());
-    QSettings().setValue("lastProject", Q(fixture.project.GetFile()));
-    QSettings().setValue("lastScene", Q(deleted));
-    QTimer answer;
-    QObject::connect(&answer, &QTimer::timeout, &app, [] {
-        if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
-            message->button(QMessageBox::Yes)->click();
+    LuxUI::Settings().setValue("lastProject", Q(fixture.project.GetFile()));
+    LuxUI::Settings().setValue("lastScene", Q(deleted));
+    LuxUI::Timer answer;
+    LuxUI::Object::connect(&answer, &LuxUI::Timer::timeout, &app, [] {
+        if (auto* message =
+                qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget()))
+            message->button(LuxUI::MessageBox::Yes)->click();
     });
     answer.start(5);
     EditorWindow restored;
@@ -373,7 +369,7 @@ void TestSessionScene(QApplication& app) {
           "last edited scene recovery preserves project context and the unsaved baseline");
 }
 
-void TestReopenCurrentProject(QApplication& app) {
+void TestReopenCurrentProject(LuxUI::Application& app) {
     ProjectFixture fixture;
     LuxEngine::Scene initial;
     initial.CreateEntity("Initially opened start");
@@ -393,13 +389,15 @@ void TestReopenCurrentProject(QApplication& app) {
     Check(updated.Serialize(PathUtf8(fixture.project.GetSceneFile())),
           "another collaborator updates the project start scene on disk");
     int discardPrompts = 0, errors = 0;
-    QTimer answer;
-    QObject::connect(&answer, &QTimer::timeout, &app, [&] {
-        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+    LuxUI::Timer answer;
+    LuxUI::Object::connect(&answer, &LuxUI::Timer::timeout, &app, [&] {
+        if (auto* dialog =
+                qobject_cast<LuxUI::FileDialog*>(LuxUI::Application::activeModalWidget())) {
             dialog->selectFile(Q(fixture.project.GetFile()));
-            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
-        } else if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
-            if (auto* no = message->button(QMessageBox::No)) {
+            LuxUI::MetaObject::invokeMethod(dialog, "accept", LuxUI::Flags::DirectConnection);
+        } else if (auto* message =
+                       qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget())) {
+            if (auto* no = message->button(LuxUI::MessageBox::No)) {
                 ++discardPrompts;
                 no->click();
             } else {
@@ -409,7 +407,7 @@ void TestReopenCurrentProject(QApplication& app) {
         }
     });
     answer.start(5);
-    auto* action = window->findChild<QAction*>("openProject");
+    auto* action = window->findChild<LuxUI::Action*>("openProject");
     Check(action && action->isEnabled(), "project open action is available");
     action->trigger();
     answer.stop();
@@ -420,13 +418,13 @@ void TestReopenCurrentProject(QApplication& app) {
               entities.front().GetComponent<LuxEngine::TagComponent>().tag ==
                   "Latest start from disk",
           "reopening the current project replaces its old open start scene without a tab conflict");
-    auto* history = window->findChild<QUndoStack*>();
+    auto* history = window->findChild<LuxUI::UndoStack*>();
     Check(history && history->count() == 0 &&
-              window->findChild<QAction*>("projectSettings")->isEnabled(),
+              window->findChild<LuxUI::Action*>("projectSettings")->isEnabled(),
           "successful project reopen clears old scene history and retains project ownership");
 }
 
-void TestRestoreOpenedProject(QApplication& app) {
+void TestRestoreOpenedProject(LuxUI::Application& app) {
     ProjectFixture fixture;
     LuxEngine::Scene original;
     original.CreateEntity("Start from backup");
@@ -440,7 +438,7 @@ void TestRestoreOpenedProject(QApplication& app) {
     const auto startTab = document.GetActiveTabId();
     window->ExecuteRecordedEdit("Work after backup",
                                 [&] { document.CreateEntity("Start edit after backup"); });
-    window->findChild<QAction*>("saveScene")->trigger();
+    window->findChild<LuxUI::Action*>("saveScene")->trigger();
     Check(!document.IsDirty() && document.GetScene().GetEntityCount() == 2,
           "post-backup start content is saved and still open");
     Check(window->OpenSceneDocument(fixture.secondary), "secondary project scene opens");
@@ -450,16 +448,18 @@ void TestRestoreOpenedProject(QApplication& app) {
     Check(window->SwitchSceneDocument(startTab, false) && document.IsDirty(secondaryTab),
           "backup restore starts with the old start scene open and inactive unsaved work");
     int discardPrompts = 0, restorePrompts = 0, errors = 0;
-    QTimer answer;
-    QObject::connect(&answer, &QTimer::timeout, &app, [&] {
-        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+    LuxUI::Timer answer;
+    LuxUI::Object::connect(&answer, &LuxUI::Timer::timeout, &app, [&] {
+        if (auto* dialog =
+                qobject_cast<LuxUI::FileDialog*>(LuxUI::Application::activeModalWidget())) {
             dialog->selectFile(Q(backup));
-            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
-        } else if (auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
-            if (message->text().contains(QStringLiteral("저장하지 않은"))) {
+            LuxUI::MetaObject::invokeMethod(dialog, "accept", LuxUI::Flags::DirectConnection);
+        } else if (auto* message =
+                       qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget())) {
+            if (message->text().contains(LUX_UI_TEXT("저장하지 않은"))) {
                 ++discardPrompts;
-                message->button(QMessageBox::No)->click();
-            } else if (auto* yes = message->button(QMessageBox::Yes)) {
+                message->button(LuxUI::MessageBox::No)->click();
+            } else if (auto* yes = message->button(LuxUI::MessageBox::Yes)) {
                 ++restorePrompts;
                 yes->click();
             } else {
@@ -469,7 +469,7 @@ void TestRestoreOpenedProject(QApplication& app) {
         }
     });
     answer.start(5);
-    auto* action = window->findChild<QAction*>("restoreProject");
+    auto* action = window->findChild<LuxUI::Action*>("restoreProject");
     Check(action && action->isEnabled(), "project restore action is available");
     action->trigger();
     answer.stop();
@@ -483,26 +483,27 @@ void TestRestoreOpenedProject(QApplication& app) {
               disk.GetEntityCount() == 1 && secondary.Deserialize(PathUtf8(fixture.secondary)) &&
               secondary.GetEntityCount() == 1,
           "restoring a backup updates both the live start scene and disk after confirmed discard");
-    auto* history = window->findChild<QUndoStack*>();
+    auto* history = window->findChild<LuxUI::UndoStack*>();
     Check(history && history->count() == 0 &&
-              window->findChild<QAction*>("projectSettings")->isEnabled(),
+              window->findChild<LuxUI::Action*>("projectSettings")->isEnabled(),
           "backup restore clears old tabs and history while retaining project ownership");
-    window->findChild<QAction*>("saveScene")->trigger();
+    window->findChild<LuxUI::Action*>("saveScene")->trigger();
     Check(disk.Deserialize(PathUtf8(fixture.project.GetSceneFile())) && disk.GetEntityCount() == 1,
           "saving after restore cannot overwrite the backup with stale pre-restore content");
 }
 } // namespace
 
 int main(int argc, char** argv) {
-    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
-    QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName("LuxEngineTests");
-    QCoreApplication::setApplicationName("LuxEditorStateTests");
-    QTemporaryDir settings;
+    LuxUI::Application::setAttribute(LuxUI::Flags::AA_DontUseNativeDialogs);
+    LuxUI::Application app(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName("LuxEngineTests");
+    LuxUI::CoreApplication::setApplicationName("LuxEditorStateTests");
+    LuxUI::TemporaryDir settings;
     if (!settings.isValid())
         return 1;
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+    LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                             settings.path());
     try {
         const std::string mode = argc > 1 ? argv[1] : "";
         if (mode == "scene-context")

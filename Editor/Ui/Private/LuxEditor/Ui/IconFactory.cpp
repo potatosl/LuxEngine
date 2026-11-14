@@ -1,35 +1,32 @@
 #include <LuxEditor/Ui/IconFactory.hpp>
 #include <LuxEngine/Platform/Branding.hpp>
-#include <QImage>
-#include <QPainter>
-#include <QPainterPath>
-#include <QPixmap>
-#include <QPolygonF>
+#include <LuxUI/Widgets.hpp>
 #include <SDL3/SDL_surface.h>
 #include <array>
 
 namespace LuxEditor {
-QIcon MakeBrandIcon(bool dark) {
+LuxUI::Icon MakeBrandIcon(bool dark) {
     auto* surface = LuxEngine::Branding::CreateWindowIcon(dark);
     if (!surface)
         return {};
-    QImage image(static_cast<const uchar*>(surface->pixels), surface->w, surface->h, surface->pitch,
-                 QImage::Format_RGBA8888);
-    QIcon icon(QPixmap::fromImage(image.copy()));
+    LuxUI::Image image(static_cast<const uchar*>(surface->pixels), surface->w, surface->h,
+                       surface->pitch, LuxUI::Image::Format_RGBA8888);
+    LuxUI::Icon icon(LuxUI::Pixmap::fromImage(image.copy()));
     SDL_DestroySurface(surface);
     return icon;
 }
 
-QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
-    QPixmap pixels(24, 24);
-    pixels.fill(Qt::transparent);
-    QPainter painter(&pixels);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
+LuxUI::Icon MakeEditorIcon(EditorIcon icon, LuxUI::Color color) {
+    LuxUI::Pixmap pixels(24, 24);
+    pixels.fill(LuxUI::Flags::transparent);
+    LuxUI::Painter painter(&pixels);
+    painter.setRenderHint(LuxUI::Painter::Antialiasing);
+    painter.setPen(LuxUI::Pen(color, 1.8, LuxUI::Flags::SolidLine, LuxUI::Flags::RoundCap,
+                              LuxUI::Flags::RoundJoin));
+    painter.setBrush(LuxUI::Flags::NoBrush);
     switch (icon) {
     case EditorIcon::Select: {
-        QPainterPath arrow;
+        LuxUI::PainterPath arrow;
         arrow.moveTo(5, 3);
         arrow.lineTo(5, 19);
         arrow.lineTo(9, 15);
@@ -54,18 +51,18 @@ QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
         painter.drawLine(22, 12, 19, 15);
         break;
     case EditorIcon::Rotate:
-        painter.drawArc(QRectF(4, 4, 16, 16), 45 * 16, 290 * 16);
+        painter.drawArc(LuxUI::RectF(4, 4, 16, 16), 45 * 16, 290 * 16);
         painter.drawLine(18, 4, 20, 9);
         painter.drawLine(18, 4, 13, 5);
         break;
     case EditorIcon::Scale:
-        painter.drawRect(QRectF(5, 9, 10, 10));
+        painter.drawRect(LuxUI::RectF(5, 9, 10, 10));
         painter.drawLine(13, 11, 20, 4);
         painter.drawLine(15, 4, 20, 4);
         painter.drawLine(20, 4, 20, 9);
         break;
     case EditorIcon::NewFile:
-        painter.drawRect(QRectF(5, 3, 12, 17));
+        painter.drawRect(LuxUI::RectF(5, 3, 12, 17));
         painter.drawLine(11, 9, 11, 16);
         painter.drawLine(7.5, 12.5, 14.5, 12.5);
         break;
@@ -81,13 +78,13 @@ QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
         painter.drawLine(4, 6, 11, 6);
         break;
     case EditorIcon::Save:
-        painter.drawRect(QRectF(4, 3, 16, 18));
-        painter.drawRect(QRectF(8, 3, 8, 6));
-        painter.drawRect(QRectF(8, 14, 8, 7));
+        painter.drawRect(LuxUI::RectF(4, 3, 16, 18));
+        painter.drawRect(LuxUI::RectF(8, 3, 8, 6));
+        painter.drawRect(LuxUI::RectF(8, 14, 8, 7));
         break;
     case EditorIcon::Sprite:
-        painter.drawRect(QRectF(4, 4, 16, 16));
-        painter.drawEllipse(QPointF(9, 9), 1.5, 1.5);
+        painter.drawRect(LuxUI::RectF(4, 4, 16, 16));
+        painter.drawEllipse(LuxUI::PointF(9, 9), 1.5, 1.5);
         painter.drawLine(5, 18, 10, 13);
         painter.drawLine(10, 13, 13, 16);
         painter.drawLine(13, 16, 18, 10);
@@ -104,29 +101,29 @@ QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
         painter.drawLine(12, 12, 12, 22);
         break;
     case EditorIcon::Search:
-        painter.drawEllipse(QRectF(4, 4, 12, 12));
+        painter.drawEllipse(LuxUI::RectF(4, 4, 12, 12));
         painter.drawLine(15, 15, 21, 21);
         break;
     case EditorIcon::Grid:
         for (int x : {4, 11, 18})
             for (int y : {4, 11, 18})
-                painter.drawRect(QRectF(x, y, 3, 3));
+                painter.drawRect(LuxUI::RectF(x, y, 3, 3));
         break;
     case EditorIcon::List:
         for (int y : {6, 12, 18}) {
-            painter.drawRect(QRectF(4, y - 1, 2, 2));
+            painter.drawRect(LuxUI::RectF(4, y - 1, 2, 2));
             painter.drawLine(9, y, 20, y);
         }
         break;
     case EditorIcon::Focus:
-        painter.drawEllipse(QRectF(5, 5, 14, 14));
+        painter.drawEllipse(LuxUI::RectF(5, 5, 14, 14));
         painter.drawLine(12, 2, 12, 8);
         painter.drawLine(12, 16, 12, 22);
         painter.drawLine(2, 12, 8, 12);
         painter.drawLine(16, 12, 22, 12);
         break;
     case EditorIcon::Console:
-        painter.drawRect(QRectF(3, 4, 18, 16));
+        painter.drawRect(LuxUI::RectF(3, 4, 18, 16));
         painter.drawLine(6, 8, 10, 12);
         painter.drawLine(10, 12, 6, 16);
         painter.drawLine(12, 16, 18, 16);
@@ -146,29 +143,32 @@ QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
         painter.drawLine(16, 7, 19, 4);
         painter.drawLine(18, 9, 21, 6);
         painter.drawLine(4, 19, 7, 20);
-        painter.drawEllipse(QRectF(3, 19, 4, 2));
+        painter.drawEllipse(LuxUI::RectF(3, 19, 4, 2));
         break;
     case EditorIcon::Eraser:
-        painter.drawPolygon(QPolygonF{QPointF(4, 15), QPointF(13, 5), QPointF(21, 13),
-                                      QPointF(13, 21), QPointF(4, 21)});
+        painter.drawPolygon(LuxUI::PolygonF{LuxUI::PointF(4, 15), LuxUI::PointF(13, 5),
+                                            LuxUI::PointF(21, 13), LuxUI::PointF(13, 21),
+                                            LuxUI::PointF(4, 21)});
         painter.drawLine(9, 21, 17, 9);
         break;
     case EditorIcon::Play:
-        painter.drawPolygon(QPolygonF{QPointF(6, 4), QPointF(20, 12), QPointF(6, 20)});
+        painter.drawPolygon(
+            LuxUI::PolygonF{LuxUI::PointF(6, 4), LuxUI::PointF(20, 12), LuxUI::PointF(6, 20)});
         break;
     case EditorIcon::Pause:
-        painter.drawRect(QRectF(5, 4, 5, 16));
-        painter.drawRect(QRectF(14, 4, 5, 16));
+        painter.drawRect(LuxUI::RectF(5, 4, 5, 16));
+        painter.drawRect(LuxUI::RectF(14, 4, 5, 16));
         break;
     case EditorIcon::Step:
-        painter.drawPolygon(QPolygonF{QPointF(4, 4), QPointF(16, 12), QPointF(4, 20)});
+        painter.drawPolygon(
+            LuxUI::PolygonF{LuxUI::PointF(4, 4), LuxUI::PointF(16, 12), LuxUI::PointF(4, 20)});
         painter.drawLine(19, 4, 19, 20);
         break;
     case EditorIcon::Stop:
-        painter.drawRect(QRectF(5, 5, 14, 14));
+        painter.drawRect(LuxUI::RectF(5, 5, 14, 14));
         break;
     case EditorIcon::Bug:
-        painter.drawEllipse(QRectF(7, 7, 10, 12));
+        painter.drawEllipse(LuxUI::RectF(7, 7, 10, 12));
         painter.drawLine(12, 3, 12, 7);
         painter.drawLine(4, 8, 8, 10);
         painter.drawLine(4, 16, 8, 15);
@@ -176,6 +176,6 @@ QIcon MakeEditorIcon(EditorIcon icon, QColor color) {
         painter.drawLine(20, 16, 16, 15);
         break;
     }
-    return QIcon(pixels);
+    return LuxUI::Icon(pixels);
 }
 } // namespace LuxEditor

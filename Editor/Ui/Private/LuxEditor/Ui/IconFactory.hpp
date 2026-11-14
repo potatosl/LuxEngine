@@ -1,6 +1,5 @@
 #pragma once
-#include <QColor>
-#include <QIcon>
+#include <LuxUI/Widgets.hpp>
 
 namespace LuxEditor {
 enum class EditorIcon {
@@ -28,6 +27,6 @@ enum class EditorIcon {
     Stop,
     Bug
 };
-QIcon MakeBrandIcon(bool dark);
-QIcon MakeEditorIcon(EditorIcon icon, QColor color = QColor(214, 223, 231));
+LuxUI::Icon MakeBrandIcon(bool dark);
+LuxUI::Icon MakeEditorIcon(EditorIcon icon, LuxUI::Color color = LuxUI::Color(214, 223, 231));
 } // namespace LuxEditor

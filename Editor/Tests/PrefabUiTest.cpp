@@ -3,13 +3,7 @@
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Scene/SceneDependencies.hpp>
 #include <LuxEngine/Scene/PrefabLibrary.hpp>
-#include <QAction>
-#include <QApplication>
-#include <QComboBox>
-#include <QListWidget>
-#include <QSettings>
-#include <QTemporaryDir>
-#include <QUndoStack>
+#include <LuxUI/Widgets.hpp>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -24,8 +18,8 @@ void Check(bool value, const std::string& error) {
         throw std::runtime_error(error);
 }
 
-QAction* Action(EditorWindow& window, const char* name) {
-    auto* action = window.findChild<QAction*>(QString::fromLatin1(name));
+LuxUI::Action* Action(EditorWindow& window, const char* name) {
+    auto* action = window.findChild<LuxUI::Action*>(LuxUI::String::fromLatin1(name));
     Check(action != nullptr, std::string("Missing prefab command: ") + name);
     return action;
 }
@@ -51,22 +45,23 @@ void Run(const fs::path& directory) {
     const auto leaf = source.CreateEntity("Leaf").GetId();
     Check(source.SetParent(leaf, authored, false), "Source hierarchy setup failed");
     Check(PrefabLibrary::Save(source, authored, file, error), error);
-    QSettings().clear();
-    QSettings().setValue(QStringLiteral("lastProject"),
-                         QString::fromUtf8(PathUtf8(project->GetFile())));
+    LuxUI::Settings().clear();
+    LuxUI::Settings().setValue(LUX_UI_TEXT("lastProject"),
+                               LuxUI::String::fromUtf8(PathUtf8(project->GetFile())));
     EditorWindow window;
     window.show();
-    QApplication::processEvents();
+    LuxUI::Application::processEvents();
     for (const char* name :
          {"savePrefab", "instantiatePrefab", "refreshPrefab", "revertPrefab", "unpackPrefab"})
         Action(window, name);
     auto& document = window.GetDocument();
-    auto* browser = window.findChild<QListWidget*>(QStringLiteral("assetGrid"));
-    auto* filter = window.findChild<QComboBox*>(QStringLiteral("assetTypeFilter"));
-    auto* history = window.findChild<QUndoStack*>();
+    auto* browser = window.findChild<LuxUI::ListWidget*>(LUX_UI_TEXT("assetGrid"));
+    auto* filter = window.findChild<LuxUI::ComboBox*>(LUX_UI_TEXT("assetTypeFilter"));
+    auto* history = window.findChild<LuxUI::UndoStack*>();
     Check(browser && filter && history, "Prefab editor controls are unavailable");
-    filter->setCurrentIndex(filter->findText(QStringLiteral("장면")));
-    const auto matches = browser->findItems(QStringLiteral("Tree.luxprefab"), Qt::MatchContains);
+    filter->setCurrentIndex(filter->findText(LUX_UI_TEXT("장면")));
+    const auto matches =
+        browser->findItems(LUX_UI_TEXT("Tree.luxprefab"), LuxUI::Flags::MatchContains);
     Check(matches.size() == 1,
           "Prefab must be discoverable through the Content Browser scene filter");
     browser->setCurrentItem(matches.front());
@@ -121,18 +116,21 @@ void Run(const fs::path& directory) {
     for (const auto& tab : document.ListTabs())
         document.SetDirty(tab.id, false);
     window.close();
-    QApplication::processEvents();
-    QSettings().clear();
+    LuxUI::Application::processEvents();
+    LuxUI::Settings().clear();
 }
 } // namespace
 
 int main(int argc, char** argv) {
-    QApplication application(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("LuxEnginePrefabTests"));
-    QCoreApplication::setApplicationName(QStringLiteral("PrefabUi"));
+    LuxUI::Application application(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName(LUX_UI_TEXT("LuxEnginePrefabTests"));
+    LuxUI::CoreApplication::setApplicationName(LUX_UI_TEXT("PrefabUi"));
     try {
-        QTemporaryDir temporary;
+        LuxUI::TemporaryDir temporary;
         Check(temporary.isValid(), "Temporary project creation failed");
+        LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+        LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                                 temporary.path() + LUX_UI_TEXT("/settings"));
         Run(PathFromUtf8(temporary.path().toUtf8().toStdString()));
         std::cout << "Prefab Content Browser, commands, overrides and undo passed\n";
         return 0;

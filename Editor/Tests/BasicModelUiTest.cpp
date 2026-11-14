@@ -2,16 +2,7 @@
 #include <LuxEditor/Project/EditorProject.hpp>
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEngine/Assets/BasicModelLibrary.hpp>
-#include <QAction>
-#include <QApplication>
-#include <QComboBox>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QMessageBox>
-#include <QSettings>
-#include <QTemporaryDir>
-#include <QTimer>
-#include <QUndoStack>
+#include <LuxUI/Widgets.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -27,8 +18,8 @@ void Check(bool value, const char* message) {
         throw std::runtime_error(message);
 }
 
-QAction* Action(EditorWindow& window, const char* name) {
-    auto* action = window.findChild<QAction*>(QString::fromLatin1(name));
+LuxUI::Action* Action(EditorWindow& window, const char* name) {
+    auto* action = window.findChild<LuxUI::Action*>(LuxUI::String::fromLatin1(name));
     Check(action, "Basic model command is missing from the editor");
     return action;
 }
@@ -37,18 +28,18 @@ void Close(EditorWindow& window) {
     for (const auto& tab : window.GetDocument().ListTabs())
         window.GetDocument().SetDirty(tab.id, false);
     window.close();
-    QApplication::processEvents();
+    LuxUI::Application::processEvents();
 }
 
 void RequiresProject() {
-    QSettings().clear();
+    LuxUI::Settings().clear();
     EditorWindow window;
     window.show();
     bool notified = false;
-    QTimer::singleShot(0, [&] {
-        for (auto* widget : QApplication::topLevelWidgets())
-            if (auto* message = qobject_cast<QMessageBox*>(widget)) {
-                notified = message->text().contains(QStringLiteral("프로젝트"));
+    LuxUI::Timer::singleShot(0, [&] {
+        for (auto* widget : LuxUI::Application::topLevelWidgets())
+            if (auto* message = qobject_cast<LuxUI::MessageBox*>(widget)) {
+                notified = message->text().contains(LUX_UI_TEXT("프로젝트"));
                 message->accept();
             }
     });
@@ -63,17 +54,17 @@ void PlacementAndContentBrowser(const fs::path& root) {
     auto project = EditorProject::Create(root / PathFromUtf8("모델 프로젝트"), "Models",
                                          ProjectTemplate::Empty, error);
     Check(project.has_value(), error.c_str());
-    QSettings().clear();
-    QSettings().setValue(QStringLiteral("lastProject"),
-                         QString::fromUtf8(PathUtf8(project->GetFile())));
+    LuxUI::Settings().clear();
+    LuxUI::Settings().setValue(LUX_UI_TEXT("lastProject"),
+                               LuxUI::String::fromUtf8(PathUtf8(project->GetFile())));
     EditorWindow window;
     window.show();
-    QApplication::processEvents();
+    LuxUI::Application::processEvents();
     auto& document = window.GetDocument();
-    auto* history = window.findChild<QUndoStack*>();
-    auto* inspector = window.findChild<QLineEdit*>(QStringLiteral("meshAssetPath"));
-    auto* filter = window.findChild<QComboBox*>(QStringLiteral("assetTypeFilter"));
-    auto* browser = window.findChild<QListWidget*>(QStringLiteral("assetGrid"));
+    auto* history = window.findChild<LuxUI::UndoStack*>();
+    auto* inspector = window.findChild<LuxUI::LineEdit*>(LUX_UI_TEXT("meshAssetPath"));
+    auto* filter = window.findChild<LuxUI::ComboBox*>(LUX_UI_TEXT("assetTypeFilter"));
+    auto* browser = window.findChild<LuxUI::ListWidget*>(LUX_UI_TEXT("assetGrid"));
     Check(history && inspector && filter && browser, "Model editor controls are unavailable");
     Check(document.GetScene().GetEntityCount() == 0, "Empty project fixture contains objects");
     Action(window, "addBasicModel.shape-cube")->trigger();
@@ -89,7 +80,7 @@ void PlacementAndContentBrowser(const fs::path& root) {
               fs::is_regular_file(model) && fs::is_regular_file(texture) &&
               fs::is_regular_file(model.parent_path() / "License.txt") &&
               fs::is_regular_file(model.parent_path() / "Provenance.json") &&
-              inspector->text() == QString::fromUtf8(mesh.meshPath),
+              inspector->text() == LuxUI::String::fromUtf8(mesh.meshPath),
           "Basic model placement must use project-owned FBX, palette texture and license data");
     history->undo();
     Check(document.GetScene().GetEntityCount() == 0 && fs::is_regular_file(model),
@@ -104,9 +95,10 @@ void PlacementAndContentBrowser(const fs::path& root) {
               PathFromUtf8(document.GetSelected().GetComponent<MeshRendererComponent>().meshPath)
                       .parent_path() == model.parent_path(),
           "Additional basic models must reuse the installed package");
-    filter->setCurrentIndex(filter->findText(QStringLiteral("모델")));
+    filter->setCurrentIndex(filter->findText(LUX_UI_TEXT("모델")));
     Check(browser->count() == 10, "Content Browser model filter must list the ten FBX models");
-    const auto slopes = browser->findItems(QStringLiteral("shape-slope.fbx"), Qt::MatchContains);
+    const auto slopes =
+        browser->findItems(LUX_UI_TEXT("shape-slope.fbx"), LuxUI::Flags::MatchContains);
     Check(slopes.size() == 1, "Packaged FBX was not discoverable in the Content Browser");
     browser->setCurrentItem(slopes.front());
     browser->itemDoubleClicked(slopes.front());
@@ -120,8 +112,8 @@ void PlacementAndContentBrowser(const fs::path& root) {
     const auto obj = model.parent_path() / "custom.OBJ";
     std::ofstream(obj) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
     filter->setCurrentIndex(0);
-    filter->setCurrentIndex(filter->findText(QStringLiteral("모델")));
-    const auto objects = browser->findItems(QStringLiteral("custom.OBJ"), Qt::MatchContains);
+    filter->setCurrentIndex(filter->findText(LUX_UI_TEXT("모델")));
+    const auto objects = browser->findItems(LUX_UI_TEXT("custom.OBJ"), LuxUI::Flags::MatchContains);
     Check(objects.size() == 1 && browser->count() == 11,
           "Model filtering must include case-insensitive existing OBJ assets");
     browser->setCurrentItem(objects.front());
@@ -150,13 +142,14 @@ void PlacementAndContentBrowser(const fs::path& root) {
 } // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("LuxModelTests"));
-    QCoreApplication::setApplicationName(QStringLiteral("BasicModelUi"));
-    QTemporaryDir settings;
-    QTemporaryDir files;
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    LuxUI::Application app(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName(LUX_UI_TEXT("LuxModelTests"));
+    LuxUI::CoreApplication::setApplicationName(LUX_UI_TEXT("BasicModelUi"));
+    LuxUI::TemporaryDir settings;
+    LuxUI::TemporaryDir files;
+    LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+    LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                             settings.path());
     try {
         Check(settings.isValid() && files.isValid(),
               "Temporary model test directories are invalid");

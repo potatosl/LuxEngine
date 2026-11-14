@@ -1,7 +1,7 @@
 #pragma once
 #include <LuxEditor/Scene/EditorDocument.hpp>
 #include <LuxEditor/Scene/EditorSnapshot.hpp>
-#include <QUndoCommand>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 #include <functional>
 #include <utility>
@@ -10,9 +10,9 @@
 namespace LuxEditor {
 size_t SceneHistoryBytes(const EditorSnapshot& snapshot);
 
-class SceneEditCommand final : public QUndoCommand {
+class SceneEditCommand final : public LuxUI::UndoCommand {
 public:
-    SceneEditCommand(QString name, std::function<void()> undo, std::function<void()> redo,
+    SceneEditCommand(LuxUI::String name, std::function<void()> undo, std::function<void()> redo,
                      std::vector<EditorDocument::TabId> tabs = {}, size_t bytes = 0);
 
     void undo() override;

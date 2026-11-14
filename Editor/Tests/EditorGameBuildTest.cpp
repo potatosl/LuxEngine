@@ -1,3 +1,4 @@
+#include <LuxUI/Widgets.hpp>
 // End-to-end check of what the editor's Build menu does: create a template game, configure and
 // build it against the installed engine SDK, run it, and zip it. Skips (exit 77) when no SDK or
 // cmake is available, because nothing here is downloaded.
@@ -6,13 +7,6 @@
 #include <LuxEditor/Project/EditorProject.hpp>
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
-
-#include <QColor>
-#include <QCoreApplication>
-#include <QImage>
-#include <QProcess>
-#include <QString>
-#include <QStringList>
 
 #include <cstdlib>
 #include <filesystem>
@@ -28,8 +22,8 @@ namespace {
 
 constexpr int SkipCode = 77;
 
-QString ToQString(const fs::path& path) {
-    return QString::fromStdU16String(path.u16string());
+LuxUI::String ToQString(const fs::path& path) {
+    return LuxUI::String::fromStdU16String(path.u16string());
 }
 
 std::string Env(const char* name) {
@@ -44,11 +38,11 @@ std::string Env(const char* name) {
 #endif
 }
 
-bool Run(const fs::path& program, const QStringList& arguments, const fs::path& workingDirectory,
-         int timeoutMs, std::string& output) {
-    QProcess process;
+bool Run(const fs::path& program, const LuxUI::StringList& arguments,
+         const fs::path& workingDirectory, int timeoutMs, std::string& output) {
+    LuxUI::Process process;
     process.setProcessEnvironment(Utf8BuildEnvironment());
-    process.setProcessChannelMode(QProcess::MergedChannels);
+    process.setProcessChannelMode(LuxUI::Process::MergedChannels);
     process.setWorkingDirectory(ToQString(workingDirectory));
     process.start(ToQString(program), arguments);
     if (!process.waitForStarted(30000)) {
@@ -63,7 +57,7 @@ bool Run(const fs::path& program, const QStringList& arguments, const fs::path& 
         output += "\n[timed out]";
         return false;
     }
-    const bool ok = process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+    const bool ok = process.exitStatus() == LuxUI::Process::NormalExit && process.exitCode() == 0;
     if (!ok)
         output += "\n[exit code " + std::to_string(process.exitCode()) + "]";
     return ok;
@@ -85,9 +79,9 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
         return false;
     }
     for (const BuildStep& step : plan->steps) {
-        QStringList arguments;
+        LuxUI::StringList arguments;
         for (const std::string& argument : step.arguments)
-            arguments << QString::fromUtf8(argument.c_str());
+            arguments << LuxUI::String::fromUtf8(argument.c_str());
         std::string output;
         std::cout << "-- " << step.title << '\n';
         if (!Run(step.program, arguments, projectDir, 15 * 60 * 1000, output)) {
@@ -111,7 +105,7 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
         return false;
     }
     std::string output;
-    if (!Run(*executable, {QStringLiteral("--smoke-test")}, executable->parent_path(), 120000,
+    if (!Run(*executable, {LUX_UI_TEXT("--smoke-test")}, executable->parent_path(), 120000,
              output) ||
         output.find("[LuxEngine WARN]") != std::string::npos) {
         std::cerr << "game failed to run (" << config << "):\n";
@@ -143,10 +137,9 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
     }
     const auto unpack = projectDir / ".lux" / (std::string("package-check-") + config);
     fs::create_directories(unpack);
-    if (!Run(
-            tools.cmake,
-            {QStringLiteral("-E"), QStringLiteral("tar"), QStringLiteral("xf"), ToQString(archive)},
-            unpack, 120000, output)) {
+    if (!Run(tools.cmake,
+             {LUX_UI_TEXT("-E"), LUX_UI_TEXT("tar"), LUX_UI_TEXT("xf"), ToQString(archive)}, unpack,
+             120000, output)) {
         PrintTail(output);
         return false;
     }
@@ -172,7 +165,7 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
                     std::cerr << "packaged resource paths are not portable\n";
                     return false;
                 }
-    if (!Run(unpackedExecutable, {QStringLiteral("--smoke-test")}, unpackedExecutable.parent_path(),
+    if (!Run(unpackedExecutable, {LUX_UI_TEXT("--smoke-test")}, unpackedExecutable.parent_path(),
              120000, output) ||
         output.find("[LuxEngine WARN]") != std::string::npos) {
         PrintTail(output);
@@ -187,8 +180,8 @@ bool BuildRunAndPackage(const fs::path& projectDir, BuildConfiguration configura
 } // namespace
 
 int main(int argc, char* argv[]) {
-    QCoreApplication app(argc, argv);
-    const fs::path appDir = fs::path(QCoreApplication::applicationDirPath().toStdU16String());
+    LuxUI::CoreApplication app(argc, argv);
+    const fs::path appDir = fs::path(LuxUI::CoreApplication::applicationDirPath().toStdU16String());
     const BuildTools tools = DetectBuildTools(appDir, [](const char* name) { return Env(name); });
     if (tools.cmake.empty() || tools.enginePackage.empty()) {
         std::cout << "SKIP: " << DescribeMissingTools(tools) << '\n';
@@ -219,8 +212,8 @@ int main(int argc, char* argv[]) {
                 "3/3/1\n";
     }
     const auto textureFile = root / "Assets" / PathFromUtf8("한글 기본색상.PnG");
-    QImage baseColor(4, 4, QImage::Format_RGBA8888);
-    baseColor.fill(QColor(160, 90, 40));
+    LuxUI::Image baseColor(4, 4, LuxUI::Image::Format_RGBA8888);
+    baseColor.fill(LuxUI::Color(160, 90, 40));
     if (!baseColor.save(ToQString(textureFile), "PNG"))
         return 1;
     const auto environmentFile = root / "Assets" / PathFromUtf8("한글 환경.HdR");

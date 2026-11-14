@@ -1,13 +1,7 @@
 #include <LuxEditor/App/EditorWindow.hpp>
 #include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
 #include <LuxEngine/Core/Log.hpp>
-#include <QAbstractButton>
-#include <QApplication>
-#include <QCoreApplication>
-#include <QMessageBox>
-#include <QSettings>
-#include <QTemporaryDir>
-#include <QTimer>
+#include <LuxUI/Widgets.hpp>
 #include <iostream>
 #include <string_view>
 
@@ -58,14 +52,14 @@ int main(int argc, char** argv) {
         if (arg == "--smoke-test") {
             qputenv("LUX_EDITOR_SOFTWARE_VIEWPORT", "1");
             LuxEditor::EngineSceneRenderer::SetForceAllowed(false);
-            QTemporaryDir tempSettings;
+            LuxUI::TemporaryDir tempSettings;
             if (tempSettings.isValid()) {
-                QSettings::setDefaultFormat(QSettings::IniFormat);
-                QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tempSettings.path());
+                LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+                LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                                         tempSettings.path());
             }
-            QApplication app(argc, argv);
-            QCoreApplication::setOrganizationName(QStringLiteral("LuxEngine"));
-            QCoreApplication::setApplicationName(QStringLiteral("LuxEditor"));
+            LuxUI::Application app(argc, argv);
+            app.SetIdentity("LuxEngine", "LuxEditor", LUX_EDITOR_ENGINE_VERSION);
             {
                 LuxEditor::EditorWindow window;
                 window.show();
@@ -82,12 +76,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("LuxEngine"));
-    QCoreApplication::setApplicationName(QStringLiteral("LuxEditor"));
-    QCoreApplication::setApplicationVersion(QStringLiteral(LUX_EDITOR_ENGINE_VERSION));
+    LuxUI::Application app(argc, argv);
+    app.SetIdentity("LuxEngine", "LuxEditor", LUX_EDITOR_ENGINE_VERSION);
 
     LuxEditor::EditorWindow window;
     window.show();
-    return app.exec();
+    return app.Run();
 }

@@ -5,10 +5,12 @@
 #include <LuxEngine/Renderer/RHI/GpuDevice.hpp>
 #include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
 #include <LuxEngine/Renderer/Renderer3D/Renderer3D.hpp>
+#include <LuxEngine/Runtime/ScenePlayer.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
 #include <LuxEngine/Scene/Scene.hpp>
-#include <QGuiApplication>
+#include <LuxUI/Widgets.hpp>
 #include <SDL3/SDL.h>
+#include <chrono>
 #if defined(__linux__)
 #include <SDL3/SDL_vulkan.h>
 #endif
@@ -113,6 +115,50 @@ EngineSceneRenderer::~EngineSceneRenderer() {
     Shutdown();
 }
 
+GameViewCamera ResolveGameViewCamera(LuxEngine::Scene& scene, int width, int height) {
+    GameViewCamera result;
+    const float aspect = static_cast<float>(std::max(1, width)) / std::max(1, height);
+    auto view = LuxEngine::FitSceneView(scene);
+    float rotation = 0;
+    auto cameras = scene.GetComponentEntityIds<LuxEngine::CameraComponent>();
+    std::sort(cameras.begin(), cameras.end());
+    bool foundCamera = false;
+    for (const auto id : cameras) {
+        const auto& camera = scene.GetComponent<LuxEngine::CameraComponent>(id);
+        if (!camera.isPrimary || !scene.HasComponent<LuxEngine::TransformComponent>(id))
+            continue;
+        if (camera.isPerspective) {
+            if (!std::isfinite(camera.fov) || camera.fov <= 0 || camera.fov >= 180)
+                continue;
+            result.perspective = true;
+        } else {
+            if (!std::isfinite(camera.orthoSize) || camera.orthoSize <= 0)
+                continue;
+            const auto transform = scene.GetWorldTransform(id);
+            if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
+                !std::isfinite(transform.rotation.z))
+                continue;
+            view = {transform.position.x, transform.position.y, camera.orthoSize};
+            rotation = transform.rotation.z;
+        }
+        foundCamera = true;
+        break;
+    }
+    if (!foundCamera)
+        result.perspective =
+            !scene.GetComponentEntityIds<LuxEngine::MeshRendererComponent>().empty();
+    const float halfWidth = view.halfHeight * aspect;
+    result.camera2D.SetProjection(-halfWidth, halfWidth, -view.halfHeight, view.halfHeight);
+    result.camera2D.SetPosition({view.centerX, view.centerY, 0});
+    result.camera2D.SetRotation(rotation);
+    const auto primary = LuxEngine::ResolveScenePlayerCamera(scene, view);
+    result.camera3D.SetPerspective(LuxEngine::ToRadians(primary.fovDegrees), aspect, .1f, 1000.f);
+    result.camera3D.SetPosition(primary.position);
+    result.camera3D.SetTarget(primary.target);
+    result.camera3D.SetUp(primary.up);
+    return result;
+}
+
 void EngineSceneRenderer::SetForceAllowed(bool force) {
     s_ForceAllowed.store(force);
 }
@@ -126,8 +172,8 @@ bool EngineSceneRenderer::Allowed() {
         return false;
     if (s_ForceAllowed.load() || qEnvironmentVariableIsSet("LUX_EDITOR_FORCE_GPU_VIEWPORT"))
         return true;
-    const QString platform = QGuiApplication::platformName();
-    return platform != QStringLiteral("offscreen") && platform != QStringLiteral("minimal");
+    const LuxUI::String platform = LuxUI::GuiApplication::platformName();
+    return platform != LUX_UI_TEXT("offscreen") && platform != LUX_UI_TEXT("minimal");
 }
 
 bool EngineSceneRenderer::IsReady() const {
@@ -174,7 +220,7 @@ bool EngineSceneRenderer::InitializeState(LuxEngine::uint32 initialWidth,
     auto state = std::make_unique<State>();
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         error_ =
-            QStringLiteral("SDL 비디오 초기화 실패: %1").arg(QString::fromUtf8(SDL_GetError()));
+            LUX_UI_TEXT("SDL 비디오 초기화 실패: %1").arg(LuxUI::String::fromUtf8(SDL_GetError()));
         return false;
     }
     state->sdlVideo = true;
@@ -187,8 +233,8 @@ bool EngineSceneRenderer::InitializeState(LuxEngine::uint32 initialWidth,
     props.hidden = true;
     props.vsync = false;
     if (!state->window.Initialize(props)) {
-        error_ = QStringLiteral("엔진 창을 만들지 못했습니다: %1")
-                     .arg(QString::fromUtf8(SDL_GetError()));
+        error_ = LUX_UI_TEXT("엔진 창을 만들지 못했습니다: %1")
+                     .arg(LuxUI::String::fromUtf8(SDL_GetError()));
         return false;
     }
     DrainWindowEvents(state->window.GetNativeHandle(), false);
@@ -197,8 +243,8 @@ bool EngineSceneRenderer::InitializeState(LuxEngine::uint32 initialWidth,
     config.framesInFlight = 1;
     config.validation = static_cast<LuxEngine::GpuValidation>(s_DefaultValidation.load());
     if (!state->gpu.Initialize(state->window, config)) {
-        error_ = QStringLiteral("GPU 장치 초기화 실패: %1")
-                     .arg(QString::fromStdString(state->gpu.GetLastError()));
+        error_ = LUX_UI_TEXT("GPU 장치 초기화 실패: %1")
+                     .arg(LuxUI::String::fromStdString(state->gpu.GetLastError()));
         return false;
     }
     state->context2D.Init(&state->gpu);
@@ -214,15 +260,15 @@ bool EngineSceneRenderer::EnsureReady() {
     if (IsReady())
         return true;
     if (!Allowed()) {
-        error_ = QStringLiteral("GPU 뷰포트가 꺼져 있습니다.");
+        error_ = LUX_UI_TEXT("GPU 뷰포트가 꺼져 있습니다.");
         return false;
     }
     // If a previously initialized device entered DeviceLost or Error state, attempt bounded
     // recovery.
     if (state_ && !state_->gpu.IsReady()) {
         if (recoveries_ >= kMaxDeviceRecoveries) {
-            error_ = QStringLiteral("GPU 장치 복구 한도를 초과했습니다: %1")
-                         .arg(QString::fromStdString(state_->gpu.GetLastError()));
+            error_ = LUX_UI_TEXT("GPU 장치 복구 한도를 초과했습니다: %1")
+                         .arg(LuxUI::String::fromStdString(state_->gpu.GetLastError()));
             return false;
         }
         const LuxEngine::uint32 prevW = state_->width > 0 ? state_->width : 640;
@@ -249,7 +295,7 @@ bool EngineSceneRenderer::BeginViewportFrame(LuxEngine::uint32 width, LuxEngine:
         auto& s = *state_;
         if (width != s.width || height != s.height) {
             if (!s.window.SetSize(width, height)) {
-                error_ = QStringLiteral("엔진 창 크기를 바꾸지 못했습니다.");
+                error_ = LUX_UI_TEXT("엔진 창 크기를 바꾸지 못했습니다.");
                 return false;
             }
             DrainWindowEvents(s.window.GetNativeHandle(), false);
@@ -258,7 +304,7 @@ bool EngineSceneRenderer::BeginViewportFrame(LuxEngine::uint32 width, LuxEngine:
             s.height = height;
         }
         if (!s.gpu.RequestFrameCapture()) {
-            error_ = QString::fromStdString(s.gpu.GetLastError());
+            error_ = LuxUI::String::fromStdString(s.gpu.GetLastError());
             return false;
         }
         LuxEngine::GpuDevice::FrameStart start = LuxEngine::GpuDevice::FrameStart::Skipped;
@@ -270,8 +316,8 @@ bool EngineSceneRenderer::BeginViewportFrame(LuxEngine::uint32 width, LuxEngine:
         }
         if (start == LuxEngine::GpuDevice::FrameStart::Ready)
             return true;
-        error_ = QStringLiteral("엔진 프레임을 시작하지 못했습니다: %1")
-                     .arg(QString::fromStdString(s.gpu.GetLastError()));
+        error_ = LUX_UI_TEXT("엔진 프레임을 시작하지 못했습니다: %1")
+                     .arg(LuxUI::String::fromStdString(s.gpu.GetLastError()));
         if (s.gpu.IsReady())
             return false;
         // Device became unusable (e.g. DeviceLost); loop once more to trigger EnsureReady()
@@ -280,23 +326,23 @@ bool EngineSceneRenderer::BeginViewportFrame(LuxEngine::uint32 width, LuxEngine:
     return false;
 }
 
-bool EngineSceneRenderer::ReadbackToImage(QImage& output) {
+bool EngineSceneRenderer::ReadbackToImage(LuxUI::Image& output) {
     if (!state_)
         return false;
     auto& s = *state_;
     if (!s.gpu.ReadFrameCapture(s.capture) || s.capture.width == 0 || s.capture.height == 0 ||
         s.capture.rgba.size() != static_cast<size_t>(s.capture.width) * s.capture.height * 4) {
-        error_ = QStringLiteral("엔진 프레임을 읽지 못했습니다.");
+        error_ = LUX_UI_TEXT("엔진 프레임을 읽지 못했습니다.");
         return false;
     }
     const auto captureWidth = static_cast<int>(s.capture.width);
     const auto captureHeight = static_cast<int>(s.capture.height);
-    if (output.size() != QSize(captureWidth, captureHeight) ||
-        output.format() != QImage::Format_RGBA8888) {
-        output = QImage(captureWidth, captureHeight, QImage::Format_RGBA8888);
+    if (output.size() != LuxUI::Size(captureWidth, captureHeight) ||
+        output.format() != LuxUI::Image::Format_RGBA8888) {
+        output = LuxUI::Image(captureWidth, captureHeight, LuxUI::Image::Format_RGBA8888);
     }
     if (output.isNull()) {
-        error_ = QStringLiteral("뷰포트 이미지 버퍼를 할당하지 못했습니다.");
+        error_ = LUX_UI_TEXT("뷰포트 이미지 버퍼를 할당하지 못했습니다.");
         return false;
     }
     const auto rowBytes = static_cast<size_t>(s.capture.width) * 4;
@@ -311,7 +357,7 @@ bool EngineSceneRenderer::ReadbackToImage(QImage& output) {
 }
 
 bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
-                                 const QRectF& worldBounds, QImage& output) {
+                                 const LuxUI::RectF& worldBounds, LuxUI::Image& output) {
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
         return false;
@@ -350,29 +396,41 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
     } catch (const std::exception& exception) {
         s.context2D.AbortScene();
         s.gpu.EndFrame();
-        error_ = QStringLiteral("엔진 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+        error_ = LUX_UI_TEXT("엔진 렌더링 오류: %1").arg(LuxUI::String::fromUtf8(exception.what()));
         return false;
     } catch (...) {
         s.context2D.AbortScene();
         s.gpu.EndFrame();
-        error_ = QStringLiteral("엔진 렌더링 중 알 수 없는 예외가 발생했습니다.");
+        error_ = LUX_UI_TEXT("엔진 렌더링 중 알 수 없는 예외가 발생했습니다.");
         return false;
     }
     if (!s.gpu.EndFrame()) {
-        error_ = QString::fromStdString(s.gpu.GetLastError());
+        error_ = LuxUI::String::fromStdString(s.gpu.GetLastError());
         return false;
     }
-    output.reinterpretAsFormat(QImage::Format_RGBA8888);
+    output.reinterpretAsFormat(LuxUI::Image::Format_RGBA8888);
     if (!ReadbackToImage(output))
         return false;
     // 2D alpha blending onto transparent black produces premultiplied color.
-    output.reinterpretAsFormat(QImage::Format_RGBA8888_Premultiplied);
+    output.reinterpretAsFormat(LuxUI::Image::Format_RGBA8888_Premultiplied);
     return true;
 }
 
 bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                                    const LuxEngine::Vec3& focus, double yaw, double pitch,
-                                   double distance, QImage& output, QImage* skyboxBackground) {
+                                   double distance, LuxUI::Image& output,
+                                   LuxUI::Image* skyboxBackground) {
+    struct Measurement {
+        double& destination;
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+
+        ~Measurement() {
+            destination =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                    .count();
+        }
+    } measurement{lastRenderMs_};
+
     if (skyboxBackground) {
         *skyboxBackground = {};
         if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Pbr &&
@@ -385,9 +443,87 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
                         skyboxBackground == nullptr);
 }
 
+bool EngineSceneRenderer::RenderGame(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
+                                     LuxUI::Image& output) {
+    if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
+        pixelHeight > 16384)
+        return false;
+
+    struct RenderScope {
+        EngineSceneRenderer& self;
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+
+        ~RenderScope() {
+            self.lastRenderMs_ =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                    .count();
+            self.rendering_ = false;
+            if (self.pendingShutdown_)
+                self.Shutdown();
+        }
+    } scope{*this};
+
+    rendering_ = true;
+    if (!BeginViewportFrame(static_cast<LuxEngine::uint32>(pixelWidth),
+                            static_cast<LuxEngine::uint32>(pixelHeight)))
+        return false;
+    auto& state = *state_;
+    const auto clear = scene.GetSettings().clearColor;
+    state.gpu.Clear(clear.x, clear.y, clear.z, clear.w);
+    const auto camera = ResolveGameViewCamera(scene, pixelWidth, pixelHeight);
+    state.context3D.Init(&state.gpu);
+    state.context2D.Init(&state.gpu);
+    LuxEngine::Renderer3D::ScopedContext scope3D(state.context3D);
+    LuxEngine::Renderer2D::ScopedContext scope2D(state.context2D);
+    try {
+        if (camera.perspective) {
+            auto settings = scene.GetSettings().render3D;
+            if (!settings.environmentPath.empty())
+                settings.environmentPath = scene.ResolveAssetPath(settings.environmentPath);
+            if (settings.mode == LuxEngine::Render3DMode::Pbr) {
+                LuxEngine::Renderer3D::BeginScene(camera.camera3D, settings,
+                                                  scene.GetSettings().exposure);
+            } else {
+                LuxEngine::DirectionalLight sun;
+                sun.direction = LuxEngine::Vec3{.5f, -1, .5f}.Normalized();
+                LuxEngine::Renderer3D::BeginScene(camera.camera3D, sun);
+            }
+            scene.OnRender3D();
+            LuxEngine::Renderer3D::EndScene();
+        }
+        LuxEngine::Renderer2D::BeginScene(camera.camera2D);
+        scene.OnRender();
+        LuxEngine::Renderer2D::EndScene();
+        if (postSceneHook_)
+            postSceneHook_();
+    } catch (const std::exception& exception) {
+        state.context3D.AbortScene();
+        state.context2D.AbortScene();
+        state.gpu.EndFrame();
+        error_ =
+            LUX_UI_TEXT("게임 뷰 렌더링 오류: %1").arg(LuxUI::String::fromUtf8(exception.what()));
+        return false;
+    } catch (...) {
+        state.context3D.AbortScene();
+        state.context2D.AbortScene();
+        state.gpu.EndFrame();
+        error_ = LUX_UI_TEXT("게임 뷰 렌더링 중 알 수 없는 예외가 발생했습니다.");
+        return false;
+    }
+    if (!state.gpu.EndFrame()) {
+        error_ = LuxUI::String::fromStdString(state.gpu.GetLastError());
+        return false;
+    }
+    if (!ReadbackToImage(output))
+        return false;
+    output.reinterpretAsFormat(LuxUI::Image::Format_RGBA8888_Premultiplied);
+    error_.clear();
+    return true;
+}
+
 bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                                        const LuxEngine::Vec3& focus, double yaw, double pitch,
-                                       double distance, QImage& output, bool backgroundOnly,
+                                       double distance, LuxUI::Image& output, bool backgroundOnly,
                                        bool drawSkybox) {
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
@@ -414,7 +550,8 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
     // The widget draws the scene background and grid before compositing object pixels.
     s.gpu.Clear(0, 0, 0, 0);
 
-    const auto camera = MakeViewportCamera3D(QSizeF(width, height), focus, yaw, pitch, distance);
+    const auto camera =
+        MakeViewportCamera3D(LuxUI::SizeF(width, height), focus, yaw, pitch, distance);
 
     LuxEngine::DirectionalLight sun;
     sun.direction = LuxEngine::Vec3(0.5f, -1.0f, 0.5f).Normalized();
@@ -459,9 +596,14 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
                         *resource = scene.ResolveAssetPath(*resource);
                 if (mesh->meshPath.empty())
                     LuxEngine::Renderer3D::DrawMesh(world, material);
-                else
-                    LuxEngine::Renderer3D::DrawMeshAsset(scene.ResolveAssetPath(mesh->meshPath),
-                                                         world, material);
+                else {
+                    const auto* animation =
+                        entity.TryGetComponent<LuxEngine::ModelAnimationComponent>();
+                    LuxEngine::Renderer3D::DrawMeshAsset(
+                        scene.ResolveAssetPath(mesh->meshPath), world, material, mesh->modelSubmesh,
+                        animation ? animation->clip : -1, animation ? animation->time : 0.0,
+                        entity.GetId());
+                }
             } else if (const auto* sprite =
                            entity.TryGetComponent<LuxEngine::SpriteRendererComponent>()) {
                 LuxEngine::Material3D material;
@@ -492,34 +634,35 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
             }
         }
         LuxEngine::Renderer3D::EndScene();
-        error_ = QString::fromUtf8(s.context3D.GetLastAssetError());
+        error_ = LuxUI::String::fromUtf8(s.context3D.GetLastAssetError());
     } catch (const std::exception& exception) {
         s.context3D.AbortScene();
         s.gpu.EndFrame();
-        error_ = QStringLiteral("엔진 3D 렌더링 오류: %1").arg(QString::fromUtf8(exception.what()));
+        error_ =
+            LUX_UI_TEXT("엔진 3D 렌더링 오류: %1").arg(LuxUI::String::fromUtf8(exception.what()));
         return false;
     } catch (...) {
         s.context3D.AbortScene();
         s.gpu.EndFrame();
-        error_ = QStringLiteral("엔진 3D 렌더링 중 알 수 없는 예외가 발생했습니다.");
+        error_ = LUX_UI_TEXT("엔진 3D 렌더링 중 알 수 없는 예외가 발생했습니다.");
         return false;
     }
     if (!s.gpu.EndFrame()) {
-        error_ = QString::fromStdString(s.gpu.GetLastError());
+        error_ = LuxUI::String::fromStdString(s.gpu.GetLastError());
         return false;
     }
     if (!ReadbackToImage(output))
         return false;
-    output.reinterpretAsFormat(QImage::Format_RGBA8888_Premultiplied);
-    output = output.convertToFormat(QImage::Format_RGBA8888);
+    output.reinterpretAsFormat(LuxUI::Image::Format_RGBA8888_Premultiplied);
+    output = output.convertToFormat(LuxUI::Image::Format_RGBA8888);
     if (output.isNull()) {
-        error_ = QStringLiteral("3D 뷰포트의 알파 이미지를 변환하지 못했습니다.");
+        error_ = LUX_UI_TEXT("3D 뷰포트의 알파 이미지를 변환하지 못했습니다.");
         return false;
     }
     return true;
 }
 
-const QString& EngineSceneRenderer::LastError() const {
+const LuxUI::String& EngineSceneRenderer::LastError() const {
     return error_;
 }
 
@@ -529,5 +672,11 @@ LuxEngine::uint32 EngineSceneRenderer::GetRecoveryCount() const noexcept {
 
 void EngineSceneRenderer::SetPostSceneHookForTesting(std::function<void()> hook) {
     postSceneHook_ = std::move(hook);
+}
+} // namespace LuxEditor
+
+namespace LuxEditor {
+double EngineSceneRenderer::LastRenderMs() const {
+    return lastRenderMs_;
 }
 } // namespace LuxEditor

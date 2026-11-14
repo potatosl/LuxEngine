@@ -1,13 +1,13 @@
 #pragma once
 #include <LuxEngine/Core/Core.hpp>
-#include <QByteArray>
+#include <LuxUI/Widgets.hpp>
 #include <utility>
 #include <vector>
 
 namespace LuxEditor {
 // Editing cursors belong to undo history, not to the persisted game scene format.
 struct EditorSnapshot {
-    QByteArray scene;
+    LuxUI::ByteArray scene;
     std::vector<LuxEngine::uint32> selection;
     std::vector<std::pair<LuxEngine::uint32, float>> animationTimes;
 

@@ -7,8 +7,8 @@
 #include <numbers>
 
 namespace LuxEditor {
-LuxEngine::PerspectiveCamera MakeViewportCamera3D(QSizeF size, LuxEngine::Vec3 focus, double yaw,
-                                                  double pitch, double distance) {
+LuxEngine::PerspectiveCamera MakeViewportCamera3D(LuxUI::SizeF size, LuxEngine::Vec3 focus,
+                                                  double yaw, double pitch, double distance) {
     yaw = std::isfinite(yaw) ? yaw : 0;
     pitch = std::isfinite(pitch) ? pitch : 0;
     yaw = std::remainder(yaw, 2 * std::numbers::pi);
@@ -33,8 +33,8 @@ LuxEngine::PerspectiveCamera MakeViewportCamera3D(QSizeF size, LuxEngine::Vec3 f
     return camera;
 }
 
-std::optional<QPointF> ProjectViewportPoint(const LuxEngine::PerspectiveCamera& camera, QSizeF size,
-                                            LuxEngine::Vec3 point) {
+std::optional<LuxUI::PointF> ProjectViewportPoint(const LuxEngine::PerspectiveCamera& camera,
+                                                  LuxUI::SizeF size, LuxEngine::Vec3 point) {
     if (size.width() <= 0 || size.height() <= 0)
         return std::nullopt;
     const auto& m = camera.GetViewProjectionMatrix().elements;
@@ -44,15 +44,15 @@ std::optional<QPointF> ProjectViewportPoint(const LuxEngine::PerspectiveCamera& 
     const double w = m[3] * point.x + m[7] * point.y + m[11] * point.z + m[15];
     if (!std::isfinite(w) || w <= 0 || z < 0 || z > w)
         return std::nullopt;
-    const QPointF screen((x / w + 1) * size.width() * .5, (1 - y / w) * size.height() * .5);
+    const LuxUI::PointF screen((x / w + 1) * size.width() * .5, (1 - y / w) * size.height() * .5);
     if (!std::isfinite(screen.x()) || !std::isfinite(screen.y()))
         return std::nullopt;
     return screen;
 }
 
-std::optional<QLineF> ProjectViewportSegment(const LuxEngine::PerspectiveCamera& camera,
-                                             QSizeF size, LuxEngine::Vec3 start,
-                                             LuxEngine::Vec3 end) {
+std::optional<LuxUI::LineF> ProjectViewportSegment(const LuxEngine::PerspectiveCamera& camera,
+                                                   LuxUI::SizeF size, LuxEngine::Vec3 start,
+                                                   LuxEngine::Vec3 end) {
     if (!(size.width() > 0 && size.height() > 0) || !std::isfinite(size.width()) ||
         !std::isfinite(size.height()))
         return std::nullopt;
@@ -86,15 +86,15 @@ std::optional<QLineF> ProjectViewportSegment(const LuxEngine::PerspectiveCamera&
     }
     if (low > high)
         return std::nullopt;
-    const auto project = [&](double fraction) -> std::optional<QPointF> {
+    const auto project = [&](double fraction) -> std::optional<LuxUI::PointF> {
         const double w = a[3] + (b[3] - a[3]) * fraction;
         if (w <= 0)
             return std::nullopt;
-        return QPointF((1 + (a[0] + (b[0] - a[0]) * fraction) / w) * size.width() * .5,
-                       (1 - (a[1] + (b[1] - a[1]) * fraction) / w) * size.height() * .5);
+        return LuxUI::PointF((1 + (a[0] + (b[0] - a[0]) * fraction) / w) * size.width() * .5,
+                             (1 - (a[1] + (b[1] - a[1]) * fraction) / w) * size.height() * .5);
     };
     const auto first = project(low), last = project(high);
-    return first && last ? std::optional<QLineF>(QLineF(*first, *last)) : std::nullopt;
+    return first && last ? std::optional<LuxUI::LineF>(LuxUI::LineF(*first, *last)) : std::nullopt;
 }
 
 double ViewportGridSpacing(double worldUnitsPerPixel) {
@@ -107,7 +107,7 @@ double ViewportGridSpacing(double worldUnitsPerPixel) {
 }
 
 std::optional<ViewportRay3D> MakeViewportRay3D(const LuxEngine::PerspectiveCamera& camera,
-                                               QSizeF size, QPointF point) {
+                                               LuxUI::SizeF size, LuxUI::PointF point) {
     if (size.width() <= 0 || size.height() <= 0 || !std::isfinite(point.x()) ||
         !std::isfinite(point.y()))
         return std::nullopt;

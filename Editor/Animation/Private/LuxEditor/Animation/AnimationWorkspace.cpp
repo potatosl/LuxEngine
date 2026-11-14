@@ -5,33 +5,7 @@
 #include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
-#include <QAction>
-#include <QButtonGroup>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QDockWidget>
-#include <QDoubleSpinBox>
-#include <QElapsedTimer>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QHBoxLayout>
-#include <QKeyEvent>
-#include <QLabel>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QMenu>
-#include <QMenuBar>
-#include <QPainter>
-#include <QPushButton>
-#include <QScrollArea>
-#include <QScrollBar>
-#include <QSignalBlocker>
-#include <QSlider>
-#include <QSpinBox>
-#include <QSplitter>
-#include <QTabWidget>
-#include <QToolButton>
-#include <QVBoxLayout>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -41,29 +15,29 @@ std::optional<LuxEngine::uint32> SelectedId(EditorDocument& doc) {
     return doc.GetSelectedId(doc.GetActiveTabId());
 }
 
-class KeyList final : public QListWidget {
+class KeyList final : public LuxUI::ListWidget {
 public:
-    KeyList(QWidget* parent, std::function<void()> remove)
-        : QListWidget(parent), remove_(std::move(remove)) {}
+    KeyList(LuxUI::Widget* parent, std::function<void()> remove)
+        : LuxUI::ListWidget(parent), remove_(std::move(remove)) {}
 
 private:
     std::function<void()> remove_;
 
-    bool event(QEvent* event) override {
-        if (event->type() == QEvent::ShortcutOverride &&
-            static_cast<QKeyEvent*>(event)->key() == Qt::Key_Delete) {
+    bool event(LuxUI::Event* event) override {
+        if (event->type() == LuxUI::Event::ShortcutOverride &&
+            static_cast<LuxUI::KeyEvent*>(event)->key() == LuxUI::Flags::Key_Delete) {
             event->accept();
             return true;
         }
-        return QListWidget::event(event);
+        return LuxUI::ListWidget::event(event);
     }
 
-    void keyPressEvent(QKeyEvent* event) override {
-        if (event->key() == Qt::Key_Delete) {
+    void keyPressEvent(LuxUI::KeyEvent* event) override {
+        if (event->key() == LuxUI::Flags::Key_Delete) {
             remove_();
             event->accept();
         } else
-            QListWidget::keyPressEvent(event);
+            LuxUI::ListWidget::keyPressEvent(event);
     }
 };
 
@@ -71,7 +45,12 @@ private:
 
 void EditorWindow::StopAnimationPlayback() {
     if (animationPanel_)
-        if (auto* play = animationPanel_->findChild<QPushButton*>(QStringLiteral("animationPlay")))
+        if (auto* play =
+                animationPanel_->findChild<LuxUI::PushButton*>(LUX_UI_TEXT("modelAnimationPlay")))
+            play->setIcon(MakeEditorIcon(EditorIcon::Play));
+    if (animationPanel_)
+        if (auto* play =
+                animationPanel_->findChild<LuxUI::PushButton*>(LUX_UI_TEXT("animationPlay")))
             play->setIcon(MakeEditorIcon(EditorIcon::Play));
     if (!animationTimer_.isActive())
         return;
@@ -80,56 +59,65 @@ void EditorWindow::StopAnimationPlayback() {
 }
 
 void EditorWindow::BuildAnimationPanel() {
-    // Transform clips are editable here. Bone and sprite-sheet tracks require engine support.
-    animationDock_ = new QDockWidget(QStringLiteral("애니메이션"), this);
-    animationDock_->setObjectName(QStringLiteral("AnimationWorkspace"));
-    animationPanel_ = new QWidget(animationDock_);
-    animationPanel_->setObjectName(QStringLiteral("animationWorkspace"));
-    auto* workspace = new QVBoxLayout(animationPanel_);
+    // Transform tracks and imported FBX clips share the workspace, with separate authoring tools.
+    animationDock_ = new LuxUI::DockWidget(LUX_UI_TEXT("애니메이션"), this);
+    animationDock_->setObjectName(LUX_UI_TEXT("AnimationWorkspace"));
+    animationPanel_ = new LuxUI::Widget(animationDock_);
+    animationPanel_->setObjectName(LUX_UI_TEXT("animationWorkspace"));
+    auto* workspace = new LuxUI::VBoxLayout(animationPanel_);
     workspace->setContentsMargins(0, 0, 0, 0);
     workspace->setSpacing(0);
 
-    auto* header = new QWidget(animationPanel_);
-    header->setObjectName(QStringLiteral("animationWorkspaceHeader"));
-    auto* heading = new QHBoxLayout(header);
+    auto* header = new LuxUI::Widget(animationPanel_);
+    header->setObjectName(LUX_UI_TEXT("animationWorkspaceHeader"));
+    auto* heading = new LuxUI::HBoxLayout(header);
     heading->setContentsMargins(12, 6, 12, 6);
-    animationTarget_ = new QLabel(header);
+    animationTarget_ = new LuxUI::Label(header);
     animationTarget_->setMinimumWidth(100);
     heading->addWidget(animationTarget_);
+    auto* sourceMode = new LuxUI::ComboBox(header);
+    sourceMode->setObjectName(LUX_UI_TEXT("animationSourceMode"));
+    sourceMode->addItems({LUX_UI_TEXT("변환 클립"), LUX_UI_TEXT("FBX 클립")});
+    heading->addWidget(sourceMode);
+    connect(sourceMode, &LuxUI::ComboBox::currentIndexChanged, this, [this](int index) {
+        StopAnimationPlayback();
+        SetModelAnimationMode(index == 1);
+    });
     heading->addStretch();
-    auto* save = new QPushButton(header);
-    save->setObjectName(QStringLiteral("animationSave"));
+    auto* save = new LuxUI::PushButton(header);
+    save->setObjectName(LUX_UI_TEXT("animationSave"));
     save->setIcon(MakeEditorIcon(EditorIcon::Save));
     save->setFixedSize(32, 30);
-    save->setToolTip(QStringLiteral("애니메이션을 포함한 씬 저장 (Ctrl+S)"));
+    save->setToolTip(LUX_UI_TEXT("애니메이션을 포함한 씬 저장 (Ctrl+S)"));
     heading->addWidget(save);
-    connect(save, &QPushButton::clicked, this, [this] { SaveScene(false); });
-    auto* previewTools = new QButtonGroup(header);
+    connect(save, &LuxUI::PushButton::clicked, this, [this] { SaveScene(false); });
+    auto* previewTools = new LuxUI::ButtonGroup(header);
     previewTools->setExclusive(true);
     const EditorIcon icons[] = {EditorIcon::Select, EditorIcon::Move, EditorIcon::Rotate,
                                 EditorIcon::Scale};
-    const QStringList toolNames{QStringLiteral("선택 (Q)"), QStringLiteral("이동 (W)"),
-                                QStringLiteral("회전 (E)"), QStringLiteral("크기 (R)")};
+    const LuxUI::StringList toolNames{LUX_UI_TEXT("선택 (Q)"), LUX_UI_TEXT("이동 (W)"),
+                                      LUX_UI_TEXT("회전 (E)"), LUX_UI_TEXT("크기 (R)")};
     for (int index = 0; index < 4; ++index) {
-        auto* tool = new QToolButton(header);
-        tool->setObjectName(QStringLiteral("animationTool%1").arg(index));
+        auto* tool = new LuxUI::ToolButton(header);
+        tool->setObjectName(LUX_UI_TEXT("animationTool%1").arg(index));
         tool->setIcon(MakeEditorIcon(icons[index]));
         tool->setToolTip(toolNames[index]);
-        const int keys[] = {Qt::Key_Q, Qt::Key_W, Qt::Key_E, Qt::Key_R};
-        tool->setShortcut(QKeySequence(keys[index]));
+        const int keys[] = {LuxUI::Flags::Key_Q, LuxUI::Flags::Key_W, LuxUI::Flags::Key_E,
+                            LuxUI::Flags::Key_R};
+        tool->setShortcut(LuxUI::KeySequence(keys[index]));
         tool->setCheckable(true);
         tool->setChecked(index == 0);
         previewTools->addButton(tool, index);
         heading->addWidget(tool);
-        connect(tool, &QToolButton::clicked, this,
+        connect(tool, &LuxUI::ToolButton::clicked, this,
                 [this, index] { SetAnimationTool(static_cast<EditorTool>(index)); });
     }
-    auto* focusPreview = new QToolButton(header);
-    focusPreview->setObjectName(QStringLiteral("animationFocusTarget"));
+    auto* focusPreview = new LuxUI::ToolButton(header);
+    focusPreview->setObjectName(LUX_UI_TEXT("animationFocusTarget"));
     focusPreview->setIcon(MakeEditorIcon(EditorIcon::Focus));
-    focusPreview->setToolTip(QStringLiteral("애니메이션 대상에 초점"));
+    focusPreview->setToolTip(LUX_UI_TEXT("애니메이션 대상에 초점"));
     heading->addWidget(focusPreview);
-    connect(focusPreview, &QToolButton::clicked, this, [this] {
+    connect(focusPreview, &LuxUI::ToolButton::clicked, this, [this] {
         if (animationPreview2D_)
             animationPreview2D_->FocusSelection();
         if (animationPreview3D_)
@@ -138,39 +126,39 @@ void EditorWindow::BuildAnimationPanel() {
     // Keep component attachment separate from runtime playback. Disabling playback must never
     // discard authored keys. The hidden attachment control remains the single creation/removal
     // path.
-    animationEnabled_ = new QCheckBox(header);
-    animationEnabled_->setObjectName(QStringLiteral("editorAnimation"));
+    animationEnabled_ = new LuxUI::CheckBox(header);
+    animationEnabled_->setObjectName(LUX_UI_TEXT("editorAnimation"));
     animationEnabled_->hide();
-    auto* autoPlay = new QCheckBox(QStringLiteral("자동 재생"), header);
-    autoPlay->setObjectName(QStringLiteral("animationAutoPlay"));
+    auto* autoPlay = new LuxUI::CheckBox(LUX_UI_TEXT("자동 재생"), header);
+    autoPlay->setObjectName(LUX_UI_TEXT("animationAutoPlay"));
     autoPlay->setToolTip(
-        QStringLiteral("게임 실행 시 클립을 자동으로 재생합니다. 키프레임은 유지됩니다."));
+        LUX_UI_TEXT("게임 실행 시 클립을 자동으로 재생합니다. 키프레임은 유지됩니다."));
     heading->addWidget(autoPlay);
-    connect(autoPlay, &QCheckBox::toggled, this, [this](bool playing) {
+    connect(autoPlay, &LuxUI::CheckBox::toggled, this, [this](bool playing) {
         if (refreshingInspector_ || previewActive_)
             return;
         auto entity = document_.GetSelected();
         if (!entity || !entity.HasComponent<LuxEngine::AnimationComponent>())
             return;
         StopAnimationPlayback();
-        RecordEdit(QStringLiteral("애니메이션 자동 재생 변경"), [this, playing] {
+        RecordEdit(LUX_UI_TEXT("애니메이션 자동 재생 변경"), [this, playing] {
             document_.GetSelected().GetComponent<LuxEngine::AnimationComponent>().playing = playing;
             document_.MarkDirty();
         });
         RefreshInspector();
         UpdateChrome();
     });
-    auto* removeClip = new QToolButton(header);
-    removeClip->setObjectName(QStringLiteral("animationRemoveClip"));
+    auto* removeClip = new LuxUI::ToolButton(header);
+    removeClip->setObjectName(LUX_UI_TEXT("animationRemoveClip"));
     removeClip->setIcon(MakeEditorIcon(EditorIcon::Delete));
-    removeClip->setToolTip(QStringLiteral("클립 제거 · 실행 취소로 복원할 수 있습니다."));
+    removeClip->setToolTip(LUX_UI_TEXT("클립 제거 · 실행 취소로 복원할 수 있습니다."));
     heading->addWidget(removeClip);
-    connect(removeClip, &QToolButton::clicked, this,
+    connect(removeClip, &LuxUI::ToolButton::clicked, this,
             [this] { animationEnabled_->setChecked(false); });
-    auto* createClip = new QPushButton(QStringLiteral("새 변환 클립"), header);
-    createClip->setObjectName(QStringLiteral("animationCreateClip"));
+    auto* createClip = new LuxUI::PushButton(LUX_UI_TEXT("새 변환 클립"), header);
+    createClip->setObjectName(LUX_UI_TEXT("animationCreateClip"));
     heading->addWidget(createClip);
-    connect(createClip, &QPushButton::clicked, this, [this] {
+    connect(createClip, &LuxUI::PushButton::clicked, this, [this] {
         if (!animationEnabled_->isChecked())
             animationEnabled_->setChecked(true);
         animationName_->setFocus();
@@ -178,42 +166,42 @@ void EditorWindow::BuildAnimationPanel() {
     });
     workspace->addWidget(header);
 
-    auto* mainSplit = new QSplitter(Qt::Horizontal, animationPanel_);
-    mainSplit->setObjectName(QStringLiteral("animationMainSplitter"));
+    auto* mainSplit = new LuxUI::Splitter(LuxUI::Flags::Horizontal, animationPanel_);
+    mainSplit->setObjectName(LUX_UI_TEXT("animationMainSplitter"));
     mainSplit->setChildrenCollapsible(false);
-    auto* browser = new QWidget(mainSplit);
+    auto* browser = new LuxUI::Widget(mainSplit);
     browser->setMinimumWidth(160);
-    auto* browserLayout = new QVBoxLayout(browser);
+    auto* browserLayout = new LuxUI::VBoxLayout(browser);
     browserLayout->setContentsMargins(10, 10, 10, 10);
-    auto* browserTitle = new QLabel(QStringLiteral("클립 · 키프레임"), browser);
-    browserTitle->setObjectName(QStringLiteral("sectionCaption"));
+    auto* browserTitle = new LuxUI::Label(LUX_UI_TEXT("클립 · 키프레임"), browser);
+    browserTitle->setObjectName(LUX_UI_TEXT("sectionCaption"));
     browserLayout->addWidget(browserTitle);
-    animationName_ = new QLineEdit(browser);
-    animationName_->setObjectName(QStringLiteral("animationClipName"));
-    animationName_->setPlaceholderText(QStringLiteral("클립 이름"));
+    animationName_ = new LuxUI::LineEdit(browser);
+    animationName_->setObjectName(LUX_UI_TEXT("animationClipName"));
+    animationName_->setPlaceholderText(LUX_UI_TEXT("클립 이름"));
     animationName_->setMaxLength(256);
     browserLayout->addWidget(animationName_);
-    auto* keyCount = new QLabel(browser);
-    keyCount->setObjectName(QStringLiteral("animationKeyCount"));
+    auto* keyCount = new LuxUI::Label(browser);
+    keyCount->setObjectName(LUX_UI_TEXT("animationKeyCount"));
     browserLayout->addWidget(keyCount);
     keyframeList_ = new KeyList(browser, [this] { RemoveKeyframe(); });
-    keyframeList_->setObjectName(QStringLiteral("animationKeys"));
+    keyframeList_->setObjectName(LUX_UI_TEXT("animationKeys"));
     keyframeList_->setAlternatingRowColors(true);
     browserLayout->addWidget(keyframeList_, 1);
-    auto* keyActions = new QHBoxLayout;
-    auto* addKey = new QPushButton(QStringLiteral("현재 변환 키 추가"), browser);
-    addKey->setObjectName(QStringLiteral("animationAddKey"));
-    addKey->setToolTip(QStringLiteral("현재 시간에 오브젝트의 위치·회전·크기를 기록합니다."));
-    auto* removeKey = new QPushButton(browser);
-    removeKey->setObjectName(QStringLiteral("animationRemoveKey"));
+    auto* keyActions = new LuxUI::HBoxLayout;
+    auto* addKey = new LuxUI::PushButton(LUX_UI_TEXT("현재 변환 키 추가"), browser);
+    addKey->setObjectName(LUX_UI_TEXT("animationAddKey"));
+    addKey->setToolTip(LUX_UI_TEXT("현재 시간에 오브젝트의 위치·회전·크기를 기록합니다."));
+    auto* removeKey = new LuxUI::PushButton(browser);
+    removeKey->setObjectName(LUX_UI_TEXT("animationRemoveKey"));
     removeKey->setIcon(MakeEditorIcon(EditorIcon::Delete));
-    removeKey->setToolTip(QStringLiteral("선택 키 삭제 (Delete)"));
+    removeKey->setToolTip(LUX_UI_TEXT("선택 키 삭제 (Delete)"));
     keyActions->addWidget(addKey, 1);
     keyActions->addWidget(removeKey);
     browserLayout->addLayout(keyActions);
 
-    auto* preview = new QTabWidget(mainSplit);
-    preview->setObjectName(QStringLiteral("animationPreviewTabs"));
+    auto* preview = new LuxUI::TabWidget(mainSplit);
+    preview->setObjectName(LUX_UI_TEXT("animationPreviewTabs"));
     preview->setDocumentMode(true);
     auto renderer = std::make_shared<EngineSceneRenderer>();
     const auto select = [this](std::optional<LuxEngine::uint32> id) { SelectEntity(id); };
@@ -225,75 +213,75 @@ void EditorWindow::BuildAnimationPanel() {
     const auto end = [this] { EndViewportEdit(); };
     animationPreview3D_ =
         new SceneViewport3D(preview, document_, select, transform, begin, end, renderer);
-    animationPreview3D_->setObjectName(QStringLiteral("animationPreview3D"));
+    animationPreview3D_->setObjectName(LUX_UI_TEXT("animationPreview3D"));
     animationPreview2D_ = new SceneViewport2D(
         preview, document_, select, transform,
         [](LuxEngine::uint32, LuxEngine::uint32, LuxEngine::uint32, uint8_t) {}, begin, end,
         renderer);
-    animationPreview2D_->setObjectName(QStringLiteral("animationPreview2D"));
+    animationPreview2D_->setObjectName(LUX_UI_TEXT("animationPreview2D"));
     animationPreview2D_->SetCancelEditCallback([this] { CancelViewportEdit(); });
     animationPreview3D_->SetCancelEditCallback([this] { CancelViewportEdit(); });
-    preview->addTab(animationPreview3D_, QStringLiteral("3D 미리보기"));
-    preview->addTab(animationPreview2D_, QStringLiteral("2D 미리보기"));
+    preview->addTab(animationPreview3D_, LUX_UI_TEXT("3D 미리보기"));
+    preview->addTab(animationPreview2D_, LUX_UI_TEXT("2D 미리보기"));
 
-    auto* detailsScroll = new QScrollArea(mainSplit);
+    auto* detailsScroll = new LuxUI::ScrollArea(mainSplit);
     detailsScroll->setWidgetResizable(true);
-    detailsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    detailsScroll->setHorizontalScrollBarPolicy(LuxUI::Flags::ScrollBarAlwaysOff);
     detailsScroll->setMinimumWidth(270);
-    auto* details = new QWidget(detailsScroll);
-    auto* detailsLayout = new QVBoxLayout(details);
+    auto* details = new LuxUI::Widget(detailsScroll);
+    auto* detailsLayout = new LuxUI::VBoxLayout(details);
     detailsLayout->setContentsMargins(10, 10, 10, 10);
-    auto* clipGroup = new QGroupBox(QStringLiteral("클립 설정"), details);
+    auto* clipGroup = new LuxUI::GroupBox(LUX_UI_TEXT("클립 설정"), details);
     clipGroup->setStyleSheet(
-        QStringLiteral("QGroupBox { margin-top:20px; padding-top:8px; } QGroupBox::title { "
-                       "subcontrol-origin:margin; left:8px; top:2px; }"));
-    auto* clipForm = new QFormLayout(clipGroup);
-    animationDuration_ = new QDoubleSpinBox(clipGroup);
-    animationDuration_->setObjectName(QStringLiteral("animationDuration"));
+        LUX_UI_TEXT("QGroupBox { margin-top:20px; padding-top:8px; } QGroupBox::title { "
+                    "subcontrol-origin:margin; left:8px; top:2px; }"));
+    auto* clipForm = new LuxUI::FormLayout(clipGroup);
+    animationDuration_ = new LuxUI::DoubleSpinBox(clipGroup);
+    animationDuration_->setObjectName(LUX_UI_TEXT("animationDuration"));
     animationDuration_->setRange(.01, 3600);
     animationDuration_->setDecimals(3);
     animationDuration_->setValue(1);
-    animationDuration_->setSuffix(QStringLiteral(" s"));
+    animationDuration_->setSuffix(LUX_UI_TEXT(" s"));
     animationDuration_->setKeyboardTracking(false);
-    clipForm->addRow(QStringLiteral("길이"), animationDuration_);
-    animationLoop_ = new QCheckBox(QStringLiteral("반복 재생"), clipGroup);
+    clipForm->addRow(LUX_UI_TEXT("길이"), animationDuration_);
+    animationLoop_ = new LuxUI::CheckBox(LUX_UI_TEXT("반복 재생"), clipGroup);
     clipForm->addRow(animationLoop_);
-    auto* interpolation = new QLabel(QStringLiteral("선형"), clipGroup);
-    interpolation->setToolTip(QStringLiteral("현재 변환 클립은 키 사이를 선형 보간합니다."));
-    clipForm->addRow(QStringLiteral("보간"), interpolation);
+    auto* interpolation = new LuxUI::Label(LUX_UI_TEXT("선형"), clipGroup);
+    interpolation->setToolTip(LUX_UI_TEXT("현재 변환 클립은 키 사이를 선형 보간합니다."));
+    clipForm->addRow(LUX_UI_TEXT("보간"), interpolation);
     detailsLayout->addWidget(clipGroup);
-    auto* keyGroup = new QGroupBox(QStringLiteral("선택 키"), details);
-    keyGroup->setObjectName(QStringLiteral("animationKeyDetails"));
+    auto* keyGroup = new LuxUI::GroupBox(LUX_UI_TEXT("선택 키"), details);
+    keyGroup->setObjectName(LUX_UI_TEXT("animationKeyDetails"));
     keyGroup->setStyleSheet(clipGroup->styleSheet());
-    auto* keyForm = new QFormLayout(keyGroup);
-    keyForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    keyForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
-    animationKeyTime_ = new QDoubleSpinBox(keyGroup);
-    animationKeyTime_->setObjectName(QStringLiteral("animationKeyTime"));
+    auto* keyForm = new LuxUI::FormLayout(keyGroup);
+    keyForm->setFieldGrowthPolicy(LuxUI::FormLayout::AllNonFixedFieldsGrow);
+    keyForm->setRowWrapPolicy(LuxUI::FormLayout::WrapLongRows);
+    animationKeyTime_ = new LuxUI::DoubleSpinBox(keyGroup);
+    animationKeyTime_->setObjectName(LUX_UI_TEXT("animationKeyTime"));
     animationKeyTime_->setRange(0, 3600);
     animationKeyTime_->setDecimals(4);
-    animationKeyTime_->setSuffix(QStringLiteral(" s"));
+    animationKeyTime_->setSuffix(LUX_UI_TEXT(" s"));
     animationKeyTime_->setKeyboardTracking(false);
-    keyForm->addRow(QStringLiteral("시간"), animationKeyTime_);
-    const QStringList rowNames{QStringLiteral("위치"), QStringLiteral("회전 °"),
-                               QStringLiteral("크기")};
+    keyForm->addRow(LUX_UI_TEXT("시간"), animationKeyTime_);
+    const LuxUI::StringList rowNames{LUX_UI_TEXT("위치"), LUX_UI_TEXT("회전 °"),
+                                     LUX_UI_TEXT("크기")};
     for (int row = 0; row < 3; ++row) {
-        auto* vector = new QWidget(keyGroup);
-        auto* vectorLayout = new QHBoxLayout(vector);
+        auto* vector = new LuxUI::Widget(keyGroup);
+        auto* vectorLayout = new LuxUI::HBoxLayout(vector);
         vectorLayout->setContentsMargins(0, 0, 0, 0);
         vectorLayout->setSpacing(3);
         for (int axis = 0; axis < 3; ++axis) {
-            auto* field = new QDoubleSpinBox(vector);
-            field->setObjectName(QStringLiteral("animationKeyValue%1%2").arg(row).arg(axis));
+            auto* field = new LuxUI::DoubleSpinBox(vector);
+            field->setObjectName(LUX_UI_TEXT("animationKeyValue%1%2").arg(row).arg(axis));
             field->setRange(-1e6, 1e6);
             field->setDecimals(3);
-            field->setButtonSymbols(QAbstractSpinBox::NoButtons);
+            field->setButtonSymbols(LuxUI::AbstractSpinBox::NoButtons);
             field->setKeyboardTracking(false);
             field->setMinimumWidth(68);
-            field->setPrefix(QString::fromLatin1("XYZ" + axis, 1) + QStringLiteral(" "));
+            field->setPrefix(LuxUI::String::fromLatin1("XYZ" + axis, 1) + LUX_UI_TEXT(" "));
             animationKeyValues_[row][axis] = field;
             vectorLayout->addWidget(field);
-            connect(field, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            connect(field, qOverload<double>(&LuxUI::DoubleSpinBox::valueChanged), this,
                     [this, field] { OnAnimationKeyChanged(field); });
         }
         keyForm->addRow(rowNames[row], vector);
@@ -307,26 +295,26 @@ void EditorWindow::BuildAnimationPanel() {
     mainSplit->setStretchFactor(2, 0);
     workspace->addWidget(mainSplit, 3);
 
-    auto* sequence = new QWidget(animationPanel_);
-    sequence->setObjectName(QStringLiteral("animationSequence"));
-    auto* sequenceLayout = new QVBoxLayout(sequence);
+    auto* sequence = new LuxUI::Widget(animationPanel_);
+    sequence->setObjectName(LUX_UI_TEXT("animationSequence"));
+    auto* sequenceLayout = new LuxUI::VBoxLayout(sequence);
     sequenceLayout->setContentsMargins(0, 0, 0, 0);
     sequenceLayout->setSpacing(0);
-    auto* sequenceHeader = new QWidget(sequence);
-    auto* sequenceHeading = new QHBoxLayout(sequenceHeader);
+    auto* sequenceHeader = new LuxUI::Widget(sequence);
+    auto* sequenceHeading = new LuxUI::HBoxLayout(sequenceHeader);
     sequenceHeading->setContentsMargins(12, 5, 12, 5);
-    auto* mode = new QComboBox(sequenceHeader);
-    mode->setObjectName(QStringLiteral("animationTimelineMode"));
-    mode->addItems({QStringLiteral("도프 시트"), QStringLiteral("위치 곡선")});
+    auto* mode = new LuxUI::ComboBox(sequenceHeader);
+    mode->setObjectName(LUX_UI_TEXT("animationTimelineMode"));
+    mode->addItems({LUX_UI_TEXT("도프 시트"), LUX_UI_TEXT("위치 곡선")});
     sequenceHeading->addWidget(mode);
     sequenceHeading->addStretch();
-    sequenceHeading->addWidget(new QLabel(QStringLiteral("확대"), sequenceHeader));
-    auto* zoom = new QSpinBox(sequenceHeader);
-    zoom->setObjectName(QStringLiteral("animationZoom"));
+    sequenceHeading->addWidget(new LuxUI::Label(LUX_UI_TEXT("확대"), sequenceHeader));
+    auto* zoom = new LuxUI::SpinBox(sequenceHeader);
+    zoom->setObjectName(LUX_UI_TEXT("animationZoom"));
     zoom->setRange(100, 1600);
     zoom->setSingleStep(25);
     zoom->setValue(100);
-    zoom->setSuffix(QStringLiteral(" %"));
+    zoom->setSuffix(LUX_UI_TEXT(" %"));
     sequenceHeading->addWidget(zoom);
     sequenceLayout->addWidget(sequenceHeader);
     auto* timeline = new AnimationTimeline(
@@ -338,59 +326,60 @@ void EditorWindow::BuildAnimationPanel() {
          [this] { AddKeyframe(); }, [this](double time) { SeekAnimationTime(time); },
          [this] {
              if (auto* play =
-                     animationPanel_->findChild<QPushButton*>(QStringLiteral("animationPlay")))
+                     animationPanel_->findChild<LuxUI::PushButton*>(LUX_UI_TEXT("animationPlay")))
                  play->click();
          }});
     animationTimeline_ = timeline;
-    timeline->setObjectName(QStringLiteral("animationTimeline"));
+    timeline->setObjectName(LUX_UI_TEXT("animationTimeline"));
     timeline->setRange(0, 1000);
     sequenceLayout->addWidget(timeline, 1);
-    auto* scroll = new QScrollBar(Qt::Horizontal, sequence);
-    scroll->setObjectName(QStringLiteral("animationTimeScroll"));
+    auto* scroll = new LuxUI::ScrollBar(LuxUI::Flags::Horizontal, sequence);
+    scroll->setObjectName(LUX_UI_TEXT("animationTimeScroll"));
     scroll->setRange(0, 1000);
     scroll->setPageStep(1000);
     sequenceLayout->addWidget(scroll);
-    connect(zoom, qOverload<int>(&QSpinBox::valueChanged), timeline, [timeline, scroll](int value) {
-        timeline->SetZoom(value / 100.0);
-        scroll->setPageStep(100000 / value);
-    });
-    connect(scroll, &QScrollBar::valueChanged, timeline,
+    connect(zoom, qOverload<int>(&LuxUI::SpinBox::valueChanged), timeline,
+            [timeline, scroll](int value) {
+                timeline->SetZoom(value / 100.0);
+                scroll->setPageStep(100000 / value);
+            });
+    connect(scroll, &LuxUI::ScrollBar::valueChanged, timeline,
             [timeline](int value) { timeline->SetScroll(value / 1000.0); });
-    connect(mode, &QComboBox::currentIndexChanged, timeline,
+    connect(mode, &LuxUI::ComboBox::currentIndexChanged, timeline,
             [timeline](int index) { timeline->SetCurveMode(index == 1); });
     workspace->addWidget(sequence, 2);
 
-    auto* transport = new QHBoxLayout;
-    animationTime_ = new QDoubleSpinBox(animationPanel_);
-    animationTime_->setObjectName(QStringLiteral("animationTime"));
+    auto* transport = new LuxUI::HBoxLayout;
+    animationTime_ = new LuxUI::DoubleSpinBox(animationPanel_);
+    animationTime_->setObjectName(LUX_UI_TEXT("animationTime"));
     animationTime_->setDecimals(3);
     animationTime_->setRange(0, 3600);
-    animationTime_->setSuffix(QStringLiteral(" s"));
+    animationTime_->setSuffix(LUX_UI_TEXT(" s"));
     animationTime_->setKeyboardTracking(false);
-    animationFps_ = new QSpinBox(animationPanel_);
+    animationFps_ = new LuxUI::SpinBox(animationPanel_);
     animationFps_->setRange(1, 240);
     animationFps_->setValue(30);
-    animationFps_->setSuffix(QStringLiteral(" FPS"));
-    connect(animationFps_, qOverload<int>(&QSpinBox::valueChanged), this,
+    animationFps_->setSuffix(LUX_UI_TEXT(" FPS"));
+    connect(animationFps_, qOverload<int>(&LuxUI::SpinBox::valueChanged), this,
             [this] { RefreshAnimationWorkspace(); });
-    const auto button = [&](const QString& text, const char* name, auto callback) {
-        auto* control = new QPushButton(animationPanel_);
+    const auto button = [&](const LuxUI::String& text, const char* name, auto callback) {
+        auto* control = new LuxUI::PushButton(animationPanel_);
         control->setToolTip(text);
         control->setFixedSize(30, 30);
-        control->setIconSize(QSize(18, 18));
-        const QString id = QString::fromLatin1(name);
-        control->setIcon(MakeEditorIcon(id == QStringLiteral("animationPlay") ? EditorIcon::Play
-                                        : id == QStringLiteral("animationStop")
-                                            ? EditorIcon::Stop
-                                            : EditorIcon::Step));
-        if (id == QStringLiteral("animationPreviousFrame"))
-            control->setIcon(control->icon().pixmap(20, 20).transformed(QTransform().scale(-1, 1)));
-        control->setObjectName(QString::fromLatin1(name));
-        connect(control, &QPushButton::clicked, this, callback);
+        control->setIconSize(LuxUI::Size(18, 18));
+        const LuxUI::String id = LuxUI::String::fromLatin1(name);
+        control->setIcon(MakeEditorIcon(id == LUX_UI_TEXT("animationPlay")   ? EditorIcon::Play
+                                        : id == LUX_UI_TEXT("animationStop") ? EditorIcon::Stop
+                                                                             : EditorIcon::Step));
+        if (id == LUX_UI_TEXT("animationPreviousFrame"))
+            control->setIcon(
+                control->icon().pixmap(20, 20).transformed(LuxUI::Transform().scale(-1, 1)));
+        control->setObjectName(LuxUI::String::fromLatin1(name));
+        connect(control, &LuxUI::PushButton::clicked, this, callback);
         transport->addWidget(control);
         return control;
     };
-    button(QStringLiteral("이전 프레임"), "animationPreviousFrame", [this] {
+    button(LUX_UI_TEXT("이전 프레임"), "animationPreviousFrame", [this] {
         StopAnimationPlayback();
         timelineBefore_ = SnapshotScene();
         const auto entity = document_.GetSelected();
@@ -399,7 +388,7 @@ void EditorWindow::BuildAnimationPanel() {
                               1.0 / animationFps_->value());
         EndTimelineEdit();
     });
-    button(QStringLiteral("재생 / 일시정지"), "animationPlay", [this] {
+    button(LUX_UI_TEXT("재생 / 일시정지"), "animationPlay", [this] {
         if (animationTimer_.isActive()) {
             StopAnimationPlayback();
             return;
@@ -414,9 +403,9 @@ void EditorWindow::BuildAnimationPanel() {
         const auto tab = document_.GetActiveTabId();
         const auto id = entity.GetId();
         animationTimer_.disconnect(this);
-        auto clock = std::make_shared<QElapsedTimer>();
+        auto clock = std::make_shared<LuxUI::ElapsedTimer>();
         clock->start();
-        connect(&animationTimer_, &QTimer::timeout, this, [this, tab, id, clock] {
+        connect(&animationTimer_, &LuxUI::Timer::timeout, this, [this, tab, id, clock] {
             const auto selected = document_.GetSelected();
             if (document_.GetActiveTabId() != tab || !selected || selected.GetId() != id ||
                 !selected.HasComponent<LuxEngine::AnimationComponent>()) {
@@ -434,16 +423,17 @@ void EditorWindow::BuildAnimationPanel() {
                 StopAnimationPlayback();
         });
         animationTimer_.start(std::max(1, 1000 / animationFps_->value()));
-        if (auto* play = animationPanel_->findChild<QPushButton*>(QStringLiteral("animationPlay")))
+        if (auto* play =
+                animationPanel_->findChild<LuxUI::PushButton*>(LUX_UI_TEXT("animationPlay")))
             play->setIcon(MakeEditorIcon(EditorIcon::Pause));
     });
-    button(QStringLiteral("정지"), "animationStop", [this] {
+    button(LUX_UI_TEXT("정지"), "animationStop", [this] {
         StopAnimationPlayback();
         timelineBefore_ = SnapshotScene();
         ScrubAnimation(0);
         EndTimelineEdit();
     });
-    button(QStringLiteral("다음 프레임"), "animationNextFrame", [this] {
+    button(LUX_UI_TEXT("다음 프레임"), "animationNextFrame", [this] {
         StopAnimationPlayback();
         timelineBefore_ = SnapshotScene();
         const auto entity = document_.GetSelected();
@@ -453,17 +443,18 @@ void EditorWindow::BuildAnimationPanel() {
         EndTimelineEdit();
     });
     transport->addSpacing(12);
-    transport->addWidget(new QLabel(QStringLiteral("시간"), animationPanel_));
+    transport->addWidget(new LuxUI::Label(LUX_UI_TEXT("시간"), animationPanel_));
     transport->addWidget(animationTime_);
     transport->addWidget(animationFps_);
     transport->addStretch();
 
-    auto* transportBar = new QWidget(animationPanel_);
-    transportBar->setObjectName(QStringLiteral("animationTransport"));
+    auto* transportBar = new LuxUI::Widget(animationPanel_);
+    transportBar->setObjectName(LUX_UI_TEXT("animationTransport"));
     transportBar->setLayout(transport);
     transport->setContentsMargins(12, 5, 12, 5);
     workspace->addWidget(transportBar);
-    connect(animationTime_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+    BuildModelAnimationWorkspace(workspace);
+    connect(animationTime_, qOverload<double>(&LuxUI::DoubleSpinBox::valueChanged), this,
             [this](double time) {
                 if (refreshingInspector_)
                     return;
@@ -472,41 +463,42 @@ void EditorWindow::BuildAnimationPanel() {
                 SeekAnimationTime(time);
                 EndTimelineEdit();
             });
-    connect(animationName_, &QLineEdit::editingFinished, this,
+    connect(animationName_, &LuxUI::LineEdit::editingFinished, this,
             [this] { OnAnimationChanged(animationName_); });
-    connect(animationEnabled_, &QCheckBox::toggled, this,
+    connect(animationEnabled_, &LuxUI::CheckBox::toggled, this,
             [this] { OnAnimationChanged(animationEnabled_); });
-    connect(animationLoop_, &QCheckBox::toggled, this,
+    connect(animationLoop_, &LuxUI::CheckBox::toggled, this,
             [this] { OnAnimationChanged(animationLoop_); });
-    connect(animationDuration_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+    connect(animationDuration_, qOverload<double>(&LuxUI::DoubleSpinBox::valueChanged), this,
             [this] { OnAnimationChanged(animationDuration_); });
-    connect(animationKeyTime_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+    connect(animationKeyTime_, qOverload<double>(&LuxUI::DoubleSpinBox::valueChanged), this,
             [this] { OnAnimationKeyChanged(animationKeyTime_); });
-    connect(keyframeList_, &QListWidget::currentRowChanged, this, [this](int row) {
+    connect(keyframeList_, &LuxUI::ListWidget::currentRowChanged, this, [this](int row) {
         if (refreshingInspector_)
             return;
         keyframeList_->setProperty("selectedKeyRow", row);
         RefreshAnimationWorkspace();
     });
-    connect(addKey, &QPushButton::clicked, this, [this] { AddKeyframe(); });
-    connect(removeKey, &QPushButton::clicked, this, [this] { RemoveKeyframe(); });
-    connect(animationTimeline_, &QSlider::sliderPressed, this, [this] {
+    connect(addKey, &LuxUI::PushButton::clicked, this, [this] { AddKeyframe(); });
+    connect(removeKey, &LuxUI::PushButton::clicked, this, [this] { RemoveKeyframe(); });
+    connect(animationTimeline_, &LuxUI::Slider::sliderPressed, this, [this] {
         StopAnimationPlayback();
         timelineBefore_ = SnapshotScene();
     });
-    connect(animationTimeline_, &QSlider::actionTriggered, this, [this] {
+    connect(animationTimeline_, &LuxUI::Slider::actionTriggered, this, [this] {
         if (animationTimeline_->isSliderDown() || previewActive_)
             return;
         timelineBefore_ = SnapshotScene();
-        QTimer::singleShot(0, this, [this] { EndTimelineEdit(); });
+        LuxUI::Timer::singleShot(0, this, [this] { EndTimelineEdit(); });
     });
-    connect(animationTimeline_, &QSlider::valueChanged, this,
+    connect(animationTimeline_, &LuxUI::Slider::valueChanged, this,
             [this](int value) { ScrubAnimation(value); });
-    connect(animationTimeline_, &QSlider::sliderReleased, this, [this] { EndTimelineEdit(); });
+    connect(animationTimeline_, &LuxUI::Slider::sliderReleased, this,
+            [this] { EndTimelineEdit(); });
     animationDock_->setWidget(animationPanel_);
-    addDockWidget(Qt::BottomDockWidgetArea, animationDock_);
+    addDockWidget(LuxUI::Flags::BottomDockWidgetArea, animationDock_);
     animationDock_->hide();
-    connect(animationDock_, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+    connect(animationDock_, &LuxUI::DockWidget::visibilityChanged, this, [this](bool visible) {
         if (!visible)
             StopAnimationPlayback();
     });
@@ -528,8 +520,8 @@ void EditorWindow::SetAnimationTool(EditorTool tool) {
         animationPreview3D_->SetTool(tool);
     }
     for (int item = 0; item < 4; ++item)
-        if (auto* button = animationPanel_->findChild<QToolButton*>(
-                QStringLiteral("animationTool%1").arg(item)))
+        if (auto* button = animationPanel_->findChild<LuxUI::ToolButton*>(
+                LUX_UI_TEXT("animationTool%1").arg(item)))
             button->setChecked(item == index);
 }
 
@@ -548,42 +540,43 @@ void EditorWindow::RefreshAnimationWorkspace() {
     if (row < 0 || row >= count)
         row = count > 0 ? 0 : -1;
     {
-        const QSignalBlocker blocked(keyframeList_);
+        const LuxUI::SignalBlocker blocked(keyframeList_);
         keyframeList_->setCurrentRow(row);
         keyframeList_->setProperty("selectedKeyRow", row);
         for (int index = 0; index < count; ++index)
             keyframeList_->item(index)->setText(
-                QStringLiteral("◆  %1 s    ·    %2 프레임")
+                LUX_UI_TEXT("◆  %1 s    ·    %2 프레임")
                     .arg(animation->clip.keyframes[index].time, 0, 'f', 3)
                     .arg(std::llround(animation->clip.keyframes[index].time *
                                       animationFps_->value())));
     }
     if (entity && entity.HasComponent<LuxEngine::TagComponent>()) {
-        const auto name = QString::fromUtf8(entity.GetComponent<LuxEngine::TagComponent>().tag);
-        animationTarget_->setText(name + QStringLiteral(" · 변환 애니메이션"));
+        const auto name =
+            LuxUI::String::fromUtf8(entity.GetComponent<LuxEngine::TagComponent>().tag);
+        animationTarget_->setText(name + LUX_UI_TEXT(" · 변환 애니메이션"));
         animationTarget_->setToolTip(name);
     }
     if (auto* create =
-            animationPanel_->findChild<QPushButton*>(QStringLiteral("animationCreateClip")))
+            animationPanel_->findChild<LuxUI::PushButton*>(LUX_UI_TEXT("animationCreateClip")))
         create->setEnabled(!animation && entity &&
                            entity.HasComponent<LuxEngine::TransformComponent>() && !previewActive_);
     if (auto* autoPlay =
-            animationPanel_->findChild<QCheckBox*>(QStringLiteral("animationAutoPlay"))) {
-        const QSignalBlocker blocked(autoPlay);
+            animationPanel_->findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("animationAutoPlay"))) {
+        const LuxUI::SignalBlocker blocked(autoPlay);
         autoPlay->setChecked(animation && animation->playing);
         autoPlay->setEnabled(animation && !previewActive_);
     }
     if (auto* remove =
-            animationPanel_->findChild<QToolButton*>(QStringLiteral("animationRemoveClip")))
+            animationPanel_->findChild<LuxUI::ToolButton*>(LUX_UI_TEXT("animationRemoveClip")))
         remove->setEnabled(animation && !previewActive_);
-    if (auto* label = animationPanel_->findChild<QLabel*>(QStringLiteral("animationKeyCount")))
-        label->setText(QStringLiteral("Transform Clip · 키 %1개").arg(count));
+    if (auto* label = animationPanel_->findChild<LuxUI::Label*>(LUX_UI_TEXT("animationKeyCount")))
+        label->setText(LUX_UI_TEXT("Transform Clip · 키 %1개").arg(count));
     if (auto* details =
-            animationPanel_->findChild<QGroupBox*>(QStringLiteral("animationKeyDetails")))
+            animationPanel_->findChild<LuxUI::GroupBox*>(LUX_UI_TEXT("animationKeyDetails")))
         details->setEnabled(row >= 0 && !previewActive_);
     if (row >= 0) {
         const auto& key = animation->clip.keyframes[row];
-        const QSignalBlocker blockTime(animationKeyTime_);
+        const LuxUI::SignalBlocker blockTime(animationKeyTime_);
         animationKeyTime_->setRange(0,
                                     std::max(1.0, static_cast<double>(animation->clip.duration)));
         animationKeyTime_->setValue(key.time);
@@ -595,16 +588,16 @@ void EditorWindow::RefreshAnimationWorkspace() {
                                      {key.scale.x, key.scale.y, key.scale.z}};
         for (int group = 0; group < 3; ++group)
             for (int axis = 0; axis < 3; ++axis) {
-                const QSignalBlocker blocked(animationKeyValues_[group][axis]);
+                const LuxUI::SignalBlocker blocked(animationKeyValues_[group][axis]);
                 animationKeyValues_[group][axis]->setValue(values[group][axis]);
             }
     }
     animationTimeline_->update();
     if (entity) {
         auto* preview =
-            animationPanel_->findChild<QTabWidget*>(QStringLiteral("animationPreviewTabs"));
+            animationPanel_->findChild<LuxUI::TabWidget*>(LUX_UI_TEXT("animationPreviewTabs"));
         const auto target =
-            QStringLiteral("%1:%2").arg(document_.GetActiveTabId()).arg(entity.GetId());
+            LUX_UI_TEXT("%1:%2").arg(document_.GetActiveTabId()).arg(entity.GetId());
         if (preview && preview->property("previewTarget").toString() != target) {
             preview->setProperty("previewTarget", target);
             preview->setCurrentIndex(entity.HasComponent<LuxEngine::MeshRendererComponent>() ? 0
@@ -619,6 +612,7 @@ void EditorWindow::RefreshAnimationWorkspace() {
         animationPreview2D_->RefreshScene();
     if (animationPreview3D_)
         animationPreview3D_->RefreshScene();
+    RefreshModelAnimationWorkspace();
     refreshingInspector_ = refreshing;
 }
 
@@ -648,7 +642,7 @@ void EditorWindow::MoveAnimationKey(int index, float time) {
     RefreshInspector();
 }
 
-void EditorWindow::OnAnimationKeyChanged(const QWidget* field) {
+void EditorWindow::OnAnimationKeyChanged(const LuxUI::Widget* field) {
     if (refreshingInspector_ || previewActive_)
         return;
     auto entity = document_.GetSelected();
@@ -658,7 +652,7 @@ void EditorWindow::OnAnimationKeyChanged(const QWidget* field) {
     if (!animation || row < 0 || static_cast<size_t>(row) >= animation->clip.keyframes.size())
         return;
     StopAnimationPlayback();
-    RecordEdit(QStringLiteral("애니메이션 키 편집"), [this, field, row] {
+    RecordEdit(LUX_UI_TEXT("애니메이션 키 편집"), [this, field, row] {
         if (field == animationKeyTime_) {
             MoveAnimationKey(row, static_cast<float>(animationKeyTime_->value()));
             return;
@@ -688,12 +682,12 @@ void EditorWindow::OnAnimationKeyChanged(const QWidget* field) {
     UpdateChrome();
 }
 
-void EditorWindow::OnAnimationChanged(const QWidget* field) {
+void EditorWindow::OnAnimationChanged(const LuxUI::Widget* field) {
     if (refreshingInspector_ || previewActive_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
         return;
     StopAnimationPlayback();
-    RecordEdit(QStringLiteral("애니메이션 변경"), [this, field] {
+    RecordEdit(LUX_UI_TEXT("애니메이션 변경"), [this, field] {
         LuxEngine::Entity entity = document_.GetSelected();
         if (field == animationEnabled_) {
             if (animationEnabled_->isChecked() &&
@@ -730,7 +724,7 @@ void EditorWindow::AddKeyframe() {
         !document_.GetSelected().HasComponent<LuxEngine::AnimationComponent>())
         return;
     StopAnimationPlayback();
-    RecordEdit(QStringLiteral("애니메이션 키 추가"), [this] {
+    RecordEdit(LUX_UI_TEXT("애니메이션 키 추가"), [this] {
         LuxEngine::Entity entity = document_.GetSelected();
         auto& animation = entity.GetComponent<LuxEngine::AnimationComponent>();
         const auto& transform = entity.GetComponent<LuxEngine::TransformComponent>();
@@ -755,7 +749,7 @@ void EditorWindow::RemoveKeyframe() {
     const int row = keyframeList_->currentRow();
     if (row < 0)
         return;
-    RecordEdit(QStringLiteral("애니메이션 키 삭제"), [this, row] {
+    RecordEdit(LUX_UI_TEXT("애니메이션 키 삭제"), [this, row] {
         auto& keys =
             document_.GetSelected().GetComponent<LuxEngine::AnimationComponent>().clip.keyframes;
         if (static_cast<size_t>(row) < keys.size())
@@ -786,7 +780,7 @@ void EditorWindow::SeekAnimationTime(double time) {
     const int value = animation.clip.duration > 0
                           ? static_cast<int>(1000 * animation.currentTime / animation.clip.duration)
                           : 0;
-    const QSignalBlocker timelineBlock(animationTimeline_), timeBlock(animationTime_);
+    const LuxUI::SignalBlocker timelineBlock(animationTimeline_), timeBlock(animationTime_);
     animationTimeline_->setValue(value);
     animationTime_->setValue(animation.currentTime);
     if (!animation.clip.keyframes.empty())
@@ -813,7 +807,7 @@ void EditorWindow::EndTimelineEdit() {
         const auto id = SelectedId(document_);
         const auto tab = document_.GetActiveTabId();
         PushSceneCommand(new SceneEditCommand(
-            QStringLiteral("애니메이션 편집"),
+            LUX_UI_TEXT("애니메이션 편집"),
             [this, tab, before, id] { RestoreSceneAt(tab, before, id); },
             [this, tab, after, id] { RestoreSceneAt(tab, after, id); }, {tab},
             SceneHistoryBytes(before) + SceneHistoryBytes(after)));

@@ -1,7 +1,7 @@
 #pragma once
+#include <LuxUI/Widgets.hpp>
 
 #include <LuxEngine/Scene/Entity.hpp>
-#include <QSlider>
 #include <functional>
 
 namespace LuxEditor {
@@ -18,29 +18,29 @@ struct AnimationTimelineActions {
     std::function<void()> togglePlayback;
 };
 
-class AnimationTimeline final : public QSlider {
+class AnimationTimeline final : public LuxUI::Slider {
 public:
-    AnimationTimeline(QWidget* parent, AnimationTimelineActions actions);
+    AnimationTimeline(LuxUI::Widget* parent, AnimationTimelineActions actions);
     void SetZoom(double zoom);
     void SetScroll(double fraction);
     void SetCurveMode(bool enabled);
 
 protected:
-    void paintEvent(QPaintEvent*) override;
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
-    void mouseDoubleClickEvent(QMouseEvent* event) override;
-    void keyPressEvent(QKeyEvent* event) override;
-    void wheelEvent(QWheelEvent* event) override;
-    void contextMenuEvent(QContextMenuEvent* event) override;
-    bool event(QEvent* event) override;
+    void paintEvent(LuxUI::PaintEvent*) override;
+    void mousePressEvent(LuxUI::MouseEvent* event) override;
+    void mouseMoveEvent(LuxUI::MouseEvent* event) override;
+    void mouseReleaseEvent(LuxUI::MouseEvent* event) override;
+    void mouseDoubleClickEvent(LuxUI::MouseEvent* event) override;
+    void keyPressEvent(LuxUI::KeyEvent* event) override;
+    void wheelEvent(LuxUI::WheelEvent* event) override;
+    void contextMenuEvent(LuxUI::ContextMenuEvent* event) override;
+    bool event(LuxUI::Event* event) override;
 
 private:
     float Duration() const;
     float TimeAt(double x) const;
     double PositionAt(float time) const;
-    int KeyAt(const QPointF& point) const;
+    int KeyAt(const LuxUI::PointF& point) const;
     void Scrub(double x);
 
     AnimationTimelineActions actions_;

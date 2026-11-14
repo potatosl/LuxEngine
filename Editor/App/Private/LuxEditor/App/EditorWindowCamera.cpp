@@ -1,54 +1,47 @@
 #include <LuxEditor/App/EditorWindow.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QDoubleSpinBox>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QSignalBlocker>
-#include <QTabWidget>
-#include <QVBoxLayout>
+#include <LuxUI/Widgets.hpp>
 
 namespace LuxEditor {
-void EditorWindow::BuildCameraDetails(QVBoxLayout* layout) {
-    auto* group = new QGroupBox(QStringLiteral("Camera"), inspectorBody_);
-    auto* form = new QFormLayout(group);
-    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
-    cameraEnabled_ = new QCheckBox(QStringLiteral("카메라 사용"), group);
-    cameraEnabled_->setObjectName(QStringLiteral("cameraEnabled"));
+void EditorWindow::BuildCameraDetails(LuxUI::VBoxLayout* layout) {
+    auto* group = new LuxUI::GroupBox(LUX_UI_TEXT("Camera"), inspectorBody_);
+    auto* form = new LuxUI::FormLayout(group);
+    form->setRowWrapPolicy(LuxUI::FormLayout::WrapLongRows);
+    cameraEnabled_ = new LuxUI::CheckBox(LUX_UI_TEXT("카메라 사용"), group);
+    cameraEnabled_->setObjectName(LUX_UI_TEXT("cameraEnabled"));
     form->addRow(cameraEnabled_);
-    cameraPrimary_ = new QCheckBox(QStringLiteral("게임 기본 카메라"), group);
-    cameraPrimary_->setObjectName(QStringLiteral("cameraPrimary"));
+    cameraPrimary_ = new LuxUI::CheckBox(LUX_UI_TEXT("게임 기본 카메라"), group);
+    cameraPrimary_->setObjectName(LUX_UI_TEXT("cameraPrimary"));
     form->addRow(cameraPrimary_);
-    cameraProjection_ = new QComboBox(group);
-    cameraProjection_->setObjectName(QStringLiteral("cameraProjection"));
-    cameraProjection_->addItems({QStringLiteral("직교"), QStringLiteral("원근")});
-    form->addRow(QStringLiteral("투영"), cameraProjection_);
-    cameraFov_ = new QDoubleSpinBox(group);
-    cameraFov_->setObjectName(QStringLiteral("cameraFov"));
+    cameraProjection_ = new LuxUI::ComboBox(group);
+    cameraProjection_->setObjectName(LUX_UI_TEXT("cameraProjection"));
+    cameraProjection_->addItems({LUX_UI_TEXT("직교"), LUX_UI_TEXT("원근")});
+    form->addRow(LUX_UI_TEXT("투영"), cameraProjection_);
+    cameraFov_ = new LuxUI::DoubleSpinBox(group);
+    cameraFov_->setObjectName(LUX_UI_TEXT("cameraFov"));
     cameraFov_->setRange(1, 179);
-    cameraFov_->setSuffix(QStringLiteral("°"));
+    cameraFov_->setSuffix(LUX_UI_TEXT("°"));
     cameraFov_->setKeyboardTracking(false);
-    form->addRow(QStringLiteral("시야각"), cameraFov_);
-    cameraOrthoSize_ = new QDoubleSpinBox(group);
-    cameraOrthoSize_->setObjectName(QStringLiteral("cameraOrthoSize"));
+    form->addRow(LUX_UI_TEXT("시야각"), cameraFov_);
+    cameraOrthoSize_ = new LuxUI::DoubleSpinBox(group);
+    cameraOrthoSize_->setObjectName(LUX_UI_TEXT("cameraOrthoSize"));
     cameraOrthoSize_->setRange(.01, 100000);
     cameraOrthoSize_->setKeyboardTracking(false);
-    form->addRow(QStringLiteral("직교 크기"), cameraOrthoSize_);
+    form->addRow(LUX_UI_TEXT("직교 크기"), cameraOrthoSize_);
     layout->addWidget(group);
-    connect(cameraEnabled_, &QCheckBox::toggled, this, [this] { OnCameraChanged(); });
-    connect(cameraPrimary_, &QCheckBox::toggled, this, [this] { OnCameraChanged(); });
-    connect(cameraProjection_, &QComboBox::currentIndexChanged, this,
+    connect(cameraEnabled_, &LuxUI::CheckBox::toggled, this, [this] { OnCameraChanged(); });
+    connect(cameraPrimary_, &LuxUI::CheckBox::toggled, this, [this] { OnCameraChanged(); });
+    connect(cameraProjection_, &LuxUI::ComboBox::currentIndexChanged, this,
             [this] { OnCameraChanged(); });
     for (auto* field : {cameraFov_, cameraOrthoSize_})
-        connect(field, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+        connect(field, qOverload<double>(&LuxUI::DoubleSpinBox::valueChanged), this,
                 [this] { OnCameraChanged(); });
 }
 
 void EditorWindow::RefreshCameraDetails() {
     const auto entity = document_.GetSelected();
     const auto* camera = entity.TryGetComponent<LuxEngine::CameraComponent>();
-    const QSignalBlocker enabled(cameraEnabled_), primary(cameraPrimary_),
+    const LuxUI::SignalBlocker enabled(cameraEnabled_), primary(cameraPrimary_),
         projection(cameraProjection_), fov(cameraFov_), ortho(cameraOrthoSize_);
     cameraEnabled_->setChecked(camera != nullptr);
     cameraPrimary_->setChecked(camera && camera->isPrimary);
@@ -63,13 +56,13 @@ void EditorWindow::RefreshCameraDetails() {
 }
 
 void EditorWindow::OnCameraChanged() {
-    if (refreshingInspector_ || previewActive_ || !document_.GetSelected())
+    if (refreshingInspector_ || !document_.GetSelected())
         return;
     const bool enabled = cameraEnabled_->isChecked();
     const LuxEngine::CameraComponent value{
         cameraPrimary_->isChecked(), cameraProjection_->currentIndex() == 1,
         static_cast<float>(cameraFov_->value()), static_cast<float>(cameraOrthoSize_->value())};
-    RecordEdit(QStringLiteral("카메라 속성 변경"), [this, enabled, value] {
+    RecordEdit(LUX_UI_TEXT("카메라 속성 변경"), [this, enabled, value] {
         auto entity = document_.GetSelected();
         if (!enabled) {
             entity.RemoveComponent<LuxEngine::CameraComponent>();
@@ -88,9 +81,7 @@ void EditorWindow::OnCameraChanged() {
 }
 
 void EditorWindow::AddCameraEntity() {
-    if (previewActive_)
-        return;
-    RecordEdit(QStringLiteral("카메라 추가"), [this] {
+    RecordEdit(LUX_UI_TEXT("카메라 추가"), [this] {
         bool primary = true;
         for (auto entity : document_.GetScene().GetEntities())
             if (const auto* camera = entity.TryGetComponent<LuxEngine::CameraComponent>())
