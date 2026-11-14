@@ -94,6 +94,8 @@ struct CameraComponent {
     bool isPerspective = false;
     float fov = 45.0f;
     float orthoSize = 10.0f;
+    float nearClip = .1f;
+    float farClip = 1000.f;
 };
 
 } // namespace LuxEngine

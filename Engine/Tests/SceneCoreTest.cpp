@@ -460,6 +460,62 @@ void RuntimePreservingCommit() {
           "invalid prepared state never mutates the live scene or physics world");
 }
 
+void Singular2DLayerOrdering() {
+    Scene scene;
+    auto camera = scene.CreateEntity("Zero-scale camera");
+    camera.AddComponent<CameraComponent>();
+    auto& cameraTransform = camera.GetComponent<TransformComponent>();
+    cameraTransform.position.z = 2;
+    cameraTransform.scale = {0, 0, 0};
+    Check(scene.GetEntitiesIn2DLayerOrder().size() == 1,
+          "camera-only zero-scale scene has a valid depth order");
+    scene.OnRender();
+    auto parent = scene.CreateEntity("Zero-scale parent");
+    auto& parentTransform = parent.GetComponent<TransformComponent>();
+    parentTransform.position.z = -3;
+    parentTransform.scale = {0, 0, 0};
+    auto childCamera = scene.CreateEntity("Parented camera");
+    childCamera.AddComponent<CameraComponent>();
+    childCamera.GetComponent<TransformComponent>().position.z = 20;
+    Check(scene.SetParent(childCamera.GetId(), parent.GetId(), false),
+          "camera can be parented below a collapsed transform");
+    auto childSprite = scene.CreateEntity("Collapsed sprite");
+    childSprite.AddComponent<SpriteRendererComponent>();
+    childSprite.GetComponent<TransformComponent>().position.z = 1000;
+    Check(scene.SetParent(childSprite.GetId(), parent.GetId(), false),
+          "sprite can be parented below a collapsed transform");
+    auto sprite = scene.CreateEntity("Visible sprite");
+    sprite.AddComponent<SpriteRendererComponent>();
+    auto largeParent = scene.CreateEntity("Finite singular affine parent");
+    auto& largeTransform = largeParent.GetComponent<TransformComponent>();
+    largeTransform.position.z = 1;
+    largeTransform.scale = {0, 1e20f, 1e20f};
+    auto largeChild = scene.CreateEntity("Finite singular affine sprite");
+    largeChild.AddComponent<SpriteRendererComponent>();
+    largeChild.AddComponent<MeshRendererComponent>();
+    Check(scene.SetParent(largeChild.GetId(), largeParent.GetId(), false),
+          "singular affine sprite hierarchy configures");
+    auto invalid = scene.CreateEntity("Non-finite depth");
+    invalid.GetComponent<TransformComponent>().position.z = std::numeric_limits<float>::infinity();
+    auto noTransform = scene.CreateEntity("No transform");
+    noTransform.RemoveComponent<TransformComponent>();
+    const std::vector<uint32> expected{parent.GetId(), childCamera.GetId(), childSprite.GetId(),
+                                       sprite.GetId(), largeParent.GetId(), largeChild.GetId(),
+                                       camera.GetId()};
+    const auto ordered = scene.GetEntitiesIn2DLayerOrder();
+    Check(ordered.size() == expected.size(),
+          "layer order excludes non-finite world depths and missing transforms");
+    for (size_t index = 0; index < expected.size(); ++index)
+        Check(ordered[index].GetId() == expected[index],
+              "layer order uses world matrix depth and preserves entity IDs for equal depths");
+    scene.OnRender();
+    scene.OnRender3D();
+    Check(camera.IsValid() && childCamera.IsValid() && childSprite.IsValid() &&
+              largeChild.IsValid(),
+          "2D/3D rendering accepts camera-only and parented singular transforms without "
+          "decomposition");
+}
+
 int RenderHierarchy() {
     struct Graphics {
         Window window;
@@ -566,6 +622,7 @@ int RunSceneCoreChecks(int argc, char** argv) {
     SettingsAndPhysics();
     BackwardCompatibilityAndOrigin();
     RuntimePreservingCommit();
+    Singular2DLayerOrdering();
     std::cout << "Scene hierarchy, versioned data, references and physics checks passed\n";
     return 0;
 }

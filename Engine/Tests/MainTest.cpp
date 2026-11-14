@@ -230,6 +230,9 @@ struct Files {
 using namespace LuxEngine;
 
 void Core() {
+    const CameraComponent legacyCamera{true, true, 60.0f, 10.0f};
+    Check(Near(legacyCamera.nearClip, .1f) && Near(legacyCamera.farClip, 1000.f),
+          "public CameraComponent preserves four-field aggregate initialization and clip defaults");
     Random first(42), second(42);
     for (int index = 0; index < 32; ++index) {
         const float value = first.Range(-2.0f, 3.0f);
@@ -252,6 +255,31 @@ void Core() {
     Check(Near(project(perspective, {0, 0, -0.5f}), 0.0f) &&
               Near(project(perspective, {0, 0, -50.0f}), 1.0f),
           "perspective depth maps near/far to Vulkan's 0..1 range");
+    const auto largePerspective = Mat4::Perspective(ToRadians(60), 1, 1e20f, 1e21f);
+    Check(std::all_of(std::begin(largePerspective.elements), std::end(largePerspective.elements),
+                      [](float value) { return std::isfinite(value); }) &&
+              Near(project(largePerspective, {0, 0, -1e20f}), 0) &&
+              Near(project(largePerspective, {0, 0, -1e21f}), 1),
+          "perspective computes large representable clip ranges without overflowing intermediates");
+    PerspectiveCamera stablePerspective(ToRadians(60), 1, .1f, 100);
+    stablePerspective.SetPosition({2, 3, 4});
+    const auto previousProjection = stablePerspective.GetProjectionMatrix();
+    const auto previousViewProjection = stablePerspective.GetViewProjectionMatrix();
+    const float extremeFar = std::numeric_limits<float>::max();
+    const float extremeNear = std::nextafter(extremeFar, 0.0f);
+    bool rejectedPerspective = false;
+    try {
+        stablePerspective.SetPerspective(ToRadians(60), 1, extremeNear, extremeFar);
+    } catch (const std::invalid_argument&) {
+        rejectedPerspective = true;
+    }
+    Check(rejectedPerspective, "unrepresentable perspective matrix throws invalid_argument");
+    for (size_t index = 0; index < 16; ++index)
+        Check(stablePerspective.GetProjectionMatrix().elements[index] ==
+                      previousProjection.elements[index] &&
+                  stablePerspective.GetViewProjectionMatrix().elements[index] ==
+                      previousViewProjection.elements[index],
+              "rejected perspective settings preserve the previous projection and camera state");
     const Mat4 ortho = Mat4::Orthographic(-1, 1, -1, 1, -1, 1);
     Check(Near(project(ortho, {0, 0, 1}), 0.0f) && Near(project(ortho, {0, 0, -1}), 1.0f),
           "orthographic depth maps into Vulkan's 0..1 range");

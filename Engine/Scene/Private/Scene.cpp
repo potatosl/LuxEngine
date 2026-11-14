@@ -88,15 +88,24 @@ std::vector<Entity> Scene::GetEntities() {
 }
 
 std::vector<Entity> Scene::GetEntitiesIn2DLayerOrder() {
-    auto entities = GetEntities();
-    std::erase_if(entities, [](Entity entity) {
-        const auto* transform = entity.TryGetComponent<TransformComponent>();
-        return !transform || !std::isfinite(transform->position.z);
-    });
-    std::stable_sort(entities.begin(), entities.end(), [this](Entity a, Entity b) {
-        return GetWorldTransform(a.GetId()).position.z < GetWorldTransform(b.GetId()).position.z;
-    });
-    return entities;
+    std::vector<std::pair<Entity, float>> depths;
+    depths.reserve(entities_.size());
+    for (const auto& entity : GetEntities()) {
+        if (!entity.HasComponent<TransformComponent>())
+            continue;
+        const float depth = GetWorldMatrix(entity.GetId()).elements[14];
+        if (std::isfinite(depth))
+            depths.emplace_back(entity, depth);
+    }
+    std::stable_sort(depths.begin(), depths.end(),
+                     [](const auto& a, const auto& b) { return a.second < b.second; });
+    std::vector<Entity> result;
+    result.reserve(depths.size());
+    for (const auto& [entity, depth] : depths) {
+        static_cast<void>(depth);
+        result.push_back(entity);
+    }
+    return result;
 }
 
 void Scene::OnUpdate(double dt) {
@@ -293,10 +302,9 @@ void Scene::OnRender() {
         for (Entity entity : entities) {
             if (!entity.HasComponent<TransformComponent>())
                 continue;
-            const auto transform = GetWorldTransform(entity.GetId());
             const auto matrix = GetWorldMatrix(entity.GetId());
-            if (!Finite(transform.position) || !Finite(transform.rotation) ||
-                !Finite(transform.scale))
+            if (!std::all_of(std::begin(matrix.elements), std::end(matrix.elements),
+                             [](float value) { return std::isfinite(value); }))
                 continue;
             if (tilemaps && entity.HasComponent<TilemapComponent>()) {
                 const auto& map = entity.GetComponent<TilemapComponent>();
@@ -330,8 +338,9 @@ void Scene::OnRender3D() {
         if (!entity.HasComponent<TransformComponent>() ||
             !entity.HasComponent<MeshRendererComponent>())
             continue;
-        const auto transform = GetWorldTransform(entity.GetId());
-        if (!Finite(transform.position) || !Finite(transform.rotation) || !Finite(transform.scale))
+        const auto world = GetWorldMatrix(entity.GetId());
+        if (!std::all_of(std::begin(world.elements), std::end(world.elements),
+                         [](float value) { return std::isfinite(value); }))
             continue;
         const auto& meshComp = entity.GetComponent<MeshRendererComponent>();
         if (Finite(meshComp.material.albedoColor) && Finite(meshComp.material.metallic) &&
@@ -345,11 +354,10 @@ void Scene::OnRender3D() {
                 if (!path->empty())
                     *path = ResolveAssetPath(*path);
             if (meshComp.meshPath.empty())
-                Renderer3D::DrawMesh(GetWorldMatrix(entity.GetId()), material);
+                Renderer3D::DrawMesh(world, material);
             else {
                 const auto* animation = entity.TryGetComponent<ModelAnimationComponent>();
-                Renderer3D::DrawMeshAsset(ResolveAssetPath(meshComp.meshPath),
-                                          GetWorldMatrix(entity.GetId()), material,
+                Renderer3D::DrawMeshAsset(ResolveAssetPath(meshComp.meshPath), world, material,
                                           meshComp.modelSubmesh, animation ? animation->clip : -1,
                                           animation ? animation->time : 0.0, entity.GetId());
             }
@@ -870,8 +878,18 @@ bool Scene::ValidateForSerialization() {
         }
         if (const auto* camera = TryGetComponent<CameraComponent>(id)) {
             if (!Finite(camera->fov) || camera->fov <= 0.0f || camera->fov >= 180.0f ||
-                !Finite(camera->orthoSize) || camera->orthoSize <= 0.0f)
+                !Finite(camera->orthoSize) || camera->orthoSize <= 0.0f ||
+                !Finite(camera->nearClip) || !Finite(camera->farClip) || camera->nearClip <= 0 ||
+                camera->farClip <= camera->nearClip)
                 return false;
+            if (camera->isPerspective) {
+                try {
+                    Mat4::Perspective(ToRadians(camera->fov), 1.0f, camera->nearClip,
+                                      camera->farClip);
+                } catch (const std::invalid_argument&) {
+                    return false;
+                }
+            }
         }
         if (const auto* rb2d = TryGetComponent<Rigidbody2DComponent>(id)) {
             const int type = static_cast<int>(rb2d->type);

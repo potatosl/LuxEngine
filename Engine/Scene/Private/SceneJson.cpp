@@ -284,6 +284,8 @@ bool Scene::SerializeToString(std::string& output) {
                 value["perspective"] = ToJson(component->isPerspective);
                 value["fov"] = ToJson(component->fov);
                 value["ortho_size"] = ToJson(component->orthoSize);
+                value["near_clip"] = component->nearClip;
+                value["far_clip"] = component->farClip;
                 components["camera"] = std::move(value);
             }
             if (const auto* component = TryGetComponent<Rigidbody2DComponent>(id)) {
@@ -526,6 +528,10 @@ bool Scene::DeserializeJson(const std::string& data) {
                     ReadJsonValue(value.at("perspective"), component.isPerspective);
                     ReadJsonValue(value.at("fov"), component.fov);
                     ReadJsonValue(value.at("ortho_size"), component.orthoSize);
+                    if (value.contains("near_clip"))
+                        ReadJsonValue(value.at("near_clip"), component.nearClip);
+                    if (value.contains("far_clip"))
+                        ReadJsonValue(value.at("far_clip"), component.farClip);
                     entity.AddComponent<CameraComponent>(std::move(component));
                 } else if (name == "rigidbody2d") {
                     Rigidbody2DComponent component;
