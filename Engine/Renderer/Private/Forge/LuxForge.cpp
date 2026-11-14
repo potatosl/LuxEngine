@@ -245,6 +245,8 @@ void CollectSceneGarbage(LuxForgeDevice* device, bool everything);
 void ShutdownScene(LuxForgeDevice* device);
 void BeginSceneFrame(LuxForgeDevice* device);
 int EndFrame(LuxForgeDevice* device);
+bool AddDepthTarget(LuxForgeDevice* device);
+void RemoveDepthTarget(LuxForgeDevice* device);
 
 // The Forge's memory, file and log systems, its GPU configuration and resource loader are
 // process-wide. Viewports share that renderer and own independent queues and swap chains.
@@ -388,6 +390,20 @@ bool AddSwapChain(LuxForgeDevice* device) {
     addSwapChain(device->renderer, &desc, &device->swapChain);
     if (!device->swapChain)
         return false;
+    if (!device->swapChain->mImageCount || !device->swapChain->ppRenderTargets[0])
+        return false;
+    // WSI may clamp the requested size or finish a resize while recreating the swap chain.
+    // Every attachment and render area must use the extent of the actual present images.
+    const RenderTarget* target = device->swapChain->ppRenderTargets[0];
+    device->width = target->mWidth;
+    device->height = target->mHeight;
+    if (device->depth &&
+        (device->depth->mWidth != device->width || device->depth->mHeight != device->height)) {
+        // All recreation paths wait for the graphics queue before reaching this function.
+        RemoveDepthTarget(device);
+        if (!AddDepthTarget(device))
+            return false;
+    }
     device->renderFinished.resize(device->swapChain->mImageCount);
     for (auto& semaphore : device->renderFinished)
         initSemaphore(device->renderer, &semaphore);
@@ -1338,6 +1354,14 @@ void WriteDrawConstants(float* out, const float* viewProjection, const float* mo
     out[40] = nearest ? 1.0f : 0.0f, out[41] = out[42] = out[43] = 0.0f;
 }
 
+void BindDescriptors(LuxForgeDevice* device, Cmd* command, uint32_t index, DescriptorSet* set) {
+    cmdBindDescriptorSet(command, index, set);
+    ++device->frameStats.descriptorBinds;
+    if (set == device->lightSet || set == device->sceneSet ||
+        set == device->frames[device->frameSlot].drawSet)
+        ++device->frameStats.uniformBinds;
+}
+
 int DrawTriangles(LuxForgeDevice* device, const LuxForgeVertex* vertices, uint32_t vertexCount,
                   const float* viewProjection, uint32_t texture, int depth) {
     if (!device || !device->frameOpen)
@@ -1377,10 +1401,10 @@ int DrawTriangles(LuxForgeDevice* device, const LuxForgeVertex* vertices, uint32
         ++device->frameStats.pipelineBinds;
     }
     if (texture != device->boundTexture) {
-        cmdBindDescriptorSet(cmd, texture, device->textureSet);
+        BindDescriptors(device, cmd, texture, device->textureSet);
         device->boundTexture = texture;
     }
-    cmdBindDescriptorSet(cmd, frame.draws, frame.drawSet);
+    BindDescriptors(device, cmd, frame.draws, frame.drawSet);
     const uint32_t stride = LuxForgeDevice::kVertexStride;
     cmdBindVertexBuffer(cmd, 1, &frame.vertices, &stride, &vertexOffset);
     cmdDraw(cmd, vertexCount, 0);
@@ -1594,13 +1618,13 @@ int DrawIndexed(LuxForgeDevice* device, uint32_t vertexBuffer, uint32_t indexBuf
         ++device->frameStats.pipelineBinds;
     }
     if (textureId != device->boundTexture) {
-        cmdBindDescriptorSet(cmd, textureId, device->textureSet);
+        BindDescriptors(device, cmd, textureId, device->textureSet);
         device->boundTexture = textureId;
     }
-    cmdBindDescriptorSet(cmd, frame.draws, frame.drawSet);
-    cmdBindDescriptorSet(cmd,
-                         device->frameSlot * LuxForgeDevice::kMaxLightBlocks + device->currentLight,
-                         device->lightSet);
+    BindDescriptors(device, cmd, frame.draws, frame.drawSet);
+    BindDescriptors(device, cmd,
+                    device->frameSlot * LuxForgeDevice::kMaxLightBlocks + device->currentLight,
+                    device->lightSet);
     Buffer* vertices = device->buffers[vertexBuffer].buffer;
     const uint32_t stride = LuxForgeDevice::kVertexStride;
     const uint64_t offset = 0;
@@ -1643,6 +1667,20 @@ void GetInfo(const LuxForgeDevice* device, LuxForgeInfo* info) {
                   device->renderer->pGpu->mGpuVendorPreset.mGpuName);
     info->framesInFlight = device->framesInFlight;
     info->validation = device->validation ? 1 : 0;
+    info->gpuTimestamps = device->renderer->pGpu->mTimestampQueries ? 1 : 0;
+    // Desktop Metal and D3D12 both guarantee 16384-wide 2D textures. Vulkan exposes its
+    // native limit directly; the public texture API supports at most 16384 on every backend.
+    info->maxTextureSize = 16384;
+#if defined(VULKAN)
+    const auto& properties = device->renderer->pGpu->mVk.mGpuProperties.properties;
+    info->apiVersion = properties.apiVersion;
+    info->driverVersion = properties.driverVersion;
+    info->maxTextureSize = std::min(info->maxTextureSize, properties.limits.maxImageDimension2D);
+#elif defined(DIRECT3D12)
+    info->apiVersion = static_cast<uint32_t>(device->renderer->pGpu->mFeatureLevel);
+    info->maxTextureSize =
+        std::min(info->maxTextureSize, uint32_t(D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION));
+#endif
 }
 
 const char* LastError(const LuxForgeDevice* device) {
@@ -2106,6 +2144,18 @@ void DestroyEnvironment(LuxForgeDevice* device, uint32_t id) {
     device->environments[id].pendingDelete = true;
     device->pendingEnvironments.push_back(
         {device->frameNumber + (device->frameOpen ? 1u : 0u), id});
+    // Every scene renderer owns an environment, including its neutral fallback. Once the last
+    // owner is gone, the shared scene targets have no future users. Retire them at their actual
+    // last-use fences instead of keeping them for the normal idle-cache interval.
+    const bool hasOwner = std::any_of(
+        device->environments.begin(), device->environments.end(),
+        [](const auto& environment) { return environment.maps[0] && !environment.pendingDelete; });
+    if (!hasOwner) {
+        RetireTarget(device, device->hdr);
+        RetireTarget(device, device->sceneDepth);
+        RetireTarget(device, device->shadow);
+        device->shadowResolution = 0;
+    }
 }
 
 // Draw resources stay valid for the frame being recorded even after destroyBuffer/destroyTexture
@@ -2164,11 +2214,11 @@ void DrawSceneMeshes(LuxForgeDevice* device, Cmd* cmd,
             ++device->frameStats.pipelineBinds;
         }
         const uint32_t material = firstDraw + static_cast<uint32_t>(i);
-        cmdBindDescriptorSet(
-            cmd, material % LuxForgeDevice::kMaterialBankSize,
+        BindDescriptors(
+            device, cmd, material % LuxForgeDevice::kMaterialBankSize,
             device->materialSets[device->frameSlot][material / LuxForgeDevice::kMaterialBankSize]);
-        cmdBindDescriptorSet(cmd, firstDraw + static_cast<uint32_t>(i),
-                             device->frames[device->frameSlot].drawSet);
+        BindDescriptors(device, cmd, firstDraw + static_cast<uint32_t>(i),
+                        device->frames[device->frameSlot].drawSet);
         Buffer* vertices = device->buffers[draw.vertexBuffer].buffer;
         cmdBindVertexBuffer(cmd, 1, &vertices, &stride, &offset);
         cmdBindIndexBuffer(cmd, device->buffers[draw.indexBuffer].buffer, INDEX_TYPE_UINT32, 0);
@@ -2373,7 +2423,7 @@ int RenderScene(LuxForgeDevice* device, const LuxForgeScene* scene, const LuxFor
                        static_cast<float>(resolution), 0.0f, 1.0f);
         cmdSetScissor(cmd, 0, 0, resolution, resolution);
         BindPipeline(device, cmd, device->pipelineShadow);
-        cmdBindDescriptorSet(cmd, entry, device->sceneSet);
+        BindDescriptors(device, cmd, entry, device->sceneSet);
         DrawSceneMeshes(device, cmd, visible, firstDraw, true);
         cmdBindRenderTargets(cmd, nullptr);
         Transition(cmd, device->shadow, RESOURCE_STATE_SHADER_RESOURCE);
@@ -2402,15 +2452,15 @@ int RenderScene(LuxForgeDevice* device, const LuxForgeScene* scene, const LuxFor
     cmdSetScissor(cmd, 0, 0, device->width, device->height);
     if (scene->options[3] > 0.5f) {
         BindPipeline(device, cmd, device->pipelineSky);
-        cmdBindDescriptorSet(cmd, entry, device->sceneSet);
+        BindDescriptors(device, cmd, entry, device->sceneSet);
         cmdDraw(cmd, 3, 0);
         ++device->frameStats.drawCalls;
     }
     BindPipeline(device, cmd, device->pipelineScene);
-    cmdBindDescriptorSet(cmd, entry, device->sceneSet);
-    cmdBindDescriptorSet(cmd,
-                         device->frameSlot * LuxForgeDevice::kMaxLightBlocks + device->currentLight,
-                         device->lightSet);
+    BindDescriptors(device, cmd, entry, device->sceneSet);
+    BindDescriptors(device, cmd,
+                    device->frameSlot * LuxForgeDevice::kMaxLightBlocks + device->currentLight,
+                    device->lightSet);
     DrawSceneMeshes(device, cmd, visible, firstDraw);
     cmdBindRenderTargets(cmd, nullptr);
     Transition(cmd, device->hdr, RESOURCE_STATE_SHADER_RESOURCE);
@@ -2419,7 +2469,7 @@ int RenderScene(LuxForgeDevice* device, const LuxForgeScene* scene, const LuxFor
     // Tone mapping onto the swap chain (keeps its contents and the main depth buffer).
     BindPass(device, false, nullptr);
     BindPipeline(device, cmd, device->pipelineTone);
-    cmdBindDescriptorSet(cmd, entry + 1, device->sceneSet);
+    BindDescriptors(device, cmd, entry + 1, device->sceneSet);
     cmdDraw(cmd, 3, 0);
     ++device->frameStats.drawCalls;
     device->boundPipeline = device->pipelineTone;

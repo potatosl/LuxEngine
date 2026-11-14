@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define LUX_FORGE_API_VERSION 8u
+#define LUX_FORGE_API_VERSION 9u
 
 #if defined(_WIN32)
 #if defined(LUX_FORGE_BUILD)
@@ -48,6 +48,10 @@ typedef struct LuxForgeInfo {
     char apiName[32];
     uint32_t framesInFlight;
     int validation;
+    uint32_t apiVersion; // native Vulkan version / D3D feature level; zero if unavailable
+    uint32_t driverVersion;
+    uint32_t maxTextureSize; // native 2D limit, capped by the engine's supported 16384 limit
+    int gpuTimestamps;
 } LuxForgeInfo;
 
 // Results of beginFrame.
@@ -64,12 +68,14 @@ typedef struct LuxForgeVertex {
 } LuxForgeVertex;
 
 typedef struct LuxForgeStats {
-    uint32_t drawCalls;      // current frame
-    uint32_t pipelineBinds;  // current frame
-    uint64_t vertexBytes;    // current frame
-    uint32_t liveTextures;   // excluding the built-in white texture
-    uint32_t pendingDeletes; // resources waiting for the GPU before release
-    uint32_t scenePasses;    // renderScene calls in the current frame
+    uint32_t drawCalls;       // current frame
+    uint32_t pipelineBinds;   // current frame
+    uint32_t descriptorBinds; // actual cmdBindDescriptorSet calls in the current frame
+    uint32_t uniformBinds;    // descriptor binds whose set contains a uniform buffer
+    uint64_t vertexBytes;     // current frame
+    uint32_t liveTextures;    // excluding the built-in white texture
+    uint32_t pendingDeletes;  // resources waiting for the GPU before release
+    uint32_t scenePasses;     // renderScene calls in the current frame
     uint64_t textureBytes;
     uint64_t sceneBytes; // HDR/depth/shadow targets and environment maps of renderScene
 } LuxForgeStats;

@@ -2575,8 +2575,11 @@ void Gpu() {
             std::cout << "frame stats: draws " << stats.drawCalls << ", pipelines "
                       << stats.pipelineBinds << ", descriptors " << stats.descriptorBinds
                       << ", push constants " << stats.pushConstantUpdates << '\n';
-        Check(stats.drawCalls == 3 && stats.pipelineBinds == 2 && stats.descriptorBinds == 2 &&
-                  stats.pushConstantUpdates == 2 && stats.submissions >= 1,
+        // Two 2D draws, one HDR mesh draw and one tone-composite draw are recorded. Forge
+        // uses uniform-buffer descriptor sets rather than the previous Vulkan push constants.
+        Check(stats.drawCalls == 4 && stats.pipelineBinds == 4 && stats.descriptorBinds == 9 &&
+                  stats.uniformBinds == 6 && stats.pushConstantUpdates == 0 &&
+                  stats.submissions >= 1,
               "frame statistics count recorded GPU commands");
     }
     {
@@ -2619,7 +2622,8 @@ void VulkanSystems() {
     ReportValidation(graphics.gpu);
     auto& gpu = graphics.gpu;
     const auto& info = gpu.GetInfo();
-    Check(!info.deviceName.empty() && info.apiVersion >= ((1u << 22) | (1u << 12)) &&
+    const bool vulkan = info.deviceType.find("Vulkan") != std::string::npos;
+    Check(!info.deviceName.empty() && (!vulkan || info.apiVersion >= ((1u << 22) | (1u << 12))) &&
               info.maxTextureSize >= 4096 && info.framesInFlight == 2,
           "device capabilities reported");
     Check(gpu.GetStatus() == GpuStatus::Ready && gpu.IsReady(), "device ready");

@@ -142,6 +142,10 @@ bool ForgeBackend::Initialize(Window& window, const GpuDeviceConfig& config) {
     info_.deviceType = std::string("The Forge / ") + forgeInfo.apiName;
     info_.framesInFlight = forgeInfo.framesInFlight;
     info_.validation = forgeInfo.validation != 0;
+    info_.apiVersion = forgeInfo.apiVersion;
+    info_.driverVersion = forgeInfo.driverVersion;
+    info_.maxTextureSize = forgeInfo.maxTextureSize;
+    info_.gpuTimestamps = forgeInfo.gpuTimestamps != 0;
 
     lib_ = std::move(lib);
     window_ = &window;
@@ -185,6 +189,16 @@ const GpuDeviceInfo& ForgeBackend::GetInfo() const {
 
 GpuFrameStats ForgeBackend::GetFrameStats() const {
     return frameStats_;
+}
+
+void ForgeBackend::UpdateFrameStats() {
+    LuxForgeStats stats = {};
+    lib_->api->stats(lib_->device, &stats);
+    frameStats_.drawCalls = stats.drawCalls;
+    frameStats_.pipelineBinds = stats.pipelineBinds;
+    frameStats_.descriptorBinds = stats.descriptorBinds;
+    frameStats_.uniformBinds = stats.uniformBinds;
+    frameStats_.vertexBytes = stats.vertexBytes;
 }
 
 GpuDeviceCounters ForgeBackend::GetCounters() const {
@@ -272,11 +286,7 @@ bool ForgeBackend::DrawTexturedTriangles(std::span<const RenderVertex> vertices,
                                   static_cast<uint32_t>(vertices.size()), viewProjection.elements,
                                   static_cast<uint32_t>(texture), depth ? 1 : 0))
         return ForgeFailure();
-    LuxForgeStats stats = {};
-    lib_->api->stats(lib_->device, &stats);
-    frameStats_.drawCalls = stats.drawCalls;
-    frameStats_.pipelineBinds = stats.pipelineBinds;
-    frameStats_.vertexBytes = stats.vertexBytes;
+    UpdateFrameStats();
     return true;
 }
 
@@ -325,10 +335,7 @@ bool ForgeBackend::DrawIndexed(uint64 vertexBuffer, uint64 indexBuffer, uint32 i
                                 viewProjection.elements, model.elements, colour,
                                 static_cast<uint32_t>(texture), metallic, roughness, pbr ? 1 : 0))
         return ForgeFailure();
-    LuxForgeStats stats = {};
-    lib_->api->stats(lib_->device, &stats);
-    frameStats_.drawCalls = stats.drawCalls;
-    frameStats_.pipelineBinds = stats.pipelineBinds;
+    UpdateFrameStats();
     return true;
 }
 
@@ -340,6 +347,7 @@ bool ForgeBackend::EndFrame() {
     frameOpen_ = false;
     if (!lib_->api->endFrame(lib_->device))
         return ForgeFailure();
+    UpdateFrameStats();
     ++counters_.framesSubmitted;
     ++counters_.submissions;
     frameStats_.submissions = 1;
@@ -605,10 +613,7 @@ public:
             error = reason;
             return Fallback(camera, exposure);
         }
-        LuxForgeStats stats = {};
-        api.stats(lib->device, &stats);
-        backend_->frameStats_.drawCalls = stats.drawCalls;
-        backend_->frameStats_.pipelineBinds = stats.pipelineBinds;
+        backend_->UpdateFrameStats();
         if (drawn < draws_.size())
             error = "3D object budget reached; excess objects skipped";
         if (!environmentError_.empty())

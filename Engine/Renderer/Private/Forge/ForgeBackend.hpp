@@ -71,6 +71,7 @@ private:
     bool Reject(const std::string& message);
     // Failure reported by LuxForge.dll: device loss is fatal, anything else is a rejection.
     bool ForgeFailure();
+    void UpdateFrameStats();
 
     // Shared so scene renderers can tell (through a weak_ptr) whether the device they were
     // created for still exists.
