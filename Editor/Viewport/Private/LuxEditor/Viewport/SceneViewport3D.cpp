@@ -1,5 +1,6 @@
 #include <LuxEditor/Scene/EditorDocument.hpp>
 #include <LuxEditor/Scene/SelectionTransform.hpp>
+#include <LuxEditor/Viewport/CameraGizmos.hpp>
 #include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
 #include <LuxEditor/Viewport/ModelViewportGeometry.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
@@ -19,6 +20,11 @@ namespace LuxEditor {
 namespace {
 bool SameLifetime(const std::weak_ptr<int>& first, const std::weak_ptr<int>& second) {
     return !first.owner_before(second) && !second.owner_before(first);
+}
+
+bool ModelingDestructiveKey(const LuxUI::KeyEvent& event) {
+    return event.matches(LuxUI::KeySequence::Delete) || event.matches(LuxUI::KeySequence::Cut) ||
+           event.key() == LuxUI::Flags::Key_Delete || event.key() == LuxUI::Flags::Key_Backspace;
 }
 
 LuxEngine::Mat4 BoundsModel(LuxEngine::Entity entity,
@@ -110,15 +116,26 @@ void SceneViewport3D::SetCancelEditCallback(std::function<void()> callback) {
 
 void SceneViewport3D::CancelInteraction() {
     const bool editing = dragging_;
+    const bool modeling = modelingDrag_;
+    if (modeling) {
+        modelingMesh_ = std::move(modelingInitialMesh_);
+        modelingDrag_ = false;
+        modelingChanged_ = false;
+        if (engineRenderer_)
+            engineRenderer_->ClearMeshPreview();
+    }
     orbiting_ = panning_ = dragging_ = marquee_ = false;
+    orbitDrag_ = false;
+    flyFast_ = false;
     flyKeys_.clear();
     const auto id = dragId_;
     dragId_ = 0;
     axis_ = -1;
     axisGesture_ = false;
+    pointerCapture_.End();
     if (mouseGrabber() == this)
         releaseMouse();
-    if (editing) {
+    if (editing && !modeling) {
         if (onCancelEdit_) {
             onCancelEdit_();
         } else if (auto* scene = document_.GetScene(dragTab_);
@@ -142,11 +159,13 @@ void SceneViewport3D::focusOutEvent(LuxUI::FocusEvent* event) {
 }
 
 void SceneViewport3D::FrameBounds(bool selectedOnly) {
+    UseEditorProjection();
     LuxEngine::Vec3 minimum{INFINITY, INFINITY, INFINITY};
     LuxEngine::Vec3 maximum{-INFINITY, -INFINITY, -INFINITY};
     for (auto entity : document_.GetScene().GetEntities()) {
         if (entity.HasComponent<LuxEngine::ModelAnimationComponent>() &&
-            !entity.HasComponent<LuxEngine::MeshRendererComponent>())
+            !entity.HasComponent<LuxEngine::MeshRendererComponent>() &&
+            !entity.HasComponent<LuxEngine::CameraComponent>())
             continue;
         bool selected = document_.IsSelected(entity.GetId());
         for (auto parent = entity.GetScene()->GetParent(entity.GetId());
@@ -172,12 +191,31 @@ void SceneViewport3D::FrameBounds(bool selectedOnly) {
     const auto extent = maximum - minimum;
     const double radius = std::hypot(extent.x, extent.y, extent.z) * .5;
     const double aspect = double(std::max(1, width())) / std::max(1, height());
-    const double halfFov = std::atan(std::tan(std::numbers::pi / 6) * std::min(1.0, aspect));
+    const double halfFov =
+        std::atan(std::tan(LuxEngine::ToRadians(viewFovDegrees_) * .5) * std::min(1.0, aspect));
     distance_ = std::clamp(radius / std::sin(halfFov) * 1.2, 1.0, 100000.0);
     update();
 }
 
 void SceneViewport3D::FocusSelection() {
+    UseEditorProjection();
+    if (ModelingActive() && !modelingSelection_.vertices.empty()) {
+        const auto world = document_.GetScene().GetWorldMatrix(modelingEntity_);
+        focus_ = ModelingPivot(modelingMesh_, modelingSelection_, world);
+        double radius = 0;
+        for (const auto id : modelingSelection_.vertices)
+            if (id < modelingMesh_.vertices.size()) {
+                const auto delta =
+                    TransformCorner(world, modelingMesh_.vertices[id].position) - focus_;
+                radius = std::max(radius, double(std::sqrt(delta.Dot(delta))));
+            }
+        const double aspect = double(std::max(1, width())) / std::max(1, height());
+        const double halfFov =
+            std::atan(std::tan(LuxEngine::ToRadians(viewFovDegrees_) * .5) * std::min(1.0, aspect));
+        distance_ = std::clamp(radius / std::sin(halfFov) * 1.2, 1.0, 100000.0);
+        update();
+        return;
+    }
     FrameBounds(true);
 }
 
@@ -188,6 +226,7 @@ void SceneViewport3D::FrameAll() {
 void SceneViewport3D::SetViewPreset(ViewPreset preset) {
     CancelInteraction();
     preset_ = preset;
+    UseEditorProjection();
     switch (preset) {
     case ViewPreset::Front:
         yaw_ = 0;
@@ -215,6 +254,14 @@ void SceneViewport3D::SetGridVisible(bool visible) {
 }
 
 void SceneViewport3D::paintEvent(LuxUI::PaintEvent*) {
+    // Preview entity IDs are scene-local. A document change must clear the old override before
+    // rendering a different scene that may reuse the same numeric ID.
+    if (modelingEntity_ && !ModelingActive()) {
+        if (modelingDrag_)
+            CancelInteraction();
+        if (engineRenderer_)
+            engineRenderer_->ClearMeshPreview();
+    }
     // Decouple GPU render/readback phase from QPainter lifecycle.
     // Vulkan offscreen rendering must complete before QPainter opens on this QWidget
     // to prevent re-entrant Qt event loop message dispatch from invalidating the raster paint
@@ -227,8 +274,10 @@ void SceneViewport3D::paintEvent(LuxUI::PaintEvent*) {
         const int pxW = static_cast<int>(std::lround(width() * ratio));
         const int pxH = static_cast<int>(std::lround(height() * ratio));
         if (pxW > 0 && pxH > 0) {
+            const auto renderCamera = GetViewCamera();
             if (engineRenderer_->Render3D(document_.GetScene(), pxW, pxH, focus_, yaw_, pitch_,
-                                          distance_, cachedFrame_, &cachedBackground_)) {
+                                          distance_, cachedFrame_, &cachedBackground_,
+                                          &renderCamera)) {
                 engineFrame_ = true;
             }
         }
@@ -243,7 +292,7 @@ void SceneViewport3D::paintEvent(LuxUI::PaintEvent*) {
         painter.drawImage(rect(), cachedBackground_);
     painter.setRenderHint(LuxUI::Painter::Antialiasing);
 
-    const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    const auto camera = GetViewCamera();
     const auto project = [&](LuxEngine::Vec3 point) {
         return ProjectViewportPoint(camera, size(), point);
     };
@@ -278,7 +327,9 @@ void SceneViewport3D::paintEvent(LuxUI::PaintEvent*) {
         painter.setClipPath(visibleGrid);
     }
     if (gridVisible_) {
-        const double spacing = ViewportGridSpacing(distance_ * 1.1547 / std::max(1, height()));
+        const double spacing = ViewportGridSpacing(
+            distance_ * 2 * std::tan(LuxEngine::ToRadians(viewFovDegrees_) * .5) /
+            std::max(1, height()));
         const bool front = preset_ == ViewPreset::Front;
         const bool side = preset_ == ViewPreset::Right;
         const double firstCenter = std::round((side ? focus_.z : focus_.x) / spacing) * spacing;
@@ -344,12 +395,17 @@ void SceneViewport3D::paintEvent(LuxUI::PaintEvent*) {
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
+        if (ModelingActive() && entity.GetId() == modelingEntity_)
+            continue;
         const auto matrix = entity.GetScene()->GetWorldMatrix(entity.GetId());
         if (std::any_of(std::begin(matrix.elements), std::end(matrix.elements),
                         [](float value) { return !std::isfinite(value); }))
             continue;
         const bool sprite = entity.HasComponent<LuxEngine::SpriteRendererComponent>();
         const bool mesh = entity.HasComponent<LuxEngine::MeshRendererComponent>();
+        if (entity.HasComponent<LuxEngine::CameraComponent>() && !sprite && !mesh &&
+            !entity.HasComponent<LuxEngine::TilemapComponent>())
+            continue;
         const bool active = document_.IsSelected(entity.GetId());
         if (engineFrame_ && !active)
             continue;
@@ -403,6 +459,11 @@ void SceneViewport3D::paintEvent(LuxUI::PaintEvent*) {
             painter.drawText(labelRect.bottomLeft(), label);
         }
     }
+    if (ModelingActive())
+        DrawModelingOverlay(painter, modelingMesh_, modelingSelection_,
+                            document_.GetScene().GetWorldMatrix(modelingEntity_), camera, size(),
+                            modelingMode_);
+    DrawCameraGizmos(painter, document_.GetScene(), camera, size(), document_.GetSelection());
     DrawGizmo(painter);
     if (marquee_) {
         painter.setPen(LuxUI::Pen(LuxUI::Color(91, 163, 230), 1, LuxUI::Flags::DashLine));
@@ -442,7 +503,8 @@ double GizmoLength(const LuxEngine::PerspectiveCamera& camera, LuxEngine::Vec3 p
                    int height) {
     const auto forward = (camera.GetTarget() - camera.GetPosition()).Normalized();
     const double depth = (position - camera.GetPosition()).Dot(forward);
-    return std::max(.001, depth * 1.1547 * 74 / std::max(1, height));
+    return std::max(.001, depth * 2 / camera.GetProjectionMatrix().elements[5] * 74 /
+                              std::max(1, height));
 }
 
 LuxEngine::Vec3 RingPoint(int axis, double angle, float radius) {
@@ -452,6 +514,16 @@ LuxEngine::Vec3 RingPoint(int axis, double angle, float radius) {
            : axis == 1 ? LuxEngine::Vec3{a, 0, b}
                        : LuxEngine::Vec3{a, b, 0};
 }
+
+LuxEngine::Mat4 ModelingAroundPivot(const LuxEngine::Mat4& delta, const LuxEngine::Mat4& basis,
+                                    LuxEngine::Vec3 pivot) {
+    LuxEngine::Mat4 inverseBasis;
+    for (int row = 0; row < 3; ++row)
+        for (int column = 0; column < 3; ++column)
+            inverseBasis.elements[column * 4 + row] = basis.elements[row * 4 + column];
+    return LuxEngine::Mat4::Translate(pivot) * basis * delta * inverseBasis *
+           LuxEngine::Mat4::Translate(pivot * -1);
+}
 } // namespace
 
 int SceneViewport3D::HitGizmo(LuxUI::PointF point) const {
@@ -460,9 +532,11 @@ int SceneViewport3D::HitGizmo(LuxUI::PointF point) const {
     auto selected = document_.GetSelected();
     if (!selected || !selected.HasComponent<LuxEngine::TransformComponent>())
         return -1;
+    if (ModelingActive() && modelingSelection_.vertices.empty())
+        return -1;
     const auto position = GizmoPosition();
     const auto basis = GizmoBasis();
-    const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    const auto camera = GetViewCamera();
     const float length = float(GizmoLength(camera, position, height()));
     if (const auto center = ProjectViewportPoint(camera, size(), position);
         center && std::hypot(point.x() - center->x(), point.y() - center->y()) < 12)
@@ -505,9 +579,11 @@ void SceneViewport3D::DrawGizmo(LuxUI::Painter& painter) const {
     auto selected = document_.GetSelected();
     if (!selected || !selected.HasComponent<LuxEngine::TransformComponent>())
         return;
+    if (ModelingActive() && modelingSelection_.vertices.empty())
+        return;
     const auto position = GizmoPosition();
     const auto basis = GizmoBasis();
-    const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    const auto camera = GetViewCamera();
     const float length = float(GizmoLength(camera, position, height()));
     painter.save();
     painter.setBrush(LuxUI::Flags::NoBrush);
@@ -567,6 +643,9 @@ LuxEngine::Mat4 SceneViewport3D::GizmoBasis() const {
 }
 
 LuxEngine::Vec3 SceneViewport3D::GizmoPosition() const {
+    if (ModelingActive())
+        return ModelingPivot(modelingMesh_, modelingSelection_,
+                             document_.GetScene().GetWorldMatrix(modelingEntity_));
     return GetSelectionPivot(document_);
 }
 
@@ -581,7 +660,10 @@ void SceneViewport3D::BeginDrag(LuxEngine::uint32 id, LuxUI::PointF point) {
     } catch (const std::exception&) {
         return;
     }
-    initialPivot_ = GetSelectionPivot(document_);
+    const bool modeling = ModelingActive();
+    if (modeling && modelingSelection_.vertices.empty())
+        return;
+    initialPivot_ = modeling ? GizmoPosition() : GetSelectionPivot(document_);
     initialBasis_ = GizmoBasis();
     dragSelection_ = document_.GetSelection();
     dragTab_ = document_.GetActiveTabId();
@@ -594,16 +676,34 @@ void SceneViewport3D::BeginDrag(LuxEngine::uint32 id, LuxUI::PointF point) {
     initialRotation_ = transform.rotation;
     initialScale_ = transform.scale;
     dragging_ = true;
-    onBeginEdit_();
+    modelingDrag_ = modeling;
+    modelingChanged_ = false;
+    if (modeling) {
+        modelingInitialMesh_ = modelingMesh_;
+        modelingWorld_ = document_.GetScene().GetWorldMatrix(id);
+    } else {
+        onBeginEdit_();
+    }
     if (isVisible())
         grabMouse();
 }
 
 bool SceneViewport3D::event(LuxUI::Event* event) {
+    if (event->type() == LuxUI::Event::ContextMenu) {
+        // RMB belongs to viewport navigation and must not open the main-window panel menu.
+        event->accept();
+        return true;
+    }
     if (event->type() == LuxUI::Event::ShortcutOverride) {
         const auto* key = static_cast<LuxUI::KeyEvent*>(event);
-        if (orbiting_ && (key->key() == 'W' || key->key() == 'A' || key->key() == 'S' ||
-                          key->key() == 'D' || key->key() == 'Q' || key->key() == 'E')) {
+        if (ModelingActive() &&
+            (key->matches(LuxUI::KeySequence::SelectAll) || ModelingDestructiveKey(*key))) {
+            event->accept();
+            return true;
+        }
+        if (orbiting_ && !orbitDrag_ &&
+            (key->key() == 'W' || key->key() == 'A' || key->key() == 'S' || key->key() == 'D' ||
+             key->key() == 'Q' || key->key() == 'E')) {
             event->accept();
             return true;
         }
@@ -622,9 +722,40 @@ bool SceneViewport3D::event(LuxUI::Event* event) {
 }
 
 void SceneViewport3D::keyPressEvent(LuxUI::KeyEvent* event) {
-    if (orbiting_ && (event->key() == 'W' || event->key() == 'A' || event->key() == 'S' ||
-                      event->key() == 'D' || event->key() == 'Q' || event->key() == 'E')) {
+    if (ModelingActive()) {
+        if (event->matches(LuxUI::KeySequence::SelectAll)) {
+            ModelingSelection selection;
+            auto& ids =
+                modelingMode_ == ModelingEditMode::Face ? selection.faces : selection.vertices;
+            const auto count = modelingMode_ == ModelingEditMode::Face
+                                   ? modelingMesh_.indices.size() / 3
+                                   : modelingMesh_.vertices.size();
+            ids.reserve(count);
+            for (LuxEngine::uint32 id = 0; id < count; ++id)
+                ids.push_back(id);
+            SetModelingSelection(selection);
+            event->accept();
+            return;
+        }
+        if (ModelingDestructiveKey(*event)) {
+            // 아직 정점·면 삭제/잘라내기는 미구현입니다. 오브젝트 삭제 명령으로 전달하지 않습니다.
+            const auto message = LUX_UI_TEXT("정점·면 삭제와 잘라내기는 아직 개발 중입니다.");
+            setToolTip(message);
+            LuxUI::ToolTip::showText(mapToGlobal(rect().center()), message, this, rect(), 2500);
+            event->accept();
+            return;
+        }
+    }
+    if (orbiting_ && !orbitDrag_ && event->key() == LuxUI::Flags::Key_Shift) {
+        flyFast_ = true;
+        event->accept();
+        return;
+    }
+    if (orbiting_ && !orbitDrag_ &&
+        (event->key() == 'W' || event->key() == 'A' || event->key() == 'S' || event->key() == 'D' ||
+         event->key() == 'Q' || event->key() == 'E')) {
         flyKeys_.insert(event->key());
+        flyFast_ = event->modifiers() & LuxUI::Flags::ShiftModifier;
         event->accept();
         return;
     }
@@ -688,7 +819,7 @@ void SceneViewport3D::NotifySelection() {
 
 void SceneViewport3D::SelectRectangle(LuxUI::RectF rectangle,
                                       LuxUI::Flags::KeyboardModifiers modifiers) {
-    const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    const auto camera = GetViewCamera();
     std::vector<LuxEngine::uint32> hits;
     rectangle = rectangle.normalized().intersected(LuxUI::RectF(rect()));
     for (auto entity : document_.GetScene().GetEntities()) {
@@ -741,12 +872,28 @@ void SceneViewport3D::SelectRectangle(LuxUI::RectF rectangle,
 void SceneViewport3D::mousePressEvent(LuxUI::MouseEvent* event) {
     setFocus();
     lastMouse_ = event->position();
+    const bool altOrbit = event->button() == LuxUI::Flags::LeftButton &&
+                          (event->modifiers() & LuxUI::Flags::AltModifier);
     if (event->button() == LuxUI::Flags::RightButton ||
-        event->button() == LuxUI::Flags::MiddleButton) {
-        if (dragging_ || marquee_)
+        event->button() == LuxUI::Flags::MiddleButton || altOrbit) {
+        if (dragging_ || marquee_ || orbiting_ || panning_)
             CancelInteraction();
-        orbiting_ = event->button() == LuxUI::Flags::RightButton;
+        orbiting_ = event->button() != LuxUI::Flags::MiddleButton;
+        orbitButton_ = event->button();
+        orbitDrag_ = orbiting_ && (event->modifiers() & LuxUI::Flags::AltModifier);
+        flyFast_ = event->modifiers() & LuxUI::Flags::ShiftModifier;
         panning_ = event->button() == LuxUI::Flags::MiddleButton;
+        if (orbiting_ && !orbitDrag_) {
+            pointerCapture_.Begin(
+                this,
+                [this](LuxUI::PointF relative) {
+                    if (orbiting_ && !orbitDrag_)
+                        RotateView(relative);
+                },
+                [this] { CancelInteraction(); });
+            (void)pointerCapture_.ConsumeMotion(event->position());
+            ReportPointerLimitation();
+        }
         return;
     }
     if (event->button() != LuxUI::Flags::LeftButton)
@@ -756,9 +903,11 @@ void SceneViewport3D::mousePressEvent(LuxUI::MouseEvent* event) {
     if (auto selected = document_.GetSelected();
         selected && selected.HasComponent<LuxEngine::TransformComponent>() &&
         !(event->modifiers() & (LuxUI::Flags::ControlModifier | LuxUI::Flags::ShiftModifier))) {
-        const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+        const auto camera = GetViewCamera();
         const auto center = ProjectViewportPoint(camera, size(), GizmoPosition());
-        if (document_.GetSelection().size() > 1 && center &&
+        if ((document_.GetSelection().size() > 1 ||
+             (ModelingActive() && !modelingSelection_.vertices.empty())) &&
+            center &&
             !(event->modifiers() & (LuxUI::Flags::ControlModifier | LuxUI::Flags::ShiftModifier)) &&
             LuxUI::LineF(*center, event->position()).length() < 12) {
             BeginDrag(selected.GetId(), event->position());
@@ -773,24 +922,50 @@ void SceneViewport3D::mousePressEvent(LuxUI::MouseEvent* event) {
             return;
         }
     }
+    if (ModelingActive()) {
+        SelectModeling(event->position(), event->modifiers());
+        if (!modelingSelection_.vertices.empty() &&
+            !(event->modifiers() & (LuxUI::Flags::ControlModifier | LuxUI::Flags::ShiftModifier)) &&
+            (tool_ == EditorTool::Select || tool_ == EditorTool::Move))
+            BeginDrag(modelingEntity_, event->position());
+        return;
+    }
     std::optional<LuxEngine::uint32> nearest;
-    const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    const auto camera = GetViewCamera();
     const auto ray = MakeViewportRay3D(camera, size(), event->position());
     if (!ray)
         return;
     double best = std::numeric_limits<double>::infinity();
+    const auto cameraMarker =
+        PickCameraGizmo(document_.GetScene(), camera, size(), event->position());
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
         if (entity.HasComponent<LuxEngine::ModelAnimationComponent>() &&
-            !entity.HasComponent<LuxEngine::MeshRendererComponent>())
+            !entity.HasComponent<LuxEngine::MeshRendererComponent>() &&
+            !entity.HasComponent<LuxEngine::CameraComponent>())
             continue;
         const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
-        const auto distance =
-            mesh && mesh->modelSubmesh >= 0
+        const bool cameraOnly = entity.HasComponent<LuxEngine::CameraComponent>() && !mesh &&
+                                !entity.HasComponent<LuxEngine::SpriteRendererComponent>() &&
+                                !entity.HasComponent<LuxEngine::TilemapComponent>();
+        std::optional<double> markerDistance;
+        if (cameraMarker && *cameraMarker == entity.GetId()) {
+            const auto matrix = document_.GetScene().GetWorldMatrix(entity.GetId());
+            const LuxEngine::Vec3 position{matrix.elements[12], matrix.elements[13],
+                                           matrix.elements[14]};
+            const double along = (position - ray->origin).Dot(ray->direction);
+            if (std::isfinite(along) && along >= 0)
+                markerDistance = along;
+        }
+        auto distance =
+            cameraOnly ? markerDistance
+            : mesh && mesh->modelSubmesh >= 0
                 ? IntersectModelViewport(*ray, entity)
                 : IntersectViewportBox(
                       *ray, BoundsModel(entity, engineFrame_ ? engineRenderer_.get() : nullptr));
+        if (markerDistance && (!distance || *markerDistance < *distance))
+            distance = markerDistance;
         if (!distance || *distance >= best)
             continue;
         const auto surface = ray->origin + ray->direction * static_cast<float>(*distance);
@@ -827,9 +1002,12 @@ void SceneViewport3D::mousePressEvent(LuxUI::MouseEvent* event) {
 }
 
 void SceneViewport3D::mouseReleaseEvent(LuxUI::MouseEvent* event) {
-    if (event->button() == LuxUI::Flags::RightButton) {
+    if (event->button() == orbitButton_) {
         orbiting_ = false;
+        orbitDrag_ = false;
+        flyFast_ = false;
         flyKeys_.clear();
+        pointerCapture_.End();
     }
     if (event->button() == LuxUI::Flags::MiddleButton)
         panning_ = false;
@@ -863,9 +1041,24 @@ void SceneViewport3D::mouseReleaseEvent(LuxUI::MouseEvent* event) {
         }
         dragging_ = false;
         dragId_ = 0;
+        const bool modeling = modelingDrag_;
+        modelingDrag_ = false;
         if (mouseGrabber() == this)
             releaseMouse();
-        onEndEdit_();
+        if (modeling) {
+            const bool changed = modelingChanged_;
+            modelingChanged_ = false;
+            modelingInitialMesh_ = {};
+            if (engineRenderer_)
+                engineRenderer_->ClearMeshPreview();
+            if (changed && onModelingCommit_) {
+                const ModelingMesh mesh = modelingMesh_;
+                const ModelingSelection selection = modelingSelection_;
+                onModelingCommit_(mesh, selection);
+            }
+        } else {
+            onEndEdit_();
+        }
         if (axisGesture_)
             axis_ = -1;
         axisGesture_ = false;
@@ -877,9 +1070,12 @@ void SceneViewport3D::mouseReleaseEvent(LuxUI::MouseEvent* event) {
 
 void SceneViewport3D::mouseMoveEvent(LuxUI::MouseEvent* event) {
     const LuxUI::PointF delta = event->position() - lastMouse_;
-    if (orbiting_ && !(event->buttons() & LuxUI::Flags::RightButton)) {
+    if (orbiting_ && !(event->buttons() & orbitButton_)) {
         orbiting_ = false;
+        orbitDrag_ = false;
+        flyFast_ = false;
         flyKeys_.clear();
+        pointerCapture_.End();
     }
     if (panning_ && !(event->buttons() & LuxUI::Flags::MiddleButton))
         panning_ = false;
@@ -897,25 +1093,19 @@ void SceneViewport3D::mouseMoveEvent(LuxUI::MouseEvent* event) {
         update();
         return;
     }
-    if (orbiting_ && (event->buttons() & LuxUI::Flags::RightButton)) {
-        const auto eye = GetViewCamera().GetPosition();
-        // OS pointer speed and acceleration are already included in logical position().
-        // Convert through the vertical FOV without reapplying a device-pixel ratio.
-        const double halfFovTangent = std::tan(LuxEngine::ToRadians(60) * .5);
-        const double viewportHeight = std::max(1, height());
-        const double yawDelta = 2 * std::atan(delta.x() * halfFovTangent / viewportHeight);
-        const double pitchDelta = 2 * std::atan(delta.y() * halfFovTangent / viewportHeight);
-        const bool orbit = event->modifiers() & LuxUI::Flags::AltModifier;
-        yaw_ = std::remainder(yaw_ + (orbit ? yawDelta : -yawDelta), 2 * std::numbers::pi);
-        pitch_ = std::clamp(pitch_ + (orbit ? pitchDelta : -pitchDelta), -1.55, 1.55);
-        if (!orbit)
-            focus_ += eye - GetViewCamera().GetPosition();
-        preset_ = ViewPreset::Perspective;
-        update();
+    if (orbiting_ && (event->buttons() & orbitButton_)) {
+        if (orbitDrag_)
+            RotateView(delta);
+        else {
+            if (const auto captured = pointerCapture_.ConsumeMotion(event->position()))
+                RotateView(*captured);
+            ReportPointerLimitation();
+        }
     } else if (panning_ && (event->buttons() & LuxUI::Flags::MiddleButton)) {
-        const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+        const auto camera = GetViewCamera();
         const auto& view = camera.GetViewMatrix().elements;
-        const double scale = distance_ * 1.1547 / std::max(1, height());
+        const double scale = distance_ * 2 * std::tan(LuxEngine::ToRadians(viewFovDegrees_) * .5) /
+                             std::max(1, height());
         const LuxEngine::Vec3 right{view[0], view[4], view[8]};
         const LuxEngine::Vec3 up{view[1], view[5], view[9]};
         focus_ += right * float(-delta.x() * scale) + up * float(delta.y() * scale);
@@ -943,8 +1133,9 @@ void SceneViewport3D::mouseMoveEvent(LuxUI::MouseEvent* event) {
             return;
         }
         const LuxUI::PointF drag = event->position() - dragStart_;
+        LuxEngine::Mat4 modelingDelta;
         if (tool_ == EditorTool::Move || tool_ == EditorTool::Select) {
-            const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+            const auto camera = GetViewCamera();
             const auto startRay = MakeViewportRay3D(camera, size(), dragStart_);
             const auto currentRay = MakeViewportRay3D(camera, size(), event->position());
             if (!startRay || !currentRay)
@@ -986,10 +1177,11 @@ void SceneViewport3D::mouseMoveEvent(LuxUI::MouseEvent* event) {
                 movement = intersect(*currentRay) - intersect(*startRay);
             }
             value.position = initialPosition_ + movement;
+            modelingDelta = LuxEngine::Mat4::Translate(movement);
         } else if (tool_ == EditorTool::Rotate) {
             const int axis = axis_ >= 0 ? axis_ : 1;
             float angle = static_cast<float>((drag.x() - drag.y()) * .01);
-            const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+            const auto camera = GetViewCamera();
             const auto from = MakeViewportRay3D(camera, size(), dragStart_);
             const auto to = MakeViewportRay3D(camera, size(), event->position());
             const auto normal = GizmoDirection(initialBasis_, axis);
@@ -1011,6 +1203,7 @@ void SceneViewport3D::mouseMoveEvent(LuxUI::MouseEvent* event) {
             const auto localRotation = axis == 0   ? LuxEngine::Mat4::RotateX(angle)
                                        : axis == 1 ? LuxEngine::Mat4::RotateY(angle)
                                                    : LuxEngine::Mat4::RotateZ(angle);
+            modelingDelta = ModelingAroundPivot(localRotation, initialBasis_, initialPivot_);
             const auto originalRotation = LuxEngine::Mat4::RotateZ(initialRotation_.z) *
                                           LuxEngine::Mat4::RotateY(initialRotation_.y) *
                                           LuxEngine::Mat4::RotateX(initialRotation_.x);
@@ -1029,7 +1222,7 @@ void SceneViewport3D::mouseMoveEvent(LuxUI::MouseEvent* event) {
         } else if (tool_ == EditorTool::Scale) {
             double pixels = drag.x() - drag.y();
             if (axis_ >= 0) {
-                const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+                const auto camera = GetViewCamera();
                 const auto direction = GizmoDirection(initialBasis_, axis_);
                 const auto projected = ProjectViewportSegment(
                     camera, size(), initialPivot_,
@@ -1044,18 +1237,48 @@ void SceneViewport3D::mouseMoveEvent(LuxUI::MouseEvent* event) {
             value.scale = {initialScale_.x * (axis_ < 0 || axis_ == 0 ? factor : 1),
                            initialScale_.y * (axis_ < 0 || axis_ == 1 ? factor : 1),
                            initialScale_.z * (axis_ < 0 || axis_ == 2 ? factor : 1)};
+            const LuxEngine::Vec3 scale{axis_ < 0 || axis_ == 0 ? factor : 1,
+                                        axis_ < 0 || axis_ == 1 ? factor : 1,
+                                        axis_ < 0 || axis_ == 2 ? factor : 1};
+            modelingDelta =
+                ModelingAroundPivot(LuxEngine::Mat4::Scale(scale), initialBasis_, initialPivot_);
         }
         if (std::isfinite(value.position.x) && std::isfinite(value.position.y) &&
             std::isfinite(value.position.z) && std::isfinite(value.rotation.x) &&
             std::isfinite(value.rotation.y) && std::isfinite(value.rotation.z) &&
             std::isfinite(value.scale.x) && std::isfinite(value.scale.y) &&
-            std::isfinite(value.scale.z))
-            onTransform_(dragId_, value);
+            std::isfinite(value.scale.z)) {
+            if (modelingDrag_) {
+                std::string error;
+                if (ModelingActive() && PreviewModelingTransform(
+                                            modelingInitialMesh_, modelingMesh_, modelingSelection_,
+                                            modelingWorld_, modelingDelta, error)) {
+                    modelingChanged_ = false;
+                    for (size_t index = 0; index < modelingMesh_.vertices.size(); ++index) {
+                        const auto delta = modelingMesh_.vertices[index].position -
+                                           modelingInitialMesh_.vertices[index].position;
+                        if (delta.Dot(delta) > 1e-12f) {
+                            modelingChanged_ = true;
+                            break;
+                        }
+                    }
+                    PublishModelingPreview();
+                }
+            } else {
+                onTransform_(dragId_, value);
+            }
+        }
     }
     lastMouse_ = event->position();
 }
 
 void SceneViewport3D::wheelEvent(LuxUI::WheelEvent* event) {
+    if (orbiting_ && !orbitDrag_ && orbitButton_ == LuxUI::Flags::RightButton) {
+        SetMoveSpeed(std::clamp(
+            GetEffectiveMoveSpeed() * std::pow(1.2, event->angleDelta().y() / 120.0), .1, 10000.));
+        event->accept();
+        return;
+    }
     if (dragging_ || marquee_)
         CancelInteraction();
     distance_ = std::clamp(distance_ * std::pow(.9, event->angleDelta().y() / 120.0), .1, 100000.0);
@@ -1063,6 +1286,10 @@ void SceneViewport3D::wheelEvent(LuxUI::WheelEvent* event) {
 }
 
 void SceneViewport3D::RefreshScene() {
+    if (modelingDrag_ && !ModelingActive())
+        CancelInteraction();
+    if (modelingEntity_ && !ModelingActive() && engineRenderer_)
+        engineRenderer_->ClearMeshPreview();
     update();
 }
 
@@ -1075,25 +1302,151 @@ void SceneViewport3D::SetTool(EditorTool tool) {
 
 namespace LuxEditor {
 LuxEngine::PerspectiveCamera SceneViewport3D::GetViewCamera() const {
-    return MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    float fov, nearClip, farClip;
+    GetViewProjection(fov, nearClip, farClip);
+    camera.SetPerspective(LuxEngine::ToRadians(fov),
+                          static_cast<float>(std::max(1, width())) / std::max(1, height()),
+                          nearClip, farClip);
+    if (roll_ != 0) {
+        const auto& view = camera.GetViewMatrix().elements;
+        const LuxEngine::Vec3 right{view[0], view[4], view[8]};
+        const LuxEngine::Vec3 up{view[1], view[5], view[9]};
+        camera.SetUp(up * static_cast<float>(std::cos(roll_)) +
+                     right * static_cast<float>(std::sin(roll_)));
+    }
+    return camera;
+}
+
+void SceneViewport3D::UseEditorProjection() {
+    roll_ = 0;
+    viewFovDegrees_ = 60;
+    viewNearClip_ = viewFarClip_ = 0;
+}
+
+void SceneViewport3D::GetViewProjection(float& fovDegrees, float& nearClip, float& farClip) const {
+    fovDegrees = viewFovDegrees_;
+    nearClip = viewNearClip_ > 0 ? viewNearClip_
+                                 : static_cast<float>(std::clamp(distance_ * .001, .001, 1000.));
+    farClip = viewFarClip_ > nearClip ? viewFarClip_
+                                      : static_cast<float>(std::max(1000., distance_ * 100.));
+}
+
+bool SceneViewport3D::SetViewCamera(const LuxEngine::PerspectiveCamera& camera, float fovDegrees,
+                                    float nearClip, float farClip) {
+    const auto position = camera.GetPosition();
+    const auto direction = camera.GetTarget() - position;
+    const double length = std::hypot(direction.x, direction.y, direction.z);
+    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) ||
+        !std::isfinite(length) || length < 1e-7 || !std::isfinite(fovDegrees) || fovDegrees <= 0 ||
+        fovDegrees >= 180 || !std::isfinite(nearClip) || nearClip <= 0 || !std::isfinite(farClip) ||
+        farClip <= nearClip)
+        return false;
+    const auto& view = camera.GetViewMatrix().elements;
+    const LuxEngine::Vec3 desiredUp{view[1], view[5], view[9]};
+    if (!std::isfinite(desiredUp.x) || !std::isfinite(desiredUp.y) || !std::isfinite(desiredUp.z))
+        return false;
+    try {
+        (void)LuxEngine::Mat4::Perspective(
+            LuxEngine::ToRadians(fovDegrees),
+            static_cast<float>(std::max(1, width())) / std::max(1, height()), nearClip, farClip);
+    } catch (const std::exception&) {
+        return false;
+    }
+    CancelInteraction();
+    const auto forward = direction * static_cast<float>(1 / length);
+    distance_ = std::clamp(length, .1, 100000.);
+    focus_ = position + forward * static_cast<float>(distance_);
+    yaw_ = std::atan2(-forward.x, -forward.z);
+    pitch_ = std::asin(std::clamp(static_cast<double>(forward.y), -1., 1.));
+    viewFovDegrees_ = fovDegrees;
+    viewNearClip_ = nearClip;
+    viewFarClip_ = farClip;
+    roll_ = 0;
+    const auto unrolled = GetViewCamera();
+    const auto& basis = unrolled.GetViewMatrix().elements;
+    const LuxEngine::Vec3 right{basis[0], basis[4], basis[8]};
+    const LuxEngine::Vec3 up{basis[1], basis[5], basis[9]};
+    roll_ = std::atan2(desiredUp.Dot(right), desiredUp.Dot(up));
+    preset_ = ViewPreset::Perspective;
+    update();
+    return true;
 }
 
 std::shared_ptr<EngineSceneRenderer> SceneViewport3D::GetRenderer() const {
     return engineRenderer_;
 }
 
+bool SceneViewport3D::SetMoveSpeed(double unitsPerSecond) {
+    if (!std::isfinite(unitsPerSecond) || unitsPerSecond < 0 || unitsPerSecond > 10000)
+        return false;
+    if (moveSpeed_ == unitsPerSecond)
+        return true;
+    moveSpeed_ = unitsPerSecond;
+    if (onMoveSpeedChanged_)
+        onMoveSpeedChanged_(moveSpeed_);
+    return true;
+}
+
+double SceneViewport3D::GetMoveSpeed() const {
+    return moveSpeed_;
+}
+
+double SceneViewport3D::GetEffectiveMoveSpeed() const {
+    return moveSpeed_ > 0 ? moveSpeed_ : std::max(2., distance_ * .5);
+}
+
+void SceneViewport3D::SetMoveSpeedChangedCallback(std::function<void(double)> callback) {
+    onMoveSpeedChanged_ = std::move(callback);
+}
+
+void SceneViewport3D::SetNavigationMessageCallback(
+    std::function<void(const LuxUI::String&)> callback) {
+    onNavigationMessage_ = std::move(callback);
+}
+
 void SceneViewport3D::keyReleaseEvent(LuxUI::KeyEvent* event) {
     flyKeys_.erase(event->key());
+    if (event->key() == LuxUI::Flags::Key_Shift)
+        flyFast_ = false;
     LuxUI::Widget::keyReleaseEvent(event);
+}
+
+void SceneViewport3D::RotateView(LuxUI::PointF delta) {
+    if (!std::isfinite(delta.x()) || !std::isfinite(delta.y()))
+        return;
+    const auto eye = GetViewCamera().GetPosition();
+    // OS pointer speed and acceleration are already included in logical position().
+    // Convert through the vertical FOV without reapplying a device-pixel ratio.
+    const double halfFovTangent = std::tan(LuxEngine::ToRadians(viewFovDegrees_) * .5);
+    const double viewportHeight = std::max(1, height());
+    const double yawDelta = 2 * std::atan(delta.x() * halfFovTangent / viewportHeight);
+    const double pitchDelta = 2 * std::atan(delta.y() * halfFovTangent / viewportHeight);
+    const bool orbit = orbitDrag_;
+    yaw_ = std::remainder(yaw_ + (orbit ? yawDelta : -yawDelta), 2 * std::numbers::pi);
+    pitch_ = std::clamp(pitch_ + (orbit ? pitchDelta : -pitchDelta), -1.55, 1.55);
+    if (!orbit)
+        focus_ += eye - GetViewCamera().GetPosition();
+    preset_ = ViewPreset::Perspective;
+    update();
+}
+
+void SceneViewport3D::ReportPointerLimitation() {
+    if (pointerCapture_.GetMode() != LuxUI::PointerCaptureMode::Limited || pointerLimitationShown_)
+        return;
+    pointerLimitationShown_ = true;
+    setToolTip(pointerCapture_.GetLimitation());
+    if (onNavigationMessage_)
+        onNavigationMessage_(pointerCapture_.GetLimitation());
 }
 
 void SceneViewport3D::AdvanceFlyCamera() {
     const auto now = std::chrono::steady_clock::now();
     const auto dt = std::clamp(std::chrono::duration<double>(now - cameraTick_).count(), 0., .05);
     cameraTick_ = now;
-    if (!orbiting_ || !hasFocus() || !isVisible() || flyKeys_.empty())
+    if (!orbiting_ || orbitDrag_ || !hasFocus() || !isVisible() || flyKeys_.empty())
         return;
-    const auto camera = MakeViewportCamera3D(size(), focus_, yaw_, pitch_, distance_);
+    const auto camera = GetViewCamera();
     const auto forward = (camera.GetTarget() - camera.GetPosition()).Normalized();
     const auto right = forward.Cross({0, 1, 0}).Normalized();
     LuxEngine::Vec3 direction;
@@ -1109,9 +1462,10 @@ void SceneViewport3D::AdvanceFlyCamera() {
         direction.y += 1;
     if (flyKeys_.contains('Q'))
         direction.y -= 1;
-    const auto shift = LuxUI::Application::keyboardModifiers() & LuxUI::Flags::ShiftModifier;
-    focus_ += direction.Normalized() *
-              static_cast<float>(dt * std::max(2., distance_ * .5) * (shift ? 3 : 1));
+    const bool shift =
+        flyFast_ || (LuxUI::Application::keyboardModifiers() & LuxUI::Flags::ShiftModifier);
+    focus_ +=
+        direction.Normalized() * static_cast<float>(dt * GetEffectiveMoveSpeed() * (shift ? 3 : 1));
     update();
 }
 } // namespace LuxEditor

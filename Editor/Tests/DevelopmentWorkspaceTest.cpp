@@ -2,6 +2,7 @@
 #include <LuxEditor/Project/EditorProject.hpp>
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Scene/EditorDocument.hpp>
+#include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
 #include <LuxEditor/Viewport/GameViewport.hpp>
 #include <LuxEngine/Platform/Input.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
@@ -49,6 +50,91 @@ int main(int argc, char** argv) {
               window.findChild<LuxUI::Widget*>(LUX_UI_TEXT("luxProfilerPanel")) &&
               window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("body3DEnabled")),
           "development panels missing");
+    auto* gameView = static_cast<LuxEditor::GameViewport*>(
+        window.findChild<LuxUI::Widget*>(LUX_UI_TEXT("gameViewport")));
+    Check(gameView && gameView->GetScene() == &window.GetDocument().GetScene() &&
+              !gameView->IsInputEnabled(),
+          "stopped Game View did not preview the authored scene");
+    auto* history = window.findChild<LuxUI::UndoStack*>();
+    auto* add2D = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("addCamera2D"));
+    auto* add3D = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("addCamera"));
+    Check(history && add2D && add3D, "camera creation commands are missing");
+    const int cameraHistory = history->index();
+    add2D->trigger();
+    const auto camera2D = window.GetDocument().GetSelected().GetId();
+    Check(!window.GetDocument()
+                  .GetSelected()
+                  .GetComponent<LuxEngine::CameraComponent>()
+                  .isPerspective &&
+              window.GetDocument()
+                  .GetSelected()
+                  .GetComponent<LuxEngine::CameraComponent>()
+                  .isPrimary &&
+              history->index() == cameraHistory + 1,
+          "first 2D camera was not primary or was not one undo operation");
+    add3D->trigger();
+    const auto camera3D = window.GetDocument().GetSelected().GetId();
+    Check(window.GetDocument()
+                  .GetSelected()
+                  .GetComponent<LuxEngine::CameraComponent>()
+                  .isPerspective &&
+              !window.GetDocument()
+                   .GetSelected()
+                   .GetComponent<LuxEngine::CameraComponent>()
+                   .isPrimary &&
+              history->index() == cameraHistory + 2,
+          "adding a 3D camera replaced the existing primary camera");
+    auto* primary = window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("cameraPrimary"));
+    Check(primary && primary->isEnabled(), "primary camera control is unavailable");
+    primary->setChecked(true);
+    Check(window.GetDocument()
+                  .GetScene()
+                  .GetComponent<LuxEngine::CameraComponent>(camera3D)
+                  .isPrimary &&
+              !window.GetDocument()
+                   .GetScene()
+                   .GetComponent<LuxEngine::CameraComponent>(camera2D)
+                   .isPrimary,
+          "primary camera selection did not unset the previous camera");
+    primary->setChecked(false);
+    add2D->trigger();
+    Check(window.GetDocument().GetSelected().GetComponent<LuxEngine::CameraComponent>().isPrimary,
+          "adding a camera without an active primary did not restore a primary camera");
+    while (history->index() > cameraHistory)
+        history->undo();
+    Check(window.GetDocument()
+                  .GetScene()
+                  .GetComponentEntityIds<LuxEngine::CameraComponent>()
+                  .empty() &&
+              gameView->GetScene() == &window.GetDocument().GetScene(),
+          "camera undo left stale authoring data in Game View");
+    history->clear();
+    const auto initialTab = window.GetDocument().GetActiveTabId();
+    const auto freshTab = window.NewSceneDocument();
+    Check(freshTab != initialTab && gameView->GetScene() == &window.GetDocument().GetScene(),
+          "Game View did not follow a new scene");
+    add2D->trigger();
+    Check(window.SwitchSceneDocument(initialTab, false) &&
+              gameView->GetScene() == &window.GetDocument().GetScene() &&
+              window.CloseSceneDocument(freshTab, true),
+          "Game View did not follow a scene switch or close");
+    const auto cameraFile = project->GetFile().parent_path() / "Scenes/CameraPreview.lux";
+    LuxEngine::Scene savedCameraScene;
+    auto savedCamera = savedCameraScene.CreateEntity("Saved camera");
+    savedCamera.AddComponent<LuxEngine::CameraComponent>();
+    savedCamera.GetComponent<LuxEngine::TransformComponent>().position = {20, 2, 0};
+    Check(savedCameraScene.Serialize(LuxEditor::PathUtf8(cameraFile)) &&
+              window.OpenSceneDocument(cameraFile),
+          "saved camera fixture did not open");
+    const auto loadedTab = window.GetDocument().GetActiveTabId();
+    Check(gameView->GetScene() == &window.GetDocument().GetScene() &&
+              LuxEditor::ResolveGameViewCamera(*gameView->GetScene(), 640, 320)
+                      .camera2D.GetPosition()
+                      .x == 20,
+          "Game View did not resolve the newly loaded scene camera");
+    Check(window.SwitchSceneDocument(initialTab, false) &&
+              window.CloseSceneDocument(loadedTab, true),
+          "saved camera fixture did not close");
     bool ran = false;
     Check(window.RegisterTool({"test.tool", "Test tool", [&] { ran = true; }, {}}),
           "native tool registration failed");
@@ -123,6 +209,8 @@ int main(int argc, char** argv) {
         const auto lifetime = authored->Lifetime();
         const int undoIndex = undo->index();
         action("previewStep");
+        Check(gameView->GetScene() == window.GetRuntimeScene() && gameView->IsInputEnabled(),
+              "playing Game View did not switch to the runtime clone");
         Check(window.GetRuntimeScene() && window.GetRuntimeScene() != authored &&
                   window.GetRuntimeScene()->GetWorldTransform(bodyId).position.y < position.y,
               "immediate play did not advance Jolt");
@@ -166,6 +254,9 @@ int main(int argc, char** argv) {
         Check(!LuxEngine::Input::IsKeyPressed(LuxEngine::LuxKey::W),
               "stop left embedded input pressed");
         Check(!window.GetRuntimeScene(), "stop retained the runtime clone");
+        Check(gameView->GetScene() == &window.GetDocument().GetScene() &&
+                  !gameView->IsInputEnabled(),
+              "stopped Game View did not return to the current authored scene");
         Check(!lifetime.expired() && &window.GetDocument().GetScene() == authored &&
                   authored->GetWorldTransform(bodyId).position.y == position.y,
               "stop replaced or mutated the authoring scene");

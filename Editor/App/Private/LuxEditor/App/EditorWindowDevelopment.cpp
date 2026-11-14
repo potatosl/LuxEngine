@@ -117,8 +117,9 @@ void EditorWindow::PollDevelopmentWorkspace() {
     LuxUI::FrameSample sample;
     sample.updateMs = lastUpdateMs_;
     if (canvas3D_) {
-        const auto renderer =
-            previewActive_ ? gameCanvas_->GetRenderer() : canvas3D_->GetRenderer();
+        const auto renderer = viewportTabs_->currentWidget() == gameCanvas_
+                                  ? gameCanvas_->GetRenderer()
+                                  : canvas3D_->GetRenderer();
         if (renderer) {
             sample.renderMs = renderer->LastRenderMs();
             if (const auto* device = renderer->GetGpuDevice()) {
@@ -398,7 +399,8 @@ bool EditorWindow::eventFilter(LuxUI::Object* source, LuxUI::Event* event) {
     if (source == gameCanvas_ && previewActive_) {
         if (event->type() == LuxUI::Event::FocusOut)
             LuxEngine::Input::ClearExternalKeys();
-        if (!previewPaused_ && gameCanvas_->hasFocus() && gameCanvas_->isVisible() &&
+        if (!previewPaused_ && gameCanvas_->IsInputEnabled() && gameCanvas_->hasFocus() &&
+            gameCanvas_->isVisible() &&
             (event->type() == LuxUI::Event::KeyPress || event->type() == LuxUI::Event::KeyRelease ||
              event->type() == LuxUI::Event::ShortcutOverride)) {
             const auto* key = static_cast<LuxUI::KeyEvent*>(event);

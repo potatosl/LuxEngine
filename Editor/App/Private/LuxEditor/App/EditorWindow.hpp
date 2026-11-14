@@ -30,6 +30,8 @@ class SceneViewport3D;
 class GameViewport;
 class DebugPanel;
 class SceneEditCommand;
+struct ModelingMesh;
+struct ModelingSelection;
 
 class EditorWindow final : public LuxUI::MainWindow {
 public:
@@ -62,6 +64,12 @@ private:
     void BuildPhysics3DDetails(LuxUI::VBoxLayout* layout);
     void RefreshPhysics3DDetails();
     void BuildDevelopmentWorkspace();
+    void BuildModelingWorkspace();
+    void RefreshModelingWorkspace();
+    void CommitModelingEdit(const ModelingMesh& mesh, const ModelingSelection& selection);
+    void ExtrudeModelingSelection();
+    void MergeModelingSelection();
+    void BakeModelingSelection();
     void PollDevelopmentWorkspace();
     void LoadProjectTools();
     void SelectPlayAssembly();
@@ -159,10 +167,12 @@ private:
     void AddBasicModel(const std::string& id);
     void AddModelAsset(const std::filesystem::path& path);
     void ChooseModelAsset();
-    void AddCameraEntity();
+    void AddCameraEntity(bool perspective = true);
     void BuildCameraDetails(LuxUI::VBoxLayout* layout);
     void RefreshCameraDetails();
-    void OnCameraChanged();
+    void OnCameraChanged(const LuxUI::Widget* field);
+    void AlignCameraToSceneView();
+    void ViewThroughSelectedCamera();
     void AddTilemap();
     void PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngine::uint32 y, uint8_t tile);
     void DeleteEntity();
@@ -279,6 +289,16 @@ private:
     SceneViewport2D* overviewCanvas_ = nullptr;
     SceneViewport3D* canvas3D_ = nullptr;
     SceneViewport3D* modelAnimationPreview_ = nullptr;
+    LuxUI::DockWidget* modelingDock_ = nullptr;
+    LuxUI::ComboBox* modelingMode_ = nullptr;
+    std::shared_ptr<ModelingMesh> modelingMesh_;
+    std::shared_ptr<LuxEngine::ModelAsset> modelingSourceAsset_;
+    LuxEngine::uint32 modelingEntity_ = 0;
+    EditorDocument::TabId modelingTab_ = 0;
+    std::weak_ptr<int> modelingLifetime_;
+    std::string modelingSourcePath_;
+    int modelingSourcePart_ = -1;
+    bool refreshingModeling_ = false;
     std::shared_ptr<LuxEngine::ModelAsset> modelAnimationAsset_;
     GameViewport* gameCanvas_ = nullptr;
     LuxUI::TreeWidget* hierarchy_ = nullptr;
@@ -306,6 +326,8 @@ private:
     LuxUI::ComboBox* cameraProjection_ = nullptr;
     LuxUI::DoubleSpinBox* cameraFov_ = nullptr;
     LuxUI::DoubleSpinBox* cameraOrthoSize_ = nullptr;
+    LuxUI::DoubleSpinBox* cameraNearClip_ = nullptr;
+    LuxUI::DoubleSpinBox* cameraFarClip_ = nullptr;
     LuxUI::LineEdit* meshPath_ = nullptr;
     std::vector<LuxUI::Action*> basicModelActions_;
     LuxUI::LineEdit* baseColorTexturePath_ = nullptr;

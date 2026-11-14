@@ -38,6 +38,7 @@ public:
     void SetCancelEditCallback(std::function<void()> callback);
     // Visible area in world units: centre and half height.
     void GetView(double& centerX, double& centerY, double& halfHeight) const;
+    bool SetView(double centerX, double centerY, double halfHeight);
 
     void SetTool(EditorTool tool);
 

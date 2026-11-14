@@ -46,8 +46,13 @@ public:
     // 3D perspective rendering with the engine Renderer3D.
     bool Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                   const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
-                  LuxUI::Image& output, LuxUI::Image* skyboxBackground = nullptr);
+                  LuxUI::Image& output, LuxUI::Image* skyboxBackground = nullptr,
+                  const LuxEngine::PerspectiveCamera* cameraOverride = nullptr);
     bool RenderGame(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight, LuxUI::Image& output);
+    // Scene View modeling preview replaces one entity's geometry without modifying its asset.
+    bool SetMeshPreview(LuxEngine::uint32 entity, std::span<const LuxEngine::Vertex3D> vertices,
+                        std::span<const LuxEngine::uint32> indices);
+    void ClearMeshPreview();
 
     const LuxUI::String& LastError() const;
 
@@ -70,14 +75,18 @@ public:
 private:
     bool Render3DPass(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                       const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
-                      LuxUI::Image& output, bool backgroundOnly, bool drawSkybox);
+                      LuxUI::Image& output, bool backgroundOnly, bool drawSkybox,
+                      const LuxEngine::PerspectiveCamera* cameraOverride);
     bool InitializeState(LuxEngine::uint32 initialWidth = 640,
                          LuxEngine::uint32 initialHeight = 360);
     bool BeginViewportFrame(LuxEngine::uint32 width, LuxEngine::uint32 height);
     bool ReadbackToImage(LuxUI::Image& output);
 
     struct State;
+    struct MeshPreview;
     std::unique_ptr<State> state_;
+    std::unique_ptr<MeshPreview> meshPreview_;
+    LuxEngine::uint64 previewRevision_ = 0;
     bool attempted_ = false;
     double lastRenderMs_ = 0;
     bool rendering_ = false;

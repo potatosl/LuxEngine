@@ -1,4 +1,6 @@
+#include <LuxEditor/App/EditorWindow.hpp>
 #include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
+#include <LuxEditor/Viewport/GameViewport.hpp>
 #include <LuxEngine/Renderer/RHI/GpuDevice.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
 #include <LuxEngine/Scene/Scene.hpp>
@@ -17,7 +19,8 @@ void Check(bool condition, const char* message) {
 
 LuxUI::Image Render(EngineSceneRenderer& renderer, Scene& scene) {
     LuxUI::Image image;
-    Check(renderer.RenderGame(scene, 640, 320, image), renderer.LastError().toUtf8().constData());
+    const bool rendered = renderer.RenderGame(scene, 640, 320, image);
+    Check(rendered, renderer.LastError().toUtf8().constData());
     Check(!image.isNull() && image.width() == 640 && image.height() == 320,
           "Game View GPU readback returned invalid dimensions");
     return image;
@@ -31,6 +34,14 @@ bool Red(const LuxUI::Image& image, int x, int y) {
 bool Blue(const LuxUI::Image& image, int x, int y) {
     const auto color = image.pixelColor(x, y);
     return color.blue() > 20 && color.blue() > color.green() * 3 && color.blue() > color.red() * 3;
+}
+
+size_t RedPixels(const LuxUI::Image& image) {
+    size_t count = 0;
+    for (int y = 0; y < image.height(); ++y)
+        for (int x = 0; x < image.width(); ++x)
+            count += Red(image, x, y);
+    return count;
 }
 
 void Primary2D(EngineSceneRenderer& renderer) {
@@ -95,6 +106,25 @@ void Primary3D(EngineSceneRenderer& renderer) {
     auto image = Render(renderer, scene);
     Check(Red(image, 320, 160),
           "GPU Game View ignored the primary perspective camera or its parent position");
+    cameraSettings.farClip = 2;
+    Check(!Red(Render(renderer, scene), 320, 160), "GPU Game View ignored the camera far plane");
+    cameraSettings.farClip = 100;
+    cameraSettings.nearClip = 8;
+    Check(!Red(Render(renderer, scene), 320, 160), "GPU Game View ignored the camera near plane");
+    cameraSettings.nearClip = .1f;
+    cameraSettings.fov = 40;
+    const auto narrow = RedPixels(Render(renderer, scene));
+    cameraSettings.fov = 100;
+    image = Render(renderer, scene);
+    Check(narrow > RedPixels(image) * 2, "GPU Game View did not update the camera FOV");
+    const auto sceneCamera = ResolveGameViewCamera(scene, 640, 320).camera3D;
+    LuxUI::Image editorImage;
+    Check(
+        renderer.Render3D(scene, 640, 320, {}, .65, -.48, 22, editorImage, nullptr, &sceneCamera) &&
+            Red(editorImage, 320, 160) &&
+            std::abs(static_cast<double>(RedPixels(editorImage)) - RedPixels(image)) < 20,
+        "GPU Scene View camera override disagreed with the primary camera projection");
+    cameraSettings.fov = 70;
     rig.GetComponent<TransformComponent>().rotation.y = ToRadians(90.f);
     red.GetComponent<TransformComponent>().position = {3, 2, -1};
     green.GetComponent<TransformComponent>().position = {3, 2, 2};
@@ -105,10 +135,92 @@ void Primary3D(EngineSceneRenderer& renderer) {
     image = Render(renderer, scene);
     Check(!Red(image, 320, 160), "GPU Game View returned a stale frame after the scene changed");
 }
+
+void StoppedAndPlaying(LuxUI::Application& app) {
+    LuxUI::TemporaryDir settings;
+    Check(settings.isValid(), "Game View GPU settings directory is unavailable");
+    LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+    LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                             settings.path());
+    LuxUI::Settings().clear();
+    EditorWindow window;
+    auto* tabs = window.findChild<LuxUI::TabWidget*>(LUX_UI_TEXT("sceneGameViews"));
+    auto* view =
+        static_cast<GameViewport*>(window.findChild<LuxUI::Widget*>(LUX_UI_TEXT("gameViewport")));
+    Check(tabs && view, "Game View editor surface is unavailable");
+    const auto action = [&window](const char* name) {
+        auto* value = window.findChild<LuxUI::Action*>(LuxUI::String::fromLatin1(name));
+        Check(value, "Game View editor action is missing");
+        value->trigger();
+    };
+    action("addCamera2D");
+    uint32 spriteId = 0;
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("GPU preview fixture"), [&] {
+        auto sprite = window.GetDocument().CreateEntity("Game preview sprite");
+        spriteId = sprite.GetId();
+        sprite.AddComponent<SpriteRendererComponent>().color = {1, 0, 0, 1};
+        auto& animation = sprite.AddComponent<AnimationComponent>();
+        animation.playing = true;
+        animation.clip.duration = 1;
+        animation.clip.AddKeyframe({0, {}, {}, {1, 1, 1}});
+        animation.clip.AddKeyframe({1, {1, 0, 0}, {}, {1, 1, 1}});
+    });
+    tabs->setCurrentWidget(view);
+    window.show();
+    app.processEvents();
+    const auto capture = [&] {
+        auto image = view->grab().toImage();
+        Check(view->GetRenderer()->IsReady() && view->GetRenderer()->LastError().isEmpty(),
+              "Game View widget fell back to software during the GPU regression");
+        return image.pixelColor(image.width() / 2, image.height() / 2);
+    };
+    auto color = capture();
+    Check(color.red() > 240 && color.blue() < 10 && !view->IsInputEnabled() &&
+              window.GetDocument()
+                      .GetScene()
+                      .GetComponent<AnimationComponent>(spriteId)
+                      .currentTime == 0,
+          "stopped Game View did not render the authored camera without advancing animation");
+    action("previewStep");
+    Check(window.GetRuntimeScene() && view->GetScene() == window.GetRuntimeScene(),
+          "playing Game View did not select the runtime scene");
+    window.GetRuntimeScene()->GetComponent<SpriteRendererComponent>(spriteId).color = {0, 0, 1, 1};
+    color = capture();
+    Check(color.blue() > 240 && color.red() < 10,
+          "playing Game View did not render runtime changes");
+    action("previewStop");
+    color = capture();
+    Check(color.red() > 240 && color.blue() < 10 && !view->IsInputEnabled() &&
+              view->GetScene() == &window.GetDocument().GetScene(),
+          "stopping Game View did not return to its authored camera image");
+    const auto original = window.GetDocument().GetActiveTabId();
+    window.NewSceneDocument();
+    action("addCamera2D");
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("GPU replacement scene"), [&] {
+        window.GetDocument()
+            .CreateEntity("Green scene")
+            .AddComponent<SpriteRendererComponent>()
+            .color = {0, 1, 0, 1};
+    });
+    color = capture();
+    Check(color.green() > 240 && color.red() < 10 && color.blue() < 10,
+          "stopped Game View retained the previous scene's GPU frame");
+    Check(window.SwitchSceneDocument(original, false), "GPU fixture scene switch failed");
+    color = capture();
+    Check(color.red() > 240 && color.green() < 10,
+          "Game View did not restore the selected scene's camera preview");
+    Check(view->GetRenderer()->GetGpuDevice()->GetCounters().validationErrors == 0,
+          "edit/play Game View transitions reported GPU validation errors");
+    for (const auto& tab : window.GetDocument().ListTabs())
+        window.GetDocument().SetDirty(tab.id, false);
+    window.close();
+}
 } // namespace
 
 int main(int argc, char** argv) {
     LuxUI::Application app(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName(LUX_UI_TEXT("LuxGameViewGpuTests"));
+    LuxUI::CoreApplication::setApplicationName(LUX_UI_TEXT("GameView"));
     qunsetenv("LUX_EDITOR_SOFTWARE_VIEWPORT");
     EngineSceneRenderer::SetForceAllowed(true);
     EngineSceneRenderer::SetDefaultValidation(static_cast<int>(GpuValidation::Synchronization));
@@ -120,6 +232,7 @@ int main(int argc, char** argv) {
     try {
         Primary2D(renderer);
         Primary3D(renderer);
+        StoppedAndPlaying(app);
         const auto* gpu = renderer.GetGpuDevice();
         Check(gpu && gpu->IsReady() && gpu->GetCounters().framesSubmitted >= 6,
               "Game View did not submit its GPU frames");

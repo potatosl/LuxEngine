@@ -64,6 +64,7 @@ EditorWindow::EditorWindow(LuxUI::Widget* parent)
     BuildLayout();
     BuildMenus();
     BuildDevelopmentWorkspace();
+    BuildModelingWorkspace();
     const LuxUI::Settings settings;
     const auto previous = PathFromUtf8(Utf8(settings.value(LUX_UI_TEXT("lastProject")).toString()));
     if (!previous.empty() && std::filesystem::is_regular_file(previous))
@@ -154,6 +155,12 @@ EditorWindow::~EditorWindow() {
     removeDockWidget(animationDock_);
     delete animationDock_;
     animationDock_ = nullptr;
+    if (modelingDock_) {
+        modelingDock_->blockSignals(true);
+        removeDockWidget(modelingDock_);
+        delete modelingDock_;
+        modelingDock_ = nullptr;
+    }
     delete takeCentralWidget();
     for (LuxUI::DockWidget* dock : docks_) {
         removeDockWidget(dock);
@@ -265,6 +272,11 @@ void EditorWindow::BuildMenus() {
         canvas_->SetDebugColliders(enabled);
         overviewCanvas_->SetDebugColliders(enabled);
     });
+    auto* cameraMenu = menuBar()->addMenu(LUX_UI_TEXT("카메라"));
+    AddCommand(cameraMenu, "alignCameraToSceneView", "선택 카메라를 씬 뷰에 맞추기",
+               [this] { AlignCameraToSceneView(); });
+    AddCommand(cameraMenu, "viewThroughSelectedCamera", "선택 카메라 시점으로 보기",
+               [this] { ViewThroughSelectedCamera(); });
     LuxUI::Menu* debug = menuBar()->addMenu(LUX_UI_TEXT("디버그"));
     add(debug, LUX_UI_TEXT("장면 실행"), LUX_UI_TEXT("previewStart"),
         LuxUI::KeySequence(LuxUI::Flags::Key_F5), [this] { StartPreview(); });
@@ -622,6 +634,7 @@ void EditorWindow::RefreshAll() {
     canvas_->RefreshScene();
     canvas3D_->RefreshScene();
     overviewCanvas_->RefreshScene();
+    gameCanvas_->RefreshScene();
     UpdateChrome();
 }
 
@@ -965,6 +978,9 @@ void EditorWindow::RefreshInspector() {
 }
 
 void EditorWindow::UpdateChrome() {
+    if (gameCanvas_)
+        gameCanvas_->RefreshScene();
+    RefreshModelingWorkspace();
     if (undoAction_)
         undoAction_->setEnabled(!viewportEditBefore_.isEmpty() || undo_->canUndo());
     if (redoAction_)
@@ -1303,7 +1319,10 @@ void EditorWindow::StartPreview() {
     lastUpdateMs_ = 0;
     previewActive_ = true;
     previewPaused_ = false;
-    gameCanvas_->SetScene(runtimeScene_.get());
+    gameCanvas_->SetPaused(false);
+    gameCanvas_->SetInputEnabled(true);
+    gameCanvas_->RefreshScene();
+    RefreshModelingWorkspace();
     viewportTabs_->setCurrentWidget(gameCanvas_);
     gameCanvas_->setFocus(LuxUI::Flags::OtherFocusReason);
     previewStartAction_->setEnabled(false);
@@ -1321,7 +1340,8 @@ void EditorWindow::StopPreview() {
     previewActive_ = false;
     previewPaused_ = false;
     previewScripts_.Shutdown();
-    gameCanvas_->SetScene(nullptr);
+    gameCanvas_->SetInputEnabled(false);
+    gameCanvas_->SetPaused(false);
     runtimeScene_.reset();
     previewStartAction_->setEnabled(true);
     previewPauseAction_->setEnabled(false);

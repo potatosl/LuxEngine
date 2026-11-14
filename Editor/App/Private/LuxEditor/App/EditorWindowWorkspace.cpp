@@ -139,6 +139,8 @@ void EditorWindow::SetWorkspace(bool animation) {
     canvas_->CancelInteraction();
     canvas3D_->CancelInteraction();
     if (animation) {
+        if (modelingDock_)
+            modelingDock_->hide();
         levelLayout_ = saveState(5);
         if (auto* toolbar = findChild<LuxUI::ToolBar*>(LUX_UI_TEXT("lux-main-toolbar")))
             toolbar->hide();

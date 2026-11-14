@@ -18,6 +18,10 @@ void Check(bool success, const char* message) {
         throw std::runtime_error(message);
 }
 
+double Length(Vec3 value) {
+    return std::hypot(value.x, value.y, value.z);
+}
+
 int DifferentPixels(const LuxUI::Image& first, const LuxUI::Image& second) {
     if (first.size() != second.size())
         return 0;
@@ -29,9 +33,10 @@ int DifferentPixels(const LuxUI::Image& first, const LuxUI::Image& second) {
 }
 
 void SendMouse(LuxUI::Widget& widget, LuxUI::Event::Type type, LuxUI::PointF point,
-               LuxUI::Flags::MouseButton button, LuxUI::Flags::MouseButtons buttons) {
+               LuxUI::Flags::MouseButton button, LuxUI::Flags::MouseButtons buttons,
+               LuxUI::Flags::KeyboardModifiers modifiers = LuxUI::Flags::NoModifier) {
     LuxUI::MouseEvent event(type, point, widget.mapToGlobal(point.toPoint()), button, buttons,
-                            LuxUI::Flags::NoModifier);
+                            modifiers);
     LuxUI::Application::sendEvent(&widget, &event);
 }
 
@@ -59,46 +64,139 @@ void CameraClipping() {
 }
 
 void FreeLookDirection(LuxUI::Application& app) {
-    for (const auto delta : {LuxUI::PointF(30, 0), LuxUI::PointF(-30, 0), LuxUI::PointF(0, 25),
-                             LuxUI::PointF(0, -25)}) {
-        EditorDocument document;
-        SceneViewport3D view(
-            nullptr, document, [](std::optional<uint32>) {},
-            [](uint32, const TransformComponent&) {}, [] {}, [] {});
-        view.resize(640, 480);
+    for (const float fov : {30.f, 60.f, 100.f})
+        for (const auto delta : {LuxUI::PointF(30, 0), LuxUI::PointF(-30, 0), LuxUI::PointF(0, 25),
+                                 LuxUI::PointF(0, -25)}) {
+            EditorDocument document;
+            SceneViewport3D view(
+                nullptr, document, [](std::optional<uint32>) {},
+                [](uint32, const TransformComponent&) {}, [] {}, [] {});
+            view.resize(640, 480);
+            view.SetViewPreset(SceneViewport3D::ViewPreset::Front);
+            Check(view.SetViewCamera(view.GetViewCamera(), fov, .1f, 1000.f),
+                  "test projection setup failed");
+            view.show();
+            app.processEvents();
+            const auto before = view.GetViewCamera();
+            const LuxUI::PointF start(320, 240);
+            SendMouse(view, LuxUI::Event::MouseButtonPress, start, LuxUI::Flags::RightButton,
+                      LuxUI::Flags::RightButton);
+            SendMouse(view, LuxUI::Event::MouseMove, start + delta, LuxUI::Flags::NoButton,
+                      LuxUI::Flags::RightButton);
+            SendMouse(view, LuxUI::Event::MouseButtonRelease, start + delta,
+                      LuxUI::Flags::RightButton, LuxUI::Flags::NoButton);
+            const auto after = view.GetViewCamera();
+            const auto eyeDelta = after.GetPosition() - before.GetPosition();
+            Check(eyeDelta.Dot(eyeDelta) < .00001f,
+                  "Free look moved the camera eye instead of turning it");
+            const auto forward = (after.GetTarget() - after.GetPosition()).Normalized();
+            if (delta.x() != 0)
+                Check(forward.x * delta.x() > 0,
+                      "Horizontal free look turned opposite to pointer movement");
+            if (delta.y() != 0)
+                Check(forward.y * delta.y() < 0,
+                      "Vertical free look turned opposite to pointer movement");
+            const double yaw =
+                -2 * std::atan(delta.x() * std::tan(ToRadians(fov) * .5) / view.height());
+            const double pitch =
+                -2 * std::atan(delta.y() * std::tan(ToRadians(fov) * .5) / view.height());
+            const Vec3 expected{static_cast<float>(-std::sin(yaw) * std::cos(pitch)),
+                                static_cast<float>(std::sin(pitch)),
+                                static_cast<float>(-std::cos(yaw) * std::cos(pitch))};
+            const auto difference = forward - expected;
+            Check(difference.Dot(difference) < .000001f,
+                  "Free look applied a device-pixel or extra sensitivity multiplier");
+        }
+}
+
+void RunFor(int milliseconds) {
+    LuxUI::EventLoop loop;
+    LuxUI::Timer::singleShot(milliseconds, &loop, &LuxUI::EventLoop::quit);
+    loop.exec();
+}
+
+void FreeNavigation(LuxUI::Application& app) {
+    EditorDocument document;
+    SceneViewport3D view(
+        nullptr, document, [](std::optional<uint32>) {}, [](uint32, const TransformComponent&) {},
+        [] {}, [] {});
+    view.resize(640, 480);
+    view.show();
+    view.activateWindow();
+    view.setFocus();
+    app.processEvents();
+    view.SetViewPreset(SceneViewport3D::ViewPreset::Front);
+    const auto origin = view.GetViewCamera();
+    SendMouse(view, LuxUI::Event::MouseButtonPress, {320, 240}, LuxUI::Flags::LeftButton,
+              LuxUI::Flags::LeftButton, LuxUI::Flags::AltModifier);
+    SendMouse(view, LuxUI::Event::MouseMove, {350, 250}, LuxUI::Flags::NoButton,
+              LuxUI::Flags::LeftButton, LuxUI::Flags::AltModifier);
+    SendMouse(view, LuxUI::Event::MouseButtonRelease, {350, 250}, LuxUI::Flags::LeftButton,
+              LuxUI::Flags::NoButton, LuxUI::Flags::AltModifier);
+    const auto orbit = view.GetViewCamera();
+    Check(Length(orbit.GetPosition() - origin.GetPosition()) > .1f &&
+              Length(orbit.GetTarget() - origin.GetTarget()) < .001f,
+          "Alt+left drag did not orbit around the edit camera focus");
+    SendMouse(view, LuxUI::Event::MouseButtonPress, {320, 240}, LuxUI::Flags::MiddleButton,
+              LuxUI::Flags::MiddleButton);
+    SendMouse(view, LuxUI::Event::MouseMove, {350, 255}, LuxUI::Flags::NoButton,
+              LuxUI::Flags::MiddleButton);
+    SendMouse(view, LuxUI::Event::MouseButtonRelease, {350, 255}, LuxUI::Flags::MiddleButton,
+              LuxUI::Flags::NoButton);
+    const auto pan = view.GetViewCamera();
+    const auto eyeDelta = pan.GetPosition() - orbit.GetPosition();
+    const auto targetDelta = pan.GetTarget() - orbit.GetTarget();
+    Check(Length(eyeDelta) > .1f && Length(eyeDelta - targetDelta) < .0001f,
+          "middle drag did not pan the camera eye and focus together");
+    const auto wheel = [&](LuxUI::Flags::MouseButtons buttons) {
+        LuxUI::WheelEvent event({320, 240}, view.mapToGlobal(LuxUI::Point(320, 240)), {}, {0, 120},
+                                buttons, LuxUI::Flags::NoModifier, LuxUI::Flags::NoScrollPhase,
+                                false);
+        LuxUI::Application::sendEvent(&view, &event);
+    };
+    const auto beforeDolly = view.GetViewCamera();
+    wheel(LuxUI::Flags::NoButton);
+    Check(Length(view.GetViewCamera().GetPosition() - beforeDolly.GetPosition()) > .1f,
+          "wheel did not dolly the camera");
+    Check(view.SetMoveSpeed(5), "explicit camera speed was rejected");
+    bool speedNotified = false;
+    view.SetMoveSpeedChangedCallback([&](double value) { speedNotified = value > 5; });
+    SendMouse(view, LuxUI::Event::MouseButtonPress, {320, 240}, LuxUI::Flags::RightButton,
+              LuxUI::Flags::RightButton);
+    const auto beforeSpeed = view.GetViewCamera().GetPosition();
+    wheel(LuxUI::Flags::RightButton);
+    Check(view.GetMoveSpeed() > 5 && speedNotified &&
+              Length(view.GetViewCamera().GetPosition() - beforeSpeed) < .0001f,
+          "right-button wheel did not adjust speed independently of dolly");
+    SendMouse(view, LuxUI::Event::MouseButtonRelease, {320, 240}, LuxUI::Flags::RightButton,
+              LuxUI::Flags::NoButton);
+    const auto fly = [&](int key, bool fast) {
         view.SetViewPreset(SceneViewport3D::ViewPreset::Front);
-        view.show();
-        app.processEvents();
-        const auto before = view.GetViewCamera();
-        const LuxUI::PointF start(320, 240);
-        SendMouse(view, LuxUI::Event::MouseButtonPress, start, LuxUI::Flags::RightButton,
+        Check(view.SetMoveSpeed(5), "fly speed setup failed");
+        const auto before = view.GetViewCamera().GetPosition();
+        SendMouse(view, LuxUI::Event::MouseButtonPress, {320, 240}, LuxUI::Flags::RightButton,
                   LuxUI::Flags::RightButton);
-        SendMouse(view, LuxUI::Event::MouseMove, start + delta, LuxUI::Flags::NoButton,
-                  LuxUI::Flags::RightButton);
-        SendMouse(view, LuxUI::Event::MouseButtonRelease, start + delta, LuxUI::Flags::RightButton,
+        LuxUI::KeyEvent press(LuxUI::Event::KeyPress, key,
+                              fast ? LuxUI::Flags::ShiftModifier : LuxUI::Flags::NoModifier);
+        LuxUI::Application::sendEvent(&view, &press);
+        RunFor(90);
+        LuxUI::KeyEvent release(LuxUI::Event::KeyRelease, key, LuxUI::Flags::NoModifier);
+        LuxUI::Application::sendEvent(&view, &release);
+        SendMouse(view, LuxUI::Event::MouseButtonRelease, {320, 240}, LuxUI::Flags::RightButton,
                   LuxUI::Flags::NoButton);
-        const auto after = view.GetViewCamera();
-        const auto eyeDelta = after.GetPosition() - before.GetPosition();
-        Check(eyeDelta.Dot(eyeDelta) < .00001f,
-              "Free look moved the camera eye instead of turning it");
-        const auto forward = (after.GetTarget() - after.GetPosition()).Normalized();
-        if (delta.x() != 0)
-            Check(forward.x * delta.x() > 0,
-                  "Horizontal free look turned opposite to pointer movement");
-        if (delta.y() != 0)
-            Check(forward.y * delta.y() < 0,
-                  "Vertical free look turned opposite to pointer movement");
-        const double yaw =
-            -2 * std::atan(delta.x() * std::tan(std::numbers::pi / 6) / view.height());
-        const double pitch =
-            -2 * std::atan(delta.y() * std::tan(std::numbers::pi / 6) / view.height());
-        const Vec3 expected{static_cast<float>(-std::sin(yaw) * std::cos(pitch)),
-                            static_cast<float>(std::sin(pitch)),
-                            static_cast<float>(-std::cos(yaw) * std::cos(pitch))};
-        const auto difference = forward - expected;
-        Check(difference.Dot(difference) < .000001f,
-              "Free look applied a device-pixel or extra sensitivity multiplier");
-    }
+        return view.GetViewCamera().GetPosition() - before;
+    };
+    const auto normal = fly(LuxUI::Flags::Key_W, false);
+    const auto fast = fly(LuxUI::Flags::Key_W, true);
+    Check(normal.z < -.05f && Length(fast) > Length(normal) * 1.6f,
+          "RMB+W or Shift acceleration did not move the free camera");
+    Check(fly(LuxUI::Flags::Key_S, false).z > .05f && fly(LuxUI::Flags::Key_A, false).x < -.05f &&
+              fly(LuxUI::Flags::Key_D, false).x > .05f,
+          "RMB+S/A/D did not move backward and sideways in camera space");
+    Check(fly(LuxUI::Flags::Key_Q, false).y < -.05f && fly(LuxUI::Flags::Key_E, false).y > .05f,
+          "RMB+Q/E did not move the camera vertically");
+    Check(view.SetMoveSpeed(0) && view.GetEffectiveMoveSpeed() >= 2,
+          "automatic camera speed was not restored");
 }
 
 void ViewportInteraction(LuxUI::Application& app) {
@@ -223,6 +321,7 @@ int main(int argc, char** argv) {
     try {
         CameraClipping();
         FreeLookDirection(app);
+        FreeNavigation(app);
         ViewportInteraction(app);
         std::cout << "Viewport clipping, grid, camera presets and gizmo regressions passed\n";
         return 0;

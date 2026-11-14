@@ -169,7 +169,37 @@ void EditorWindow::BuildLayout() {
     canvas3D_->SetCancelEditCallback([this] { CancelViewportEdit(); });
     canvas_->setObjectName(LUX_UI_TEXT("sceneViewport2D"));
     canvas3D_->setObjectName(LUX_UI_TEXT("sceneViewport3D"));
+    auto* cameraSpeed = new LuxUI::DoubleSpinBox(sceneBar);
+    cameraSpeed->setObjectName(LUX_UI_TEXT("viewportCameraSpeed"));
+    cameraSpeed->setRange(0, 10000);
+    cameraSpeed->setDecimals(2);
+    cameraSpeed->setSingleStep(.5);
+    cameraSpeed->setPrefix(LUX_UI_TEXT("속도 "));
+    cameraSpeed->setSpecialValueText(LUX_UI_TEXT("자동 속도"));
+    cameraSpeed->setToolTip(
+        LUX_UI_TEXT("카메라 이동 속도 (월드 단위/초). 0은 거리 기반 자동 속도이며, 마우스 오른쪽 "
+                    "버튼을 누른 채 휠로 조절할 수 있습니다."));
+    cameraSpeed->setMinimumWidth(96);
+    cameraSpeed->setMaximumWidth(124);
+    cameraSpeed->setKeyboardTracking(false);
+    cameraSpeed->setValue(
+        LuxUI::Settings().value(LUX_UI_TEXT("viewport/cameraSpeed"), 0).toDouble());
+    canvas3D_->SetMoveSpeed(cameraSpeed->value());
+    sceneBarLayout->insertWidget(std::max(0, sceneBarLayout->count() - 3), cameraSpeed);
+    connect(cameraSpeed, qOverload<double>(&LuxUI::DoubleSpinBox::valueChanged), this,
+            [this](double value) { canvas3D_->SetMoveSpeed(value); });
+    canvas3D_->SetMoveSpeedChangedCallback([cameraSpeed](double value) {
+        const LuxUI::SignalBlocker block(cameraSpeed);
+        cameraSpeed->setValue(value);
+        LuxUI::Settings().setValue(LUX_UI_TEXT("viewport/cameraSpeed"), value);
+    });
+    canvas3D_->SetNavigationMessageCallback(
+        [this](const LuxUI::String& message) { statusBar()->showMessage(message, 7000); });
+    connect(viewChoice, &LuxUI::ComboBox::currentIndexChanged, cameraSpeed,
+            [cameraSpeed](int index) { cameraSpeed->setVisible(index == 0); });
     gameCanvas_ = new GameViewport(viewportTabs_);
+    gameCanvas_->SetSceneProvider(
+        [this] { return runtimeScene_ ? runtimeScene_.get() : &document_.GetScene(); });
     viewportTabs_->addTab(canvas3D_, LUX_UI_TEXT("Scene · 3D"));
     viewportTabs_->addTab(canvas_, LUX_UI_TEXT("Scene · 2D"));
     viewportTabs_->addTab(gameCanvas_, LUX_UI_TEXT("Game"));
@@ -929,9 +959,13 @@ void EditorWindow::BuildLayout() {
     createMenu->addAction(MakeEditorIcon(EditorIcon::Grid), LUX_UI_TEXT("타일맵"), this,
                           [this] { AddTilemap(); });
     createMenu
-        ->addAction(MakeEditorIcon(EditorIcon::Focus), LUX_UI_TEXT("카메라"), this,
-                    [this] { AddCameraEntity(); })
+        ->addAction(MakeEditorIcon(EditorIcon::Focus), LUX_UI_TEXT("3D 카메라"), this,
+                    [this] { AddCameraEntity(true); })
         ->setObjectName(LUX_UI_TEXT("addCamera"));
+    createMenu
+        ->addAction(MakeEditorIcon(EditorIcon::Focus), LUX_UI_TEXT("2D 카메라"), this,
+                    [this] { AddCameraEntity(false); })
+        ->setObjectName(LUX_UI_TEXT("addCamera2D"));
     create->setMenu(createMenu);
     toolbar->addWidget(create);
     toolbar->addSeparator();

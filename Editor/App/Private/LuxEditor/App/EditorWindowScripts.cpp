@@ -190,7 +190,7 @@ void EditorWindow::RefreshScriptDetails() {
                 } else if constexpr (std::is_same_v<T, LuxEngine::ScriptEntityReference>) {
                     auto* field = new LuxUI::ComboBox(scriptFieldsPanel_);
                     field->addItem(LUX_UI_TEXT("없음"), 0u);
-                    for (const auto candidate : document_.GetScene().GetEntities()) {
+                    for (const auto& candidate : document_.GetScene().GetEntities()) {
                         const auto* tag = candidate.TryGetComponent<LuxEngine::TagComponent>();
                         field->addItem(LUX_UI_TEXT("%1 (#%2)")
                                            .arg(tag ? LuxUI::String::fromUtf8(tag->tag.c_str())

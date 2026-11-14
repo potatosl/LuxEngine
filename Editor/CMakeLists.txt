@@ -80,12 +80,16 @@ endfunction()
 if(TARGET LuxUIPanelsTests)
     lux_editor_copy_qt_plugins(LuxUIPanelsTests)
 endif()
+if(TARGET LuxUIPointerCaptureTests)
+    lux_editor_copy_qt_plugins(LuxUIPointerCaptureTests)
+endif()
 
 set(LUX_EDITOR_PRIVATE_INCLUDE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/Animation/Private"
     "${CMAKE_CURRENT_SOURCE_DIR}/App/Private"
     "${CMAKE_CURRENT_SOURCE_DIR}/Build/Private"
     "${CMAKE_CURRENT_SOURCE_DIR}/Debug/Private"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Modeling/Private"
     "${CMAKE_CURRENT_SOURCE_DIR}/Project/Private"
     "${CMAKE_CURRENT_SOURCE_DIR}/Scene/Private"
     "${CMAKE_CURRENT_SOURCE_DIR}/Ui/Private"
@@ -99,6 +103,7 @@ add_subdirectory(Animation)
 add_subdirectory(Debug)
 add_subdirectory(Project)
 add_subdirectory(Scene)
+add_subdirectory(Modeling)
 add_subdirectory(Ui)
 add_subdirectory(Viewport)
 
@@ -400,11 +405,13 @@ if(LUX_BUILD_TESTS)
 endif()
 
 if(LUX_BUILD_TESTS)
-    foreach(suite GameView ModelImport FbxViewport)
+    foreach(suite GameView ModelImport FbxViewport MeshModeling ModelingWorkspace ModelingViewport CameraUi CameraGizmo)
         add_executable(Lux${suite}Tests Tests/${suite}Test.cpp)
         target_link_libraries(Lux${suite}Tests PRIVATE LuxEditorUi)
         target_include_directories(Lux${suite}Tests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
-        lux_set_target_warnings(Lux${suite}Tests)
+        if(COMMAND lux_set_target_warnings)
+            lux_set_target_warnings(Lux${suite}Tests)
+        endif()
         lux_editor_copy_runtime(Lux${suite}Tests)
         lux_editor_copy_qt_plugins(Lux${suite}Tests)
         add_test(NAME Editor_${suite} COMMAND Lux${suite}Tests)
@@ -417,10 +424,18 @@ if(LUX_BUILD_TESTS)
     add_executable(LuxGameViewGpuTests Tests/GameViewGpuTest.cpp)
     target_link_libraries(LuxGameViewGpuTests PRIVATE LuxEditorUi)
     target_include_directories(LuxGameViewGpuTests PRIVATE ${LUX_EDITOR_PRIVATE_INCLUDE_DIRS})
-    lux_set_target_warnings(LuxGameViewGpuTests)
+    if(COMMAND lux_set_target_warnings)
+        lux_set_target_warnings(LuxGameViewGpuTests)
+    endif()
     lux_editor_copy_runtime(LuxGameViewGpuTests)
     lux_editor_copy_qt_plugins(LuxGameViewGpuTests)
     add_test(NAME Editor_game_view_gpu COMMAND LuxGameViewGpuTests)
     set_tests_properties(Editor_game_view_gpu PROPERTIES LABELS "gpu;editor;play" TIMEOUT 90
+        SKIP_RETURN_CODE 77 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_VULKAN_VALIDATION=sync")
+endif()
+
+if(LUX_BUILD_TESTS)
+    add_test(NAME Editor_modeling_gpu COMMAND LuxModelingViewportTests --gpu)
+    set_tests_properties(Editor_modeling_gpu PROPERTIES LABELS "gpu;editor;modeling" TIMEOUT 90
         SKIP_RETURN_CODE 77 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LUX_VULKAN_VALIDATION=sync")
 endif()

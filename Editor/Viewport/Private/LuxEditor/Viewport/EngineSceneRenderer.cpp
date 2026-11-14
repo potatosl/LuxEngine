@@ -88,6 +88,14 @@ void DrainWindowEvents(SDL_Window* window, bool pump = false) {
 }
 } // namespace
 
+struct EngineSceneRenderer::MeshPreview {
+    LuxEngine::uint32 entity = 0;
+    std::vector<LuxEngine::Vertex3D> vertices;
+    std::vector<LuxEngine::uint32> indices;
+    LuxEngine::uint64 revision = 1;
+    LuxEngine::uint64 topology = 1;
+};
+
 struct EngineSceneRenderer::State {
     bool sdlVideo = false;
     LuxEngine::Window window;
@@ -97,8 +105,12 @@ struct EngineSceneRenderer::State {
     LuxEngine::uint32 width = 0;
     LuxEngine::uint32 height = 0;
     LuxEngine::GpuFrameCapture capture;
+    LuxEngine::Mesh3D previewMesh;
+    LuxEngine::uint64 previewRevision = 0;
+    LuxEngine::uint64 previewTopology = 0;
 
     ~State() {
+        previewMesh.Release();
         context2D.Shutdown();
         context3D.Shutdown();
         gpu.Shutdown();
@@ -115,6 +127,44 @@ EngineSceneRenderer::~EngineSceneRenderer() {
     Shutdown();
 }
 
+bool EngineSceneRenderer::SetMeshPreview(LuxEngine::uint32 entity,
+                                         std::span<const LuxEngine::Vertex3D> vertices,
+                                         std::span<const LuxEngine::uint32> indices) {
+    if (entity == 0 || vertices.empty() || vertices.size() > 1'000'000 || indices.empty() ||
+        indices.size() > 3'000'000 || indices.size() % 3 != 0)
+        return false;
+    for (const auto index : indices)
+        if (index >= vertices.size())
+            return false;
+    for (const auto& v : vertices)
+        for (const auto value : {v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y,
+                                 v.normal.z, v.texCoords.x, v.texCoords.y})
+            if (!std::isfinite(value))
+                return false;
+    auto preview = std::make_unique<MeshPreview>();
+    preview->entity = entity;
+    preview->vertices.assign(vertices.begin(), vertices.end());
+    preview->indices.assign(indices.begin(), indices.end());
+    preview->revision = ++previewRevision_;
+    preview->topology = preview->revision;
+    if (meshPreview_) {
+        if (meshPreview_->vertices.size() == vertices.size() &&
+            meshPreview_->indices == preview->indices)
+            preview->topology = meshPreview_->topology;
+    }
+    meshPreview_ = std::move(preview);
+    return true;
+}
+
+void EngineSceneRenderer::ClearMeshPreview() {
+    meshPreview_.reset();
+    if (state_ && !rendering_) {
+        state_->previewMesh.Release();
+        state_->previewRevision = 0;
+        state_->previewTopology = 0;
+    }
+}
+
 GameViewCamera ResolveGameViewCamera(LuxEngine::Scene& scene, int width, int height) {
     GameViewCamera result;
     const float aspect = static_cast<float>(std::max(1, width)) / std::max(1, height);
@@ -128,18 +178,31 @@ GameViewCamera ResolveGameViewCamera(LuxEngine::Scene& scene, int width, int hei
         if (!camera.isPrimary || !scene.HasComponent<LuxEngine::TransformComponent>(id))
             continue;
         if (camera.isPerspective) {
-            if (!std::isfinite(camera.fov) || camera.fov <= 0 || camera.fov >= 180)
+            if (!std::isfinite(camera.fov) || camera.fov <= 0 || camera.fov >= 180 ||
+                !std::isfinite(camera.nearClip) || !std::isfinite(camera.farClip) ||
+                camera.nearClip <= 0 || camera.farClip <= camera.nearClip)
                 continue;
             result.perspective = true;
         } else {
             if (!std::isfinite(camera.orthoSize) || camera.orthoSize <= 0)
                 continue;
-            const auto transform = scene.GetWorldTransform(id);
-            if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y) ||
-                !std::isfinite(transform.rotation.z))
+            const auto matrix = scene.GetWorldMatrix(id);
+            const auto* m = matrix.elements;
+            float angle = 0;
+            try {
+                angle = scene.GetWorldTransform(id).rotation.z;
+            } catch (const std::logic_error&) {
+                // A zero scale does not invalidate a camera's position or its authored 2D
+                // orientation. Avoid decomposing the singular world matrix in this case.
+                for (auto node = id; node; node = scene.GetParent(node))
+                    if (const auto* transform =
+                            scene.TryGetComponent<LuxEngine::TransformComponent>(node))
+                        angle += transform->rotation.z;
+            }
+            if (!std::isfinite(m[12]) || !std::isfinite(m[13]) || !std::isfinite(angle))
                 continue;
-            view = {transform.position.x, transform.position.y, camera.orthoSize};
-            rotation = transform.rotation.z;
+            view = {m[12], m[13], camera.orthoSize};
+            rotation = angle;
         }
         foundCamera = true;
         break;
@@ -152,7 +215,8 @@ GameViewCamera ResolveGameViewCamera(LuxEngine::Scene& scene, int width, int hei
     result.camera2D.SetPosition({view.centerX, view.centerY, 0});
     result.camera2D.SetRotation(rotation);
     const auto primary = LuxEngine::ResolveScenePlayerCamera(scene, view);
-    result.camera3D.SetPerspective(LuxEngine::ToRadians(primary.fovDegrees), aspect, .1f, 1000.f);
+    result.camera3D.SetPerspective(LuxEngine::ToRadians(primary.fovDegrees), aspect,
+                                   primary.nearClip, primary.farClip);
     result.camera3D.SetPosition(primary.position);
     result.camera3D.SetTarget(primary.target);
     result.camera3D.SetUp(primary.up);
@@ -367,6 +431,8 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
 
         ~RenderScope() {
             self.rendering_ = false;
+            if (!self.meshPreview_)
+                self.ClearMeshPreview();
             if (self.pendingShutdown_)
                 self.Shutdown();
         }
@@ -419,7 +485,8 @@ bool EngineSceneRenderer::Render(LuxEngine::Scene& scene, int pixelWidth, int pi
 bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                                    const LuxEngine::Vec3& focus, double yaw, double pitch,
                                    double distance, LuxUI::Image& output,
-                                   LuxUI::Image* skyboxBackground) {
+                                   LuxUI::Image* skyboxBackground,
+                                   const LuxEngine::PerspectiveCamera* cameraOverride) {
     struct Measurement {
         double& destination;
         std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
@@ -436,11 +503,11 @@ bool EngineSceneRenderer::Render3D(LuxEngine::Scene& scene, int pixelWidth, int 
         if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Pbr &&
             scene.GetSettings().render3D.showSkybox)
             if (!Render3DPass(scene, pixelWidth, pixelHeight, focus, yaw, pitch, distance,
-                              *skyboxBackground, true, true))
+                              *skyboxBackground, true, true, cameraOverride))
                 return false;
     }
     return Render3DPass(scene, pixelWidth, pixelHeight, focus, yaw, pitch, distance, output, false,
-                        skyboxBackground == nullptr);
+                        skyboxBackground == nullptr, cameraOverride);
 }
 
 bool EngineSceneRenderer::RenderGame(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
@@ -458,6 +525,8 @@ bool EngineSceneRenderer::RenderGame(LuxEngine::Scene& scene, int pixelWidth, in
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
                     .count();
             self.rendering_ = false;
+            if (!self.meshPreview_)
+                self.ClearMeshPreview();
             if (self.pendingShutdown_)
                 self.Shutdown();
         }
@@ -524,7 +593,8 @@ bool EngineSceneRenderer::RenderGame(LuxEngine::Scene& scene, int pixelWidth, in
 bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                                        const LuxEngine::Vec3& focus, double yaw, double pitch,
                                        double distance, LuxUI::Image& output, bool backgroundOnly,
-                                       bool drawSkybox) {
+                                       bool drawSkybox,
+                                       const LuxEngine::PerspectiveCamera* cameraOverride) {
     if (rendering_ || pixelWidth <= 0 || pixelHeight <= 0 || pixelWidth > 16384 ||
         pixelHeight > 16384)
         return false;
@@ -534,6 +604,8 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
 
         ~RenderScope() {
             self.rendering_ = false;
+            if (!self.meshPreview_)
+                self.ClearMeshPreview();
             if (self.pendingShutdown_)
                 self.Shutdown();
         }
@@ -550,8 +622,9 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
     // The widget draws the scene background and grid before compositing object pixels.
     s.gpu.Clear(0, 0, 0, 0);
 
-    const auto camera =
-        MakeViewportCamera3D(LuxUI::SizeF(width, height), focus, yaw, pitch, distance);
+    const auto camera = cameraOverride ? *cameraOverride
+                                       : MakeViewportCamera3D(LuxUI::SizeF(width, height), focus,
+                                                              yaw, pitch, distance);
 
     LuxEngine::DirectionalLight sun;
     sun.direction = LuxEngine::Vec3(0.5f, -1.0f, 0.5f).Normalized();
@@ -594,7 +667,20 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
                                        &material.occlusionTexture})
                     if (!resource->empty())
                         *resource = scene.ResolveAssetPath(*resource);
-                if (mesh->meshPath.empty())
+                if (meshPreview_ && meshPreview_->entity == entity.GetId()) {
+                    if (s.previewRevision != meshPreview_->revision || !s.previewMesh.IsValid()) {
+                        const bool updated = s.previewMesh.IsValid() &&
+                                             s.previewTopology == meshPreview_->topology &&
+                                             s.previewMesh.UpdateVertices(meshPreview_->vertices);
+                        if (!updated && !s.previewMesh.Upload(&s.gpu, meshPreview_->vertices,
+                                                              meshPreview_->indices))
+                            throw std::runtime_error(
+                                "모델링 미리보기 메시를 업로드하지 못했습니다.");
+                        s.previewRevision = meshPreview_->revision;
+                        s.previewTopology = meshPreview_->topology;
+                    }
+                    LuxEngine::Renderer3D::DrawMesh(s.previewMesh, world, material);
+                } else if (mesh->meshPath.empty())
                     LuxEngine::Renderer3D::DrawMesh(world, material);
                 else {
                     const auto* animation =

@@ -184,6 +184,21 @@ void SceneViewport2D::GetView(double& centerX, double& centerY, double& halfHeig
     halfHeight = std::max(1.0, height() * 0.5) / pixelsPerUnit_;
 }
 
+bool SceneViewport2D::SetView(double centerX, double centerY, double halfHeight) {
+    if (!std::isfinite(centerX) || !std::isfinite(centerY) || !std::isfinite(halfHeight) ||
+        halfHeight <= 0)
+        return false;
+    const double scale = std::max(1.0, height() * .5) / halfHeight;
+    const LuxUI::PointF pan(-centerX * scale, centerY * scale);
+    if (!std::isfinite(scale) || scale <= 0 || !std::isfinite(pan.x()) || !std::isfinite(pan.y()))
+        return false;
+    CancelInteraction();
+    pixelsPerUnit_ = scale;
+    pan_ = pan;
+    update();
+    return true;
+}
+
 void SceneViewport2D::FrameBounds(bool selectedOnly) {
     LuxUI::RectF bounds;
     bool found = false;

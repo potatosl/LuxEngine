@@ -73,4 +73,4 @@ python3 -m unittest discover -s tools/Tests -p test_basic_models.py -v
 
 이번 구조화 FBX 확장은 자체 작성한 ASCII fixture로 계층·단위 변환·다중 재질·내장 텍스처·스킨·모프·클립·잘못된 입력과 씬 왕복을 검사했다. 에디터 회귀는 계층 배치·재가져오기·ID/사용자 자식 유지·Undo/Redo·현재 포즈의 경계와 삼각형 선택·독립 애니메이션 작업공간을 검사한다. 음수 월드 스케일은 CW/CCW 파이프라인을 선택하고 양면 재질의 뒷면 조명 법선을 보정했다.
 
-Linux 헤드리스 회귀 82개와 수정 후 에디터 관련 42개 재검사를 통과했다. NVIDIA Vulkan GPU 회귀 5개는 기본 모델 10종, CPU 스키닝 인스턴스 분리·정점 갱신, 한 씬 내 4096개 캐시 항목을 넘는 메시 수명, 미러/양면 재질, Game View 주 카메라, 일반/HiDPI 선택을 확인했다. 설치한 SDK만 링크한 외부 소비자에서 Jolt·ModelAsset·모델 씬 직렬화를 검증했다. Windows·macOS 실행이나 원격 CI 검증 결과는 포함하지 않는다.
+구조화 FBX 단계에서 Linux 헤드리스 회귀 82개와 에디터 관련 42개 재검사를 통과했다. 이후 모델링 단계의 헤드리스 85개·GPU 6개도 통과했다. NVIDIA Vulkan GPU 회귀는 기본 모델 10종, CPU 스키닝 인스턴스 분리·정점 갱신, 한 씬 내 4096개 캐시 항목을 넘는 메시 수명, 미러/양면 재질, Game View 주 카메라, 일반/HiDPI 선택을 확인했다. 설치한 SDK만 링크한 외부 소비자에서 Jolt·ModelAsset·모델 씬 직렬화를 검증했다. Windows·macOS 실행이나 원격 CI 검증 결과는 포함하지 않는다.

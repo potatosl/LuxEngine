@@ -65,18 +65,58 @@ GameViewport::~GameViewport() {
 }
 
 void GameViewport::SetScene(LuxEngine::Scene* scene) {
+    const auto lifetime = scene ? scene->Lifetime() : std::weak_ptr<int>{};
+    if (!sceneProvider_ && scene_ == scene && !lifetime.owner_before(sceneLifetime_) &&
+        !sceneLifetime_.owner_before(lifetime)) {
+        update();
+        return;
+    }
     ClearInput();
+    sceneProvider_ = {};
     scene_ = scene;
+    sceneLifetime_ = lifetime;
+    paused_ = false;
+    inputEnabled_ = false;
+    frame_ = {};
+    update();
+}
+
+void GameViewport::SetSceneProvider(std::function<LuxEngine::Scene*()> provider) {
+    ClearInput();
+    scene_ = nullptr;
+    sceneLifetime_.reset();
+    sceneProvider_ = std::move(provider);
+    inputEnabled_ = false;
     paused_ = false;
     frame_ = {};
     update();
 }
 
 LuxEngine::Scene* GameViewport::GetScene() const noexcept {
-    return scene_;
+    if (sceneProvider_) {
+        try {
+            return sceneProvider_();
+        } catch (...) {
+            return nullptr;
+        }
+    }
+    return sceneLifetime_.expired() ? nullptr : scene_;
+}
+
+void GameViewport::SetInputEnabled(bool enabled) {
+    if (inputEnabled_ == enabled)
+        return;
+    ClearInput();
+    inputEnabled_ = enabled;
+}
+
+bool GameViewport::IsInputEnabled() const noexcept {
+    return inputEnabled_;
 }
 
 void GameViewport::SetPaused(bool paused) {
+    if (paused_ == paused)
+        return;
     paused_ = paused;
     ClearInput();
     update();
@@ -103,7 +143,7 @@ bool GameViewport::event(LuxUI::Event* event) {
 
 void GameViewport::mousePressEvent(LuxUI::MouseEvent* event) {
     setFocus(LuxUI::Flags::MouseFocusReason);
-    if (scene_ && !paused_) {
+    if (GetScene() && inputEnabled_ && !paused_) {
         LuxEngine::Input::SetExternalMousePosition(static_cast<float>(event->position().x()),
                                                    static_cast<float>(event->position().y()));
         if (const auto button = MouseButton(event->button()))
@@ -113,7 +153,7 @@ void GameViewport::mousePressEvent(LuxUI::MouseEvent* event) {
 }
 
 void GameViewport::mouseReleaseEvent(LuxUI::MouseEvent* event) {
-    if (scene_ && !paused_ && hasFocus()) {
+    if (GetScene() && inputEnabled_ && !paused_ && hasFocus()) {
         if (const auto button = MouseButton(event->button()))
             LuxEngine::Input::SetExternalMouseButton(*button, false);
     }
@@ -121,7 +161,7 @@ void GameViewport::mouseReleaseEvent(LuxUI::MouseEvent* event) {
 }
 
 void GameViewport::mouseMoveEvent(LuxUI::MouseEvent* event) {
-    if (scene_ && !paused_ && hasFocus())
+    if (GetScene() && inputEnabled_ && !paused_ && hasFocus())
         LuxEngine::Input::SetExternalMousePosition(static_cast<float>(event->position().x()),
                                                    static_cast<float>(event->position().y()));
     event->accept();
@@ -132,28 +172,32 @@ void GameViewport::paintEvent(LuxUI::PaintEvent*) {
     const double scale = devicePixelRatioF();
     const int pixelWidth = std::clamp(static_cast<int>(std::lround(width() * scale)), 1, 16384);
     const int pixelHeight = std::clamp(static_cast<int>(std::lround(height() * scale)), 1, 16384);
-    const bool rendered = scene_ && renderer_->RenderGame(*scene_, pixelWidth, pixelHeight, frame_);
+    auto* scene = GetScene();
+    const auto lifetime = scene ? scene->Lifetime() : std::weak_ptr<int>{};
+    const bool rendered = scene && renderer_->RenderGame(*scene, pixelWidth, pixelHeight, frame_);
+    // A host can replace its document while initializing a native GPU surface.
+    if (lifetime.expired() || GetScene() != scene)
+        scene = nullptr;
     LuxUI::Painter painter(this);
     if (!painter.isActive())
         return;
     painter.fillRect(rect(), LuxUI::Color(22, 24, 28));
-    if (!scene_) {
+    if (!scene) {
         painter.setPen(LuxUI::Color(165, 170, 180));
-        painter.drawText(rect(), LuxUI::Flags::AlignCenter,
-                         LUX_UI_TEXT("게임이 실행되고 있지 않습니다."));
+        painter.drawText(rect(), LuxUI::Flags::AlignCenter, LUX_UI_TEXT("미리 볼 씬이 없습니다."));
         return;
     }
-    painter.fillRect(rect(), Color(scene_->GetSettings().clearColor));
+    painter.fillRect(rect(), Color(scene->GetSettings().clearColor));
     if (rendered) {
         frame_.setDevicePixelRatio(scale);
         painter.drawImage(LuxUI::RectF(rect()), frame_);
     } else {
-        PaintSoftware(painter);
+        PaintSoftware(painter, *scene);
     }
 }
 
-void GameViewport::PaintSoftware(LuxUI::Painter& painter) {
-    const auto camera = ResolveGameViewCamera(*scene_, width(), height());
+void GameViewport::PaintSoftware(LuxUI::Painter& painter, LuxEngine::Scene& scene) {
+    const auto camera = ResolveGameViewCamera(scene, width(), height());
     painter.setRenderHint(LuxUI::Painter::Antialiasing);
     painter.setPen(LuxUI::Flags::NoPen);
     if (camera.perspective) {
@@ -178,11 +222,11 @@ void GameViewport::PaintSoftware(LuxUI::Painter& painter) {
                                                              {{3, 7, 6, 2}},
                                                              {{0, 4, 7, 3}},
                                                              {{1, 2, 6, 5}}}};
-        for (auto entity : scene_->GetEntities()) {
+        for (auto entity : scene.GetEntities()) {
             const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
             if (!mesh || !entity.HasComponent<LuxEngine::TransformComponent>())
                 continue;
-            const auto world = scene_->GetWorldMatrix(entity.GetId());
+            const auto world = scene.GetWorldMatrix(entity.GetId());
             for (size_t side = 0; side < indices.size(); ++side) {
                 Face face;
                 face.depth = 0;
@@ -226,10 +270,10 @@ void GameViewport::PaintSoftware(LuxUI::Painter& painter) {
                                                      {.48f, .51f, .54f, 1},
                                                      {.22f, .46f, .74f, .82f},
                                                      {.76f, .66f, .42f, 1}}};
-    for (auto entity : scene_->GetEntitiesIn2DLayerOrder()) {
+    for (auto entity : scene.GetEntitiesIn2DLayerOrder()) {
         if (!entity.HasComponent<LuxEngine::TransformComponent>())
             continue;
-        const auto world = scene_->GetWorldMatrix(entity.GetId());
+        const auto world = scene.GetWorldMatrix(entity.GetId());
         if (const auto* sprite = entity.TryGetComponent<LuxEngine::SpriteRendererComponent>())
             drawQuad(world, sprite->color);
         if (const auto* map = entity.TryGetComponent<LuxEngine::TilemapComponent>())
