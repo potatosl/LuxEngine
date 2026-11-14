@@ -80,6 +80,7 @@ struct LuxForgeDevice {
 
     WindowHandle window = {};
     SwapChain* swapChain = nullptr;
+    uint64_t swapchainCreations = 0;
     uint32_t width = 0;
     uint32_t height = 0;
     bool vsync = true;
@@ -407,6 +408,7 @@ bool AddSwapChain(LuxForgeDevice* device) {
     device->renderFinished.resize(device->swapChain->mImageCount);
     for (auto& semaphore : device->renderFinished)
         initSemaphore(device->renderer, &semaphore);
+    ++device->swapchainCreations;
     return true;
 }
 
@@ -1104,6 +1106,8 @@ int BeginFrame(LuxForgeDevice* device) {
     BeginSceneFrame(device);
     device->frameStats.drawCalls = 0;
     device->frameStats.pipelineBinds = 0;
+    device->frameStats.descriptorBinds = 0;
+    device->frameStats.uniformBinds = 0;
     device->frameStats.vertexBytes = 0;
 
     uint32_t index = UINT32_MAX;
@@ -1429,6 +1433,7 @@ void Stats(const LuxForgeDevice* device, LuxForgeStats* stats) {
         if (id != device->whiteTexture)
             stats->textureBytes += device->textures[id].bytes;
     stats->sceneBytes = device->sceneBytes;
+    stats->swapchainRecreations = device->swapchainCreations ? device->swapchainCreations - 1 : 0;
 }
 
 bool IsLiveBuffer(const LuxForgeDevice* device, uint32_t id) {

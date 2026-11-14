@@ -2574,7 +2574,8 @@ void Gpu() {
         if (frame == 0)
             std::cout << "frame stats: draws " << stats.drawCalls << ", pipelines "
                       << stats.pipelineBinds << ", descriptors " << stats.descriptorBinds
-                      << ", push constants " << stats.pushConstantUpdates << '\n';
+                      << ", uniforms " << stats.uniformBinds << ", push constants "
+                      << stats.pushConstantUpdates << ", submissions " << stats.submissions << '\n';
         // Two 2D draws, one HDR mesh draw and one tone-composite draw are recorded. Forge
         // uses uniform-buffer descriptor sets rather than the previous Vulkan push constants.
         Check(stats.drawCalls == 4 && stats.pipelineBinds == 4 && stats.descriptorBinds == 9 &&

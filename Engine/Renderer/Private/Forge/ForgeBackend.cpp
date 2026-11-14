@@ -126,7 +126,7 @@ bool ForgeBackend::Initialize(Window& window, const GpuDeviceConfig& config) {
 
     desc.width = width;
     desc.height = height;
-    desc.framesInFlight = config.framesInFlight ? config.framesInFlight : 2;
+    desc.framesInFlight = std::clamp(config.framesInFlight, 1u, 3u);
     desc.vsync = config.vsync ? 1 : 0;
     desc.validation = config.validation == GpuValidation::Off ? 0 : 1;
     desc.maxFrameVertexBytes = config.maxFrameVertexBytes;
@@ -145,7 +145,9 @@ bool ForgeBackend::Initialize(Window& window, const GpuDeviceConfig& config) {
     info_.apiVersion = forgeInfo.apiVersion;
     info_.driverVersion = forgeInfo.driverVersion;
     info_.maxTextureSize = forgeInfo.maxTextureSize;
-    info_.gpuTimestamps = forgeInfo.gpuTimestamps != 0;
+    // Report usable RHI timing, not merely hardware support. The Forge bridge does not yet
+    // record/read GPU timestamp queries, so gpuTimeMs remains unavailable on this backend.
+    info_.gpuTimestamps = false;
 
     lib_ = std::move(lib);
     window_ = &window;
@@ -202,7 +204,13 @@ void ForgeBackend::UpdateFrameStats() {
 }
 
 GpuDeviceCounters ForgeBackend::GetCounters() const {
-    return counters_;
+    auto counters = counters_;
+    if (lib_ && lib_->device) {
+        LuxForgeStats stats = {};
+        lib_->api->stats(lib_->device, &stats);
+        counters.swapchainRecreations = stats.swapchainRecreations;
+    }
+    return counters;
 }
 
 GpuMemoryStats ForgeBackend::GetMemoryStats() const {
@@ -239,8 +247,6 @@ GpuDevice::FrameStart ForgeBackend::BeginFrame() {
                 ForgeFailure();
                 return GpuDevice::FrameStart::Error;
             }
-            if (width != currentWidth || height != currentHeight)
-                ++counters_.swapchainRecreations;
             resizePending_ = false;
         }
     }
@@ -371,7 +377,11 @@ bool ForgeBackend::FlushUploads() {
 }
 
 bool ForgeBackend::WaitIdle() {
-    return Usable() && (lib_->api->waitIdle(lib_->device) != 0 || ForgeFailure());
+    if (!Usable())
+        return false;
+    if (frameOpen_)
+        return Reject("WaitIdle called during a frame");
+    return lib_->api->waitIdle(lib_->device) != 0 || ForgeFailure();
 }
 
 bool ForgeBackend::RequestFrameCapture() {
