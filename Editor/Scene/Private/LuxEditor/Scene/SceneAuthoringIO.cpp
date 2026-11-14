@@ -40,7 +40,10 @@ void RebaseSceneReferences(LuxEngine::Scene& scene, const fs::path& owner,
     }
     for (auto entity : scene.GetEntities()) {
         if (auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>())
-            for (auto* resource : {&mesh->meshPath, &mesh->material.baseColorTexture}) {
+            for (auto* resource :
+                 {&mesh->meshPath, &mesh->material.baseColorTexture, &mesh->material.normalTexture,
+                  &mesh->material.metallicTexture, &mesh->material.roughnessTexture,
+                  &mesh->material.occlusionTexture}) {
                 if (resource->empty())
                     continue;
                 auto path = PathFromUtf8(*resource);

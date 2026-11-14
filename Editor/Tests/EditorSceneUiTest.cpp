@@ -5,6 +5,7 @@
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
 #include <LuxEditor/Viewport/ViewportCamera3D.hpp>
+#include <LuxEngine/Assets/AssetManager.hpp>
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
@@ -304,6 +305,67 @@ void BaseColorEditingAndReload() {
               Data(*document.GetScene(oldTab)) == oldScene,
           "a delayed file picker never applies an asset to a different active document");
     (void)tab;
+}
+
+void NormalMapEditingAndReload() {
+    Fixture fixture;
+    auto& window = *fixture.window;
+    auto& document = window.GetDocument();
+    const auto texture = fixture.Path("normal-only.png");
+    QImage image(4, 4, QImage::Format_RGBA8888);
+    image.fill(QColor(128, 128, 255));
+    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"), "normal map fixture writes");
+    window.ExecuteRecordedEdit(QStringLiteral("노멀 맵 대상"), [&] {
+        document.CreateEntity("Normal mapped cube").AddComponent<MeshRendererComponent>();
+    });
+    const auto id = document.GetSelected().GetId();
+    auto* field = window.findChild<QLineEdit*>(QStringLiteral("materialMap0"));
+    auto* reload = window.findChild<QPushButton*>(QStringLiteral("reloadMeshAssets"));
+    Check(field && reload, "normal map inspector and asset reload controls exist");
+    field->setText(QString::fromUtf8(PathUtf8(texture)));
+    Check(QMetaObject::invokeMethod(field, "editingFinished", Qt::DirectConnection),
+          "normal map assignment invokes its editor action");
+    const auto assigned = document.GetScene().GetComponent<MeshRendererComponent>(id).material;
+    Check(assigned.baseColorTexture.empty() &&
+              std::filesystem::equivalent(PathFromUtf8(assigned.normalTexture), texture),
+          "the inspector assigns a normal map without requiring a base-color texture");
+    History(window)->undo();
+    Check(
+        document.GetScene().GetComponent<MeshRendererComponent>(id).material.normalTexture.empty(),
+        "normal map assignment is undoable");
+    History(window)->redo();
+    Check(document.GetScene().GetComponent<MeshRendererComponent>(id).material.normalTexture ==
+              assigned.normalTexture,
+          "normal map assignment is redoable");
+    const auto revision = AssetManager::GetTextureRevision(PathUtf8(texture));
+    image.fill(QColor(150, 128, 250));
+    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"),
+          "normal map source can change on disk");
+    const auto before = Data(document.GetScene());
+    const auto history = History(window)->index();
+    const auto dirty = document.IsDirty();
+    reload->click();
+    Check(AssetManager::GetTextureRevision(PathUtf8(texture)) > revision,
+          "asset reload refreshes a normal-only material texture revision");
+    Check(Data(document.GetScene()) == before && History(window)->index() == history &&
+              document.IsDirty() == dirty,
+          "normal map reload preserves scene data, dirty state and undo history");
+    const auto saved = fixture.Path("normal-material.lux");
+    const auto tab = document.GetActiveTabId();
+    Check(document.SaveAs(PathUtf8(saved)) && window.CloseSceneDocument(tab, true) &&
+              window.OpenSceneDocument(saved),
+          "a normal-mapped scene saves and opens again from disk");
+    const auto& restored = document.GetScene().GetComponent<MeshRendererComponent>(id).material;
+    Check(restored.baseColorTexture.empty() &&
+              std::filesystem::equivalent(PathFromUtf8(restored.normalTexture), texture),
+          "scene reload preserves a normal map when the base-color slot is empty");
+    auto* outliner = Outliner(window);
+    outliner->setCurrentItem(Find(*outliner, id));
+    Pump();
+    Check(!field->text().isEmpty() &&
+              std::filesystem::equivalent(PathFromUtf8(field->text().toUtf8().toStdString()),
+                                          texture),
+          "the inspector restores the saved normal map field");
 }
 
 void TabsAndGlobalUndo() {
@@ -1237,8 +1299,9 @@ int main(int argc, char** argv) {
         }
         const std::string_view suite = argc > 1 ? argv[1] : "all";
         bool found = suite == "all";
-        for (const auto& [name, run] : std::array<std::pair<std::string_view, void (*)()>, 14>{
+        for (const auto& [name, run] : std::array<std::pair<std::string_view, void (*)()>, 15>{
                  {{"base-color", BaseColorEditingAndReload},
+                  {"normal-map", NormalMapEditingAndReload},
                   {"mesh-assets", MeshAssetEditing},
                   {"animation-workspace", AnimationWorkspace},
                   {"tabs", TabsAndGlobalUndo},

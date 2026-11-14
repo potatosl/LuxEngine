@@ -21,10 +21,11 @@ namespace LuxEngine {
         public uint Version;
         public uint Size;
         public delegate* unmanaged[Cdecl]<ulong, byte*, int, ulong> Load;
-        public delegate* unmanaged[Cdecl]<ulong, uint, byte*, int, int> Attach;
+        public delegate* unmanaged[Cdecl]<ulong, uint, byte*, int, byte*, int, int> Attach;
         public delegate* unmanaged[Cdecl]<ulong, uint, int> Detach;
         public delegate* unmanaged[Cdecl]<ulong, double, int> Update;
         public delegate* unmanaged[Cdecl]<ulong, void> Unload;
+        public delegate* unmanaged[Cdecl]<ulong, byte*, int, byte*, int, int> Describe;
         public delegate* unmanaged[Cdecl]<byte*, int, int> LastError;
     }
 
@@ -68,17 +69,18 @@ namespace LuxEngine {
                 if (nativeApi == null || managedApi == null)
                     return 0;
                 NativeApi callbacks = *(NativeApi*)nativeApi;
-                if (callbacks.Version != 1 || callbacks.Size != sizeof(NativeApi))
+                if (callbacks.Version != 2 || callbacks.Size != sizeof(NativeApi))
                     return 0;
                 native = callbacks;
                 *(ManagedApi*)managedApi = new ManagedApi {
-                    Version = 1,
+                    Version = 2,
                     Size = (uint)sizeof(ManagedApi),
                     Load = &Load,
                     Attach = &Attach,
                     Detach = &Detach,
                     Update = &Update,
                     Unload = &Unload,
+                    Describe = &Describe,
                     LastError = &LastError
                 };
                 return 1;
@@ -133,7 +135,7 @@ namespace LuxEngine {
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        private static int Attach(ulong id, uint entity, byte* name, int length) {
+        private static int Attach(ulong id, uint entity, byte* name, int length, byte* fields, int fieldLength) {
             try {
                 World world = Find(id);
                 string typeName = Encoding.UTF8.GetString(new ReadOnlySpan<byte>(name, length));
@@ -144,12 +146,33 @@ namespace LuxEngine {
                     throw new InvalidOperationException("A script is already attached to this entity.");
                 EntityScript script = (EntityScript)Activator.CreateInstance(type)!;
                 script.Entity = new Entity(world.NativeId, entity);
+                ScriptFieldReflection.Apply(script, Encoding.UTF8.GetString(new ReadOnlySpan<byte>(fields, fieldLength)), world.NativeId);
                 script.Create();
                 world.Instances.Add(entity, script);
                 return 1;
             } catch (Exception error) {
                 lastError = error.ToString();
                 return 0;
+            }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        private static int Describe(ulong id, byte* name, int length, byte* destination, int capacity) {
+            try {
+                World world = Find(id);
+                Type type = world.Assembly.GetType(Encoding.UTF8.GetString(new ReadOnlySpan<byte>(name, length)), throwOnError: true)!;
+                if (type.IsAbstract || !typeof(EntityScript).IsAssignableFrom(type))
+                    throw new InvalidOperationException("The type must be a concrete EntityScript class.");
+                byte[] bytes = Encoding.UTF8.GetBytes(ScriptFieldReflection.Describe(type));
+                if (bytes.Length > 65536) throw new InvalidOperationException("Script metadata exceeds the 65536-byte UTF-8 limit.");
+                if (destination != null && capacity > bytes.Length) {
+                    bytes.CopyTo(new Span<byte>(destination, capacity));
+                    destination[bytes.Length] = 0;
+                }
+                return bytes.Length;
+            } catch (Exception error) {
+                lastError = error.ToString();
+                return -1;
             }
         }
 

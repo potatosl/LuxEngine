@@ -25,6 +25,16 @@ void Test() {
     auto& mesh = root.AddComponent<MeshRendererComponent>();
     mesh.meshPath = "Assets/메시.obj";
     mesh.material.baseColorTexture = "Assets/색상.png";
+    mesh.material.normalTexture = "Assets/normal.png";
+    mesh.material.metallicTexture = "Assets/metal.png";
+    mesh.material.roughnessTexture = "Assets/rough.png";
+    mesh.material.occlusionTexture = "Assets/ao.png";
+    mesh.material.normalScale = 2;
+    mesh.material.occlusionStrength = .75f;
+    mesh.material.alphaMode = MaterialAlphaMode::Blend;
+    mesh.material.alphaCutoff = .4f;
+    mesh.material.doubleSided = false;
+    mesh.material.textureSampling = {true, TextureAddressMode::Repeat, true, false};
     root.AddComponent<CameraComponent>();
     root.AddComponent<Rigidbody2DComponent>().velocity = {2, -3};
     root.AddComponent<BoxCollider2DComponent>().isTrigger = true;
@@ -69,6 +79,16 @@ void Test() {
         fn(bad);
         reject(bad.dump());
     };
+
+    for (const auto* key : {"alpha_mode", "alpha_cutoff", "normal_scale", "occlusion_strength"})
+        mutate([key](auto& j) { j["entities"][0]["components"]["mesh"][key] = -1; });
+    mutate([](auto& j) { j["entities"][0]["components"]["mesh"]["alpha_mode"] = 3; });
+    mutate([](auto& j) { j["entities"][0]["components"]["mesh"]["sampling"]["address"] = 2; });
+    mutate([](auto& j) { j["entities"][0]["components"]["mesh"]["sampling"]["mipmaps"] = 1; });
+    mutate([](auto& j) { j["entities"][0]["components"]["mesh"]["double_sided"] = 1; });
+    mutate([](auto& j) {
+        j["entities"][0]["components"]["mesh"]["normal_texture"] = std::string(4097, 'x');
+    });
     mutate([](auto& j) { j["version"] = 2; });
     mutate([](auto& j) { j["version"] = true; });
     mutate([](auto& j) { j["entities"][0]["id"] = 1.5; });

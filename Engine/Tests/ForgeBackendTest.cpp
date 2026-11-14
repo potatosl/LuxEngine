@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <span>
 #include <string>
@@ -2452,6 +2453,250 @@ void Scene3D() {
     Check(context.GetLastAssetError().empty(), "no scene errors after resize");
 }
 
+void MaterialModes() {
+    Session session(96, 96);
+    if (!session.ok)
+        return Check(false, "material session initializes");
+    Renderer3D::Context context(&session.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(60), 1, .1f, 10);
+    camera.SetPosition({0, 0, 3});
+    camera.SetTarget({0, 0, 0});
+    const std::array<Vertex3D, 4> vertices{{{{-1, -1, 0}, {0, 0, 1}, {0, 0}},
+                                            {{1, -1, 0}, {0, 0, 1}, {1, 0}},
+                                            {{1, 1, 0}, {0, 0, 1}, {1, 1}},
+                                            {{-1, 1, 0}, {0, 0, 1}, {0, 1}}}};
+    const std::array<uint32, 6> indices{0, 1, 2, 0, 2, 3};
+    Mesh3D plane;
+    Check(plane.Upload(&session.gpu, vertices, indices), "material plane uploads");
+    for (auto renderMode : {Render3DMode::Legacy, Render3DMode::Pbr}) {
+        Render3DSettings settings;
+        settings.mode = renderMode;
+        settings.shadows = false;
+        settings.imageBasedLighting = false;
+        settings.toneMapping = false;
+        settings.sun.direction = {0, 0, -1};
+        const auto render = [&](Material3D nearMaterial, Material3D farMaterial, bool reverse) {
+            GpuFrameCapture capture;
+            Check(CaptureFrame(session, capture,
+                               [&] {
+                                   session.gpu.Clear(0, 0, 1, 1);
+                                   Renderer3D::BeginScene(camera, settings, 1);
+                                   const auto nearDraw = [&] {
+                                       Renderer3D::DrawMesh(plane, Mat4::Translate({0, 0, .25f}),
+                                                            nearMaterial);
+                                   };
+                                   const auto farDraw = [&] {
+                                       Renderer3D::DrawMesh(plane, Mat4::Translate({0, 0, -.25f}),
+                                                            farMaterial);
+                                   };
+                                   if (reverse) {
+                                       nearDraw();
+                                       farDraw();
+                                   } else {
+                                       farDraw();
+                                       nearDraw();
+                                   }
+                                   Renderer3D::EndScene();
+                                   return true;
+                               }),
+                  "material frame captures");
+            return At(capture, .5f, .5f);
+        };
+        Material3D red, green;
+        red.albedoColor = {1, 0, 0, .5f};
+        green.albedoColor = {0, 1, 0, .5f};
+        red.metallic = green.metallic = 1;
+        red.roughness = green.roughness = 1;
+        red.alphaMode = green.alphaMode = MaterialAlphaMode::Blend;
+        const auto forward = render(red, green, false);
+        const auto reverse = render(red, green, true);
+        Check(forward == reverse && forward[0] > 10 && forward[1] > 10 && forward[2] > 10,
+              "transparent layers sort independently of insertion order");
+        red.alphaMode = MaterialAlphaMode::Opaque;
+        const auto opaque = render(red, green, true);
+        Check(opaque[0] > 10 && opaque[1] < 3 && opaque[2] < 3,
+              "opaque material writes depth and ignores alpha");
+        red.alphaMode = MaterialAlphaMode::Mask;
+        red.alphaCutoff = .75f;
+        const auto masked = render(red, green, true);
+        Check(masked[0] < 3 && masked[1] > 10 && masked[2] > 10,
+              "mask cutoff exposes geometry behind it");
+        red.alphaCutoff = .25f;
+        Check(render(red, green, true)[1] < 3, "mask passing cutoff writes depth");
+        red.alphaMode = MaterialAlphaMode::Blend;
+        green.alphaMode = MaterialAlphaMode::Opaque;
+        green.albedoColor.w = 1;
+        red.albedoColor.w = 0;
+        const auto zero = render(red, green, false);
+        Check(zero[0] < 3 && zero[1] > 10 && zero[2] < 3,
+              "zero-alpha blend preserves opaque background");
+        Check(context.GetLastAssetError().empty(), "material renderer reports no errors");
+    }
+}
+
+void MaterialTextures() {
+    std::printf("[material textures]\n");
+    Session session(96, 96);
+    if (!session.ok)
+        return Check(false, "texture session initializes");
+    for (const auto dimensions : {std::array<uint32, 2>{1, 1}, {1, 9}, {13, 1}, {7, 5}}) {
+        const auto [width, height] = dimensions;
+        std::vector<uint8> pixels(static_cast<size_t>(width) * height * 4, 255);
+        GpuTexture texture;
+        TextureSampling sampling{true, TextureAddressMode::Repeat, true, false};
+        Check(texture.Initialize(&session.gpu, width, height, pixels.data(), TextureFilter::Linear,
+                                 TextureColorSpace::Srgb, sampling),
+              "odd or one-dimensional mip texture uploads");
+        Check(texture.GetMipCount() > 0 && texture.GetStorageBytes() >= pixels.size(),
+              "GPU mip accounting is exposed");
+        std::vector<TextureMipLevel> levels;
+        Check(BuildTextureMipChain(width, height, pixels, TextureColorSpace::Srgb, false, levels) &&
+                  texture.GetMipCount() == levels.size(),
+              "GPU receives every CPU mip level");
+        std::vector<RenderVertex> quad;
+        PushQuad(quad, 48, 48, 24, 0, {1, 1, 1, 1});
+        GpuFrameCapture capture;
+        Check(CaptureFrame(session, capture,
+                           [&] {
+                               session.gpu.Clear(0, 0, 0, 1);
+                               return session.gpu.DrawTriangles(
+                                   quad, Mat4::Orthographic(0, 96, 96, 0, -1, 1), &texture);
+                           }),
+              "one-dimensional mip texture renders");
+        const auto center = At(capture, .5f, .5f);
+        Check(center[0] > 250 && center[1] > 250 && center[2] > 250,
+              "one-dimensional mip texture samples valid white texels");
+    }
+    Renderer3D::Context context(&session.gpu);
+    Renderer3D::ScopedContext scoped(context);
+    PerspectiveCamera camera(ToRadians(60), 1, .1f, 10);
+    camera.SetPosition({0, 0, 3});
+    camera.SetTarget({0, 0, 0});
+    const std::array<Vertex3D, 4> vertices{{{{-1, -1, 0}, {0, 0, 1}, {0, 0}},
+                                            {{1, -1, 0}, {0, 0, 1}, {1, 0}},
+                                            {{1, 1, 0}, {0, 0, 1}, {1, 1}},
+                                            {{-1, 1, 0}, {0, 0, 1}, {0, 1}}}};
+    const std::array<uint32, 6> indices{0, 1, 2, 0, 2, 3};
+    Mesh3D plane;
+    Check(plane.Upload(&session.gpu, vertices, indices), "mapped material plane uploads");
+    const auto folder = std::filesystem::temp_directory_path() /
+                        ("LuxMaterialMaps-" + std::to_string(SDL_GetTicksNS()));
+    std::filesystem::create_directories(folder);
+
+    struct Cleanup {
+        std::filesystem::path path;
+
+        ~Cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup{folder};
+
+    const auto image = [&](const char* name, std::array<uint8, 4> pixel) {
+        std::array<uint8, 22> bytes{};
+        bytes[2] = 2;
+        bytes[12] = bytes[14] = 1;
+        bytes[16] = 32;
+        bytes[17] = 40;
+        bytes[18] = pixel[2];
+        bytes[19] = pixel[1];
+        bytes[20] = pixel[0];
+        bytes[21] = pixel[3];
+        const auto path = folder / name;
+        std::ofstream output(path, std::ios::binary);
+        output.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const auto utf8 = path.u8string();
+        return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+    };
+    const auto black = image("black.tga", {0, 0, 0, 255});
+    const auto white = image("white.tga", {255, 255, 255, 255});
+    const auto tilted = image("normal.tga", {255, 128, 128, 255});
+    Render3DSettings settings;
+    settings.mode = Render3DMode::Pbr;
+    settings.shadows = settings.imageBasedLighting = settings.toneMapping = false;
+    settings.environmentColor = {.2f, .2f, .2f};
+    settings.sun.direction = {0, 0, -1};
+    settings.sun.intensity = 2;
+    const auto render = [&](Material3D material, const Mesh3D* geometry = nullptr) {
+        GpuFrameCapture capture;
+        Check(CaptureFrame(session, capture,
+                           [&] {
+                               session.gpu.Clear(0, 0, 0, 1);
+                               Renderer3D::BeginScene(camera, settings, 1);
+                               Renderer3D::DrawMesh(geometry ? *geometry : plane, Mat4::Identity(),
+                                                    material);
+                               Renderer3D::EndScene();
+                               return true;
+                           }),
+              "mapped material frame captures");
+        return At(capture, .5f, .5f);
+    };
+    const auto difference = [](auto a, auto b) {
+        return std::abs(int(a[0]) - b[0]) + std::abs(int(a[1]) - b[1]) + std::abs(int(a[2]) - b[2]);
+    };
+    Material3D material;
+    material.albedoColor = {.4f, .4f, .4f, 1};
+    const auto base = render(material);
+    material.normalTexture = tilted;
+    Check(difference(base, render(material)) > 10, "normal texture changes actual lighting");
+    material.normalScale = 0;
+    material.normalTexture.clear();
+    material.metallic = 1;
+    material.metallicTexture = black;
+    const auto dielectric = render(material);
+    material.metallicTexture = white;
+    Check(difference(dielectric, render(material)) > 5,
+          "metallic texture changes actual PBR response");
+    material.metallic = 0;
+    material.metallicTexture.clear();
+    material.roughness = 1;
+    material.roughnessTexture = black;
+    const auto smooth = render(material);
+    material.roughnessTexture = white;
+    Check(difference(smooth, render(material)) > 5, "roughness texture changes actual highlight");
+    material.roughnessTexture.clear();
+    settings.sun.intensity = 0;
+    material.occlusionTexture = black;
+    const auto occluded = render(material);
+    material.occlusionStrength = 0;
+    Check(difference(occluded, render(material)) > 20,
+          "AO texture modulates environment lighting with strength");
+    auto repeatVertices = vertices;
+    for (auto& vertex : repeatVertices)
+        vertex.texCoords.x += .75f;
+    Mesh3D repeatPlane;
+    Check(repeatPlane.Upload(&session.gpu, repeatVertices, indices), "repeat plane uploads");
+    std::array<uint8, 26> twoColour{};
+    twoColour[2] = 2;
+    twoColour[12] = 2;
+    twoColour[14] = 1;
+    twoColour[16] = 32;
+    twoColour[17] = 40;
+    twoColour[20] = twoColour[21] = twoColour[23] = twoColour[25] = 255;
+    const auto repeatPath = folder / "repeat.tga";
+    {
+        std::ofstream output(repeatPath, std::ios::binary);
+        output.write(reinterpret_cast<const char*>(twoColour.data()), twoColour.size());
+    }
+    const auto repeatUtf8 = repeatPath.u8string();
+    material = {};
+    material.baseColorTexture =
+        std::string(reinterpret_cast<const char*>(repeatUtf8.data()), repeatUtf8.size());
+    material.textureSampling.anisotropic = false;
+    material.textureSampling.addressMode = TextureAddressMode::Clamp;
+    settings.mode = Render3DMode::Legacy;
+    settings.sun.intensity = 1;
+    const auto clamped = render(material, &repeatPlane);
+    material.textureSampling.addressMode = TextureAddressMode::Repeat;
+    const auto repeated = render(material, &repeatPlane);
+    Check(clamped[1] > clamped[0] + 30 && repeated[0] > repeated[1] + 30,
+          "Repeat sampler wraps UVs while Clamp retains the edge texel");
+    material.textureSampling.anisotropic = true;
+    Check(render(material, &repeatPlane)[0] > 20, "anisotropic Repeat sampler renders");
+    Check(context.GetLastAssetError().empty(), "material texture loading has no hidden errors");
+}
+
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0); // keep output even if the process crashes
     // Optional: section names to run (basics misuse resize lifecycle frames drawing volume
@@ -2502,6 +2747,8 @@ int main(int argc, char** argv) {
     run("drawing", Drawing);
     run("meshes", Meshes);
     run("scene3d", Scene3D);
+    run("materials", MaterialModes);
+    run("material_textures", MaterialTextures);
     run("volume", Volume);
     run("resolutions", Resolutions);
     run("wobble", Wobble);

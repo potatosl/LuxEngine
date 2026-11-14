@@ -2,6 +2,7 @@
 
 #include <LuxEngine/Core/Core.hpp>
 #include <LuxEngine/Core/Math.hpp>
+#include <LuxEngine/ECS/ScriptFields.hpp>
 #include <LuxEngine/Renderer/Renderer3D/Renderer3D.hpp>
 #include <algorithm>
 #include <string>
@@ -73,6 +74,7 @@ struct MeshRendererComponent {
 struct ScriptComponent {
     std::string typeName;
     bool enabled = true;
+    ScriptFieldMap fields;
 };
 
 struct CameraComponent {

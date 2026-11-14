@@ -198,8 +198,7 @@ GpuMemoryStats ForgeBackend::GetMemoryStats() const {
         lib_->api->stats(lib_->device, &stats);
         memory.liveTextures = stats.liveTextures;
         memory.pendingDestructions = stats.pendingDeletes;
-        // Only the scene renderer's targets and environment maps are tracked so far.
-        memory.allocationBytes = stats.sceneBytes;
+        memory.allocationBytes = stats.sceneBytes + stats.textureBytes;
     }
     return memory;
 }
@@ -435,12 +434,12 @@ bool ForgeBackend::HasBuffer(uint64 handle) const {
 
 bool ForgeBackend::CreateTexture(uint32 width, uint32 height, const void* pixelData,
                                  TextureFilter filter, TextureColorSpace colorSpace,
-                                 uint64& handle) {
+                                 uint32 mipLevels, TextureSampling, uint64& handle) {
     if (!Usable())
         return false;
-    const uint32_t id = lib_->api->createTexture(lib_->device, width, height, pixelData,
-                                                 filter == TextureFilter::Nearest ? 1 : 0,
-                                                 colorSpace == TextureColorSpace::Srgb ? 1 : 0);
+    const uint32_t id = lib_->api->createTexture(
+        lib_->device, width, height, pixelData, filter == TextureFilter::Nearest ? 1 : 0,
+        colorSpace == TextureColorSpace::Srgb ? 1 : 0, mipLevels);
     if (!id)
         return ForgeFailure();
     handle = id;
@@ -496,6 +495,10 @@ public:
             !backend_->buffers_.count(draw.indexBuffer) ||
             (draw.texture && !backend_->textures_.count(draw.texture)))
             return false;
+        for (const auto handle : {draw.normalTexture, draw.metallicTexture, draw.roughnessTexture,
+                                  draw.occlusionTexture})
+            if (handle && !backend_->textures_.count(handle))
+                return false;
         LuxForgeSceneDraw d = {};
         d.vertexBuffer = static_cast<uint32_t>(draw.vertexBuffer);
         d.indexBuffer = static_cast<uint32_t>(draw.indexBuffer);
@@ -505,6 +508,17 @@ public:
         Copy4(d.albedo, draw.albedo);
         d.metallic = draw.metallic;
         d.roughness = draw.roughness;
+        d.alphaMode = draw.alphaMode;
+        d.alphaCutoff = draw.alphaCutoff;
+        d.doubleSided = draw.doubleSided ? 1 : 0;
+        d.legacy = draw.legacy ? 1 : 0;
+        d.normalTexture = static_cast<uint32_t>(draw.normalTexture);
+        d.metallicTexture = static_cast<uint32_t>(draw.metallicTexture);
+        d.roughnessTexture = static_cast<uint32_t>(draw.roughnessTexture);
+        d.occlusionTexture = static_cast<uint32_t>(draw.occlusionTexture);
+        d.normalScale = draw.normalScale;
+        d.occlusionStrength = draw.occlusionStrength;
+        d.sampling = draw.sampling;
         draws_.push_back(d);
         return true;
     }

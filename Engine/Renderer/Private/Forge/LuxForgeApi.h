@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define LUX_FORGE_API_VERSION 7u
+#define LUX_FORGE_API_VERSION 8u
 
 #if defined(_WIN32)
 #if defined(LUX_FORGE_BUILD)
@@ -70,7 +70,8 @@ typedef struct LuxForgeStats {
     uint32_t liveTextures;   // excluding the built-in white texture
     uint32_t pendingDeletes; // resources waiting for the GPU before release
     uint32_t scenePasses;    // renderScene calls in the current frame
-    uint64_t sceneBytes;     // HDR/depth/shadow targets and environment maps of renderScene
+    uint64_t textureBytes;
+    uint64_t sceneBytes; // HDR/depth/shadow targets and environment maps of renderScene
 } LuxForgeStats;
 
 typedef struct LuxForgePointLight {
@@ -116,6 +117,13 @@ typedef struct LuxForgeSceneDraw {
     float albedo[4];
     float metallic;
     float roughness;
+    uint32_t alphaMode;
+    float alphaCutoff;
+    int doubleSided;
+    int legacy;
+    uint32_t normalTexture, metallicTexture, roughnessTexture, occlusionTexture;
+    float normalScale, occlusionStrength;
+    uint32_t sampling;
 } LuxForgeSceneDraw;
 
 // One HDR scene pass (port of the Vulkan backend's Scene3DRenderer). The vec4 fields and the
@@ -166,7 +174,7 @@ typedef struct LuxForgeApi {
 
     // Textures: RGBA8 pixels (NULL = transparent black). Returns an id > 0, or 0 on failure.
     uint32_t (*createTexture)(LuxForgeDevice* device, uint32_t width, uint32_t height,
-                              const void* rgba, int nearest, int srgb);
+                              const void* rgba, int nearest, int srgb, uint32_t mipLevels);
     // Released once the GPU no longer uses it; unknown ids are ignored.
     void (*destroyTexture)(LuxForgeDevice* device, uint32_t texture);
     int (*hasTexture)(const LuxForgeDevice* device, uint32_t texture);

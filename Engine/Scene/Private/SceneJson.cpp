@@ -221,8 +221,11 @@ bool Scene::SerializeToString(std::string& output) {
         for (auto id : ids) {
             Json components = Json::object();
             if (const auto* component = TryGetComponent<ScriptComponent>(id)) {
+                std::string fields;
+                RequireValidScene(SerializeScriptFields(component->fields, fields));
                 components["script"] = {{"type", component->typeName},
-                                        {"enabled", component->enabled}};
+                                        {"enabled", component->enabled},
+                                        {"fields", Json::parse(fields)}};
             }
             if (const auto* component = TryGetComponent<TagComponent>(id)) {
                 Json value = Json::object();
@@ -248,6 +251,19 @@ bool Scene::SerializeToString(std::string& output) {
                 value["roughness"] = ToJson(component->material.roughness);
                 value["asset"] = ToJson(component->meshPath);
                 value["base_color_texture"] = ToJson(component->material.baseColorTexture);
+                value["alpha_mode"] = static_cast<int>(component->material.alphaMode);
+                value["alpha_cutoff"] = ToJson(component->material.alphaCutoff);
+                value["double_sided"] = component->material.doubleSided;
+                value["normal_texture"] = component->material.normalTexture;
+                value["metallic_texture"] = component->material.metallicTexture;
+                value["roughness_texture"] = component->material.roughnessTexture;
+                value["occlusion_texture"] = component->material.occlusionTexture;
+                value["normal_scale"] = component->material.normalScale;
+                value["occlusion_strength"] = component->material.occlusionStrength;
+                value["sampling"] = {
+                    {"mipmaps", component->material.textureSampling.mipmaps},
+                    {"address", static_cast<int>(component->material.textureSampling.addressMode)},
+                    {"anisotropic", component->material.textureSampling.anisotropic}};
                 components["mesh"] = std::move(value);
             }
             if (const auto* component = TryGetComponent<CameraComponent>(id)) {
@@ -398,6 +414,9 @@ bool Scene::DeserializeJson(const std::string& data) {
                     RequireValidScene(value.is_object());
                     ReadJsonValue(value.at("type"), component.typeName);
                     ReadJsonValue(value.at("enabled"), component.enabled);
+                    if (value.contains("fields"))
+                        RequireValidScene(
+                            DeserializeScriptFields(value.at("fields").dump(), component.fields));
                     entity.AddComponent<ScriptComponent>(std::move(component));
                 } else if (name == "tag") {
                     TagComponent component;
@@ -425,6 +444,54 @@ bool Scene::DeserializeJson(const std::string& data) {
                     ReadJsonValue(value.at("asset"), component.meshPath);
                     ReadJsonValue(value.at("base_color_texture"),
                                   component.material.baseColorTexture);
+                    if (value.contains("alpha_mode")) {
+                        int mode = 0;
+                        ReadJsonValue(value.at("alpha_mode"), mode);
+                        RequireValidScene(mode >= 0 && mode <= 2);
+                        component.material.alphaMode = static_cast<MaterialAlphaMode>(mode);
+                    }
+                    if (value.contains("alpha_cutoff")) {
+                        ReadJsonValue(value.at("alpha_cutoff"), component.material.alphaCutoff);
+                        RequireValidScene(component.material.alphaCutoff >= 0 &&
+                                          component.material.alphaCutoff <= 1);
+                    }
+                    if (value.contains("double_sided"))
+                        ReadJsonValue(value.at("double_sided"), component.material.doubleSided);
+                    if (value.contains("normal_texture"))
+                        ReadJsonValue(value.at("normal_texture"), component.material.normalTexture);
+                    if (value.contains("metallic_texture"))
+                        ReadJsonValue(value.at("metallic_texture"),
+                                      component.material.metallicTexture);
+                    if (value.contains("roughness_texture"))
+                        ReadJsonValue(value.at("roughness_texture"),
+                                      component.material.roughnessTexture);
+                    if (value.contains("occlusion_texture"))
+                        ReadJsonValue(value.at("occlusion_texture"),
+                                      component.material.occlusionTexture);
+                    if (value.contains("normal_scale")) {
+                        ReadJsonValue(value.at("normal_scale"), component.material.normalScale);
+                        RequireValidScene(component.material.normalScale >= 0 &&
+                                          component.material.normalScale <= 16);
+                    }
+                    if (value.contains("occlusion_strength")) {
+                        ReadJsonValue(value.at("occlusion_strength"),
+                                      component.material.occlusionStrength);
+                        RequireValidScene(component.material.occlusionStrength >= 0 &&
+                                          component.material.occlusionStrength <= 1);
+                    }
+                    if (value.contains("sampling")) {
+                        const auto& sampling = value.at("sampling");
+                        RequireValidScene(sampling.is_object());
+                        ReadJsonValue(sampling.at("mipmaps"),
+                                      component.material.textureSampling.mipmaps);
+                        ReadJsonValue(sampling.at("anisotropic"),
+                                      component.material.textureSampling.anisotropic);
+                        int address = 0;
+                        ReadJsonValue(sampling.at("address"), address);
+                        RequireValidScene(address >= 0 && address <= 1);
+                        component.material.textureSampling.addressMode =
+                            static_cast<TextureAddressMode>(address);
+                    }
                     entity.AddComponent<MeshRendererComponent>(std::move(component));
                 } else if (name == "camera") {
                     CameraComponent component;

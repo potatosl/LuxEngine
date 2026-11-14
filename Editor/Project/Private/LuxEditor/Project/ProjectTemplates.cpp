@@ -56,7 +56,8 @@ if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Assets")
         VERBATIM)
 endif()
 file(GLOB_RECURSE _lux_scenes CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.lux")
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.lux"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.[lL][uU][xX][pP][rR][eE][fF][aA][bB]")
 foreach(_scene IN LISTS _lux_scenes)
     if(_scene MATCHES "(^|/)(\\.git|\\.lux)(/|$)" OR
        _scene MATCHES "^(build|out|cmake-build[^/]*)(/|$)")

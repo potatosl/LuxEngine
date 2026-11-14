@@ -263,8 +263,11 @@ void Scene::OnRender3D() {
             auto material = meshComp.material;
             if (settings_.render3D.mode == Render3DMode::Legacy)
                 material.albedoColor = Exposed(material.albedoColor, settings_.exposure);
-            if (!material.baseColorTexture.empty())
-                material.baseColorTexture = ResolveAssetPath(material.baseColorTexture);
+            for (auto* path :
+                 {&material.baseColorTexture, &material.normalTexture, &material.metallicTexture,
+                  &material.roughnessTexture, &material.occlusionTexture})
+                if (!path->empty())
+                    *path = ResolveAssetPath(*path);
             if (meshComp.meshPath.empty())
                 Renderer3D::DrawMesh(GetWorldMatrix(entity.GetId()), material);
             else
@@ -752,8 +755,22 @@ bool Scene::ValidateForSerialization() {
                 return false;
         }
         if (const auto* mesh = TryGetComponent<MeshRendererComponent>(id)) {
+            for (const auto* path :
+                 {&mesh->material.normalTexture, &mesh->material.metallicTexture,
+                  &mesh->material.roughnessTexture, &mesh->material.occlusionTexture})
+                if (path->size() > 4096 || path->find('\0') != std::string::npos ||
+                    !IsValidUtf8(*path))
+                    return false;
+            if (!Finite(mesh->material.normalScale) || mesh->material.normalScale < 0 ||
+                mesh->material.normalScale > 16 || !Finite(mesh->material.occlusionStrength) ||
+                mesh->material.occlusionStrength < 0 || mesh->material.occlusionStrength > 1 ||
+                static_cast<unsigned>(mesh->material.textureSampling.addressMode) > 1)
+                return false;
             if (!Finite(mesh->material.albedoColor) || !Finite(mesh->material.metallic) ||
-                !Finite(mesh->material.roughness) || mesh->meshPath.size() > 4096 ||
+                !Finite(mesh->material.roughness) ||
+                static_cast<unsigned>(mesh->material.alphaMode) > 2 ||
+                !Finite(mesh->material.alphaCutoff) || mesh->material.alphaCutoff < 0 ||
+                mesh->material.alphaCutoff > 1 || mesh->meshPath.size() > 4096 ||
                 mesh->meshPath.find('\0') != std::string::npos || !IsValidUtf8(mesh->meshPath) ||
                 mesh->material.baseColorTexture.size() > 4096 ||
                 mesh->material.baseColorTexture.find('\0') != std::string::npos ||
@@ -796,6 +813,9 @@ bool Scene::ValidateForSerialization() {
                 return false;
         }
         if (const auto* script = TryGetComponent<ScriptComponent>(id)) {
+            std::string fields;
+            if (!SerializeScriptFields(script->fields, fields))
+                return false;
             if (script->typeName.size() > 512 || script->typeName.find('\0') != std::string::npos ||
                 !IsValidUtf8(script->typeName))
                 return false;

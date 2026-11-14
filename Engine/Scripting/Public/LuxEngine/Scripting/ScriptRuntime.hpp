@@ -1,8 +1,10 @@
 #pragma once
 
 #include <LuxEngine/Core/Core.hpp>
+#include <LuxEngine/ECS/ScriptFields.hpp>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace LuxEngine {
 class Scene;
@@ -24,6 +26,7 @@ public:
 
     bool Initialize(Scene& scene, const ScriptRuntimeConfig& config);
     bool Update(double deltaTime);
+    bool DescribeFields(const std::string& typeName, std::vector<ScriptFieldDescription>& fields);
     void Shutdown();
     bool IsRunning() const;
     const std::string& GetLastError() const;

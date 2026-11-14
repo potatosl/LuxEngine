@@ -418,7 +418,9 @@ void EditorWindow::BuildLayout() {
             return;
         const auto& path = projectFilePaths_[static_cast<size_t>(row)];
         const auto suffix = QString::fromUtf8(PathUtf8(path.extension())).toLower();
-        if (suffix == QLatin1String(".lux"))
+        if (suffix == QLatin1String(".luxprefab"))
+            AddPrefabAsset(path);
+        else if (suffix == QLatin1String(".lux"))
             OpenProjectScene(path);
         else if (suffix == QLatin1String(".obj") || suffix == QLatin1String(".fbx"))
             AddModelAsset(path);
@@ -621,13 +623,21 @@ void EditorWindow::BuildLayout() {
             requested = true;
             if (!LuxEngine::AssetManager::ReloadMesh(
                     document_.GetScene().ResolveAssetPath(mesh.meshPath), error,
-                    !mesh.material.baseColorTexture.empty()))
+                    !mesh.material.baseColorTexture.empty() ||
+                        !mesh.material.normalTexture.empty() ||
+                        !mesh.material.metallicTexture.empty() ||
+                        !mesh.material.roughnessTexture.empty() ||
+                        !mesh.material.occlusionTexture.empty()))
                 errors << QString::fromUtf8(error);
         }
-        if (!mesh.material.baseColorTexture.empty()) {
+        for (const auto* path : {&mesh.material.baseColorTexture, &mesh.material.normalTexture,
+                                 &mesh.material.metallicTexture, &mesh.material.roughnessTexture,
+                                 &mesh.material.occlusionTexture}) {
+            if (path->empty())
+                continue;
             requested = true;
             if (!LuxEngine::AssetManager::ReloadTexture(
-                    document_.GetScene().ResolveAssetPath(mesh.material.baseColorTexture), error))
+                    document_.GetScene().ResolveAssetPath(*path), error))
                 errors << QString::fromUtf8(error);
         }
         Log(!errors.isEmpty() ? errors.join('\n')
@@ -653,6 +663,72 @@ void EditorWindow::BuildLayout() {
     roughness_ = Number(meshGroup, 0, 1, 1, .05);
     meshLayout->addRow(QStringLiteral("금속성"), metallic_);
     meshLayout->addRow(QStringLiteral("거칠기"), roughness_);
+    materialAlphaMode_ = new QComboBox(meshGroup);
+    materialAlphaMode_->setObjectName(QStringLiteral("materialAlphaMode"));
+    materialAlphaMode_->addItems(
+        {QStringLiteral("불투명"), QStringLiteral("컷아웃"), QStringLiteral("반투명")});
+    materialAlphaCutoff_ = Number(meshGroup, 0, 1, .001, .05);
+    materialAlphaCutoff_->setObjectName(QStringLiteral("materialAlphaCutoff"));
+    materialDoubleSided_ = new QCheckBox(QStringLiteral("양면"), meshGroup);
+    materialDoubleSided_->setObjectName(QStringLiteral("materialDoubleSided"));
+    meshLayout->addRow(QStringLiteral("표면 모드"), materialAlphaMode_);
+    meshLayout->addRow(QStringLiteral("알파 임계값"), materialAlphaCutoff_);
+    meshLayout->addRow(materialDoubleSided_);
+    const std::array<QString, 4> mapNames{
+        QStringLiteral("노멀 텍스처"), QStringLiteral("금속성 텍스처"),
+        QStringLiteral("거칠기 텍스처"), QStringLiteral("AO 텍스처")};
+    for (size_t i = 0; i < materialMapPaths_.size(); ++i) {
+        auto* field = new QLineEdit(meshGroup);
+        field->setObjectName(QStringLiteral("materialMap%1").arg(i));
+        materialMapPaths_[i] = field;
+        auto* row = new QHBoxLayout;
+        row->addWidget(field);
+        auto* choose = new QPushButton(QStringLiteral("선택"), meshGroup);
+        row->addWidget(choose);
+        meshLayout->addRow(mapNames[i], row);
+        connect(field, &QLineEdit::editingFinished, this, [this, field] { OnMeshChanged(field); });
+        connect(choose, &QPushButton::clicked, this, [this, field] {
+            const auto file = QFileDialog::getOpenFileName(
+                this, QStringLiteral("재질 텍스처 선택"), field->text(),
+                QStringLiteral("이미지 (*.png *.jpg *.jpeg *.bmp *.tga)"));
+            if (file.isEmpty())
+                return;
+            field->setText(file);
+            OnMeshChanged(field);
+        });
+    }
+    materialNormalScale_ = Number(meshGroup, 0, 16, 1, .05);
+    materialNormalScale_->setObjectName(QStringLiteral("materialNormalScale"));
+    materialOcclusionStrength_ = Number(meshGroup, 0, 1, 1, .05);
+    materialOcclusionStrength_->setObjectName(QStringLiteral("materialOcclusionStrength"));
+    materialMipmaps_ = new QCheckBox(QStringLiteral("밉맵"), meshGroup);
+    materialMipmaps_->setObjectName(QStringLiteral("materialMipmaps"));
+    materialAddressMode_ = new QComboBox(meshGroup);
+    materialAddressMode_->setObjectName(QStringLiteral("materialAddressMode"));
+    materialAddressMode_->addItems({QStringLiteral("가장자리 고정"), QStringLiteral("반복")});
+    materialAnisotropic_ = new QCheckBox(QStringLiteral("이방성 필터링"), meshGroup);
+    materialAnisotropic_->setObjectName(QStringLiteral("materialAnisotropic"));
+    meshLayout->addRow(QStringLiteral("노멀 강도"), materialNormalScale_);
+    meshLayout->addRow(QStringLiteral("AO 강도"), materialOcclusionStrength_);
+    meshLayout->addRow(materialMipmaps_);
+    meshLayout->addRow(QStringLiteral("텍스처 주소"), materialAddressMode_);
+    meshLayout->addRow(materialAnisotropic_);
+    connect(materialNormalScale_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            [this] { OnMeshChanged(materialNormalScale_); });
+    connect(materialOcclusionStrength_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            [this] { OnMeshChanged(materialOcclusionStrength_); });
+    connect(materialMipmaps_, &QCheckBox::toggled, this,
+            [this] { OnMeshChanged(materialMipmaps_); });
+    connect(materialAddressMode_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this] { OnMeshChanged(materialAddressMode_); });
+    connect(materialAnisotropic_, &QCheckBox::toggled, this,
+            [this] { OnMeshChanged(materialAnisotropic_); });
+    connect(materialAlphaMode_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this] { OnMeshChanged(materialAlphaMode_); });
+    connect(materialAlphaCutoff_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            [this] { OnMeshChanged(materialAlphaCutoff_); });
+    connect(materialDoubleSided_, &QCheckBox::toggled, this,
+            [this] { OnMeshChanged(materialDoubleSided_); });
     body->addWidget(meshGroup);
     connect(meshEnabled_, &QCheckBox::toggled, this, [this] { OnMeshChanged(meshEnabled_); });
     connect(metallic_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
@@ -725,6 +801,7 @@ void EditorWindow::BuildLayout() {
 
     connect(name_, &QLineEdit::editingFinished, this, [this] { OnNameChanged(); });
     BuildCameraDetails(body);
+    BuildScriptDetails(body);
     inspectorLayout->addWidget(inspectorBody_);
     inspectorLayout->addStretch();
     inspectorScroll->setWidget(inspector);

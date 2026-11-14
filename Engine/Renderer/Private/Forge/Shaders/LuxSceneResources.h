@@ -4,6 +4,15 @@
 #include "LuxStructs.h"
 #include "LuxScene.srt.h"
 
+#define SampleMaterial(texture, uv)                                                                \
+    (gDraw.options.x > 0.5f           ? (fmod(gDraw.materialOptions.z, 2.0f) > 0.5f                \
+                                             ? SampleTex2D(texture, gSamplerPointWrap, uv)         \
+                                             : SampleTex2D(texture, gSamplerPointClamp, uv))       \
+     : gDraw.materialOptions.z < 0.5f ? SampleTex2D(texture, gMaterialClamp, uv)                   \
+     : gDraw.materialOptions.z < 1.5f ? SampleTex2D(texture, gMaterialRepeat, uv)                  \
+     : gDraw.materialOptions.z < 2.5f ? SampleTex2D(texture, gMaterialAnisotropicClamp, uv)        \
+                                      : SampleTex2D(texture, gMaterialAnisotropicRepeat, uv))
+
 // Port of Shaders/Scene3D.hlsli.
 float3 RotateEnvironment(float3 v) {
     const float c = cos(gScene.options.x);

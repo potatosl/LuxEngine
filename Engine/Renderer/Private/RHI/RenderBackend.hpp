@@ -22,6 +22,13 @@ struct SceneDrawDesc {
     Vec4 albedo;
     float metallic = 0;
     float roughness = .5f;
+    uint32 alphaMode = 1;
+    float alphaCutoff = .001f;
+    bool doubleSided = true;
+    bool legacy = false;
+    uint64 normalTexture = 0, metallicTexture = 0, roughnessTexture = 0, occlusionTexture = 0;
+    float normalScale = 1.f, occlusionStrength = 1.f;
+    uint32 sampling = 0;
 };
 
 // HDR scene path (PBR, shadows, image-based lighting) owned by a backend.
@@ -79,8 +86,8 @@ public:
     virtual bool HasBuffer(uint64 handle) const = 0;
 
     virtual bool CreateTexture(uint32 width, uint32 height, const void* pixelData,
-                               TextureFilter filter, TextureColorSpace colorSpace,
-                               uint64& handle) = 0;
+                               TextureFilter filter, TextureColorSpace colorSpace, uint32 mipLevels,
+                               TextureSampling sampling, uint64& handle) = 0;
     virtual void DestroyTexture(uint64 handle) = 0;
     virtual bool HasTexture(uint64 handle) const = 0;
 

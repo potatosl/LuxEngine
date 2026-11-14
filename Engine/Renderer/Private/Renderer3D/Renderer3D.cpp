@@ -251,6 +251,12 @@ void Renderer3D::Context::Shutdown() {
     impl_->textures.clear();
     impl_->warnings.clear();
     impl_->pbr = false;
+    impl_->settings = {};
+    impl_->settings.mode = Render3DMode::Legacy;
+    impl_->settings.shadows = false;
+    impl_->settings.imageBasedLighting = false;
+    impl_->settings.toneMapping = false;
+    impl_->exposure = 1.0f;
     impl_->lastError.clear();
     impl_->textureBytes = 0;
     impl_->meshBytes = 0;
@@ -289,6 +295,12 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
     if (impl_->active)
         throw std::logic_error("3D scene already active");
     impl_->pbr = false;
+    impl_->settings = {};
+    impl_->settings.mode = Render3DMode::Legacy;
+    impl_->settings.shadows = false;
+    impl_->settings.imageBasedLighting = false;
+    impl_->settings.toneMapping = false;
+    impl_->exposure = 1.0f;
     impl_->camera = camera.GetPosition();
     impl_->sceneCamera = camera;
     if (impl_->modern)
@@ -367,7 +379,7 @@ void Renderer3D::Context::EndScene() {
     if (!impl_ || !impl_->active)
         return;
     impl_->active = false;
-    if (impl_->pbr) {
+    if (impl_->pbr || (impl_->modern && impl_->modern->DrawCount())) {
         if (auto state = impl_->LockValidState()) {
             if (!impl_->modern)
                 impl_->modern = state->CreateScene3DRenderer();
@@ -410,54 +422,19 @@ void Renderer3D::Context::DrawMesh(std::span<const Vec3> positions, std::span<co
     for (auto index : indices)
         if (index >= positions.size())
             return;
-    if (impl_->pbr) {
-        Mesh3D mesh;
-        if (mesh.Upload(impl_->device, positions, indices))
-            DrawMesh(mesh, transform, material);
-        return;
-    }
-    for (size_t i = 0; i < indices.size(); i += 3) {
-        std::array<Vec3, 3> triangle;
-        for (size_t j = 0; j < 3; ++j)
-            triangle[j] = TransformPoint(transform, positions[indices[i + j]]);
-        const auto normal =
-            (triangle[1] - triangle[0]).Cross(triangle[2] - triangle[0]).Normalized();
-        const float diffuse =
-            std::max(0.0f, normal.Dot(impl_->light.direction.Normalized() * -1.0f)) *
-            std::max(0.0f, impl_->light.intensity);
-        Vec3 lit = impl_->light.color * diffuse;
-        const Vec3 center = (triangle[0] + triangle[1] + triangle[2]) * (1.0f / 3.0f);
-        for (const auto& point : impl_->pointLights) {
-            const Vec3 toLight = point.position - center;
-            const float distanceSq = toLight.Dot(toLight);
-            if (!std::isfinite(distanceSq) || point.radius <= 0.0f ||
-                distanceSq >= point.radius * point.radius)
-                continue;
-            const float distance = std::sqrt(distanceSq);
-            const float facing = distance > 0.00001f
-                                     ? std::max(0.0f, normal.Dot(toLight * (1.0f / distance)))
-                                     : 1.0f;
-            const float falloff = std::max(0.0f, 1.0f - distance / point.radius);
-            lit += point.color * (facing * falloff * falloff * std::max(0.0f, point.intensity));
-        }
-        const auto& c = material.albedoColor;
-        const Vec4 color{c.x * (0.15f + lit.x), c.y * (0.15f + lit.y), c.z * (0.15f + lit.z), c.w};
-        for (const auto& p : triangle)
-            impl_->vertices.push_back({p, color, {0, 0}});
-    }
-    ++impl_->stats.meshCount;
+    Mesh3D mesh;
+    if (mesh.Upload(impl_->device, positions, indices))
+        DrawMesh(mesh, transform, material);
 }
 
 void Renderer3D::Context::DrawMesh(const Mat4& transform, const Material3D& material) {
-    if (impl_->pbr || !material.baseColorTexture.empty())
-        DrawMeshAsset({}, transform, material);
-    else
-        DrawMesh(CubePositions, CubeIndices, transform, material);
+    DrawMeshAsset({}, transform, material);
 }
 
 void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
                                    const Material3D& material) {
-    DrawMesh(mesh, transform, material, ResolveBaseColorTexture(material.baseColorTexture));
+    auto texture = ResolveBaseColorTexture(material.baseColorTexture, material.textureSampling);
+    DrawMesh(mesh, transform, material, texture.get());
 }
 
 void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
@@ -469,31 +446,47 @@ void Renderer3D::Context::DrawMesh(const Mesh3D& mesh, const Mat4& transform,
         return;
     if (!mesh.vertices_.BelongsTo(*impl_->device) || !mesh.indices_.BelongsTo(*impl_->device))
         return;
-    if (impl_->pbr) {
-        if (texture && !texture->BelongsTo(*impl_->device))
-            return;
-        if (!impl_->modern)
-            impl_->modern = lockedState->CreateScene3DRenderer();
-        if (!impl_->modern || impl_->modern->DrawCount() >= 65536 ||
-            !impl_->modern->AddDraw({mesh.vertices_.handle_, mesh.indices_.handle_,
-                                     texture ? texture->handle_ : 0, mesh.indexCount_, transform,
-                                     material.albedoColor, material.metallic, material.roughness}))
-            return;
-        ++impl_->stats.meshCount;
-        ++impl_->stats.drawCalls;
+    if (texture && !texture->BelongsTo(*impl_->device))
         return;
-    }
-    if (impl_->device->DrawIndexed(mesh.vertices_, mesh.indices_, mesh.indexCount_,
-                                   impl_->viewProjection, transform, material.albedoColor, texture,
-                                   material.metallic, material.roughness, impl_->pbr))
-        ++impl_->stats.drawCalls;
+    if (!impl_->modern)
+        impl_->modern = lockedState->CreateScene3DRenderer();
+    auto normalSampling = material.textureSampling;
+    normalSampling.normalMap = true;
+    std::array<Ref<GpuTexture>, 4> maps;
+    const auto map = [this, &maps](size_t index, const std::string& path,
+                                   TextureSampling sampling) {
+        maps[index] = ResolveBaseColorTexture(path, sampling, TextureColorSpace::Linear);
+        return maps[index] ? maps[index]->handle_ : uint64{0};
+    };
+    const uint64 normal = map(0, material.normalTexture, normalSampling);
+    const uint64 metallic = map(1, material.metallicTexture, material.textureSampling);
+    const uint64 roughness = map(2, material.roughnessTexture, material.textureSampling);
+    const uint64 occlusion = map(3, material.occlusionTexture, material.textureSampling);
+    const uint32 sampling =
+        (material.textureSampling.addressMode == TextureAddressMode::Repeat ? 1u : 0u) |
+        (material.textureSampling.anisotropic ? 2u : 0u);
+    if (!impl_->modern || impl_->modern->DrawCount() >= 65536 ||
+        !impl_->modern->AddDraw(
+            {mesh.vertices_.handle_, mesh.indices_.handle_, texture ? texture->handle_ : 0,
+             mesh.indexCount_, transform, material.albedoColor, material.metallic,
+             material.roughness, static_cast<uint32>(material.alphaMode), material.alphaCutoff,
+             material.doubleSided, !impl_->pbr, normal, metallic, roughness, occlusion,
+             material.normalScale, material.occlusionStrength, sampling}))
+        return;
     ++impl_->stats.meshCount;
+    ++impl_->stats.drawCalls;
 }
 
-GpuTexture* Renderer3D::Context::ResolveBaseColorTexture(const std::string& path) {
+Ref<GpuTexture> Renderer3D::Context::ResolveBaseColorTexture(const std::string& path,
+                                                             TextureSampling sampling,
+                                                             TextureColorSpace colorSpace) {
     if (path.empty() || !impl_ || !impl_->LockValidState())
         return nullptr;
-    auto found = impl_->textures.find(path);
+    const std::string key =
+        path + "\n" + std::to_string(static_cast<int>(colorSpace)) +
+        std::to_string(sampling.mipmaps) + std::to_string(static_cast<int>(sampling.addressMode)) +
+        std::to_string(sampling.anisotropic) + std::to_string(sampling.normalMap);
+    auto found = impl_->textures.find(key);
     if (found == impl_->textures.end()) {
         if (impl_->textures.size() >= MaxCachedAssets) {
             const auto oldest = std::min_element(
@@ -502,7 +495,7 @@ GpuTexture* Renderer3D::Context::ResolveBaseColorTexture(const std::string& path
             impl_->textureBytes -= oldest->second.bytes;
             impl_->textures.erase(oldest);
         }
-        found = impl_->textures.emplace(path, Impl::CachedTexture{}).first;
+        found = impl_->textures.emplace(key, Impl::CachedTexture{}).first;
     }
     auto& cached = found->second;
     cached.used = ++impl_->sequence;
@@ -514,7 +507,16 @@ GpuTexture* Renderer3D::Context::ResolveBaseColorTexture(const std::string& path
             std::vector<uint8> pixels;
             const bool decoded = AssetManager::IsBaseColorTextureFile(path) &&
                                  AssetManager::DecodeTextureCpu(path, width, height, pixels);
-            const size_t bytes = pixels.size();
+            size_t bytes = pixels.size();
+            if (decoded && (!sampling.mipmaps || (width == 1 && height == 1)))
+                bytes =
+                    static_cast<size_t>(width == 1 ? 2 : width) * (height == 1 ? 2 : height) * 4;
+            if (sampling.mipmaps)
+                for (uint32 w = std::max(1, width), h = std::max(1, height); w > 1 || h > 1;) {
+                    w = std::max(1u, w / 2);
+                    h = std::max(1u, h / 2);
+                    bytes += static_cast<size_t>(w) * h * 4;
+                }
             constexpr size_t Budget = 256ull * 1024 * 1024;
             bool room = decoded && bytes <= Budget;
             if (room) {
@@ -535,7 +537,7 @@ GpuTexture* Renderer3D::Context::ResolveBaseColorTexture(const std::string& path
             auto next = CreateRef<GpuTexture>();
             if (room && next->Initialize(impl_->device, static_cast<uint32>(width),
                                          static_cast<uint32>(height), pixels.data(),
-                                         TextureFilter::Linear, TextureColorSpace::Srgb)) {
+                                         TextureFilter::Linear, colorSpace, sampling)) {
                 impl_->textureBytes = impl_->textureBytes - cached.bytes + bytes;
                 cached.texture = std::move(next);
                 cached.bytes = bytes;
@@ -557,7 +559,7 @@ GpuTexture* Renderer3D::Context::ResolveBaseColorTexture(const std::string& path
     if (!error.empty() && cached.texture)
         error += " (이전 정상 텍스처 유지)";
     impl_->Report("texture:" + path, error);
-    return cached.texture.get();
+    return cached.texture;
 }
 
 bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& transform,
@@ -578,7 +580,10 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
     auto& cached = found->second;
     cached.used = ++impl_->sequence;
     const auto revision = path.empty() ? uint64{1} : AssetManager::GetMeshRevision(path);
-    const bool requiresUv = !material.baseColorTexture.empty();
+    const bool requiresUv = !material.baseColorTexture.empty() || !material.normalTexture.empty() ||
+                            !material.metallicTexture.empty() ||
+                            !material.roughnessTexture.empty() ||
+                            !material.occlusionTexture.empty();
     if (cached.attempted != revision || (cached.uvBlocked && !requiresUv) ||
         (requiresUv && !cached.hasUvs && !cached.uvBlocked)) {
         cached.attempted = revision;
@@ -671,8 +676,13 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
     }
     const auto previous = impl_->stats.drawCalls;
     auto drawable = material;
-    if (!cached.hasUvs)
+    if (!cached.hasUvs) {
         drawable.baseColorTexture.clear();
+        drawable.normalTexture.clear();
+        drawable.metallicTexture.clear();
+        drawable.roughnessTexture.clear();
+        drawable.occlusionTexture.clear();
+    }
     DrawMesh(*cached.mesh, transform, drawable);
     return impl_->stats.drawCalls > previous;
 }

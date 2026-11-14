@@ -8,6 +8,8 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QMimeData>
@@ -72,16 +74,44 @@ struct ProjectFixture {
 
 void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
     QTimer chooser;
+    bool configured = false, accepted = false, timedOut = false, inputAvailable = false;
+    const auto start = std::chrono::steady_clock::now();
     QObject::connect(&chooser, &QTimer::timeout, &window, [&] {
-        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
-            dialog->selectFile(Q(scene));
-            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+        auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+        if (std::chrono::steady_clock::now() - start > std::chrono::seconds(10)) {
+            timedOut = true;
+            if (auto* modal = qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+                modal->reject();
+            return;
         }
+        if (!dialog)
+            return;
+        if (!configured) {
+            configured = true;
+            dialog->setDirectory(Q(scene.parent_path()));
+            auto* filename = dialog->findChild<QLineEdit*>(QStringLiteral("fileNameEdit"));
+            inputAvailable = filename != nullptr;
+            if (!filename) {
+                dialog->reject();
+                return;
+            }
+            QObject::connect(dialog, &QFileDialog::accepted, &window, [&] { accepted = true; });
+            filename->setFocus();
+            filename->setText(Q(scene));
+            return;
+        }
+        const auto selected = dialog->selectedFiles();
+        if (selected.size() == 1 && QFileInfo(selected.front()).canonicalFilePath() ==
+                                        QFileInfo(Q(scene)).canonicalFilePath())
+            QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
     });
     chooser.start(5);
     auto* action = window.findChild<QAction*>("openScene");
     Check(action, "scene open action exists");
     action->trigger();
+    Check(!timedOut, "scene chooser did not accept the existing fixture file within ten seconds");
+    Check(inputAvailable, "non-native scene chooser exposes its filename input");
+    Check(configured && accepted, "scene chooser accepted the exact requested file");
 }
 
 void DropScene(EditorWindow& window, const fs::path& path) {

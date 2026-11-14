@@ -468,6 +468,7 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
         auto& material =
             materialScene.CreateEntity("Alpha plane").AddComponent<MeshRendererComponent>();
         material.meshPath = PathUtf8(model);
+        material.material.alphaMode = MaterialAlphaMode::Blend;
         material.material.baseColorTexture = opaque.toUtf8().toStdString();
         QImage image;
         Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image),
@@ -476,7 +477,7 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
         material.material.baseColorTexture = partial.toUtf8().toStdString();
         Check(renderer->Render3D(materialScene, 400, 300, {}, 0, 0, 5, image) &&
                   image.format() == QImage::Format_RGBA8888,
-              "3D readback declares the opaque pipeline's straight alpha format");
+              "3D readback declares its straight alpha format");
         const auto alpha = image.pixelColor(200, 150);
         std::cout << "alpha material: opaque=" << full.red() << ',' << full.green() << ','
                   << full.blue() << ',' << full.alpha() << " partial=" << alpha.red() << ','
@@ -529,12 +530,17 @@ void TestPicking3D(QApplication& app, bool gpu = false) {
         Check(device->EndFrame(), "runtime-path comparison submits after context release");
         GpuFrameCapture runtimeCapture;
         Check(device->ReadFrameCapture(runtimeCapture), "runtime-path comparison capture reads");
-        const size_t offset = (150 * 400 + 200) * 4;
-        Check(
-            std::abs(runtimeCapture.rgba[offset] - editorPixel.red()) <= 2 &&
-                std::abs(runtimeCapture.rgba[offset + 1] - editorPixel.green()) <= 2 &&
-                std::abs(runtimeCapture.rgba[offset + 2] - editorPixel.blue()) <= 2,
-            "editor and runtime scene path agree for identical camera and post-lighting exposure");
+        const QImage runtimeImage(
+            runtimeCapture.rgba.data(), static_cast<int>(runtimeCapture.width),
+            static_cast<int>(runtimeCapture.height), static_cast<int>(runtimeCapture.width * 4),
+            QImage::Format_RGBA8888_Premultiplied);
+        const auto runtimePixel = runtimeImage.pixelColor(200, 150);
+        Check(std::abs(runtimePixel.red() - editorPixel.red()) <= 2 &&
+                  std::abs(runtimePixel.green() - editorPixel.green()) <= 2 &&
+                  std::abs(runtimePixel.blue() - editorPixel.blue()) <= 2 &&
+                  std::abs(runtimePixel.alpha() - editorPixel.alpha()) <= 1,
+              "editor and runtime scene path agree for identical camera, alpha and post-lighting "
+              "exposure");
         settings.render3D.showSkybox = true;
         Check(materialScene.SetSettings(settings), "skybox composition settings apply");
         QImage background, foreground;

@@ -201,8 +201,8 @@ struct DotnetHost {
             return false;
         }
         const Managed::NativeApi native = {
-            1, sizeof(Managed::NativeApi), IsAlive, GetTransform, SetTransform, IsKeyPressed};
-        if (!getApi(&native, &api) || api.version != 1 || api.size != sizeof(api)) {
+            2, sizeof(Managed::NativeApi), IsAlive, GetTransform, SetTransform, IsKeyPressed};
+        if (!getApi(&native, &api) || api.version != 2 || api.size != sizeof(api)) {
             api = {};
             error = "C# 스크립트 ABI가 엔진과 일치하지 않습니다.";
             return false;
@@ -228,7 +228,7 @@ struct ScriptRuntime::Impl {
     std::shared_ptr<WorldState> world;
     uint64 nativeId = 0;
     uint64 context = 0;
-    std::map<uint32, std::string> instances;
+    std::map<uint32, std::pair<std::string, std::string>> instances;
     std::string error;
 };
 
@@ -286,7 +286,13 @@ bool ScriptRuntime::Update(double deltaTime) {
     auto& scene = *impl_->world->scene;
     for (auto iterator = impl_->instances.begin(); iterator != impl_->instances.end();) {
         const auto* component = scene.TryGetComponent<ScriptComponent>(iterator->first);
-        if (!component || !component->enabled || component->typeName != iterator->second) {
+        std::string fields;
+        if (component && !SerializeScriptFields(component->fields, fields)) {
+            impl_->error = "Invalid serialized C# fields";
+            return false;
+        }
+        if (!component || !component->enabled || component->typeName != iterator->second.first ||
+            fields != iterator->second.second) {
             if (!Host().api.detach(impl_->context, iterator->first)) {
                 impl_->error = ManagedError();
                 return false;
@@ -304,17 +310,53 @@ bool ScriptRuntime::Update(double deltaTime) {
             impl_->error = "C# 스크립트 클래스 이름이 비어 있습니다.";
             return false;
         }
+        std::string fields;
+        if (!SerializeScriptFields(component.fields, fields)) {
+            impl_->error = "Invalid serialized C# fields";
+            return false;
+        }
         if (!Host().api.attach(impl_->context, entity, component.typeName.data(),
-                               static_cast<int>(component.typeName.size()))) {
+                               static_cast<int>(component.typeName.size()), fields.data(),
+                               static_cast<int>(fields.size()))) {
             impl_->error = ManagedError();
             return false;
         }
-        impl_->instances.emplace(entity, component.typeName);
+        impl_->instances.emplace(entity, std::make_pair(component.typeName, fields));
     }
     if (!Host().api.update(impl_->context, deltaTime)) {
         impl_->error = ManagedError();
         return false;
     }
+    return true;
+}
+
+bool ScriptRuntime::DescribeFields(const std::string& typeName,
+                                   std::vector<ScriptFieldDescription>& fields) {
+    if (!IsRunning() || impl_->world->owner != std::this_thread::get_id() ||
+        impl_->world->lifetime.expired())
+        return false;
+    std::lock_guard lock(managedMutex);
+    std::vector<char> buffer(65537);
+    const int size =
+        Host().api.describe(impl_->context, typeName.data(), static_cast<int>(typeName.size()),
+                            buffer.data(), static_cast<int>(buffer.size()));
+    if (size < 0) {
+        impl_->error = ManagedError();
+        return false;
+    }
+    if (size > 65536) {
+        impl_->error = "C# field metadata exceeds the 65536-byte UTF-8 limit";
+        return false;
+    }
+    ScriptFieldMap defaults;
+    if (!DeserializeScriptFields(std::string(buffer.data(), static_cast<size_t>(size)), defaults)) {
+        impl_->error = "Invalid C# field metadata";
+        return false;
+    }
+    std::vector<ScriptFieldDescription> next;
+    for (auto& [name, value] : defaults)
+        next.push_back({name, std::move(value)});
+    fields = std::move(next);
     return true;
 }
 

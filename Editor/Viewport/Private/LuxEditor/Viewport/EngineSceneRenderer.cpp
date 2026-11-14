@@ -452,8 +452,11 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
                 auto material = mesh->material;
                 if (scene.GetSettings().render3D.mode == LuxEngine::Render3DMode::Legacy)
                     material.albedoColor = expose(material.albedoColor);
-                if (!material.baseColorTexture.empty())
-                    material.baseColorTexture = scene.ResolveAssetPath(material.baseColorTexture);
+                for (auto* resource : {&material.baseColorTexture, &material.normalTexture,
+                                       &material.metallicTexture, &material.roughnessTexture,
+                                       &material.occlusionTexture})
+                    if (!resource->empty())
+                        *resource = scene.ResolveAssetPath(*resource);
                 if (mesh->meshPath.empty())
                     LuxEngine::Renderer3D::DrawMesh(world, material);
                 else
@@ -505,7 +508,15 @@ bool EngineSceneRenderer::Render3DPass(LuxEngine::Scene& scene, int pixelWidth, 
         error_ = QString::fromStdString(s.gpu.GetLastError());
         return false;
     }
-    return ReadbackToImage(output);
+    if (!ReadbackToImage(output))
+        return false;
+    output.reinterpretAsFormat(QImage::Format_RGBA8888_Premultiplied);
+    output = output.convertToFormat(QImage::Format_RGBA8888);
+    if (output.isNull()) {
+        error_ = QStringLiteral("3D 뷰포트의 알파 이미지를 변환하지 못했습니다.");
+        return false;
+    }
+    return true;
 }
 
 const QString& EngineSceneRenderer::LastError() const {

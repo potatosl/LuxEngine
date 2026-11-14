@@ -38,6 +38,7 @@ class QWidget;
 class QSlider;
 class QStackedWidget;
 class QVBoxLayout;
+class QFormLayout;
 class QPushButton;
 class QProcess;
 class QPixmap;
@@ -129,6 +130,10 @@ private:
     void RefreshHierarchy();
     void RefreshInspector();
     void RefreshProjectExplorer();
+    void BuildPrefabMenus(QMenu* parent);
+    void SaveSelectedPrefab();
+    void AddPrefabAsset(const std::filesystem::path& path);
+    void EditSelectedPrefab(int operation);
     void UpdateChrome();
     void UpdateRecentMenu();
     void ApplyProjectPreferences();
@@ -209,12 +214,22 @@ private:
     void CopyEntity();
     void PasteEntity();
     void RecordEdit(const QString& name, const std::function<void()>& edit);
+    void BuildScriptDetails(QVBoxLayout* layout);
+    void RefreshScriptDetails();
+    void InspectScriptFields();
+    void SetScriptField(const std::string& name, const LuxEngine::ScriptFieldValue& value);
     EditorSnapshot SnapshotScene();
     void RestoreScene(const EditorSnapshot& snapshot, std::optional<LuxEngine::uint32> selected);
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
+
+    QCheckBox* scriptAttached_ = nullptr;
+    QCheckBox* scriptEnabled_ = nullptr;
+    QLineEdit* scriptType_ = nullptr;
+    QWidget* scriptFieldsPanel_ = nullptr;
+    QFormLayout* scriptFieldsForm_ = nullptr;
 
     EditorDocument document_;
     std::optional<EditorProject> project_;
@@ -318,6 +333,15 @@ private:
     uint8_t tileId_ = 1;
     QDoubleSpinBox* metallic_ = nullptr;
     QDoubleSpinBox* roughness_ = nullptr;
+    QComboBox* materialAlphaMode_ = nullptr;
+    QDoubleSpinBox* materialAlphaCutoff_ = nullptr;
+    QCheckBox* materialDoubleSided_ = nullptr;
+    std::array<QLineEdit*, 4> materialMapPaths_{};
+    QDoubleSpinBox* materialNormalScale_ = nullptr;
+    QDoubleSpinBox* materialOcclusionStrength_ = nullptr;
+    QCheckBox* materialMipmaps_ = nullptr;
+    QComboBox* materialAddressMode_ = nullptr;
+    QCheckBox* materialAnisotropic_ = nullptr;
     std::array<std::array<QDoubleSpinBox*, 3>, 3> transform_{};
     std::array<QDoubleSpinBox*, 4> color_{};
     QPlainTextEdit* consoleOutput_ = nullptr;
