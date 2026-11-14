@@ -9,6 +9,7 @@
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QMimeData>
@@ -73,7 +74,7 @@ struct ProjectFixture {
 
 void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
     QTimer chooser;
-    bool configured = false, accepted = false, timedOut = false;
+    bool configured = false, accepted = false, timedOut = false, inputAvailable = false;
     const auto start = std::chrono::steady_clock::now();
     QObject::connect(&chooser, &QTimer::timeout, &window, [&] {
         auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
@@ -88,8 +89,15 @@ void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
         if (!configured) {
             configured = true;
             dialog->setDirectory(Q(scene.parent_path()));
-            dialog->selectFile(Q(scene.filename()));
+            auto* filename = dialog->findChild<QLineEdit*>(QStringLiteral("fileNameEdit"));
+            inputAvailable = filename != nullptr;
+            if (!filename) {
+                dialog->reject();
+                return;
+            }
             QObject::connect(dialog, &QFileDialog::accepted, &window, [&] { accepted = true; });
+            filename->setFocus();
+            filename->setText(Q(scene));
             return;
         }
         const auto selected = dialog->selectedFiles();
@@ -102,6 +110,7 @@ void OpenViaMenu(EditorWindow& window, const fs::path& scene) {
     Check(action, "scene open action exists");
     action->trigger();
     Check(!timedOut, "scene chooser did not accept the existing fixture file within ten seconds");
+    Check(inputAvailable, "non-native scene chooser exposes its filename input");
     Check(configured && accepted, "scene chooser accepted the exact requested file");
 }
 
