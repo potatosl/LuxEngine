@@ -4,10 +4,13 @@ lux_engine_module(Assets
     HEADERS
         Public/LuxEngine/Assets/AssetManager.hpp
         Public/LuxEngine/Assets/BasicModelLibrary.hpp
+        Public/LuxEngine/Assets/ModelAsset.hpp
     SOURCES
         Private/AssetManager.cpp
         Private/BasicModelLibrary.cpp
         Private/FbxImporter.cpp
+        Private/ModelAsset.cpp
+        Private/FbxModelImporter.cpp
 )
 target_include_directories(LuxModuleAssets SYSTEM PRIVATE "${stb_SOURCE_DIR}")
 target_compile_definitions(LuxModuleAssets PRIVATE

@@ -1,9 +1,11 @@
 #include "RHI/RenderBackend.hpp"
 #include <LuxEngine/Assets/AssetManager.hpp>
+#include <LuxEngine/Assets/ModelAsset.hpp>
 #include <LuxEngine/Core/Log.hpp>
 #include <LuxEngine/Renderer/Renderer3D/Renderer3D.hpp>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -71,6 +73,9 @@ struct Renderer3D::Context::Impl {
 
     struct CachedMesh {
         Ref<Mesh3D> mesh;
+        Ref<ModelAsset> model;
+        int32 clip = -1;
+        double time = std::numeric_limits<double>::quiet_NaN();
         uint64 used = 0;
         size_t bytes = 0;
         uint64 attempted = std::numeric_limits<uint64>::max();
@@ -88,6 +93,10 @@ struct Renderer3D::Context::Impl {
     };
 
     std::unordered_map<std::string, CachedTexture> textures;
+    // Scene draws retain GPU IDs until Render() records them. Cache eviction must not retire
+    // buffers or textures that a previously submitted draw in this scene still references.
+    std::vector<Ref<Mesh3D>> frameMeshes;
+    std::vector<Ref<GpuTexture>> frameTextures;
     std::unordered_map<std::string, std::string> warnings;
     std::string lastError;
     size_t textureBytes = 0;
@@ -209,6 +218,24 @@ bool Mesh3D::IsValid() const {
     return indexCount_ != 0 && vertices_.IsValid() && indices_.IsValid();
 }
 
+bool Mesh3D::UpdateVertices(std::span<const Vertex3D> vertices) {
+    if (!IsValid() ||
+        vertices.size_bytes() / sizeof(Vertex3D) != vertices_.GetSize() / sizeof(RenderVertex))
+        return false;
+    std::vector<RenderVertex> data;
+    data.reserve(vertices.size());
+    for (const auto& vertex : vertices) {
+        const auto& p = vertex.position;
+        const auto& n = vertex.normal;
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
+            !std::isfinite(n.x) || !std::isfinite(n.y) || !std::isfinite(n.z) ||
+            !std::isfinite(vertex.texCoords.x) || !std::isfinite(vertex.texCoords.y))
+            return false;
+        data.push_back({p, {1, 1, 1, 1}, vertex.texCoords, n});
+    }
+    return vertices_.SetData(data.data(), static_cast<uint32>(data.size() * sizeof(RenderVertex)));
+}
+
 Renderer3D::Context::Context() : impl_(std::make_unique<Impl>()) {}
 
 Renderer3D::Context::Context(GpuDevice* gpu) : impl_(std::make_unique<Impl>()) {
@@ -247,6 +274,8 @@ void Renderer3D::Context::Shutdown() {
     if (impl_->modern)
         impl_->modern->ClearDraws();
     impl_->modern.reset();
+    impl_->frameMeshes.clear();
+    impl_->frameTextures.clear();
     impl_->meshes.clear();
     impl_->textures.clear();
     impl_->warnings.clear();
@@ -344,6 +373,8 @@ void Renderer3D::Context::BeginScene(const PerspectiveCamera& camera, const Dire
     }
     impl_->vertices.clear();
     impl_->stats = {};
+    impl_->frameMeshes.clear();
+    impl_->frameTextures.clear();
     impl_->active = true;
 }
 
@@ -411,6 +442,8 @@ void Renderer3D::Context::AbortScene() {
     if (!impl_)
         return;
     impl_->active = false;
+    impl_->frameMeshes.clear();
+    impl_->frameTextures.clear();
     impl_->vertices.clear();
     impl_->pointLights.clear();
 }
@@ -559,14 +592,25 @@ Ref<GpuTexture> Renderer3D::Context::ResolveBaseColorTexture(const std::string& 
     if (!error.empty() && cached.texture)
         error += " (이전 정상 텍스처 유지)";
     impl_->Report("texture:" + path, error);
+    if (impl_->active && cached.texture)
+        impl_->frameTextures.push_back(cached.texture);
     return cached.texture;
 }
 
 bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& transform,
-                                        const Material3D& material) {
+                                        const Material3D& material, int32 modelSubmesh, int32 clip,
+                                        double time, uint64 instance) {
     if (!impl_ || !impl_->active || !impl_->LockValidState())
         return false;
-    auto found = impl_->meshes.find(path);
+    std::string key = path;
+    if (modelSubmesh >= 0) {
+        key.push_back('\0');
+        key += std::to_string(modelSubmesh) + ":" + std::to_string(instance);
+        // A host without an instance ID can still draw distinct poses in the same frame.
+        if (instance == 0 && clip >= 0)
+            key += ":" + std::to_string(clip) + ":" + std::to_string(std::bit_cast<uint64>(time));
+    }
+    auto found = impl_->meshes.find(key);
     if (found == impl_->meshes.end()) {
         if (impl_->meshes.size() >= MaxCachedAssets) {
             const auto oldest = std::min_element(
@@ -575,7 +619,7 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
             impl_->meshBytes -= oldest->second.bytes;
             impl_->meshes.erase(oldest);
         }
-        found = impl_->meshes.emplace(path, Impl::CachedMesh{}).first;
+        found = impl_->meshes.emplace(key, Impl::CachedMesh{}).first;
     }
     auto& cached = found->second;
     cached.used = ++impl_->sequence;
@@ -584,8 +628,77 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
                             !material.metallicTexture.empty() ||
                             !material.roughnessTexture.empty() ||
                             !material.occlusionTexture.empty();
-    if (cached.attempted != revision || (cached.uvBlocked && !requiresUv) ||
-        (requiresUv && !cached.hasUvs && !cached.uvBlocked)) {
+    if (modelSubmesh >= 0) {
+        std::string error;
+        auto model = ModelAsset::LoadFbx(path, error);
+        if (!std::isfinite(time) || clip < -1) {
+            model.reset();
+            error = "FBX 애니메이션 시간 또는 클립 번호가 올바르지 않습니다.";
+        }
+        if (model && static_cast<size_t>(modelSubmesh) < model->submeshes.size()) {
+            const auto& part = model->submeshes[static_cast<size_t>(modelSubmesh)];
+            if (requiresUv && !part.hasTexCoords) {
+                error = "텍스처를 적용할 UV 좌표가 없는 모델입니다: " + path;
+            } else if (cached.model != model || cached.clip != clip || cached.time != time) {
+                ModelPose pose;
+                const std::vector<ModelVertex>* source = &part.vertices;
+                if (clip >= 0 || part.skinned || part.morphTargets) {
+                    if (model->Evaluate(time, clip, pose, error))
+                        source = &pose.submeshes[static_cast<size_t>(modelSubmesh)];
+                }
+                if (error.empty()) {
+                    std::vector<Vertex3D> vertices;
+                    vertices.reserve(source->size());
+                    for (const auto& vertex : *source)
+                        vertices.push_back({vertex.position, vertex.normal, vertex.texCoords});
+                    const size_t bytes = vertices.size() * sizeof(RenderVertex) +
+                                         part.indices.size() * sizeof(uint32);
+                    constexpr size_t Budget = 256ull * 1024 * 1024;
+                    bool room = bytes <= Budget;
+                    while (room && impl_->meshBytes - cached.bytes + bytes > Budget &&
+                           impl_->meshes.size() > 1) {
+                        auto oldest = impl_->meshes.end();
+                        for (auto item = impl_->meshes.begin(); item != impl_->meshes.end(); ++item)
+                            if (item != found && (oldest == impl_->meshes.end() ||
+                                                  item->second.used < oldest->second.used))
+                                oldest = item;
+                        if (oldest == impl_->meshes.end())
+                            break;
+                        impl_->meshBytes -= oldest->second.bytes;
+                        impl_->meshes.erase(oldest);
+                    }
+                    room = room && impl_->meshBytes - cached.bytes + bytes <= Budget;
+                    bool uploaded = room && cached.model == model && cached.mesh &&
+                                    cached.mesh->UpdateVertices(vertices);
+                    if (room && !uploaded) {
+                        auto mesh = CreateRef<Mesh3D>();
+                        uploaded = mesh->Upload(impl_->device, vertices, part.indices);
+                        if (uploaded)
+                            cached.mesh = std::move(mesh);
+                    }
+                    if (uploaded) {
+                        impl_->meshBytes = impl_->meshBytes - cached.bytes + bytes;
+                        cached.bytes = bytes;
+                        cached.model = std::move(model);
+                        cached.clip = clip;
+                        cached.time = time;
+                        cached.hasUvs = part.hasTexCoords;
+                        cached.error.clear();
+                    } else {
+                        error = room ? "FBX 메시 업로드에 실패했습니다: " + path
+                                     : "메시 캐시 예산을 초과했습니다: " + path;
+                    }
+                }
+            } else {
+                cached.error.clear();
+            }
+        } else if (model) {
+            error = "FBX 하위 메시 번호가 올바르지 않습니다: " + path;
+        }
+        if (!error.empty())
+            cached.error = std::move(error);
+    } else if (cached.attempted != revision || (cached.uvBlocked && !requiresUv) ||
+               (requiresUv && !cached.hasUvs && !cached.uvBlocked)) {
         cached.attempted = revision;
         cached.uvBlocked = false;
         try {
@@ -662,12 +775,13 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
             cached.error = "3D 메시 갱신에 실패했습니다: " + path;
         }
     }
-    auto error = path.empty() ? std::string{} : AssetManager::GetAssetError(path);
+    auto error =
+        path.empty() || modelSubmesh >= 0 ? std::string{} : AssetManager::GetAssetError(path);
     if (error.empty())
         error = cached.error;
     if (!error.empty() && cached.mesh)
         error += " (이전 정상 메시 유지)";
-    impl_->Report("mesh:" + path, error);
+    impl_->Report("mesh:" + key, error);
     if (!cached.mesh) {
         Material3D placeholder;
         placeholder.albedoColor = {.85f, .15f, .25f, 1};
@@ -683,6 +797,7 @@ bool Renderer3D::Context::DrawMeshAsset(const std::string& path, const Mat4& tra
         drawable.roughnessTexture.clear();
         drawable.occlusionTexture.clear();
     }
+    impl_->frameMeshes.push_back(cached.mesh);
     DrawMesh(*cached.mesh, transform, drawable);
     return impl_->stats.drawCalls > previous;
 }
@@ -825,11 +940,14 @@ void Renderer3D::DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Mater
 }
 
 bool Renderer3D::DrawMeshAsset(const std::string& path, const Mat4& transform,
-                               const Material3D& material) {
+                               const Material3D& material, int32 modelSubmesh, int32 clip,
+                               double time, uint64 instance) {
     if (t_ActiveContext3D)
-        return t_ActiveContext3D->DrawMeshAsset(path, transform, material);
+        return t_ActiveContext3D->DrawMeshAsset(path, transform, material, modelSubmesh, clip, time,
+                                                instance);
     std::lock_guard<std::recursive_mutex> lock(s_DefaultContext3DMutex);
-    return DefaultContext3D().DrawMeshAsset(path, transform, material);
+    return DefaultContext3D().DrawMeshAsset(path, transform, material, modelSubmesh, clip, time,
+                                            instance);
 }
 
 void Renderer3D::DrawCube(const Vec3& p, const Vec3& scale, const Material3D& material) {

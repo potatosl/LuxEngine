@@ -1,6 +1,6 @@
 lux_engine_module(Scene
     PUBLIC_DEPENDENCIES LuxModuleCore LuxModuleECS LuxModuleAnimation LuxModulePhysics
-    PRIVATE_DEPENDENCIES LuxModuleRenderer Threads::Threads nlohmann_json::nlohmann_json
+    PRIVATE_DEPENDENCIES LuxModuleRenderer LuxModuleAssets Threads::Threads nlohmann_json::nlohmann_json
     HEADERS
         Private/ScenePhysicsWorld.hpp
         Public/LuxEngine/Scene/Entity.hpp

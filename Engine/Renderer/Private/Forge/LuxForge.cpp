@@ -217,7 +217,7 @@ struct LuxForgeDevice {
     Sampler* materialSamplers[4] = {};
     static constexpr uint32_t kMaterialBankSize = 8192;
     Pipeline* pipelineScene = nullptr;
-    Pipeline* materialPipelines[6] = {};
+    Pipeline* materialPipelines[12] = {};
     Pipeline* pipelineShadow = nullptr;
     Pipeline* pipelineSky = nullptr;
     Pipeline* pipelineTone = nullptr;
@@ -1902,12 +1902,17 @@ bool InitScene(LuxForgeDevice* device) {
             depthTest.mDepthWrite = mode != 2;
             raster.mCullMode = sided ? CULL_MODE_NONE : CULL_MODE_BACK;
             graphics.pBlendState = mode == 2 ? &materialBlend : nullptr;
-            addPipeline(device->renderer, &desc, &device->materialPipelines[mode * 2 + sided]);
-            if (!device->materialPipelines[mode * 2 + sided])
-                return failed("Material pipeline could not be created");
+            for (uint32_t mirrored = 0; mirrored < 2; ++mirrored) {
+                raster.mFrontFace = mirrored ? FRONT_FACE_CW : FRONT_FACE_CCW;
+                const uint32_t variant = (mode * 2 + sided) * 2 + mirrored;
+                addPipeline(device->renderer, &desc, &device->materialPipelines[variant]);
+                if (!device->materialPipelines[variant])
+                    return failed("Material pipeline could not be created");
+            }
         }
     }
     raster.mCullMode = CULL_MODE_NONE;
+    raster.mFrontFace = FRONT_FACE_CCW;
     depthTest.mDepthWrite = true;
     graphics.pBlendState = nullptr;
 
@@ -2134,6 +2139,15 @@ bool SceneDrawUsable(const LuxForgeDevice* device, const LuxForgeSceneDraw& draw
                                   device->textures[draw.texture].texture));
 }
 
+bool MirroredTransform(const float* m) {
+    // The FBX importer corrects geometry-local reflections. Hierarchy/world reflections
+    // remain part of the model matrix and reverse triangle winding once more.
+    const double determinant = double(m[0]) * (double(m[5]) * m[10] - double(m[9]) * m[6]) -
+                               double(m[4]) * (double(m[1]) * m[10] - double(m[9]) * m[2]) +
+                               double(m[8]) * (double(m[1]) * m[6] - double(m[5]) * m[2]);
+    return determinant < 0.0;
+}
+
 void DrawSceneMeshes(LuxForgeDevice* device, Cmd* cmd,
                      const std::vector<const LuxForgeSceneDraw*>& draws, uint32_t firstDraw,
                      bool shadow = false) {
@@ -2144,8 +2158,9 @@ void DrawSceneMeshes(LuxForgeDevice* device, Cmd* cmd,
         if (shadow && draw.alphaMode == 2)
             continue;
         if (!shadow) {
-            cmdBindPipeline(
-                cmd, device->materialPipelines[draw.alphaMode * 2 + (draw.doubleSided ? 1 : 0)]);
+            const uint32_t variant = (draw.alphaMode * 2 + (draw.doubleSided ? 1 : 0)) * 2 +
+                                     (MirroredTransform(draw.model) ? 1 : 0);
+            cmdBindPipeline(cmd, device->materialPipelines[variant]);
             ++device->frameStats.pipelineBinds;
         }
         const uint32_t material = firstDraw + static_cast<uint32_t>(i);
@@ -2315,7 +2330,7 @@ int RenderScene(LuxForgeDevice* device, const LuxForgeScene* scene, const LuxFor
         block[44] = draw.normalScale;
         block[45] = draw.occlusionStrength;
         block[46] = static_cast<float>(draw.sampling);
-        block[47] = 0.f;
+        block[47] = draw.doubleSided ? 1.f : 0.f;
         const uint32_t materialIndex = firstDraw + static_cast<uint32_t>(i);
         const uint32_t materialIds[5] = {draw.texture, draw.normalTexture, draw.metallicTexture,
                                          draw.roughnessTexture, draw.occlusionTexture};

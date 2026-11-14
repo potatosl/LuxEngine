@@ -24,6 +24,7 @@
 // Systems
 #include <LuxEngine/Animation/AnimationEngine.hpp>
 #include <LuxEngine/Assets/AssetManager.hpp>
+#include <LuxEngine/Assets/ModelAsset.hpp>
 #include <LuxEngine/Audio/AudioEngine.hpp>
 #include <LuxEngine/ECS/ECS.hpp>
 #include <LuxEngine/Physics/PhysicsEngine.hpp>

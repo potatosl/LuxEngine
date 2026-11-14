@@ -81,6 +81,7 @@ public:
                 std::span<const uint32> indices);
     bool Upload(GpuDevice* device, std::span<const Vertex3D> vertices,
                 std::span<const uint32> indices);
+    bool UpdateVertices(std::span<const Vertex3D> vertices);
     void Release();
     bool IsValid() const;
 
@@ -128,7 +129,8 @@ public:
         void DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material,
                       GpuTexture* texture);
         bool DrawMeshAsset(const std::string& path, const Mat4& transform,
-                           const Material3D& material);
+                           const Material3D& material, int32 modelSubmesh = -1, int32 clip = -1,
+                           double time = 0.0, uint64 instance = 0);
         void DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
                       const Mat4& transform, const Material3D& material);
         void DrawCube(const Vec3& position, const Vec3& scale, const Material3D& material);
@@ -176,7 +178,8 @@ public:
     static void DrawMesh(const Mesh3D& mesh, const Mat4& transform, const Material3D& material,
                          GpuTexture* texture);
     static bool DrawMeshAsset(const std::string& path, const Mat4& transform,
-                              const Material3D& material);
+                              const Material3D& material, int32 modelSubmesh = -1, int32 clip = -1,
+                              double time = 0.0, uint64 instance = 0);
     static void DrawMesh(std::span<const Vec3> positions, std::span<const uint32> indices,
                          const Mat4& transform, const Material3D& material);
     static void DrawCube(const Vec3& position, const Vec3& scale, const Material3D& material);

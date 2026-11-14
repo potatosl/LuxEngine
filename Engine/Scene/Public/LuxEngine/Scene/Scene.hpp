@@ -16,6 +16,7 @@
 namespace LuxEngine {
 class Entity;
 class ScenePhysicsWorld;
+class ModelAsset;
 
 struct SceneSettings {
     Vec4 clearColor{.12f, .14f, .16f, 1};
@@ -23,8 +24,7 @@ struct SceneSettings {
     Render3DSettings render3D;
     Vec2 gravity{0, -9.81f};
     Vec3 gravity3D{0, -9.81f, 0};
-    // Existing framework applications can continue setting PhysicsEngine's global
-    // gravity.
+    // Existing framework applications can continue setting PhysicsEngine's global gravity.
     bool overrideGravity = false;
     float fixedStep = 1.0f / 60.0f;
     uint32 physicsSubsteps = 1;
@@ -54,12 +54,10 @@ public:
     std::unordered_map<uint32, uint32> ImportEntities(const Scene& source,
                                                       const std::vector<uint32>& roots = {},
                                                       uint32 parent = 0, bool preserveIds = false);
-    // Replace built-in authored data while preserving the destination's
-    // hierarchy/provenance.
+    // Replace built-in authored data while preserving the destination's hierarchy/provenance.
     bool CopyEntityComponents(const Scene& source, uint32 sourceId, uint32 targetId);
-    // Commit validated authored data while retaining unchanged native physics
-    // bodies/runtime. Both scenes' previously obtained entity handles are
-    // invalidated; the target origin stays.
+    // Commit validated authored data while retaining unchanged native physics bodies/runtime.
+    // Both scenes' previously obtained entity handles are invalidated; the target origin stays.
     bool ApplyState(Scene& prepared);
 
     const SceneSettings& GetSettings() const noexcept;
@@ -75,8 +73,7 @@ public:
     void OnRender3D();
     std::string ResolveAssetPath(const std::string& path) const;
 
-    // BeginContact events from the most recent 2D physics step, including
-    // sensors.
+    // BeginContact events from the most recent 2D physics step, including sensors.
     const std::vector<Collision2DEvent>& GetCollisionEvents2D() const;
     const std::vector<Collision3DEvent>& GetCollisionEvents3D() const;
     enum class SaveFault {
@@ -114,8 +111,7 @@ public:
 
     template <class T> bool HasComponent(uint32 id) const;
 
-    // Query a component pool directly without allocating/sorting every entity in
-    // the scene.
+    // Query a component pool directly without allocating/sorting every entity in the scene.
     template <class T> std::vector<uint32> GetComponentEntityIds() const;
 
     template <class T> void RemoveComponent(uint32 id);
@@ -157,6 +153,7 @@ private:
     std::vector<Collision3DEvent> collisionEvents3D_;
     std::vector<Collision2DEvent> collisionEvents2D_;
     std::vector<uint32> updateBuffer_;
+    std::unordered_map<std::string, Ref<ModelAsset>> modelAssets_;
     SceneSettings settings_;
     std::string sourcePath_;
     double physicsAccumulator_ = 0;

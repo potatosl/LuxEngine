@@ -1,5 +1,6 @@
 #include <LuxEngine/Assets/AssetManager.hpp>
 #include <LuxEngine/Assets/BasicModelLibrary.hpp>
+#include <LuxEngine/Assets/ModelAsset.hpp>
 #include <LuxEngine/Platform/Window.hpp>
 #include <LuxEngine/Renderer/Renderer3D/Renderer3D.hpp>
 #include <SDL3/SDL.h>
@@ -280,6 +281,92 @@ void SaveCapture(const fs::path& path, const le::GpuFrameCapture& capture) {
     Require(static_cast<bool>(output), "The gallery PNG could not be saved completely");
 }
 
+void CheckAnimatedModel(le::Window& window, le::GpuDevice& gpu, le::Renderer3D::Context& renderer) {
+    std::string error;
+    const auto model = le::ModelAsset::LoadFbx(LUX_FBX_ANIMATED_FIXTURE, error);
+    Require(model && model->submeshes.size() == 1, "Animated FBX fixture failed: " + error);
+    le::PerspectiveCamera camera(le::ToRadians(40), 1.6f, .1f, 100);
+    camera.SetPosition({1, .4f, 8});
+    camera.SetTarget({1, .4f, 0});
+    const auto capture = [&](double rightTime) {
+        Require(gpu.RequestFrameCapture(), "Animated frame capture request failed");
+        BeginFrame(window, gpu);
+        Require(gpu.Clear(Background.x, Background.y, Background.z, 1), "Animated clear failed");
+        renderer.BeginScene(camera, le::DirectionalLight{});
+        for (int instance = 0; instance < 2; ++instance) {
+            const double time = instance == 0 ? 0 : rightTime;
+            le::ModelPose pose;
+            Require(model->Evaluate(time, 0, pose, error), error);
+            le::Material3D material;
+            material.doubleSided = true;
+            material.albedoColor =
+                instance == 0 ? le::Vec4{1, .05f, .05f, 1} : le::Vec4{.05f, 1, .05f, 1};
+            const auto world = le::Mat4::Translate({instance == 0 ? -1.5f : 1.5f, 0, 0}) *
+                               pose.nodeWorldTransforms[model->submeshes[0].node];
+            Require(renderer.DrawMeshAsset(LUX_FBX_ANIMATED_FIXTURE, world, material, 0, 0, time,
+                                           static_cast<le::uint64>(instance + 1)),
+                    "Animated FBX draw failed: " + renderer.GetLastAssetError());
+        }
+        renderer.EndScene();
+        Require(gpu.EndFrame(), "Animated frame presentation failed");
+        le::GpuFrameCapture frame;
+        Require(gpu.ReadFrameCapture(frame) && !frame.rgba.empty(), "Animated readback failed");
+        Require(renderer.GetStats().meshCount == 2 && gpu.GetCounters().validationErrors == 0,
+                "Animated FBX draws or validation failed");
+        return frame;
+    };
+    const auto first = capture(.25);
+    const auto second = capture(.75);
+    const auto centroid = [&](const le::GpuFrameCapture& frame, bool green) {
+        double sum = 0;
+        size_t count = 0;
+        for (le::uint32 y = 0; y < frame.height; ++y)
+            for (le::uint32 x = 0; x < frame.width; ++x) {
+                const auto index = (static_cast<size_t>(y) * frame.width + x) * 4;
+                const int red = frame.rgba[index], value = frame.rgba[index + 1];
+                if ((green && value > 60 && value > red * 2) ||
+                    (!green && red > 60 && red > value * 2)) {
+                    sum += x;
+                    ++count;
+                }
+            }
+        Require(count > 100, "Animated FBX instance did not produce visible pixels");
+        return sum / static_cast<double>(count);
+    };
+    const double redFirst = centroid(first, false), redSecond = centroid(second, false);
+    const double greenFirst = centroid(first, true), greenSecond = centroid(second, true);
+    Require(std::abs(redSecond - redFirst) < 1.0 && greenSecond - greenFirst > 40 &&
+                greenFirst - redFirst > 100,
+            "CPU skinning/GPU updates did not preserve independently animated instances");
+
+    Require(gpu.RequestFrameCapture(), "Cache lifetime capture request failed");
+    BeginFrame(window, gpu);
+    Require(gpu.Clear(Background.x, Background.y, Background.z, 1), "Cache lifetime clear failed");
+    renderer.BeginScene(camera, le::DirectionalLight{});
+    le::ModelPose rest;
+    Require(model->Evaluate(0, -1, rest, error), error);
+    const auto world = rest.nodeWorldTransforms[model->submeshes[0].node];
+    le::Material3D red;
+    red.albedoColor = {1, .05f, .05f, 1};
+    red.doubleSided = true;
+    // Exceed the 4096-entry LRU within one scene. The first visible draw must retain its
+    // buffers through EndScene(), even though later offscreen instances evict its cache entry.
+    for (le::uint64 instance = 100; instance < 4200; ++instance) {
+        const auto placement = instance == 100 ? world : le::Mat4::Translate({1000, 0, 0}) * world;
+        Require(
+            renderer.DrawMeshAsset(LUX_FBX_ANIMATED_FIXTURE, placement, red, 0, -1, 0, instance),
+            "FBX cache eviction retired a queued draw");
+    }
+    renderer.EndScene();
+    Require(renderer.GetLastAssetError().empty(), "FBX queued mesh resources expired");
+    Require(gpu.EndFrame(), "Cache lifetime presentation failed");
+    le::GpuFrameCapture retained;
+    Require(gpu.ReadFrameCapture(retained), "Cache lifetime readback failed");
+    (void)centroid(retained, false);
+    Require(gpu.GetCounters().validationErrors == 0,
+            "FBX cache eviction caused GPU validation errors");
+}
+
 int Run(const fs::path& capturePath) {
     if (DisplayUnavailable()) {
         std::cout << "SKIP: the FBX GPU gallery requires a window-system display\n";
@@ -325,6 +412,7 @@ int Run(const fs::path& capturePath) {
     }
     const auto untextured = Capture(window, gpu, renderer, camera, models, {}, true);
     CheckPixels(models, camera, background, textured, untextured);
+    CheckAnimatedModel(window, gpu, renderer);
     Require(le::AssetManager::GetCachedMeshCount() == models.size(),
             "The gallery did not retain all imported FBX models");
     Require(le::AssetManager::GetAssetError(texture, true).empty(),

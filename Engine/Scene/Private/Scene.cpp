@@ -1,4 +1,5 @@
 #include "ScenePhysicsWorld.hpp"
+#include <LuxEngine/Assets/ModelAsset.hpp>
 #include <LuxEngine/Core/Log.hpp>
 #include <LuxEngine/Physics/PhysicsEngine.hpp>
 #include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
@@ -14,9 +15,11 @@
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #ifdef _WIN32
@@ -100,6 +103,63 @@ void Scene::OnUpdate(double dt) {
     if (!std::isfinite(dt) || dt <= 0.0)
         return;
     updateBuffer_.assign(entities_.begin(), entities_.end());
+    std::unordered_map<std::string, Ref<ModelAsset>> models;
+    std::map<std::tuple<std::string, int32, double>, ModelPose> modelPoses;
+    for (const auto id : updateBuffer_) {
+        auto* animation = TryGetComponent<ModelAnimationComponent>(id);
+        auto* transform = TryGetComponent<TransformComponent>(id);
+        if (!animation || !transform || animation->modelPath.empty() ||
+            !std::isfinite(animation->time) || !std::isfinite(animation->speed))
+            continue;
+        const auto path = ResolveAssetPath(animation->modelPath);
+        std::string error;
+        auto [found, inserted] = models.try_emplace(path);
+        if (inserted)
+            found->second = ModelAsset::LoadFbx(path, error);
+        const auto& model = found->second;
+        if (!model || animation->nodeIndex >= model->nodes.size() || animation->clip < -1 ||
+            (animation->clip >= 0 &&
+             static_cast<size_t>(animation->clip) >= model->animations.size()))
+            continue;
+        if (animation->playing && animation->clip >= 0) {
+            const double duration = model->animations[animation->clip].duration;
+            const double next = animation->time + dt * animation->speed;
+            if (!std::isfinite(next))
+                continue;
+            if (duration > 0 && animation->loop) {
+                animation->time = std::fmod(next, duration);
+                if (animation->time < 0)
+                    animation->time += duration;
+            } else {
+                animation->time = std::clamp(next, 0.0, duration);
+                if (next < 0 || next >= duration)
+                    animation->playing = false;
+            }
+        }
+        if (animation->applyNodeTransform && animation->clip >= 0) {
+            const auto key = std::tuple{path, animation->clip, animation->time};
+            auto [pose, newPose] = modelPoses.try_emplace(key);
+            if (newPose &&
+                !model->Evaluate(animation->time, animation->clip, pose->second, error)) {
+                modelPoses.erase(pose);
+                continue;
+            }
+            // Scene transforms need node poses only. The model retains its CPU vertex cache
+            // for rendering; do not retain another complete vertex array for every node pose.
+            pose->second.submeshes.clear();
+            if (animation->nodeIndex < pose->second.nodeLocalTransforms.size()) {
+                const auto& node = pose->second.nodeLocalTransforms[animation->nodeIndex];
+                transform->position = node.position;
+                transform->rotation = node.rotation;
+                transform->scale = node.scale;
+            }
+        }
+    }
+    std::erase_if(modelAssets_,
+                  [&models](const auto& entry) { return !models.contains(entry.first); });
+    for (const auto& [path, model] : models)
+        if (model && (modelAssets_.contains(path) || modelAssets_.size() < 128))
+            modelAssets_[path] = model;
     for (auto id : updateBuffer_) {
         if (!entities_.contains(id))
             continue;
@@ -156,9 +216,8 @@ void Scene::OnUpdate(double dt) {
                                             : std::unordered_map<uint32, TransformComponent>{};
             const auto world3D = physics3D_ ? physics3D_->GetWorldPoses(*this)
                                             : std::unordered_map<uint32, TransformComponent>{};
-            // Apply every physics family together, parent before child. A hierarchy
-            // may contain both 2D and 3D bodies; each simulation's absolute world
-            // pose must remain independent.
+            // Apply every physics family together, parent before child. A hierarchy may contain
+            // both 2D and 3D bodies; each simulation's absolute world pose must remain independent.
             for (const auto& entity : hierarchy) {
                 const auto id = entity.GetId();
                 if (const auto pose = world3D.find(id); pose != world3D.end()) {
@@ -228,8 +287,7 @@ Vec4 Exposed(Vec4 color, float exposure) {
 } // namespace
 
 void Scene::OnRender() {
-    // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직
-    // 연결되지 않았습니다.
+    // 개발 중: 타일 종류는 고정 색상으로 표시합니다. 텍스처 아틀라스는 아직 연결되지 않았습니다.
     const auto entities = GetEntitiesIn2DLayerOrder();
     for (const bool tilemaps : {true, false}) {
         for (Entity entity : entities) {
@@ -288,9 +346,13 @@ void Scene::OnRender3D() {
                     *path = ResolveAssetPath(*path);
             if (meshComp.meshPath.empty())
                 Renderer3D::DrawMesh(GetWorldMatrix(entity.GetId()), material);
-            else
+            else {
+                const auto* animation = entity.TryGetComponent<ModelAnimationComponent>();
                 Renderer3D::DrawMeshAsset(ResolveAssetPath(meshComp.meshPath),
-                                          GetWorldMatrix(entity.GetId()), material);
+                                          GetWorldMatrix(entity.GetId()), material,
+                                          meshComp.modelSubmesh, animation ? animation->clip : -1,
+                                          animation ? animation->time : 0.0, entity.GetId());
+            }
         }
     }
 }
@@ -360,8 +422,7 @@ bool WriteTempFileFlushed(const std::filesystem::path& tempPath, const std::stri
     namespace fs = std::filesystem;
     std::error_code ec;
     if (ConsumeSaveFault(Scene::SaveFault::TempWriteFailure)) {
-        SetSaveError("Scene save failed: injected temporary file write failure "
-                     "(Win32 error 5: "
+        SetSaveError("Scene save failed: injected temporary file write failure (Win32 error 5: "
                      "ERROR_ACCESS_DENIED) for " +
                      PathToUtf8(tempPath));
         return false;
@@ -483,8 +544,8 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
                          "' failed (Win32 error " + std::to_string(moveErr) + ")");
             return false;
         }
-        // If another writer created targetPath concurrently, fall through to atomic
-        // ReplaceFileW with backup.
+        // If another writer created targetPath concurrently, fall through to atomic ReplaceFileW
+        // with backup.
     }
 
     const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -501,8 +562,7 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
         replaceSucceeded = false;
         replaceErr = ERROR_ACCESS_DENIED;
     } else if (ConsumeSaveFault(Scene::SaveFault::ReplaceFailedAfterBackup)) {
-        // Simulate step 1 of ReplaceFileW succeeding (target moved to backup) and
-        // step 2 failing.
+        // Simulate step 1 of ReplaceFileW succeeding (target moved to backup) and step 2 failing.
         if (MoveFileExW(targetW.c_str(), backupW.c_str(), MOVEFILE_WRITE_THROUGH)) {
             replaceSucceeded = false;
             replaceErr = ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
@@ -511,8 +571,7 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
             replaceErr = GetLastError();
         }
     } else if (ConsumeSaveFault(Scene::SaveFault::BackupRestoreFailure)) {
-        // Simulate target moved to backup, replacement failing, AND backup
-        // restoration failing.
+        // Simulate target moved to backup, replacement failing, AND backup restoration failing.
         if (MoveFileExW(targetW.c_str(), backupW.c_str(), MOVEFILE_WRITE_THROUGH)) {
             replaceSucceeded = false;
             replaceErr = ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
@@ -539,21 +598,20 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
         replaceErr = ERROR_FILE_NOT_FOUND;
     }
 
-    // Replacement failed. Absolute priority: preserve the original file and never
-    // clobber it with tempW.
+    // Replacement failed. Absolute priority: preserve the original file and never clobber it with
+    // tempW.
     const bool backupExists = (GetFileAttributesW(backupW.c_str()) != INVALID_FILE_ATTRIBUTES);
     if (!backupExists) {
         // Original target file was never renamed to backup and remains intact.
         DeleteFileW(tempW.c_str());
-        SetSaveError("Scene save failed: ReplaceFileW failed before backup "
-                     "replacement for '" +
+        SetSaveError("Scene save failed: ReplaceFileW failed before backup replacement for '" +
                      PathToUtf8(targetPath) + "' (Win32 error " + std::to_string(replaceErr) +
                      "). Original file preserved.");
         return false;
     }
 
-    // Backup exists: the original file was moved to backupW. Attempt safe
-    // restoration of backupW -> targetW.
+    // Backup exists: the original file was moved to backupW. Attempt safe restoration of backupW ->
+    // targetW.
     bool restored = false;
     DWORD restoreErr = ERROR_SUCCESS;
     if (injectRestoreFailure) {
@@ -595,8 +653,7 @@ bool AtomicReplaceFile(const std::filesystem::path& tempPath,
         return false;
     }
 
-    // Backup restoration failed! NEVER delete backupW — it holds the user's
-    // original scene data.
+    // Backup restoration failed! NEVER delete backupW — it holds the user's original scene data.
     SetSaveError("CRITICAL: Scene save failed for '" + PathToUtf8(targetPath) + "' (Win32 error " +
                  std::to_string(replaceErr) + ") and backup restoration failed (Win32 error " +
                  std::to_string(restoreErr) +
@@ -689,8 +746,7 @@ bool ValidSceneMetadata(Scene& scene) {
     std::unordered_map<uint32, std::vector<uint32>> children;
     for (const auto& entity : entities)
         children[scene.GetParent(entity.GetId())].push_back(entity.GetId());
-    // Pre/post indices make ancestry validation linear even for a very deep
-    // hierarchy.
+    // Pre/post indices make ancestry validation linear even for a very deep hierarchy.
     std::unordered_map<uint32, std::pair<uint32, uint32>> intervals;
     std::vector<std::pair<uint32, bool>> pending;
     for (const auto root : children[0])
@@ -751,6 +807,7 @@ bool Scene::ValidateForSerialization() {
                                                         typeid(TransformComponent),
                                                         typeid(SpriteRendererComponent),
                                                         typeid(MeshRendererComponent),
+                                                        typeid(ModelAnimationComponent),
                                                         typeid(CameraComponent),
                                                         typeid(Rigidbody2DComponent),
                                                         typeid(BoxCollider2DComponent),
@@ -795,10 +852,20 @@ bool Scene::ValidateForSerialization() {
                 static_cast<unsigned>(mesh->material.alphaMode) > 2 ||
                 !Finite(mesh->material.alphaCutoff) || mesh->material.alphaCutoff < 0 ||
                 mesh->material.alphaCutoff > 1 || mesh->meshPath.size() > 4096 ||
+                mesh->modelSubmesh < -1 || mesh->modelSubmesh >= 100000 ||
                 mesh->meshPath.find('\0') != std::string::npos || !IsValidUtf8(mesh->meshPath) ||
                 mesh->material.baseColorTexture.size() > 4096 ||
                 mesh->material.baseColorTexture.find('\0') != std::string::npos ||
                 !IsValidUtf8(mesh->material.baseColorTexture))
+                return false;
+        }
+        if (const auto* animation = TryGetComponent<ModelAnimationComponent>(id)) {
+            if (animation->modelPath.empty() || animation->modelPath.size() > 4096 ||
+                animation->modelPath.find('\0') != std::string::npos ||
+                !IsValidUtf8(animation->modelPath) || animation->nodeIndex >= 100000 ||
+                animation->clip < -1 || animation->clip >= 4096 ||
+                !std::isfinite(animation->time) || animation->time < 0 || animation->time > 1e12 ||
+                !std::isfinite(animation->speed) || std::abs(animation->speed) > 1000)
                 return false;
         }
         if (const auto* camera = TryGetComponent<CameraComponent>(id)) {
@@ -1127,6 +1194,7 @@ void Scene::AdoptLoadedScene(Scene& parsed) {
     physicsAccumulator_ = 0;
     physics2D_.reset();
     physics3D_.reset();
+    modelAssets_.clear();
     collisionEvents2D_.clear();
     collisionEvents3D_.clear();
     lifetime_ = std::move(nextLifetime);
