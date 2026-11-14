@@ -196,6 +196,13 @@ lux_copy_runtime(LuxJoltPhysicsTests)
 add_test(NAME Engine_jolt_physics COMMAND LuxJoltPhysicsTests)
 set_tests_properties(Engine_jolt_physics PROPERTIES LABELS "headless;physics;jolt" TIMEOUT 60)
 
+add_executable(LuxEmbeddedInputTests EmbeddedInputTest.cpp)
+target_link_libraries(LuxEmbeddedInputTests PRIVATE LuxEngine::Engine Threads::Threads)
+lux_set_target_warnings(LuxEmbeddedInputTests)
+lux_copy_runtime(LuxEmbeddedInputTests)
+add_test(NAME Engine_embedded_input COMMAND LuxEmbeddedInputTests)
+set_tests_properties(Engine_embedded_input PROPERTIES LABELS "headless;input;editor" TIMEOUT 30)
+
 add_executable(LuxFbxModelTests FbxModelTest.cpp)
 target_link_libraries(LuxFbxModelTests PRIVATE LuxEngine::Engine)
 lux_set_target_warnings(LuxFbxModelTests)
