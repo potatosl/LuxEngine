@@ -5,6 +5,8 @@
 /samples/PandaGarden/CMakeLists.txt text eol=lf
 /samples/PandaGarden/README.md text eol=lf
 /samples/PandaGarden/Assets/** -text -whitespace
+/samples/RainyCreek/Assets/** -text -whitespace
+/tools/RainyCreekSources.json text eol=lf
 /samples/MeshFoundation/Assets/*.obj text eol=lf
 /samples/MeshFoundation/*.lux text eol=lf
 # Keep upstream formatting byte-exact; verify these sources by their recorded hashes.

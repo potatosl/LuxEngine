@@ -35,6 +35,33 @@ class RainyCreekAssetTests(unittest.TestCase):
         self.assertLess(report["bytes"], ASSETS.MAX_OUTPUT_BYTES)
         self.assertFalse(report["canonicalPackageCreated"])
 
+    @unittest.skipUnless(shutil.which("git"), "Git is required to verify checkout filters")
+    def test_autocrlf_checkout_preserves_verified_asset_bytes(self):
+        repository = Path(self.temporary.name) / "repository"
+        tools = repository / "tools"
+        tools.mkdir(parents=True)
+        assets = repository / "samples/RainyCreek/Assets"
+        assets.parent.mkdir(parents=True)
+        shutil.move(str(self.root), assets)
+        shutil.copyfile(ASSETS.REPOSITORY / ".gitattributes", repository / ".gitattributes")
+        shutil.copyfile(SCRIPT, tools / SCRIPT.name)
+        shutil.copyfile(ASSETS.SOURCE_ROSTER, tools / ASSETS.SOURCE_ROSTER.name)
+        checkout = Path(self.temporary.name) / "checkout"
+        commands = (
+            ["git", "init", "--template="],
+            ["git", "-c", "core.autocrlf=false", "add", "--force", "--", "."],
+            ["git", "-c", "core.autocrlf=true", "-c", "core.eol=crlf",
+             "checkout-index", "--all", f"--prefix={checkout.as_posix()}/"],
+        )
+        for command in commands:
+            subprocess.run(command, cwd=repository, capture_output=True, check=True)
+        result = subprocess.run(
+            [sys.executable, "-S", str(checkout / "tools" / SCRIPT.name), "--verify"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["meshes"], 14)
+
     def test_same_size_texture_corruption_is_rejected(self):
         path = self.root / "Textures/fern.png"
         data = bytearray(path.read_bytes())
