@@ -1,46 +1,32 @@
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Scene/SceneSettingsDialog.hpp>
 #include <LuxEngine/Environment/EnvironmentMap.hpp>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QDoubleSpinBox>
-#include <QFileDialog>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QLineEdit>
-#include <QMessageBox>
-#include <QPushButton>
-#include <QScrollArea>
-#include <QSpinBox>
-#include <QVBoxLayout>
-#include <QVariant>
+#include <LuxUI/Widgets.hpp>
 #include <array>
 
 namespace LuxEditor {
 std::optional<LuxEngine::SceneSettings>
-ShowSceneSettingsDialog(QWidget* parent, const LuxEngine::SceneSettings& settings,
+ShowSceneSettingsDialog(LuxUI::Widget* parent, const LuxEngine::SceneSettings& settings,
                         const std::string& sourcePath) {
-    QDialog dialog(parent);
-    dialog.setWindowTitle(QStringLiteral("씬 설정"));
+    LuxUI::Dialog dialog(parent);
+    dialog.setWindowTitle(LUX_UI_TEXT("씬 설정"));
     dialog.setMinimumWidth(360);
     dialog.resize(580, 760);
-    auto* outer = new QVBoxLayout(&dialog);
-    auto* scroll = new QScrollArea(&dialog);
+    auto* outer = new LuxUI::VBoxLayout(&dialog);
+    auto* scroll = new LuxUI::ScrollArea(&dialog);
     scroll->setWidgetResizable(true);
-    auto* body = new QWidget(scroll);
+    auto* body = new LuxUI::Widget(scroll);
     scroll->setWidget(body);
     outer->addWidget(scroll);
-    auto* layout = new QVBoxLayout(body);
-    auto group = [&](const QString& title) {
-        auto* box = new QGroupBox(title, &dialog);
+    auto* layout = new LuxUI::VBoxLayout(body);
+    auto group = [&](const LuxUI::String& title) {
+        auto* box = new LuxUI::GroupBox(title, &dialog);
         layout->addWidget(box);
-        return new QFormLayout(box);
+        return new LuxUI::FormLayout(box);
     };
-    auto number = [&](QFormLayout* form, const QString& label, double value, double low,
+    auto number = [&](LuxUI::FormLayout* form, const LuxUI::String& label, double value, double low,
                       double high, int decimals = 3) {
-        auto* field = new QDoubleSpinBox(&dialog);
+        auto* field = new LuxUI::DoubleSpinBox(&dialog);
         field->setDecimals(decimals);
         field->setRange(low, high);
         field->setValue(value);
@@ -49,137 +35,140 @@ ShowSceneSettingsDialog(QWidget* parent, const LuxEngine::SceneSettings& setting
         form->addRow(label, field);
         return field;
     };
-    auto* environment = group(QStringLiteral("환경"));
-    std::array<QDoubleSpinBox*, 4> clear;
+    auto* environment = group(LUX_UI_TEXT("환경"));
+    std::array<LuxUI::DoubleSpinBox*, 4> clear;
     const std::array<float, 4> colors{settings.clearColor.x, settings.clearColor.y,
                                       settings.clearColor.z, settings.clearColor.w};
-    const std::array<QString, 4> labels{QStringLiteral("배경 R"), QStringLiteral("배경 G"),
-                                        QStringLiteral("배경 B"), QStringLiteral("배경 A")};
+    const std::array<LuxUI::String, 4> labels{LUX_UI_TEXT("배경 R"), LUX_UI_TEXT("배경 G"),
+                                              LUX_UI_TEXT("배경 B"), LUX_UI_TEXT("배경 A")};
     for (size_t index = 0; index < clear.size(); ++index)
         clear[index] = number(environment, labels[index], colors[index], 0, 1);
-    auto* rendering = group(QStringLiteral("렌더링"));
-    auto* exposure = number(rendering, QStringLiteral("노출 배율"), settings.exposure, .05, 16);
-    auto* mode = new QComboBox(&dialog);
-    mode->setObjectName(QStringLiteral("render3DMode"));
-    mode->addItem(QStringLiteral("Legacy"));
-    mode->addItem(QStringLiteral("PBR"));
+    auto* rendering = group(LUX_UI_TEXT("렌더링"));
+    auto* exposure = number(rendering, LUX_UI_TEXT("노출 배율"), settings.exposure, .05, 16);
+    auto* mode = new LuxUI::ComboBox(&dialog);
+    mode->setObjectName(LUX_UI_TEXT("render3DMode"));
+    mode->addItem(LUX_UI_TEXT("Legacy"));
+    mode->addItem(LUX_UI_TEXT("PBR"));
     mode->setCurrentIndex(static_cast<int>(settings.render3D.mode));
-    rendering->addRow(QStringLiteral("3D"), mode);
+    rendering->addRow(LUX_UI_TEXT("3D"), mode);
     const auto& r = settings.render3D;
-    auto* sunGroup = group(QStringLiteral("방향광"));
-    std::array<QDoubleSpinBox*, 3> sunDirection, sunColor, ambientColor;
+    auto* sunGroup = group(LUX_UI_TEXT("방향광"));
+    std::array<LuxUI::DoubleSpinBox*, 3> sunDirection, sunColor, ambientColor;
     const std::array<float, 3> directions{r.sun.direction.x, r.sun.direction.y, r.sun.direction.z};
     const std::array<float, 3> sunColors{r.sun.color.x, r.sun.color.y, r.sun.color.z};
     const std::array<float, 3> ambientColors{r.environmentColor.x, r.environmentColor.y,
                                              r.environmentColor.z};
     for (size_t i = 0; i < 3; ++i) {
-        sunDirection[i] =
-            number(sunGroup, QStringLiteral("방향 %1").arg(QStringLiteral("XYZ").at(i)),
-                   directions[i], -10000, 10000);
-        sunColor[i] = number(sunGroup, QStringLiteral("색상 %1").arg(QStringLiteral("RGB").at(i)),
+        sunDirection[i] = number(sunGroup, LUX_UI_TEXT("방향 %1").arg(LUX_UI_TEXT("XYZ").at(i)),
+                                 directions[i], -10000, 10000);
+        sunColor[i] = number(sunGroup, LUX_UI_TEXT("색상 %1").arg(LUX_UI_TEXT("RGB").at(i)),
                              sunColors[i], 0, 65504);
     }
-    auto* sunIntensity = number(sunGroup, QStringLiteral("광원 강도"), r.sun.intensity, 0, 10000);
-    auto* lighting = group(QStringLiteral("환경광·HDR"));
-    auto* ibl = new QCheckBox(QStringLiteral("환경 반사 (IBL)"), &dialog);
+    auto* sunIntensity = number(sunGroup, LUX_UI_TEXT("광원 강도"), r.sun.intensity, 0, 10000);
+    auto* lighting = group(LUX_UI_TEXT("환경광·HDR"));
+    auto* ibl = new LuxUI::CheckBox(LUX_UI_TEXT("환경 반사 (IBL)"), &dialog);
     ibl->setChecked(r.imageBasedLighting);
     lighting->addRow(ibl);
-    auto* skybox = new QCheckBox(QStringLiteral("스카이박스 표시"), &dialog);
+    auto* skybox = new LuxUI::CheckBox(LUX_UI_TEXT("스카이박스 표시"), &dialog);
     skybox->setChecked(r.showSkybox);
     lighting->addRow(skybox);
-    auto* tone = new QCheckBox(QStringLiteral("ACES 톤 매핑"), &dialog);
+    auto* tone = new LuxUI::CheckBox(LUX_UI_TEXT("ACES 톤 매핑"), &dialog);
     tone->setChecked(r.toneMapping);
     lighting->addRow(tone);
     for (size_t i = 0; i < 3; ++i)
         ambientColor[i] =
-            number(lighting, QStringLiteral("기본 환경색 %1").arg(QStringLiteral("RGB").at(i)),
+            number(lighting, LUX_UI_TEXT("기본 환경색 %1").arg(LUX_UI_TEXT("RGB").at(i)),
                    ambientColors[i], 0, 65504);
     auto* ambientIntensity =
-        number(lighting, QStringLiteral("환경 강도"), r.environmentIntensity, 0, 10000);
+        number(lighting, LUX_UI_TEXT("환경 강도"), r.environmentIntensity, 0, 10000);
     auto* rotation =
-        number(lighting, QStringLiteral("환경 회전 (도)"), r.environmentRotation, -36000, 36000);
-    auto* path = new QLineEdit(QString::fromUtf8(r.environmentPath), &dialog);
-    path->setObjectName(QStringLiteral("environmentPath"));
+        number(lighting, LUX_UI_TEXT("환경 회전 (도)"), r.environmentRotation, -36000, 36000);
+    auto* path = new LuxUI::LineEdit(LuxUI::String::fromUtf8(r.environmentPath), &dialog);
+    path->setObjectName(LUX_UI_TEXT("environmentPath"));
     path->setReadOnly(true);
-    path->setPlaceholderText(QStringLiteral("내장 환경 사용"));
-    lighting->addRow(QStringLiteral("HDR 이미지"), path);
-    const auto resolve = [&](const QString& text) {
+    path->setPlaceholderText(LUX_UI_TEXT("내장 환경 사용"));
+    lighting->addRow(LUX_UI_TEXT("HDR 이미지"), path);
+    const auto resolve = [&](const LuxUI::String& text) {
         auto file = PathFromUtf8(text.toUtf8().toStdString());
         if (file.is_relative() && !sourcePath.empty())
             file = PathFromUtf8(sourcePath).parent_path() / file;
         return file;
     };
-    auto* choose = new QPushButton(QStringLiteral("환경 이미지 선택..."), &dialog);
+    auto* choose = new LuxUI::PushButton(LUX_UI_TEXT("환경 이미지 선택..."), &dialog);
     lighting->addRow(choose);
-    QObject::connect(choose, &QPushButton::clicked, &dialog, [&] {
+    LuxUI::Object::connect(choose, &LuxUI::PushButton::clicked, &dialog, [&] {
         const auto file =
-            QFileDialog::getOpenFileName(&dialog, QStringLiteral("환경 이미지 선택"), {},
-                                         QStringLiteral("Radiance HDR (*.hdr *.HDR)"));
+            LuxUI::FileDialog::getOpenFileName(&dialog, LUX_UI_TEXT("환경 이미지 선택"), {},
+                                               LUX_UI_TEXT("Radiance HDR (*.hdr *.HDR)"));
         if (file.isEmpty())
             return;
         std::string error;
         if (!LuxEngine::EnvironmentData::ValidateFile(file.toUtf8().toStdString(), error)) {
-            QMessageBox::warning(&dialog, QStringLiteral("환경 이미지 오류"),
-                                 QString::fromUtf8(error));
+            LuxUI::MessageBox::warning(&dialog, LUX_UI_TEXT("환경 이미지 오류"),
+                                       LuxUI::String::fromUtf8(error));
             return;
         }
         path->setText(file);
     });
-    auto* clearEnvironment = new QPushButton(QStringLiteral("내장 환경으로 초기화"), &dialog);
+    auto* clearEnvironment = new LuxUI::PushButton(LUX_UI_TEXT("내장 환경으로 초기화"), &dialog);
     lighting->addRow(clearEnvironment);
-    QObject::connect(clearEnvironment, &QPushButton::clicked, path, &QLineEdit::clear);
-    auto* reload = new QPushButton(QStringLiteral("환경 다시 불러오기"), &dialog);
+    LuxUI::Object::connect(clearEnvironment, &LuxUI::PushButton::clicked, path,
+                           &LuxUI::LineEdit::clear);
+    auto* reload = new LuxUI::PushButton(LUX_UI_TEXT("환경 다시 불러오기"), &dialog);
     lighting->addRow(reload);
-    QObject::connect(reload, &QPushButton::clicked, &dialog, [&] {
+    LuxUI::Object::connect(reload, &LuxUI::PushButton::clicked, &dialog, [&] {
         std::string error;
         const auto file =
             path->text().isEmpty() ? std::string{} : GenericPathUtf8(resolve(path->text()));
         if (!LuxEngine::EnvironmentData::Reload(file, error))
-            QMessageBox::warning(&dialog, QStringLiteral("환경 이미지 오류"),
-                                 QString::fromUtf8(error));
+            LuxUI::MessageBox::warning(&dialog, LUX_UI_TEXT("환경 이미지 오류"),
+                                       LuxUI::String::fromUtf8(error));
     });
-    auto* shadowGroup = group(QStringLiteral("방향광 그림자"));
-    auto* shadows = new QCheckBox(QStringLiteral("그림자 사용"), &dialog);
-    shadows->setObjectName(QStringLiteral("directionalShadows"));
+    auto* shadowGroup = group(LUX_UI_TEXT("방향광 그림자"));
+    auto* shadows = new LuxUI::CheckBox(LUX_UI_TEXT("그림자 사용"), &dialog);
+    shadows->setObjectName(LUX_UI_TEXT("directionalShadows"));
     shadows->setChecked(r.shadows);
     shadowGroup->addRow(shadows);
-    auto* resolution = new QComboBox(&dialog);
+    auto* resolution = new LuxUI::ComboBox(&dialog);
     for (int size : {1024, 2048, 4096})
-        resolution->addItem(QString::number(size), size);
+        resolution->addItem(LuxUI::String::number(size), size);
     resolution->setCurrentIndex(resolution->findData(static_cast<int>(r.shadowResolution)));
-    shadowGroup->addRow(QStringLiteral("해상도"), resolution);
-    auto* range = number(shadowGroup, QStringLiteral("적용 영역 크기"), r.shadowRange, 1, 10000);
+    shadowGroup->addRow(LUX_UI_TEXT("해상도"), resolution);
+    auto* range = number(shadowGroup, LUX_UI_TEXT("적용 영역 크기"), r.shadowRange, 1, 10000);
     auto* depthBias =
-        number(shadowGroup, QStringLiteral("깊이 바이어스"), r.shadowDepthBias, 0, .1, 6);
+        number(shadowGroup, LUX_UI_TEXT("깊이 바이어스"), r.shadowDepthBias, 0, .1, 6);
     auto* normalBias =
-        number(shadowGroup, QStringLiteral("법선 바이어스"), r.shadowNormalBias, 0, 10, 4);
-    auto* physics = group(QStringLiteral("물리"));
-    auto* overrideGravity = new QCheckBox(QStringLiteral("씬 중력 사용"), &dialog);
+        number(shadowGroup, LUX_UI_TEXT("법선 바이어스"), r.shadowNormalBias, 0, 10, 4);
+    auto* physics = group(LUX_UI_TEXT("물리"));
+    auto* overrideGravity = new LuxUI::CheckBox(LUX_UI_TEXT("씬 중력 사용"), &dialog);
     overrideGravity->setChecked(settings.overrideGravity);
     physics->addRow(overrideGravity);
-    auto* gx = number(physics, QStringLiteral("2D 중력 X"), settings.gravity.x, -10000, 10000);
-    auto* gy = number(physics, QStringLiteral("2D 중력 Y"), settings.gravity.y, -10000, 10000);
-    std::array<QDoubleSpinBox*, 3> gravity3D;
+    auto* gx = number(physics, LUX_UI_TEXT("2D 중력 X"), settings.gravity.x, -10000, 10000);
+    auto* gy = number(physics, LUX_UI_TEXT("2D 중력 Y"), settings.gravity.y, -10000, 10000);
+    std::array<LuxUI::DoubleSpinBox*, 3> gravity3D;
     const std::array<float, 3> gravity{settings.gravity3D.x, settings.gravity3D.y,
                                        settings.gravity3D.z};
     for (size_t index = 0; index < gravity3D.size(); ++index)
-        gravity3D[index] = number(physics,
-                                  QStringLiteral("3D 중력 %1")
-                                      .arg(QStringLiteral("XYZ").at(static_cast<qsizetype>(index))),
-                                  gravity[index], -10000, 10000);
-    auto* step = number(physics, QStringLiteral("고정 시간 간격 (초)"), settings.fixedStep,
+        gravity3D[index] = number(
+            physics,
+            LUX_UI_TEXT("3D 중력 %1").arg(LUX_UI_TEXT("XYZ").at(static_cast<qsizetype>(index))),
+            gravity[index], -10000, 10000);
+    auto* step = number(physics, LUX_UI_TEXT("고정 시간 간격 (초)"), settings.fixedStep,
                         1.0 / 240.0, .25, 6);
-    auto* substeps = new QSpinBox(&dialog);
+    auto* substeps = new LuxUI::SpinBox(&dialog);
     substeps->setRange(1, 16);
     substeps->setValue(static_cast<int>(settings.physicsSubsteps));
-    physics->addRow(QStringLiteral("물리 하위 단계"), substeps);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    physics->addRow(LUX_UI_TEXT("물리 하위 단계"), substeps);
+    auto* buttons = new LuxUI::DialogButtonBox(
+        LuxUI::DialogButtonBox::Ok | LuxUI::DialogButtonBox::Cancel, &dialog);
     outer->addWidget(buttons);
-    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    if (dialog.exec() != QDialog::Accepted)
+    LuxUI::Object::connect(buttons, &LuxUI::DialogButtonBox::accepted, &dialog,
+                           &LuxUI::Dialog::accept);
+    LuxUI::Object::connect(buttons, &LuxUI::DialogButtonBox::rejected, &dialog,
+                           &LuxUI::Dialog::reject);
+    if (dialog.exec() != LuxUI::Dialog::Accepted)
         return std::nullopt;
-    const auto value = [](QDoubleSpinBox* field, float previous) {
+    const auto value = [](LuxUI::DoubleSpinBox* field, float previous) {
         return field->value() == field->property("initialValue").toDouble()
                    ? previous
                    : static_cast<float>(field->value());

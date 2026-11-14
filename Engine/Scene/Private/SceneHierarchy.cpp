@@ -1,4 +1,4 @@
-#include "PhysicsWorld2D.hpp"
+#include "ScenePhysicsWorld.hpp"
 #include <LuxEngine/Scene/Entity.hpp>
 #include <LuxEngine/Scene/Scene.hpp>
 #include <algorithm>
@@ -80,8 +80,8 @@ bool InverseAffine(const Mat4& input, Mat4& result) {
 using AuthoredComponents =
     std::tuple<TagComponent, TransformComponent, SpriteRendererComponent, MeshRendererComponent,
                CameraComponent, Rigidbody2DComponent, BoxCollider2DComponent, Rigidbody3DComponent,
-               BoxCollider3DComponent, TilemapComponent, AnimationComponent, ScriptComponent,
-               SceneReferenceComponent>;
+               BoxCollider3DComponent, TilemapComponent, AnimationComponent,
+               ModelAnimationComponent, ScriptComponent, SceneReferenceComponent>;
 
 template <typename Tuple, typename Callback, size_t... Indices>
 void ForEachType(Callback&& callback, std::index_sequence<Indices...>) {
@@ -318,7 +318,7 @@ bool Scene::CopyEntityComponents(const Scene& source, uint32 sourceId, uint32 ta
     } catch (...) {
         return false;
     }
-    RemovePhysicsBody2D(targetId);
+    RemovePhysicsBody(targetId);
     ForEachType<AuthoredComponents>([&]<typename T> {
         auto& destination = GetPool<T>().values;
         destination.erase(targetId);
@@ -341,18 +341,22 @@ bool Scene::ApplyState(Scene& prepared) {
         nextLifetime = std::make_shared<int>(0);
         preparedLifetime = std::make_shared<int>(0);
         removedBodies.reserve(entities_.size());
-        for (const auto id : entities_)
-            if (!prepared.HasComponent<TransformComponent>(id) ||
-                !prepared.HasComponent<BoxCollider2DComponent>(id) ||
-                (!prepared.HasComponent<Rigidbody2DComponent>(id) &&
-                 prepared.HasComponent<Rigidbody3DComponent>(id) &&
-                 prepared.HasComponent<BoxCollider3DComponent>(id)))
+        for (const auto id : entities_) {
+            const bool had2D = HasComponent<BoxCollider2DComponent>(id) &&
+                               (HasComponent<Rigidbody2DComponent>(id) ||
+                                !HasComponent<BoxCollider3DComponent>(id));
+            const bool has2D = prepared.HasComponent<BoxCollider2DComponent>(id) &&
+                               (prepared.HasComponent<Rigidbody2DComponent>(id) ||
+                                !prepared.HasComponent<BoxCollider3DComponent>(id));
+            if (!prepared.HasComponent<TransformComponent>(id) || had2D != has2D ||
+                (!has2D && !prepared.HasComponent<BoxCollider3DComponent>(id)))
                 removedBodies.push_back(id);
+        }
     } catch (...) {
         return false;
     }
     for (const auto id : removedBodies)
-        RemovePhysicsBody2D(id);
+        RemovePhysicsBody(id);
     const bool timingChanged = settings_.fixedStep != prepared.settings_.fixedStep ||
                                settings_.physicsSubsteps != prepared.settings_.physicsSubsteps;
     pools_.swap(prepared.pools_);
@@ -369,10 +373,17 @@ bool Scene::ApplyState(Scene& prepared) {
     std::erase_if(collisionEvents2D_, [this](const auto& event) {
         return !IsAlive(event.entityA) || !IsAlive(event.entityB);
     });
+    std::erase_if(collisionEvents3D_, [this](const auto& event) {
+        return !IsAlive(event.entityA) || !IsAlive(event.entityB);
+    });
     updateBuffer_.clear();
+    modelAssets_.clear();
+    prepared.modelAssets_.clear();
     prepared.physics2D_.reset();
+    prepared.physics3D_.reset();
     prepared.physicsAccumulator_ = 0;
     prepared.collisionEvents2D_.clear();
+    prepared.collisionEvents3D_.clear();
     prepared.updateBuffer_.clear();
     return true;
 }

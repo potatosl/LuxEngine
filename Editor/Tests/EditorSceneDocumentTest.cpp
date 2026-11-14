@@ -3,8 +3,7 @@
 #include <LuxEditor/Scene/EditorDocument.hpp>
 #include <LuxEngine/EntryPoint.hpp>
 #include <LuxEngine/Scene/SceneManager.hpp>
-#include <QColor>
-#include <QImage>
+#include <LuxUI/Widgets.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -242,9 +241,9 @@ void TestMeshAssetPaths() {
 void TestBaseColorPaths() {
     Files files;
     const auto texture = files.root / PathFromUtf8("기본 색상.PnG");
-    QImage image(2, 2, QImage::Format_RGBA8888);
-    image.fill(QColor(128, 70, 20));
-    Check(image.save(QString::fromUtf8(PathUtf8(texture)), "PNG"), "texture fixture writes");
+    LuxUI::Image image(2, 2, LuxUI::Image::Format_RGBA8888);
+    image.fill(LuxUI::Color(128, 70, 20));
+    Check(image.save(LuxUI::String::fromUtf8(PathUtf8(texture)), "PNG"), "texture fixture writes");
     const auto first = files.root / "Scenes/First.lux";
     const auto second = files.root / "Moved/Scenes/Second.lux";
     fs::create_directories(first.parent_path());

@@ -230,6 +230,9 @@ struct Files {
 using namespace LuxEngine;
 
 void Core() {
+    const CameraComponent legacyCamera{true, true, 60.0f, 10.0f};
+    Check(Near(legacyCamera.nearClip, .1f) && Near(legacyCamera.farClip, 1000.f),
+          "public CameraComponent preserves four-field aggregate initialization and clip defaults");
     Random first(42), second(42);
     for (int index = 0; index < 32; ++index) {
         const float value = first.Range(-2.0f, 3.0f);
@@ -252,6 +255,31 @@ void Core() {
     Check(Near(project(perspective, {0, 0, -0.5f}), 0.0f) &&
               Near(project(perspective, {0, 0, -50.0f}), 1.0f),
           "perspective depth maps near/far to Vulkan's 0..1 range");
+    const auto largePerspective = Mat4::Perspective(ToRadians(60), 1, 1e20f, 1e21f);
+    Check(std::all_of(std::begin(largePerspective.elements), std::end(largePerspective.elements),
+                      [](float value) { return std::isfinite(value); }) &&
+              Near(project(largePerspective, {0, 0, -1e20f}), 0) &&
+              Near(project(largePerspective, {0, 0, -1e21f}), 1),
+          "perspective computes large representable clip ranges without overflowing intermediates");
+    PerspectiveCamera stablePerspective(ToRadians(60), 1, .1f, 100);
+    stablePerspective.SetPosition({2, 3, 4});
+    const auto previousProjection = stablePerspective.GetProjectionMatrix();
+    const auto previousViewProjection = stablePerspective.GetViewProjectionMatrix();
+    const float extremeFar = std::numeric_limits<float>::max();
+    const float extremeNear = std::nextafter(extremeFar, 0.0f);
+    bool rejectedPerspective = false;
+    try {
+        stablePerspective.SetPerspective(ToRadians(60), 1, extremeNear, extremeFar);
+    } catch (const std::invalid_argument&) {
+        rejectedPerspective = true;
+    }
+    Check(rejectedPerspective, "unrepresentable perspective matrix throws invalid_argument");
+    for (size_t index = 0; index < 16; ++index)
+        Check(stablePerspective.GetProjectionMatrix().elements[index] ==
+                      previousProjection.elements[index] &&
+                  stablePerspective.GetViewProjectionMatrix().elements[index] ==
+                      previousViewProjection.elements[index],
+              "rejected perspective settings preserve the previous projection and camera state");
     const Mat4 ortho = Mat4::Orthographic(-1, 1, -1, 1, -1, 1);
     Check(Near(project(ortho, {0, 0, 1}), 0.0f) && Near(project(ortho, {0, 0, -1}), 1.0f),
           "orthographic depth maps into Vulkan's 0..1 range");
@@ -314,36 +342,15 @@ void Core() {
           "animation update loop keeps time wrapped and bounded");
     Throws([&] { clip.AddKeyframe({-1}); }, "invalid keyframe rejected");
     PhysicsEngine::Init();
-    Vec3 p{0, 0.5f, 0};
-    Rigidbody2DComponent body;
-    BoxCollider2DComponent collider;
-    PhysicsEngine::Step2D(p, body, collider, 1.0 / 60);
-    Check(body.isGrounded && Near(p.y, 0.5f), "ground contact");
-    body.velocity.y = 2;
-    PhysicsEngine::Step2D(p, body, collider, 1.0 / 60);
-    Check(p.y > 0.5f && !body.isGrounded, "jump leaves ground");
-    p = {0, 0, 0};
-    body = {};
-    collider.isTrigger = true;
-    PhysicsEngine::Step2D(p, body, collider, 1.0 / 60);
-    Check(p.y < 0 && !body.isGrounded, "trigger does not block");
-    body.type = BodyType::Kinematic;
-    body.velocity = {3, 0};
-    p = {0, 5, 0};
-    PhysicsEngine::Step2D(p, body, collider, 0.1);
-    Check(Near(p.x, 0.3f) && Near(p.y, 5), "kinematic motion");
-    const auto before = p;
-    PhysicsEngine::Step2D(p, body, collider, -1);
-    Check(Near(p.x, before.x), "invalid timestep ignored");
-    body.velocity = {std::numeric_limits<float>::quiet_NaN(), 0};
-    PhysicsEngine::Step2D(p, body, collider, 0.1);
-    Check(Near(p.x, before.x) && Near(p.y, before.y), "NaN velocity in Step2D ignored safely");
-    Vec3 p3{0, 2, 0};
-    Rigidbody3DComponent body3;
-    BoxCollider3DComponent collider3;
-    body3.velocity = {0, std::numeric_limits<float>::infinity(), 0};
-    PhysicsEngine::Step3D(p3, body3, collider3, 0.1);
-    Check(Near(p3.y, 2.0f), "infinite velocity in Step3D ignored safely");
+    PhysicsEngine::SetGravity2D({2, -3});
+    PhysicsEngine::SetGravity2D({std::numeric_limits<float>::quiet_NaN(), 0});
+    Check(Near(PhysicsEngine::GetGravity2D().x, 2) && Near(PhysicsEngine::GetGravity2D().y, -3),
+          "invalid 2D gravity preserves the configured Jolt gravity");
+    PhysicsEngine::SetGravity3D({1, -2, 3});
+    PhysicsEngine::SetGravity3D({0, std::numeric_limits<float>::infinity(), 0});
+    Check(Near(PhysicsEngine::GetGravity3D().y, -2),
+          "invalid 3D gravity preserves the configured Jolt gravity");
+    PhysicsEngine::Shutdown();
     Check(!Input::IsMouseButtonPressed(0) && !Input::IsMouseButtonPressed(33),
           "invalid mouse buttons");
     Check(!Input::IsGamepadButtonPressed(static_cast<LuxGamepadButton>(-1)),
@@ -382,7 +389,7 @@ void Physics2D() {
         const auto& body = falling.GetComponent<Rigidbody2DComponent>();
         Check(contact, "static collider receives falling body contact");
         Check(transform.position.y > 0.4f && transform.position.y < 0.65f,
-              "Box2D body rests on static floor");
+              "Jolt body rests on static floor");
         Check(Near(transform.position.z, 7), "2D physics preserves Z position");
         Check(body.isGrounded && std::abs(body.velocity.y) < 0.2f,
               "resting body reports grounded state");
@@ -593,7 +600,7 @@ void Physics2D() {
         for (int i = 0; i < 60; ++i)
             scene.OnUpdate(1.0 / 60.0);
         Check(std::abs(mover.GetComponent<TransformComponent>().position.x - 2.0f) < 0.1f,
-              "runtime velocity change reaches Box2D body");
+              "runtime velocity change reaches Jolt body");
         const float positionBeforeRemoval = mover.GetComponent<TransformComponent>().position.x;
         mover.RemoveComponent<Rigidbody2DComponent>();
         for (int i = 0; i < 60; ++i)
@@ -2567,9 +2574,13 @@ void Gpu() {
         if (frame == 0)
             std::cout << "frame stats: draws " << stats.drawCalls << ", pipelines "
                       << stats.pipelineBinds << ", descriptors " << stats.descriptorBinds
-                      << ", push constants " << stats.pushConstantUpdates << '\n';
-        Check(stats.drawCalls == 3 && stats.pipelineBinds == 2 && stats.descriptorBinds == 2 &&
-                  stats.pushConstantUpdates == 2 && stats.submissions >= 1,
+                      << ", uniforms " << stats.uniformBinds << ", push constants "
+                      << stats.pushConstantUpdates << ", submissions " << stats.submissions << '\n';
+        // Two 2D draws, one HDR mesh draw and one tone-composite draw are recorded. Forge
+        // uses uniform-buffer descriptor sets rather than the previous Vulkan push constants.
+        Check(stats.drawCalls == 4 && stats.pipelineBinds == 4 && stats.descriptorBinds == 9 &&
+                  stats.uniformBinds == 6 && stats.pushConstantUpdates == 0 &&
+                  stats.submissions >= 1,
               "frame statistics count recorded GPU commands");
     }
     {
@@ -2612,7 +2623,8 @@ void VulkanSystems() {
     ReportValidation(graphics.gpu);
     auto& gpu = graphics.gpu;
     const auto& info = gpu.GetInfo();
-    Check(!info.deviceName.empty() && info.apiVersion >= ((1u << 22) | (1u << 12)) &&
+    const bool vulkan = info.deviceType.find("Vulkan") != std::string::npos;
+    Check(!info.deviceName.empty() && (!vulkan || info.apiVersion >= ((1u << 22) | (1u << 12))) &&
               info.maxTextureSize >= 4096 && info.framesInFlight == 2,
           "device capabilities reported");
     Check(gpu.GetStatus() == GpuStatus::Ready && gpu.IsReady(), "device ready");

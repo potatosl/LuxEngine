@@ -66,8 +66,10 @@ template <class T> void Scene::RemoveComponent(uint32 id) {
         it->second->Erase(id);
         if constexpr (std::is_same_v<T, TransformComponent> ||
                       std::is_same_v<T, Rigidbody2DComponent> ||
-                      std::is_same_v<T, BoxCollider2DComponent>)
-            RemovePhysicsBody2D(id);
+                      std::is_same_v<T, BoxCollider2DComponent> ||
+                      std::is_same_v<T, Rigidbody3DComponent> ||
+                      std::is_same_v<T, BoxCollider3DComponent>)
+            RemovePhysicsBody(id);
     }
 }
 

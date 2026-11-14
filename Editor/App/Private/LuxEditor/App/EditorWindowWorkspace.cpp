@@ -4,135 +4,126 @@
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
-#include <QAction>
-#include <QApplication>
-#include <QCheckBox>
-#include <QDockWidget>
-#include <QGroupBox>
-#include <QLabel>
-#include <QLineEdit>
-#include <QMenu>
-#include <QSignalBlocker>
-#include <QStackedWidget>
-#include <QStatusBar>
-#include <QTabBar>
-#include <QToolBar>
-#include <QToolButton>
-#include <QTreeWidget>
-#include <QVBoxLayout>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 #include <map>
 
 namespace LuxEditor {
 void EditorWindow::BuildWorkspaceChrome() {
-    auto* workspaceBar = new QToolBar(QStringLiteral("작업 공간"), this);
-    workspaceBar->setObjectName(QStringLiteral("workspaceToolbar"));
+    auto* workspaceBar = new LuxUI::ToolBar(LUX_UI_TEXT("작업 공간"), this);
+    workspaceBar->setObjectName(LUX_UI_TEXT("workspaceToolbar"));
     workspaceBar->setMovable(false);
-    auto* brand = new QLabel(QStringLiteral("  LUX  "), workspaceBar);
-    brand->setObjectName(QStringLiteral("editorBrand"));
+    auto* brand = new LuxUI::Label(LUX_UI_TEXT("  LUX  "), workspaceBar);
+    brand->setObjectName(LUX_UI_TEXT("editorBrand"));
     brand->setPixmap(MakeBrandIcon(true).pixmap(30, 30));
     brand->setFixedSize(42, 38);
-    brand->setAlignment(Qt::AlignCenter);
-    brand->setToolTip(QStringLiteral("LuxEngine"));
+    brand->setAlignment(LuxUI::Flags::AlignCenter);
+    brand->setToolTip(LUX_UI_TEXT("LuxEngine"));
     workspaceBar->addWidget(brand);
-    workspaceTabs_ = new QTabBar(workspaceBar);
-    workspaceTabs_->setObjectName(QStringLiteral("workspaceTabs"));
-    workspaceTabs_->addTab(MakeEditorIcon(EditorIcon::Mesh), QStringLiteral("레벨 에디터"));
-    workspaceTabs_->addTab(MakeEditorIcon(EditorIcon::Play), QStringLiteral("애니메이션"));
+    workspaceTabs_ = new LuxUI::TabBar(workspaceBar);
+    workspaceTabs_->setObjectName(LUX_UI_TEXT("workspaceTabs"));
+    workspaceTabs_->addTab(MakeEditorIcon(EditorIcon::Mesh), LUX_UI_TEXT("레벨 에디터"));
+    workspaceTabs_->addTab(MakeEditorIcon(EditorIcon::Play), LUX_UI_TEXT("애니메이션"));
     workspaceTabs_->setExpanding(false);
     workspaceBar->addWidget(workspaceTabs_);
-    auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("lux-main-toolbar"));
+    auto* mainToolbar = findChild<LuxUI::ToolBar*>(LUX_UI_TEXT("lux-main-toolbar"));
     insertToolBar(mainToolbar, workspaceBar);
     insertToolBarBreak(mainToolbar);
-    connect(workspaceTabs_, &QTabBar::currentChanged, this,
+    connect(workspaceTabs_, &LuxUI::TabBar::currentChanged, this,
             [this](int index) { SetWorkspace(index == 1); });
 
     // Animation is a document workspace, not a small console tab competing with the viewport.
     removeDockWidget(animationDock_);
-    animationDock_->setFeatures(QDockWidget::NoDockWidgetFeatures);
-    animationDock_->setTitleBarWidget(new QWidget(animationDock_));
+    animationDock_->setFeatures(LuxUI::DockWidget::NoDockWidgetFeatures);
+    animationDock_->setTitleBarWidget(new LuxUI::Widget(animationDock_));
     workspaceStack_->addWidget(animationDock_);
     animationDock_->hide();
 
-    auto* detailsLayout = qobject_cast<QVBoxLayout*>(inspectorBody_->layout());
-    const auto groups =
-        inspectorBody_->findChildren<QGroupBox*>(QString(), Qt::FindDirectChildrenOnly);
+    auto* detailsLayout = qobject_cast<LuxUI::VBoxLayout*>(inspectorBody_->layout());
+    const auto groups = inspectorBody_->findChildren<LuxUI::GroupBox*>(
+        LuxUI::String(), LuxUI::Flags::FindDirectChildrenOnly);
     for (auto* group : groups) {
         const int index = detailsLayout->indexOf(group);
-        auto* section = new QWidget(inspectorBody_);
-        section->setObjectName(QStringLiteral("componentSection"));
+        auto* section = new LuxUI::Widget(inspectorBody_);
+        section->setObjectName(LUX_UI_TEXT("componentSection"));
         section->setProperty("sectionName", group->title());
-        auto* sectionLayout = new QVBoxLayout(section);
+        auto* sectionLayout = new LuxUI::VBoxLayout(section);
         sectionLayout->setContentsMargins(0, 0, 0, 0);
         sectionLayout->setSpacing(0);
-        auto* header = new QToolButton(section);
-        header->setObjectName(QStringLiteral("componentHeader"));
+        auto* header = new LuxUI::ToolButton(section);
+        header->setObjectName(LUX_UI_TEXT("componentHeader"));
         header->setText(group->title());
-        header->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        header->setArrowType(Qt::DownArrow);
+        header->setToolButtonStyle(LuxUI::Flags::ToolButtonTextBesideIcon);
+        header->setArrowType(LuxUI::Flags::DownArrow);
         header->setCheckable(true);
         header->setChecked(true);
-        header->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        header->setSizePolicy(LuxUI::SizePolicy::Expanding, LuxUI::SizePolicy::Fixed);
         sectionLayout->addWidget(header);
         detailsLayout->removeWidget(group);
         group->setProperty("componentTitle", group->title());
         group->setTitle({});
         sectionLayout->addWidget(group);
         detailsLayout->insertWidget(index, section);
-        connect(header, &QToolButton::toggled, section, [group, header](bool expanded) {
+        connect(header, &LuxUI::ToolButton::toggled, section, [group, header](bool expanded) {
             group->setVisible(expanded);
-            header->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+            header->setArrowType(expanded ? LuxUI::Flags::DownArrow : LuxUI::Flags::RightArrow);
         });
     }
 
-    auto* addComponent = new QToolButton(inspectorBody_);
-    addComponent->setObjectName(QStringLiteral("addComponent"));
-    addComponent->setText(QStringLiteral("+ 컴포넌트 추가"));
-    addComponent->setPopupMode(QToolButton::InstantPopup);
-    addComponent->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    auto* components = new QMenu(addComponent);
-    const std::pair<const char*, QCheckBox*> choices[] = {{"Sprite Renderer", spriteEnabled_},
-                                                          {"Mesh Renderer", meshEnabled_},
-                                                          {"Tilemap", tilemapEnabled_},
-                                                          {"Rigidbody 2D", bodyEnabled_},
-                                                          {"Box Collider 2D", colliderEnabled_}};
+    auto* addComponent = new LuxUI::ToolButton(inspectorBody_);
+    addComponent->setObjectName(LUX_UI_TEXT("addComponent"));
+    addComponent->setText(LUX_UI_TEXT("+ 컴포넌트 추가"));
+    addComponent->setPopupMode(LuxUI::ToolButton::InstantPopup);
+    addComponent->setSizePolicy(LuxUI::SizePolicy::Expanding, LuxUI::SizePolicy::Fixed);
+    auto* components = new LuxUI::Menu(addComponent);
+    const std::pair<const char*, LuxUI::CheckBox*> choices[] = {
+        {"Sprite Renderer", spriteEnabled_},
+        {"Mesh Renderer", meshEnabled_},
+        {"Tilemap", tilemapEnabled_},
+        {"Rigidbody 2D", bodyEnabled_},
+        {"Box Collider 2D", colliderEnabled_}};
     for (const auto& [name, field] : choices)
-        components->addAction(QString::fromLatin1(name), this,
+        components->addAction(LuxUI::String::fromLatin1(name), this,
                               [field] { field->setChecked(true); });
-    components->addAction(QStringLiteral("Camera"), this,
+    components->addAction(LUX_UI_TEXT("Jolt Rigidbody 3D"), this,
+                          [this] { body3DEnabled_->setChecked(true); });
+    components->addAction(LUX_UI_TEXT("Jolt Box Collider 3D"), this,
+                          [this] { collider3DEnabled_->setChecked(true); });
+    components->addAction(LUX_UI_TEXT("Camera"), this,
                           [this] { cameraEnabled_->setChecked(true); });
-    components->addAction(QStringLiteral("애니메이션 클립"), this, [this] {
+    components->addAction(LUX_UI_TEXT("애니메이션 클립"), this, [this] {
         animationEnabled_->setChecked(true);
         SetWorkspace(true);
     });
     addComponent->setMenu(components);
     detailsLayout->insertWidget(1, addComponent);
 
-    const auto drawer = [this](const QString& text, EditorIcon icon, size_t index,
+    const auto drawer = [this](const LuxUI::String& text, EditorIcon icon, size_t index,
                                const char* name) {
-        auto* button = new QToolButton(this);
-        button->setObjectName(QString::fromLatin1(name));
+        auto* button = new LuxUI::ToolButton(this);
+        button->setObjectName(LuxUI::String::fromLatin1(name));
         button->setText(text);
         button->setIcon(MakeEditorIcon(icon));
-        button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        button->setToolButtonStyle(LuxUI::Flags::ToolButtonTextBesideIcon);
         button->setCheckable(true);
         statusBar()->addWidget(button);
-        connect(button, &QToolButton::clicked, this, [this, index] { ToggleDrawer(index); });
-        connect(docks_[index], &QDockWidget::visibilityChanged, button, &QToolButton::setChecked);
+        connect(button, &LuxUI::ToolButton::clicked, this, [this, index] { ToggleDrawer(index); });
+        connect(docks_[index], &LuxUI::DockWidget::visibilityChanged, button,
+                &LuxUI::ToolButton::setChecked);
         return button;
     };
-    auto* content = drawer(QStringLiteral("콘텐츠"), EditorIcon::Folder, 1, "contentDrawerButton");
-    content->setToolTip(QStringLiteral("콘텐츠 브라우저 (Ctrl+Space)"));
-    auto* contentShortcut = new QAction(this);
-    contentShortcut->setObjectName(QStringLiteral("toggleContentBrowser"));
-    contentShortcut->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Space));
+    auto* content = drawer(LUX_UI_TEXT("콘텐츠"), EditorIcon::Folder, 1, "contentDrawerButton");
+    content->setToolTip(LUX_UI_TEXT("콘텐츠 브라우저 (Ctrl+Space)"));
+    auto* contentShortcut = new LuxUI::Action(this);
+    contentShortcut->setObjectName(LUX_UI_TEXT("toggleContentBrowser"));
+    contentShortcut->setShortcut(LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::Key_Space));
     addAction(contentShortcut);
-    connect(contentShortcut, &QAction::triggered, content, &QToolButton::click);
-    drawer(QStringLiteral("출력 로그"), EditorIcon::Console, 3, "outputLogButton");
-    drawer(QStringLiteral("문제"), EditorIcon::Bug, 4, "problemsDrawerButton");
-    sceneStatus_ = new QLabel(this);
-    sceneStatus_->setObjectName(QStringLiteral("sceneStatus"));
-    sceneStatus_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    connect(contentShortcut, &LuxUI::Action::triggered, content, &LuxUI::ToolButton::click);
+    drawer(LUX_UI_TEXT("출력 로그"), EditorIcon::Console, 3, "outputLogButton");
+    drawer(LUX_UI_TEXT("문제"), EditorIcon::Bug, 4, "problemsDrawerButton");
+    sceneStatus_ = new LuxUI::Label(this);
+    sceneStatus_->setObjectName(LUX_UI_TEXT("sceneStatus"));
+    sceneStatus_->setAlignment(LuxUI::Flags::AlignRight | LuxUI::Flags::AlignVCenter);
     statusBar()->addPermanentWidget(sceneStatus_, 1);
     statusBar()->setSizeGripEnabled(true);
 }
@@ -140,7 +131,7 @@ void EditorWindow::BuildWorkspaceChrome() {
 void EditorWindow::SetWorkspace(bool animation) {
     if (!workspaceStack_ || !animationDock_)
         return;
-    const QSignalBlocker blocker(workspaceTabs_);
+    const LuxUI::SignalBlocker blocker(workspaceTabs_);
     workspaceTabs_->setCurrentIndex(animation ? 1 : 0);
     if ((workspaceStack_->currentIndex() == 1) == animation)
         return;
@@ -148,8 +139,10 @@ void EditorWindow::SetWorkspace(bool animation) {
     canvas_->CancelInteraction();
     canvas3D_->CancelInteraction();
     if (animation) {
+        if (modelingDock_)
+            modelingDock_->hide();
         levelLayout_ = saveState(5);
-        if (auto* toolbar = findChild<QToolBar*>(QStringLiteral("lux-main-toolbar")))
+        if (auto* toolbar = findChild<LuxUI::ToolBar*>(LUX_UI_TEXT("lux-main-toolbar")))
             toolbar->hide();
         for (auto* dock : docks_)
             dock->hide();
@@ -161,7 +154,7 @@ void EditorWindow::SetWorkspace(bool animation) {
         if (!levelLayout_.isEmpty())
             restoreState(levelLayout_, 5);
         levelLayout_.clear();
-        if (auto* toolbar = findChild<QToolBar*>(QStringLiteral("lux-main-toolbar")))
+        if (auto* toolbar = findChild<LuxUI::ToolBar*>(LUX_UI_TEXT("lux-main-toolbar")))
             toolbar->show();
     }
 }
@@ -175,38 +168,39 @@ void EditorWindow::ToggleDrawer(size_t index) {
     if (!close) {
         docks_[index]->show();
         docks_[index]->raise();
-        resizeDocks({docks_[index]}, {270}, Qt::Vertical);
+        resizeDocks({docks_[index]}, {270}, LuxUI::Flags::Vertical);
     }
 }
 
-void EditorWindow::FilterDetails(const QString& text) {
+void EditorWindow::FilterDetails(const LuxUI::String& text) {
     for (auto* section :
-         inspectorBody_->findChildren<QWidget*>(QStringLiteral("componentSection"))) {
+         inspectorBody_->findChildren<LuxUI::Widget*>(LUX_UI_TEXT("componentSection"))) {
         bool matches =
-            text.trimmed().isEmpty() ||
-            section->property("sectionName").toString().contains(text, Qt::CaseInsensitive);
-        for (auto* label : section->findChildren<QLabel*>())
-            matches |= label->text().contains(text, Qt::CaseInsensitive);
-        for (auto* field : section->findChildren<QCheckBox*>())
-            matches |= field->text().contains(text, Qt::CaseInsensitive);
+            text.trimmed().isEmpty() || section->property("sectionName")
+                                            .toString()
+                                            .contains(text, LuxUI::Flags::CaseInsensitive);
+        for (auto* label : section->findChildren<LuxUI::Label*>())
+            matches |= label->text().contains(text, LuxUI::Flags::CaseInsensitive);
+        for (auto* field : section->findChildren<LuxUI::CheckBox*>())
+            matches |= field->text().contains(text, LuxUI::Flags::CaseInsensitive);
         const auto entity = document_.GetSelected();
         const auto name = section->property("sectionName").toString();
         bool available = static_cast<bool>(entity);
         if (entity) {
-            if (name == QLatin1String("Sprite Renderer"))
+            if (name == LuxUI::Latin1String("Sprite Renderer"))
                 available = entity.HasComponent<LuxEngine::SpriteRendererComponent>();
-            else if (name == QLatin1String("Mesh Renderer"))
+            else if (name == LuxUI::Latin1String("Mesh Renderer"))
                 available = entity.HasComponent<LuxEngine::MeshRendererComponent>();
-            else if (name == QLatin1String("Tilemap"))
+            else if (name == LuxUI::Latin1String("Tilemap"))
                 available = entity.HasComponent<LuxEngine::TilemapComponent>();
-            else if (name == QLatin1String("Physics 2D"))
+            else if (name == LuxUI::Latin1String("Physics 2D"))
                 available = entity.HasComponent<LuxEngine::Rigidbody2DComponent>() ||
                             entity.HasComponent<LuxEngine::BoxCollider2DComponent>();
-            else if (name == QStringLiteral("씬 참조"))
+            else if (name == LUX_UI_TEXT("씬 참조"))
                 available = entity.HasComponent<LuxEngine::SceneReferenceComponent>();
-            else if (name == QLatin1String("Camera"))
+            else if (name == LuxUI::Latin1String("Camera"))
                 available = entity.HasComponent<LuxEngine::CameraComponent>();
-            else if (name == QLatin1String("Transform"))
+            else if (name == LuxUI::Latin1String("Transform"))
                 available = entity.HasComponent<LuxEngine::TransformComponent>();
         }
         section->setVisible(matches && available);
@@ -216,7 +210,7 @@ void EditorWindow::FilterDetails(const QString& text) {
 void EditorWindow::RefreshAssetFolders() {
     if (!assetFolders_)
         return;
-    const QSignalBlocker blocker(assetFolders_);
+    const LuxUI::SignalBlocker blocker(assetFolders_);
     assetFolders_->clear();
     if (!project_) {
         assetProjectRoot_.clear();
@@ -228,8 +222,8 @@ void EditorWindow::RefreshAssetFolders() {
         assetProjectRoot_ = root;
         assetFolder_.clear();
     }
-    std::map<std::filesystem::path, QTreeWidgetItem*> folders;
-    auto* all = new QTreeWidgetItem(assetFolders_, {QStringLiteral("모든 콘텐츠")});
+    std::map<std::filesystem::path, LuxUI::TreeWidgetItem*> folders;
+    auto* all = new LuxUI::TreeWidgetItem(assetFolders_, {LUX_UI_TEXT("모든 콘텐츠")});
     all->setIcon(0, MakeEditorIcon(EditorIcon::Folder));
     folders.emplace(std::filesystem::path{}, all);
     std::error_code error;
@@ -247,9 +241,11 @@ void EditorWindow::RefreshAssetFolders() {
         }
         const auto relative = iterator->path().lexically_relative(root);
         const auto parent = folders.find(relative.parent_path());
-        auto* item = new QTreeWidgetItem(parent == folders.end() ? all : parent->second,
-                                         {QString::fromUtf8(PathUtf8(relative.filename()))});
-        item->setData(0, Qt::UserRole, QString::fromUtf8(GenericPathUtf8(relative)));
+        auto* item =
+            new LuxUI::TreeWidgetItem(parent == folders.end() ? all : parent->second,
+                                      {LuxUI::String::fromUtf8(PathUtf8(relative.filename()))});
+        item->setData(0, LuxUI::Flags::UserRole,
+                      LuxUI::String::fromUtf8(GenericPathUtf8(relative)));
         item->setIcon(0, MakeEditorIcon(EditorIcon::Folder));
         folders.emplace(relative, item);
     }
@@ -259,7 +255,7 @@ void EditorWindow::RefreshAssetFolders() {
     assetFolders_->setCurrentItem(selected == folders.end() ? all : selected->second);
     all->setExpanded(true);
     assetBreadcrumb_->setText(assetFolder_.empty()
-                                  ? QString::fromUtf8(project_->GetName())
-                                  : QString::fromUtf8(GenericPathUtf8(assetFolder_)));
+                                  ? LuxUI::String::fromUtf8(project_->GetName())
+                                  : LuxUI::String::fromUtf8(GenericPathUtf8(assetFolder_)));
 }
 } // namespace LuxEditor

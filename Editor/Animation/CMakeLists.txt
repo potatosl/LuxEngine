@@ -1,6 +1,7 @@
 target_sources(LuxEditorUi PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/Animation/AnimationTimeline.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/Animation/AnimationWorkspace.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/Animation/ModelAnimationWorkspace.cpp"
 )
 
 if(LUX_BUILD_TESTS)
@@ -17,7 +18,7 @@ if(LUX_BUILD_TESTS)
     add_executable(LuxAnimationTimelineTests
         "${CMAKE_CURRENT_SOURCE_DIR}/../Tests/AnimationTimelineTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Private/LuxEditor/Animation/AnimationTimeline.cpp")
-    target_link_libraries(LuxAnimationTimelineTests PRIVATE LuxEngine::Engine Qt6::Widgets)
+    target_link_libraries(LuxAnimationTimelineTests PRIVATE LuxEngine::Engine LuxUI::LuxUI)
     target_include_directories(LuxAnimationTimelineTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Private")
     add_test(NAME Editor_animation_timeline COMMAND LuxAnimationTimelineTests)
     set_tests_properties(Editor_animation_timeline PROPERTIES

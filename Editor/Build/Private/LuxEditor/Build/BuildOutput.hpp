@@ -1,11 +1,8 @@
 #pragma once
-
-#include <QByteArrayView>
-#include <QProcessEnvironment>
-#include <QString>
+#include <LuxUI/Widgets.hpp>
 
 namespace LuxEditor {
-QString DecodeBuildOutput(QByteArrayView bytes);
+LuxUI::String DecodeBuildOutput(LuxUI::ByteArrayView bytes);
 
-QProcessEnvironment Utf8BuildEnvironment();
+LuxUI::ProcessEnvironment Utf8BuildEnvironment();
 } // namespace LuxEditor

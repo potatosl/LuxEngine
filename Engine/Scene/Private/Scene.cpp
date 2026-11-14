@@ -1,4 +1,5 @@
-#include "PhysicsWorld2D.hpp"
+#include "ScenePhysicsWorld.hpp"
+#include <LuxEngine/Assets/ModelAsset.hpp>
 #include <LuxEngine/Core/Log.hpp>
 #include <LuxEngine/Physics/PhysicsEngine.hpp>
 #include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
@@ -14,9 +15,11 @@
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #ifdef _WIN32
@@ -66,7 +69,7 @@ void Scene::DestroyEntity(Entity entity) {
             pending.insert(pending.end(), found->second.begin(), found->second.end());
     }
     for (const auto id : removed) {
-        RemovePhysicsBody2D(id);
+        RemovePhysicsBody(id);
         for (auto& [type, pool] : pools_)
             pool->Erase(id);
         entities_.erase(id);
@@ -85,21 +88,87 @@ std::vector<Entity> Scene::GetEntities() {
 }
 
 std::vector<Entity> Scene::GetEntitiesIn2DLayerOrder() {
-    auto entities = GetEntities();
-    std::erase_if(entities, [](Entity entity) {
-        const auto* transform = entity.TryGetComponent<TransformComponent>();
-        return !transform || !std::isfinite(transform->position.z);
-    });
-    std::stable_sort(entities.begin(), entities.end(), [this](Entity a, Entity b) {
-        return GetWorldTransform(a.GetId()).position.z < GetWorldTransform(b.GetId()).position.z;
-    });
-    return entities;
+    std::vector<std::pair<Entity, float>> depths;
+    depths.reserve(entities_.size());
+    for (const auto& entity : GetEntities()) {
+        if (!entity.HasComponent<TransformComponent>())
+            continue;
+        const float depth = GetWorldMatrix(entity.GetId()).elements[14];
+        if (std::isfinite(depth))
+            depths.emplace_back(entity, depth);
+    }
+    std::stable_sort(depths.begin(), depths.end(),
+                     [](const auto& a, const auto& b) { return a.second < b.second; });
+    std::vector<Entity> result;
+    result.reserve(depths.size());
+    for (const auto& [entity, depth] : depths) {
+        static_cast<void>(depth);
+        result.push_back(entity);
+    }
+    return result;
 }
 
 void Scene::OnUpdate(double dt) {
     if (!std::isfinite(dt) || dt <= 0.0)
         return;
     updateBuffer_.assign(entities_.begin(), entities_.end());
+    std::unordered_map<std::string, Ref<ModelAsset>> models;
+    std::map<std::tuple<std::string, int32, double>, ModelPose> modelPoses;
+    for (const auto id : updateBuffer_) {
+        auto* animation = TryGetComponent<ModelAnimationComponent>(id);
+        auto* transform = TryGetComponent<TransformComponent>(id);
+        if (!animation || !transform || animation->modelPath.empty() ||
+            !std::isfinite(animation->time) || !std::isfinite(animation->speed))
+            continue;
+        const auto path = ResolveAssetPath(animation->modelPath);
+        std::string error;
+        auto [found, inserted] = models.try_emplace(path);
+        if (inserted)
+            found->second = ModelAsset::LoadFbx(path, error);
+        const auto& model = found->second;
+        if (!model || animation->nodeIndex >= model->nodes.size() || animation->clip < -1 ||
+            (animation->clip >= 0 &&
+             static_cast<size_t>(animation->clip) >= model->animations.size()))
+            continue;
+        if (animation->playing && animation->clip >= 0) {
+            const double duration = model->animations[animation->clip].duration;
+            const double next = animation->time + dt * animation->speed;
+            if (!std::isfinite(next))
+                continue;
+            if (duration > 0 && animation->loop) {
+                animation->time = std::fmod(next, duration);
+                if (animation->time < 0)
+                    animation->time += duration;
+            } else {
+                animation->time = std::clamp(next, 0.0, duration);
+                if (next < 0 || next >= duration)
+                    animation->playing = false;
+            }
+        }
+        if (animation->applyNodeTransform && animation->clip >= 0) {
+            const auto key = std::tuple{path, animation->clip, animation->time};
+            auto [pose, newPose] = modelPoses.try_emplace(key);
+            if (newPose &&
+                !model->Evaluate(animation->time, animation->clip, pose->second, error)) {
+                modelPoses.erase(pose);
+                continue;
+            }
+            // Scene transforms need node poses only. The model retains its CPU vertex cache
+            // for rendering; do not retain another complete vertex array for every node pose.
+            pose->second.submeshes.clear();
+            if (animation->nodeIndex < pose->second.nodeLocalTransforms.size()) {
+                const auto& node = pose->second.nodeLocalTransforms[animation->nodeIndex];
+                transform->position = node.position;
+                transform->rotation = node.rotation;
+                transform->scale = node.scale;
+            }
+        }
+    }
+    std::erase_if(modelAssets_,
+                  [&models](const auto& entry) { return !models.contains(entry.first); });
+    for (const auto& [path, model] : models)
+        if (model && (modelAssets_.contains(path) || modelAssets_.size() < 128))
+            modelAssets_[path] = model;
     for (auto id : updateBuffer_) {
         if (!entities_.contains(id))
             continue;
@@ -111,46 +180,57 @@ void Scene::OnUpdate(double dt) {
                                         static_cast<float>(dt),
                                         GetComponent<TransformComponent>(id));
     }
-    if (!physics2D_)
-        physics2D_ = std::make_unique<PhysicsWorld2D>();
+    const auto colliders2D = GetComponentEntityIds<BoxCollider2DComponent>();
+    const auto colliders3D = GetComponentEntityIds<BoxCollider3DComponent>();
+    const bool has2D = std::any_of(colliders2D.begin(), colliders2D.end(), [this](uint32 id) {
+        return HasComponent<TransformComponent>(id) && (HasComponent<Rigidbody2DComponent>(id) ||
+                                                        !HasComponent<BoxCollider3DComponent>(id));
+    });
+    const bool has3D = std::any_of(colliders3D.begin(), colliders3D.end(), [this](uint32 id) {
+        return HasComponent<TransformComponent>(id) && (!HasComponent<BoxCollider2DComponent>(id) ||
+                                                        !HasComponent<Rigidbody2DComponent>(id));
+    });
+    if (!has2D)
+        physics2D_.reset();
+    if (!has3D)
+        physics3D_.reset();
     collisionEvents2D_.clear();
+    collisionEvents3D_.clear();
     physicsAccumulator_ += std::min(dt, .25);
     const double fixedStep = settings_.fixedStep;
     while (physicsAccumulator_ + 1e-8 >= fixedStep) {
         physicsAccumulator_ = std::max(0.0, physicsAccumulator_ - fixedStep);
         const double substep = fixedStep / settings_.physicsSubsteps;
         for (uint32 index = 0; index < settings_.physicsSubsteps; ++index) {
-            std::unordered_map<uint32, TransformComponent> world3D;
-            std::unordered_map<uint32, Rigidbody3DComponent> bodies3D;
+            if (has2D && !physics2D_)
+                physics2D_ = std::make_unique<ScenePhysicsWorld>(true);
+            if (has3D && !physics3D_)
+                physics3D_ = std::make_unique<ScenePhysicsWorld>(false);
             const auto hierarchy = GetEntitiesInHierarchyOrder();
-            for (const auto& entity : hierarchy) {
-                const auto id = entity.GetId();
-                if (!HasComponent<TransformComponent>(id) ||
-                    (HasComponent<Rigidbody2DComponent>(id) &&
-                     HasComponent<BoxCollider2DComponent>(id)) ||
-                    !HasComponent<Rigidbody3DComponent>(id) ||
-                    !HasComponent<BoxCollider3DComponent>(id))
-                    continue;
-                auto world = GetWorldTransform(id);
-                auto body = GetComponent<Rigidbody3DComponent>(id);
-                PhysicsEngine::Step3D(world.position, body,
-                                      GetComponent<BoxCollider3DComponent>(id), substep,
-                                      settings_.overrideGravity ? settings_.gravity3D
-                                                                : PhysicsEngine::GetGravity3D());
-                world3D.emplace(id, world);
-                bodies3D.emplace(id, body);
+            if (physics2D_) {
+                physics2D_->Step(*this, substep);
+                for (const auto& contact : physics2D_->BeganContacts())
+                    collisionEvents2D_.push_back({contact.entityA,
+                                                  contact.entityB,
+                                                  {contact.normal.x, contact.normal.y},
+                                                  contact.isTrigger});
             }
-            std::vector<Collision2DEvent> contacts;
-            physics2D_->Step(*this, substep, contacts);
-            collisionEvents2D_.insert(collisionEvents2D_.end(), contacts.begin(), contacts.end());
-            const auto world2D = physics2D_->GetWorldPoses(*this);
+            if (physics3D_) {
+                physics3D_->Step(*this, substep);
+                const auto& contacts = physics3D_->BeganContacts();
+                collisionEvents3D_.insert(collisionEvents3D_.end(), contacts.begin(),
+                                          contacts.end());
+            }
+            const auto world2D = physics2D_ ? physics2D_->GetWorldPoses(*this)
+                                            : std::unordered_map<uint32, TransformComponent>{};
+            const auto world3D = physics3D_ ? physics3D_->GetWorldPoses(*this)
+                                            : std::unordered_map<uint32, TransformComponent>{};
             // Apply every physics family together, parent before child. A hierarchy may contain
             // both 2D and 3D bodies; each simulation's absolute world pose must remain independent.
             for (const auto& entity : hierarchy) {
                 const auto id = entity.GetId();
                 if (const auto pose = world3D.find(id); pose != world3D.end()) {
-                    if (SetWorldTransform(id, pose->second))
-                        GetComponent<Rigidbody3DComponent>(id) = bodies3D.at(id);
+                    SetWorldTransform(id, pose->second);
                 } else if (const auto pose2D = world2D.find(id); pose2D != world2D.end()) {
                     SetWorldTransform(id, pose2D->second);
                 }
@@ -159,9 +239,14 @@ void Scene::OnUpdate(double dt) {
     }
 }
 
-void Scene::RemovePhysicsBody2D(uint32 id) {
+void Scene::RemovePhysicsBody(uint32 id) {
     if (physics2D_)
         physics2D_->Remove(id);
+    if (physics3D_)
+        physics3D_->Remove(id);
+    std::erase_if(collisionEvents3D_, [id](const auto& contact) {
+        return contact.entityA == id || contact.entityB == id;
+    });
     if (auto* body = TryGetComponent<Rigidbody2DComponent>(id))
         body->isGrounded = false;
     std::erase_if(collisionEvents2D_,
@@ -217,10 +302,9 @@ void Scene::OnRender() {
         for (Entity entity : entities) {
             if (!entity.HasComponent<TransformComponent>())
                 continue;
-            const auto transform = GetWorldTransform(entity.GetId());
             const auto matrix = GetWorldMatrix(entity.GetId());
-            if (!Finite(transform.position) || !Finite(transform.rotation) ||
-                !Finite(transform.scale))
+            if (!std::all_of(std::begin(matrix.elements), std::end(matrix.elements),
+                             [](float value) { return std::isfinite(value); }))
                 continue;
             if (tilemaps && entity.HasComponent<TilemapComponent>()) {
                 const auto& map = entity.GetComponent<TilemapComponent>();
@@ -254,8 +338,9 @@ void Scene::OnRender3D() {
         if (!entity.HasComponent<TransformComponent>() ||
             !entity.HasComponent<MeshRendererComponent>())
             continue;
-        const auto transform = GetWorldTransform(entity.GetId());
-        if (!Finite(transform.position) || !Finite(transform.rotation) || !Finite(transform.scale))
+        const auto world = GetWorldMatrix(entity.GetId());
+        if (!std::all_of(std::begin(world.elements), std::end(world.elements),
+                         [](float value) { return std::isfinite(value); }))
             continue;
         const auto& meshComp = entity.GetComponent<MeshRendererComponent>();
         if (Finite(meshComp.material.albedoColor) && Finite(meshComp.material.metallic) &&
@@ -269,10 +354,13 @@ void Scene::OnRender3D() {
                 if (!path->empty())
                     *path = ResolveAssetPath(*path);
             if (meshComp.meshPath.empty())
-                Renderer3D::DrawMesh(GetWorldMatrix(entity.GetId()), material);
-            else
-                Renderer3D::DrawMeshAsset(ResolveAssetPath(meshComp.meshPath),
-                                          GetWorldMatrix(entity.GetId()), material);
+                Renderer3D::DrawMesh(world, material);
+            else {
+                const auto* animation = entity.TryGetComponent<ModelAnimationComponent>();
+                Renderer3D::DrawMeshAsset(ResolveAssetPath(meshComp.meshPath), world, material,
+                                          meshComp.modelSubmesh, animation ? animation->clip : -1,
+                                          animation ? animation->time : 0.0, entity.GetId());
+            }
         }
     }
 }
@@ -727,6 +815,7 @@ bool Scene::ValidateForSerialization() {
                                                         typeid(TransformComponent),
                                                         typeid(SpriteRendererComponent),
                                                         typeid(MeshRendererComponent),
+                                                        typeid(ModelAnimationComponent),
                                                         typeid(CameraComponent),
                                                         typeid(Rigidbody2DComponent),
                                                         typeid(BoxCollider2DComponent),
@@ -771,16 +860,36 @@ bool Scene::ValidateForSerialization() {
                 static_cast<unsigned>(mesh->material.alphaMode) > 2 ||
                 !Finite(mesh->material.alphaCutoff) || mesh->material.alphaCutoff < 0 ||
                 mesh->material.alphaCutoff > 1 || mesh->meshPath.size() > 4096 ||
+                mesh->modelSubmesh < -1 || mesh->modelSubmesh >= 100000 ||
                 mesh->meshPath.find('\0') != std::string::npos || !IsValidUtf8(mesh->meshPath) ||
                 mesh->material.baseColorTexture.size() > 4096 ||
                 mesh->material.baseColorTexture.find('\0') != std::string::npos ||
                 !IsValidUtf8(mesh->material.baseColorTexture))
                 return false;
         }
+        if (const auto* animation = TryGetComponent<ModelAnimationComponent>(id)) {
+            if (animation->modelPath.empty() || animation->modelPath.size() > 4096 ||
+                animation->modelPath.find('\0') != std::string::npos ||
+                !IsValidUtf8(animation->modelPath) || animation->nodeIndex >= 100000 ||
+                animation->clip < -1 || animation->clip >= 4096 ||
+                !std::isfinite(animation->time) || animation->time < 0 || animation->time > 1e12 ||
+                !std::isfinite(animation->speed) || std::abs(animation->speed) > 1000)
+                return false;
+        }
         if (const auto* camera = TryGetComponent<CameraComponent>(id)) {
             if (!Finite(camera->fov) || camera->fov <= 0.0f || camera->fov >= 180.0f ||
-                !Finite(camera->orthoSize) || camera->orthoSize <= 0.0f)
+                !Finite(camera->orthoSize) || camera->orthoSize <= 0.0f ||
+                !Finite(camera->nearClip) || !Finite(camera->farClip) || camera->nearClip <= 0 ||
+                camera->farClip <= camera->nearClip)
                 return false;
+            if (camera->isPerspective) {
+                try {
+                    Mat4::Perspective(ToRadians(camera->fov), 1.0f, camera->nearClip,
+                                      camera->farClip);
+                } catch (const std::invalid_argument&) {
+                    return false;
+                }
+            }
         }
         if (const auto* rb2d = TryGetComponent<Rigidbody2DComponent>(id)) {
             const int type = static_cast<int>(rb2d->type);
@@ -1102,7 +1211,10 @@ void Scene::AdoptLoadedScene(Scene& parsed) {
     std::swap(settings_, parsed.settings_);
     physicsAccumulator_ = 0;
     physics2D_.reset();
+    physics3D_.reset();
+    modelAssets_.clear();
     collisionEvents2D_.clear();
+    collisionEvents3D_.clear();
     lifetime_ = std::move(nextLifetime);
 }
 
@@ -1168,4 +1280,10 @@ void Scene::RequireAlive(uint32 id) const {
 }
 
 Scene::PoolBase::~PoolBase() = default;
+} // namespace LuxEngine
+
+namespace LuxEngine {
+const std::vector<Collision3DEvent>& Scene::GetCollisionEvents3D() const {
+    return collisionEvents3D_;
+}
 } // namespace LuxEngine

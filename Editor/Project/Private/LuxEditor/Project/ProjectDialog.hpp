@@ -1,11 +1,10 @@
 #pragma once
+#include <LuxUI/Widgets.hpp>
 
 #include <LuxEditor/Project/EditorProject.hpp>
 #include <filesystem>
 #include <optional>
 #include <string>
-
-class QWidget;
 
 namespace LuxEditor {
 
@@ -21,10 +20,11 @@ struct ProjectSettingsRequest {
     bool clearIcon = false;
 };
 
-std::optional<ProjectCreationRequest> ShowNewProjectDialog(QWidget* parent);
-std::optional<ProjectSettingsRequest> ShowProjectSettingsDialog(QWidget* parent,
+std::optional<ProjectCreationRequest> ShowNewProjectDialog(LuxUI::Widget* parent);
+std::optional<ProjectSettingsRequest> ShowProjectSettingsDialog(LuxUI::Widget* parent,
                                                                 const ProjectSettings& current);
-std::optional<std::filesystem::path>
-ShowProjectDestinationDialog(QWidget* parent, const char* title, const std::string& suggested);
+std::optional<std::filesystem::path> ShowProjectDestinationDialog(LuxUI::Widget* parent,
+                                                                  const char* title,
+                                                                  const std::string& suggested);
 
 } // namespace LuxEditor

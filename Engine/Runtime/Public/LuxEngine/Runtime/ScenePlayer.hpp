@@ -37,6 +37,8 @@ struct ScenePlayerCameraView {
     Vec3 target{};
     Vec3 up{0, 1, 0};
     float fovDegrees = 60;
+    float nearClip = .1f;
+    float farClip = 1000.f;
 };
 
 // Primary perspective cameras follow their complete world transform: local -Z is forward and

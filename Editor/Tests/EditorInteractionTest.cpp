@@ -1,17 +1,6 @@
 #include <LuxEditor/App/EditorWindow.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
-#include <QAction>
-#include <QApplication>
-#include <QDoubleSpinBox>
-#include <QFocusEvent>
-#include <QGroupBox>
-#include <QItemSelectionModel>
-#include <QKeyEvent>
-#include <QMouseEvent>
-#include <QSettings>
-#include <QTemporaryDir>
-#include <QTreeWidget>
-#include <QUndoStack>
+#include <LuxUI/Widgets.hpp>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -22,27 +11,28 @@ void Check(bool value, const char* message) {
         throw std::runtime_error(message);
 }
 
-void Mouse(QWidget* target, QEvent::Type type, QPointF point, Qt::MouseButton button,
-           Qt::MouseButtons buttons) {
-    QMouseEvent event(type, point, target->mapToGlobal(point.toPoint()), button, buttons,
-                      Qt::NoModifier);
-    QApplication::sendEvent(target, &event);
+void Mouse(LuxUI::Widget* target, LuxUI::Event::Type type, LuxUI::PointF point,
+           LuxUI::Flags::MouseButton button, LuxUI::Flags::MouseButtons buttons) {
+    LuxUI::MouseEvent event(type, point, target->mapToGlobal(point.toPoint()), button, buttons,
+                            LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(target, &event);
 }
 } // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("LuxInteractionTests"));
-    QCoreApplication::setApplicationName(QStringLiteral("EditorInteraction"));
-    QTemporaryDir settings;
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    LuxUI::Application app(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName(LUX_UI_TEXT("LuxInteractionTests"));
+    LuxUI::CoreApplication::setApplicationName(LUX_UI_TEXT("EditorInteraction"));
+    LuxUI::TemporaryDir settings;
+    LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+    LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                             settings.path());
     try {
         LuxEditor::EditorWindow window;
         window.show();
         auto& document = window.GetDocument();
         LuxEngine::uint32 first = 0, second = 0;
-        window.ExecuteRecordedEdit(QStringLiteral("Fixture"), [&] {
+        window.ExecuteRecordedEdit(LUX_UI_TEXT("Fixture"), [&] {
             auto a = document.CreateEntity("First");
             first = a.GetId();
             a.AddComponent<LuxEngine::SpriteRendererComponent>();
@@ -52,22 +42,22 @@ int main(int argc, char** argv) {
             b.AddComponent<LuxEngine::SpriteRendererComponent>();
             b.GetComponent<LuxEngine::TransformComponent>().position.x = 2;
         });
-        auto* tree = window.findChild<QTreeWidget*>(QStringLiteral("sceneOutliner"));
+        auto* tree = window.findChild<LuxUI::TreeWidget*>(LUX_UI_TEXT("sceneOutliner"));
         tree->clearSelection();
         tree->topLevelItem(0)->setSelected(true);
         tree->topLevelItem(1)->setSelected(true);
-        tree->setCurrentItem(tree->topLevelItem(1), 0, QItemSelectionModel::NoUpdate);
+        tree->setCurrentItem(tree->topLevelItem(1), 0, LuxUI::ItemSelectionModel::NoUpdate);
         Check(document.GetSelection() == std::vector<LuxEngine::uint32>{first, second},
               "Outliner did not update the document's complete selection");
-        auto* undo = window.findChild<QUndoStack*>();
+        auto* undo = window.findChild<LuxUI::UndoStack*>();
         undo->clear();
         document.SetDirty(false);
-        QGroupBox* transformGroup = nullptr;
-        for (auto* group : window.findChildren<QGroupBox*>())
-            if (group->property("componentTitle").toString() == QLatin1String("Transform"))
+        LuxUI::GroupBox* transformGroup = nullptr;
+        for (auto* group : window.findChildren<LuxUI::GroupBox*>())
+            if (group->property("componentTitle").toString() == LuxUI::Latin1String("Transform"))
                 transformGroup = group;
         Check(transformGroup, "Transform Details are unavailable");
-        transformGroup->findChildren<QDoubleSpinBox*>().front()->setValue(5);
+        transformGroup->findChildren<LuxUI::DoubleSpinBox*>().front()->setValue(5);
         Check(document.GetScene().GetWorldTransform(first).position.x == 5 &&
                   document.GetScene().GetWorldTransform(second).position.x == 5,
               "Transform Details did not edit the complete selection");
@@ -77,13 +67,13 @@ int main(int argc, char** argv) {
               "Batch Details undo did not restore the selection");
         undo->clear();
         document.SetDirty(false);
-        window.findChild<QAction*>(QStringLiteral("view2D"))->trigger();
-        for (auto* action : window.findChildren<QAction*>())
-            if (action->shortcut() == QKeySequence(Qt::Key_W))
+        window.findChild<LuxUI::Action*>(LUX_UI_TEXT("view2D"))->trigger();
+        for (auto* action : window.findChildren<LuxUI::Action*>())
+            if (action->shortcut() == LuxUI::KeySequence(LuxUI::Flags::Key_W))
                 action->trigger();
         app.processEvents();
         auto* view = static_cast<LuxEditor::SceneViewport2D*>(
-            window.findChild<QWidget*>(QStringLiteral("sceneViewport2D")));
+            window.findChild<LuxUI::Widget*>(LUX_UI_TEXT("sceneViewport2D")));
         Check(view && view->isVisible(), "2D viewport was not activated");
         const auto position = [&](LuxEngine::uint32 id) {
             return document.GetScene().GetWorldTransform(id).position.x;
@@ -93,18 +83,23 @@ int main(int argc, char** argv) {
             view->GetView(x, y, halfHeight);
             const double unit = view->height() / (2 * halfHeight);
             const double pivot = (position(first) + position(second)) * .5;
-            QPointF start(view->width() * .5 + (pivot - x) * unit, view->height() * .5 + y * unit);
-            QPointF end = start + QPointF(unit, 0);
-            Mouse(view, QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
-            Mouse(view, QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton);
+            LuxUI::PointF start(view->width() * .5 + (pivot - x) * unit,
+                                view->height() * .5 + y * unit);
+            LuxUI::PointF end = start + LuxUI::PointF(unit, 0);
+            Mouse(view, LuxUI::Event::MouseButtonPress, start, LuxUI::Flags::LeftButton,
+                  LuxUI::Flags::LeftButton);
+            Mouse(view, LuxUI::Event::MouseMove, end, LuxUI::Flags::NoButton,
+                  LuxUI::Flags::LeftButton);
             return end;
         };
         auto finish = drag();
         Check(std::abs(position(first) + 1) < .001 && std::abs(position(second) - 3) < .001,
               "Shared viewport callback did not transform every selected object");
-        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
-        QApplication::sendEvent(view, &escape);
-        Mouse(view, QEvent::MouseButtonRelease, finish, Qt::LeftButton, Qt::NoButton);
+        LuxUI::KeyEvent escape(LuxUI::Event::KeyPress, LuxUI::Flags::Key_Escape,
+                               LuxUI::Flags::NoModifier);
+        LuxUI::Application::sendEvent(view, &escape);
+        Mouse(view, LuxUI::Event::MouseButtonRelease, finish, LuxUI::Flags::LeftButton,
+              LuxUI::Flags::NoButton);
         Check(position(first) == -2 && position(second) == 2 && !document.IsDirty() &&
                   undo->count() == 0,
               "Escape did not restore data, dirty state and empty undo history");
@@ -112,17 +107,21 @@ int main(int argc, char** argv) {
             double x, y, halfHeight;
             view->GetView(x, y, halfHeight);
             const double unit = view->height() / (2 * halfHeight);
-            const QPointF start(view->width() * .5 - x * unit, view->height() * .5 + y * unit);
-            Mouse(view, QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+            const LuxUI::PointF start(view->width() * .5 - x * unit,
+                                      view->height() * .5 + y * unit);
+            Mouse(view, LuxUI::Event::MouseButtonPress, start, LuxUI::Flags::LeftButton,
+                  LuxUI::Flags::LeftButton);
             document.SetSelection({second});
-            QApplication::sendEvent(view, &escape);
-            Mouse(view, QEvent::MouseButtonRelease, start, Qt::LeftButton, Qt::NoButton);
+            LuxUI::Application::sendEvent(view, &escape);
+            Mouse(view, LuxUI::Event::MouseButtonRelease, start, LuxUI::Flags::LeftButton,
+                  LuxUI::Flags::NoButton);
             Check(document.GetSelection() == std::vector<LuxEngine::uint32>{first, second} &&
                       !document.IsDirty() && undo->count() == 0,
                   "An unchanged canceled gesture did not restore its complete selection");
         }
         finish = drag();
-        Mouse(view, QEvent::MouseButtonRelease, finish, Qt::LeftButton, Qt::NoButton);
+        Mouse(view, LuxUI::Event::MouseButtonRelease, finish, LuxUI::Flags::LeftButton,
+              LuxUI::Flags::NoButton);
         Check(undo->count() == 1 && document.GetSelection().size() == 2,
               "A gesture did not create exactly one command");
         undo->undo();
@@ -132,12 +131,12 @@ int main(int argc, char** argv) {
         undo->redo();
         Check(position(first) == -1 && position(second) == 3, "Multi-object redo failed");
         finish = drag();
-        QFocusEvent focus(QEvent::FocusOut);
-        QApplication::sendEvent(view, &focus);
+        LuxUI::FocusEvent focus(LuxUI::Event::FocusOut);
+        LuxUI::Application::sendEvent(view, &focus);
         Check(position(first) == -1 && position(second) == 3 && undo->count() == 1,
               "Focus loss committed a partial gesture");
         finish = drag();
-        window.findChild<QAction*>(QStringLiteral("undoEdit"))->trigger();
+        window.findChild<LuxUI::Action*>(LUX_UI_TEXT("undoEdit"))->trigger();
         Check(position(first) == -1 && undo->index() == 1,
               "Undo during a gesture affected an older command");
         finish = drag();
@@ -146,14 +145,16 @@ int main(int argc, char** argv) {
         Check(document.GetScene(original)->GetWorldTransform(first).position.x == -1 &&
                   document.GetSelection(original).size() == 2,
               "Scene switch did not cancel the original gesture");
-        Mouse(view, QEvent::MouseButtonRelease, finish, Qt::LeftButton, Qt::NoButton);
+        Mouse(view, LuxUI::Event::MouseButtonRelease, finish, LuxUI::Flags::LeftButton,
+              LuxUI::Flags::NoButton);
         Check(document.GetActiveTabId() == other && document.GetScene().GetEntityCount() == 0 &&
                   !document.IsDirty(),
               "Late mouse release changed the new scene");
         Check(window.SwitchSceneDocument(original, false), "Original scene did not activate");
         finish = drag();
         Check(window.MoveSelectionToScene(other), "Scene move during a gesture failed");
-        Mouse(view, QEvent::MouseButtonRelease, finish, Qt::LeftButton, Qt::NoButton);
+        Mouse(view, LuxUI::Event::MouseButtonRelease, finish, LuxUI::Flags::LeftButton,
+              LuxUI::Flags::NoButton);
         Check(
             document.GetScene(original)->GetEntityCount() == 1 &&
                 document.GetScene(original)->GetWorldTransform(first).position.x == -1 &&

@@ -2,6 +2,7 @@
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Scene/SceneDependencies.hpp>
 #include <LuxEngine/Assets/AssetManager.hpp>
+#include <LuxEngine/Assets/ModelAsset.hpp>
 #include <LuxEngine/Environment/EnvironmentMap.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
 #include <LuxEngine/Scene/PrefabLibrary.hpp>
@@ -116,6 +117,32 @@ private:
         return data;
     }
 
+    fs::path ResolveModel(const std::string& resource, const fs::path& owner) const {
+        if (resource.empty() || resource.size() > 4096 || resource.find('\0') != std::string::npos)
+            throw std::runtime_error("모델 경로가 올바르지 않습니다.");
+        const auto input = PathFromUtf8(resource);
+        std::error_code error;
+        const auto file =
+            fs::canonical(input.is_absolute() ? input : owner.parent_path() / input, error);
+        const auto relative = file.lexically_relative(root);
+        if (error || relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||
+            Ignored(relative) || !fs::is_regular_file(file, error) || error)
+            throw std::runtime_error("모델 파일은 프로젝트 내부에 있어야 합니다: " + resource);
+        return file;
+    }
+
+    const LuxEngine::ModelAsset& LoadModel(const fs::path& file) {
+        if (const auto found = models_.find(file); found != models_.end())
+            return *found->second;
+        if (meshFiles_.insert(file).second)
+            Charge(fs::file_size(file));
+        std::string error;
+        auto model = LuxEngine::ModelAsset::LoadFbx(GenericPathUtf8(file), error);
+        if (!model)
+            throw std::runtime_error("FBX 모델 파일이 올바르지 않습니다: " + error);
+        return *models_.emplace(file, std::move(model)).first->second;
+    }
+
     void Inspect(LuxEngine::Scene& scene, const fs::path& owner, size_t depth) {
         CheckDepth(depth);
         const auto& environment = scene.GetSettings().render3D.environmentPath;
@@ -139,36 +166,52 @@ private:
         for (const auto& entity : scene.GetEntities()) {
             if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
                 mesh && !mesh->meshPath.empty()) {
-                if (mesh->meshPath.size() > 4096 || mesh->meshPath.find('\0') != std::string::npos)
-                    throw std::runtime_error("메시 경로가 올바르지 않습니다.");
-                const auto input = PathFromUtf8(mesh->meshPath);
-                std::error_code error;
-                const auto file =
-                    fs::canonical(input.is_absolute() ? input : owner.parent_path() / input, error);
-                const auto relative = file.lexically_relative(root);
-                if (error || relative.empty() || relative.is_absolute() ||
-                    *relative.begin() == ".." || Ignored(relative))
-                    throw std::runtime_error("메시 파일은 프로젝트 내부에 있어야 합니다: " +
-                                             mesh->meshPath);
-                if (meshFiles_.insert(file).second) {
-                    const auto size = fs::file_size(file, error);
-                    if (error)
-                        throw std::runtime_error("메시 파일을 읽을 수 없습니다: " + mesh->meshPath);
-                    Charge(size);
-                    bool hasUvs = false;
-                    if (!LuxEngine::AssetManager::ValidateMeshFile(GenericPathUtf8(file), &hasUvs))
-                        throw std::runtime_error("모델 파일이 올바르지 않습니다: " +
+                const auto file = ResolveModel(mesh->meshPath, owner);
+                bool hasUvs = false;
+                if (mesh->modelSubmesh >= 0) {
+                    const auto& model = LoadModel(file);
+                    const auto index = static_cast<size_t>(mesh->modelSubmesh);
+                    if (index >= model.submeshes.size())
+                        throw std::runtime_error("FBX 하위 메시 번호가 올바르지 않습니다: " +
                                                  mesh->meshPath);
-                    meshHasUvs_[file] = hasUvs;
+                    hasUvs = model.submeshes[index].hasTexCoords;
+                } else {
+                    if (!meshHasUvs_.contains(file)) {
+                        if (meshFiles_.insert(file).second)
+                            Charge(fs::file_size(file));
+                        if (!LuxEngine::AssetManager::ValidateMeshFile(GenericPathUtf8(file),
+                                                                       &hasUvs))
+                            throw std::runtime_error("모델 파일이 올바르지 않습니다: " +
+                                                     mesh->meshPath);
+                        meshHasUvs_[file] = hasUvs;
+                    }
+                    hasUvs = meshHasUvs_.at(file);
                 }
                 if ((!mesh->material.baseColorTexture.empty() ||
                      !mesh->material.normalTexture.empty() ||
                      !mesh->material.metallicTexture.empty() ||
                      !mesh->material.roughnessTexture.empty() ||
                      !mesh->material.occlusionTexture.empty()) &&
-                    !meshHasUvs_.at(file))
+                    !hasUvs)
                     throw std::runtime_error("텍스처를 적용할 UV 좌표가 없는 모델입니다: " +
                                              mesh->meshPath);
+            }
+            if (const auto* animation =
+                    entity.TryGetComponent<LuxEngine::ModelAnimationComponent>()) {
+                const auto& model = LoadModel(ResolveModel(animation->modelPath, owner));
+                if (animation->nodeIndex >= model.nodes.size() || animation->clip < -1 ||
+                    (animation->clip >= 0 &&
+                     static_cast<size_t>(animation->clip) >= model.animations.size()))
+                    throw std::runtime_error("FBX 애니메이션 참조가 올바르지 않습니다.");
+                if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
+                    mesh && mesh->modelSubmesh >= 0) {
+                    if (ResolveModel(mesh->meshPath, owner) !=
+                            ResolveModel(animation->modelPath, owner) ||
+                        static_cast<size_t>(mesh->modelSubmesh) >= model.submeshes.size() ||
+                        model.submeshes[static_cast<size_t>(mesh->modelSubmesh)].node !=
+                            animation->nodeIndex)
+                        throw std::runtime_error("FBX 메시와 애니메이션의 원본 노드가 다릅니다.");
+                }
             }
             if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
                 mesh) {
@@ -232,6 +275,7 @@ private:
     std::set<fs::path> active_;
     std::set<fs::path> meshFiles_;
     std::map<fs::path, bool> meshHasUvs_;
+    std::map<fs::path, LuxEngine::Ref<LuxEngine::ModelAsset>> models_;
     std::set<fs::path> textureFiles_;
     std::map<fs::path, size_t> checked_;
 };

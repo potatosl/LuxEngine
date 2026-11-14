@@ -81,7 +81,7 @@ private:
                 {t.position.x, t.position.y}, {t.scale.x, t.scale.y}, {1, 1, 1, 1}, t.rotation.z);
         }
         LuxSamples::Panel({4.8f, 3.7f}, {5.3f, 1.3f});
-        LuxSamples::Text("Box2D 물리 시뮬레이션", {2.5f, 4.03f}, .04f);
+        LuxSamples::Text("Jolt 2D 물리 시뮬레이션", {2.5f, 4.03f}, .04f);
         LuxSamples::Text("상자 " + std::to_string(spawned_) + " / 64", {2.5f, 3.54f}, .04f);
     }
 };

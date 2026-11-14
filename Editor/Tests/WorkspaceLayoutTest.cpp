@@ -2,21 +2,7 @@
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Viewport/EngineSceneRenderer.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
-#include <QAction>
-#include <QApplication>
-#include <QCheckBox>
-#include <QDockWidget>
-#include <QDoubleSpinBox>
-#include <QImage>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QSettings>
-#include <QStackedWidget>
-#include <QTabBar>
-#include <QTemporaryDir>
-#include <QToolButton>
-#include <QTreeWidget>
-#include <QUndoStack>
+#include <LuxUI/Widgets.hpp>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -29,12 +15,13 @@ void Check(bool condition, const char* message) {
 } // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("LuxWorkspaceTests"));
-    QCoreApplication::setApplicationName(QStringLiteral("Layout"));
-    QTemporaryDir temporary;
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temporary.path());
+    LuxUI::Application app(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName(LUX_UI_TEXT("LuxWorkspaceTests"));
+    LuxUI::CoreApplication::setApplicationName(LUX_UI_TEXT("Layout"));
+    LuxUI::TemporaryDir temporary;
+    LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+    LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                             temporary.path());
     LuxEditor::EngineSceneRenderer::SetForceAllowed(qEnvironmentVariableIsSet("LUX_WORKSPACE_GPU"));
     try {
         std::string error;
@@ -43,18 +30,20 @@ int main(int argc, char** argv) {
         auto project = LuxEditor::EditorProject::Create(directory, "Workspace",
                                                         LuxEditor::ProjectTemplate::Empty, error);
         Check(project.has_value(), error.c_str());
-        QSettings().setValue(QStringLiteral("lastProject"),
-                             QString::fromUtf8(LuxEditor::PathUtf8(project->GetFile())));
+        LuxUI::Settings().setValue(
+            LUX_UI_TEXT("lastProject"),
+            LuxUI::String::fromUtf8(LuxEditor::PathUtf8(project->GetFile())));
         LuxEditor::EditorWindow window;
         window.resize(1600, 960);
         window.show();
         app.processEvents();
-        auto* workspace = window.findChild<QStackedWidget*>(QStringLiteral("editorWorkspace"));
-        auto* tabs = window.findChild<QTabBar*>(QStringLiteral("workspaceTabs"));
-        auto* contents = window.findChild<QDockWidget*>(QStringLiteral("lux-dock-1"));
-        auto* details = window.findChild<QDockWidget*>(QStringLiteral("lux-dock-2"));
-        auto* outliner = window.findChild<QDockWidget*>(QStringLiteral("lux-dock-0"));
-        auto* contentButton = window.findChild<QToolButton*>(QStringLiteral("contentDrawerButton"));
+        auto* workspace = window.findChild<LuxUI::StackedWidget*>(LUX_UI_TEXT("editorWorkspace"));
+        auto* tabs = window.findChild<LuxUI::TabBar*>(LUX_UI_TEXT("workspaceTabs"));
+        auto* contents = window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("lux-dock-1"));
+        auto* details = window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("lux-dock-2"));
+        auto* outliner = window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("lux-dock-0"));
+        auto* contentButton =
+            window.findChild<LuxUI::ToolButton*>(LUX_UI_TEXT("contentDrawerButton"));
         Check(workspace && tabs && contents && details && outliner && contentButton,
               "Workspace structure is incomplete");
         Check(!contents->isVisible() && details->isVisible() && outliner->isVisible(),
@@ -63,12 +52,12 @@ int main(int argc, char** argv) {
         contentButton->click();
         app.processEvents();
         Check(contents->isVisible() &&
-                  window.findChild<QTreeWidget*>(QStringLiteral("assetFolders"))
+                  window.findChild<LuxUI::TreeWidget*>(LUX_UI_TEXT("assetFolders"))
                           ->topLevelItemCount() > 0,
               "Content drawer or folder navigation did not open");
         contentButton->click();
         Check(!contents->isVisible(), "Content drawer did not collapse");
-        window.ExecuteRecordedEdit(QStringLiteral("Fixture"), [&] {
+        window.ExecuteRecordedEdit(LUX_UI_TEXT("Fixture"), [&] {
             auto entity = window.GetDocument().CreateEntity("Animated Cube");
             entity.AddComponent<LuxEngine::MeshRendererComponent>().material.albedoColor = {
                 .32f, .56f, .77f, 1};
@@ -79,16 +68,16 @@ int main(int argc, char** argv) {
             clip.AddKeyframe({2, {0, 0, 0}, {}, {1, 1, 1}});
         });
         app.processEvents();
-        auto* search = window.findChild<QLineEdit*>(QStringLiteral("detailsSearch"));
+        auto* search = window.findChild<LuxUI::LineEdit*>(LUX_UI_TEXT("detailsSearch"));
         Check(search, "Details search is missing");
-        search->setText(QStringLiteral("Transform"));
+        search->setText(LUX_UI_TEXT("Transform"));
         int visible = 0;
-        for (auto* section : window.findChildren<QWidget*>(QStringLiteral("componentSection")))
+        for (auto* section : window.findChildren<LuxUI::Widget*>(LUX_UI_TEXT("componentSection")))
             visible += section->isVisible() ? 1 : 0;
         Check(visible == 1, "Details search did not filter component sections");
         search->clear();
-        auto* cameraEnabled = window.findChild<QCheckBox*>(QStringLiteral("cameraEnabled"));
-        auto* fov = window.findChild<QDoubleSpinBox*>(QStringLiteral("cameraFov"));
+        auto* cameraEnabled = window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("cameraEnabled"));
+        auto* fov = window.findChild<LuxUI::DoubleSpinBox*>(LUX_UI_TEXT("cameraFov"));
         Check(cameraEnabled && fov, "Camera Details are missing");
         cameraEnabled->setChecked(true);
         Check(window.GetDocument().GetSelected().HasComponent<LuxEngine::CameraComponent>(),
@@ -97,23 +86,23 @@ int main(int argc, char** argv) {
         Check(window.GetDocument().GetSelected().GetComponent<LuxEngine::CameraComponent>().fov ==
                   70,
               "Camera FOV edit did not reach the scene");
-        auto* undo = window.findChild<QUndoStack*>();
+        auto* undo = window.findChild<LuxUI::UndoStack*>();
         undo->undo();
         Check(window.GetDocument().GetSelected().GetComponent<LuxEngine::CameraComponent>().fov ==
                   45,
               "Camera edit undo failed");
-        window.findChild<QAction*>(QStringLiteral("focusSelection"))->trigger();
+        window.findChild<LuxUI::Action*>(LUX_UI_TEXT("focusSelection"))->trigger();
         app.processEvents();
-        const QString capture = qEnvironmentVariable("LUX_WORKSPACE_CAPTURE");
+        const LuxUI::String capture = qEnvironmentVariable("LUX_WORKSPACE_CAPTURE");
         if (!capture.isEmpty())
-            Check(window.grab().save(capture + QStringLiteral("-level.png")),
+            Check(window.grab().save(capture + LUX_UI_TEXT("-level.png")),
                   "Level screenshot failed");
         tabs->setCurrentIndex(1);
         app.processEvents();
         Check(workspace->currentIndex() == 1 && !details->isVisible(),
               "Animation did not open as a dedicated workspace");
         if (!capture.isEmpty())
-            Check(window.grab().save(capture + QStringLiteral("-animation.png")),
+            Check(window.grab().save(capture + LUX_UI_TEXT("-animation.png")),
                   "Animation screenshot failed");
         tabs->setCurrentIndex(0);
         app.processEvents();
@@ -121,12 +110,12 @@ int main(int argc, char** argv) {
               "Level workspace did not restore its panels");
         window.resize(960, 600);
         app.processEvents();
-        for (auto* field : window.findChildren<QDoubleSpinBox*>()) {
+        for (auto* field : window.findChildren<LuxUI::DoubleSpinBox*>()) {
             if (field->isVisible())
                 Check(field->width() >= 56, "Numeric field was clipped below its minimum size");
         }
         if (!capture.isEmpty())
-            Check(window.grab().save(capture + QStringLiteral("-small.png")),
+            Check(window.grab().save(capture + LUX_UI_TEXT("-small.png")),
                   "Small layout screenshot failed");
         window.GetDocument().SetDirty(false);
         window.close();

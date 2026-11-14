@@ -1,6 +1,8 @@
 #include <LuxEngine/Scene/Entity.hpp>
 #include <LuxEngine/Scene/Scene.hpp>
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
@@ -35,7 +37,10 @@ void Test() {
     mesh.material.alphaCutoff = .4f;
     mesh.material.doubleSided = false;
     mesh.material.textureSampling = {true, TextureAddressMode::Repeat, true, false};
-    root.AddComponent<CameraComponent>();
+    auto& camera = root.AddComponent<CameraComponent>();
+    camera.isPerspective = true;
+    camera.nearClip = .25f;
+    camera.farClip = 2500.f;
     root.AddComponent<Rigidbody2DComponent>().velocity = {2, -3};
     root.AddComponent<BoxCollider2DComponent>().isTrigger = true;
     root.AddComponent<Rigidbody3DComponent>().velocity = {4, 5, 6};
@@ -61,10 +66,24 @@ void Test() {
           "explicit scene schema");
     Check(json["entities"][0]["components"]["transform"]["position"][0] == 1.25,
           "named typed transform field");
+    Check(json["entities"][0]["components"]["camera"]["near_clip"] == .25 &&
+              json["entities"][0]["components"]["camera"]["far_clip"] == 2500,
+          "camera clipping settings are saved as named numeric fields");
     Scene restored;
     Check(restored.DeserializeFromString(text), "all component types load");
     std::string second;
     Check(restored.SerializeToString(second) && second == text, "deterministic lossless roundtrip");
+    const auto& loadedCamera = restored.GetComponent<CameraComponent>(root.GetId());
+    Check(loadedCamera.nearClip == .25f && loadedCamera.farClip == 2500.f,
+          "camera clipping settings survive scene roundtrip");
+    auto previousCameraJson = json;
+    previousCameraJson["entities"][0]["components"]["camera"].erase("near_clip");
+    previousCameraJson["entities"][0]["components"]["camera"].erase("far_clip");
+    Scene previousCameraScene;
+    Check(previousCameraScene.DeserializeFromString(previousCameraJson.dump()) &&
+              previousCameraScene.GetComponent<CameraComponent>(root.GetId()).nearClip == .1f &&
+              previousCameraScene.GetComponent<CameraComponent>(root.GetId()).farClip == 1000.f,
+          "scenes saved before camera clip settings retain the original projection defaults");
     Check(restored.GetComponent<InstanceSourceComponent>(child.GetId()).sourceEntity == 9,
           "scene instance identity survives");
     Entity retained(root.GetId(), &restored);
@@ -83,6 +102,30 @@ void Test() {
     for (const auto* key : {"alpha_mode", "alpha_cutoff", "normal_scale", "occlusion_strength"})
         mutate([key](auto& j) { j["entities"][0]["components"]["mesh"][key] = -1; });
     mutate([](auto& j) { j["entities"][0]["components"]["mesh"]["alpha_mode"] = 3; });
+    for (const auto near : {0.0, -1.0, 2500.0, 3000.0})
+        mutate([near](auto& j) { j["entities"][0]["components"]["camera"]["near_clip"] = near; });
+    mutate([](auto& j) { j["entities"][0]["components"]["camera"]["far_clip"] = .1; });
+    mutate([](auto& j) { j["entities"][0]["components"]["camera"]["far_clip"] = "1000"; });
+    mutate([](auto& j) { j["entities"][0]["components"]["camera"]["near_clip"] = nullptr; });
+    const auto validFar = camera.farClip;
+    camera.farClip = std::numeric_limits<float>::infinity();
+    Check(!scene.SerializeToString(second), "non-finite camera clipping values cannot be saved");
+    camera.farClip = validFar;
+    const auto validNear = camera.nearClip;
+    camera.nearClip = 1e20f;
+    camera.farClip = 1e21f;
+    Check(scene.SerializeToString(second), "large representable camera clip ranges can be saved");
+    camera.farClip = std::numeric_limits<float>::max();
+    camera.nearClip = std::nextafter(camera.farClip, 0.0f);
+    Check(!scene.SerializeToString(second),
+          "unrepresentable perspective clip matrices cannot be saved");
+    camera.nearClip = validNear;
+    camera.farClip = validFar;
+    mutate([](auto& j) {
+        const float far = std::numeric_limits<float>::max();
+        j["entities"][0]["components"]["camera"]["near_clip"] = std::nextafter(far, 0.0f);
+        j["entities"][0]["components"]["camera"]["far_clip"] = far;
+    });
     mutate([](auto& j) { j["entities"][0]["components"]["mesh"]["sampling"]["address"] = 2; });
     mutate([](auto& j) { j["entities"][0]["components"]["mesh"]["sampling"]["mipmaps"] = 1; });
     mutate([](auto& j) { j["entities"][0]["components"]["mesh"]["double_sided"] = 1; });

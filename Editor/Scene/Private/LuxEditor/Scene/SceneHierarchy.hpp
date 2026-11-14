@@ -1,16 +1,16 @@
 #pragma once
 #include <LuxEngine/Core/Core.hpp>
-#include <QTreeWidget>
+#include <LuxUI/Widgets.hpp>
 #include <functional>
 #include <vector>
 
 namespace LuxEditor {
-class SceneHierarchy final : public QTreeWidget {
+class SceneHierarchy final : public LuxUI::TreeWidget {
 public:
-    explicit SceneHierarchy(QWidget* parent = nullptr);
+    explicit SceneHierarchy(LuxUI::Widget* parent = nullptr);
     std::function<void(const std::vector<LuxEngine::uint32>&, LuxEngine::uint32)> reparent;
 
 protected:
-    void dropEvent(QDropEvent* event) override;
+    void dropEvent(LuxUI::DropEvent* event) override;
 };
 } // namespace LuxEditor

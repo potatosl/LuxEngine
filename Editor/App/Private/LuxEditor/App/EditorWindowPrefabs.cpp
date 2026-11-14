@@ -1,9 +1,7 @@
 #include <LuxEditor/App/EditorWindow.hpp>
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEngine/Scene/PrefabLibrary.hpp>
-#include <QAction>
-#include <QFileDialog>
-#include <QMenu>
+#include <LuxUI/Widgets.hpp>
 #include <stdexcept>
 
 namespace LuxEditor {
@@ -21,31 +19,31 @@ bool InProject(const std::filesystem::path& path, const std::filesystem::path& d
 }
 } // namespace
 
-void EditorWindow::BuildPrefabMenus(QMenu* parent) {
-    auto* menu = parent->addMenu(QStringLiteral("프리팹"));
-    menu->setObjectName(QStringLiteral("prefabMenu"));
-    const auto add = [this, menu](const QString& text, const char* name, auto callback) {
+void EditorWindow::BuildPrefabMenus(LuxUI::Menu* parent) {
+    auto* menu = parent->addMenu(LUX_UI_TEXT("프리팹"));
+    menu->setObjectName(LUX_UI_TEXT("prefabMenu"));
+    const auto add = [this, menu](const LuxUI::String& text, const char* name, auto callback) {
         auto* action = menu->addAction(text);
-        action->setObjectName(QString::fromLatin1(name));
-        connect(action, &QAction::triggered, this, callback);
+        action->setObjectName(LuxUI::String::fromLatin1(name));
+        connect(action, &LuxUI::Action::triggered, this, callback);
     };
-    add(QStringLiteral("선택 계층을 프리팹으로 저장..."), "savePrefab",
+    add(LUX_UI_TEXT("선택 계층을 프리팹으로 저장..."), "savePrefab",
         [this] { SaveSelectedPrefab(); });
-    add(QStringLiteral("프리팹 배치..."), "instantiatePrefab", [this] {
+    add(LUX_UI_TEXT("프리팹 배치..."), "instantiatePrefab", [this] {
         if (previewActive_ || !project_)
             return;
-        const auto file = QFileDialog::getOpenFileName(
-            this, QStringLiteral("프리팹 배치"),
-            QString::fromUtf8(PathUtf8(project_->GetFile().parent_path())),
-            QStringLiteral("Lux 프리팹 (*.luxprefab *.LUXPREFAB)"));
+        const auto file = LuxUI::FileDialog::getOpenFileName(
+            this, LUX_UI_TEXT("프리팹 배치"),
+            LuxUI::String::fromUtf8(PathUtf8(project_->GetFile().parent_path())),
+            LUX_UI_TEXT("Lux 프리팹 (*.luxprefab *.LUXPREFAB)"));
         if (!file.isEmpty())
             AddPrefabAsset(PathFromUtf8(file.toUtf8().toStdString()));
     });
-    add(QStringLiteral("선택 프리팹 갱신 (로컬 변경 유지)"), "refreshPrefab",
+    add(LUX_UI_TEXT("선택 프리팹 갱신 (로컬 변경 유지)"), "refreshPrefab",
         [this] { EditSelectedPrefab(0); });
-    add(QStringLiteral("선택 프리팹의 로컬 변경 되돌리기"), "revertPrefab",
+    add(LUX_UI_TEXT("선택 프리팹의 로컬 변경 되돌리기"), "revertPrefab",
         [this] { EditSelectedPrefab(1); });
-    add(QStringLiteral("선택 프리팹 연결 해제"), "unpackPrefab", [this] { EditSelectedPrefab(2); });
+    add(LUX_UI_TEXT("선택 프리팹 연결 해제"), "unpackPrefab", [this] { EditSelectedPrefab(2); });
 }
 
 void EditorWindow::SaveSelectedPrefab() {
@@ -58,13 +56,13 @@ void EditorWindow::SaveSelectedPrefab() {
     std::error_code filesystemError;
     std::filesystem::create_directories(directory, filesystemError);
     if (filesystemError) {
-        ShowError(QStringLiteral("프리팹 저장"), QStringLiteral("프리팹 폴더를 만들 수 없습니다."));
+        ShowError(LUX_UI_TEXT("프리팹 저장"), LUX_UI_TEXT("프리팹 폴더를 만들 수 없습니다."));
         return;
     }
-    auto file =
-        QFileDialog::getSaveFileName(this, QStringLiteral("프리팹 저장"),
-                                     QString::fromUtf8(PathUtf8(directory / "NewPrefab.luxprefab")),
-                                     QStringLiteral("Lux 프리팹 (*.luxprefab)"));
+    auto file = LuxUI::FileDialog::getSaveFileName(
+        this, LUX_UI_TEXT("프리팹 저장"),
+        LuxUI::String::fromUtf8(PathUtf8(directory / "NewPrefab.luxprefab")),
+        LUX_UI_TEXT("Lux 프리팹 (*.luxprefab)"));
     if (file.isEmpty())
         return;
     if (document_.GetActiveTabId() != tab || document_.GetSelectedId(tab) != root)
@@ -73,27 +71,27 @@ void EditorWindow::SaveSelectedPrefab() {
     if (!LuxEngine::PrefabLibrary::IsPrefabPath(path))
         path += ".luxprefab";
     if (!InProject(path, project_->GetFile().parent_path())) {
-        ShowError(QStringLiteral("프리팹 저장"), QStringLiteral("프로젝트 내부에 저장해 주세요."));
+        ShowError(LUX_UI_TEXT("프리팹 저장"), LUX_UI_TEXT("프로젝트 내부에 저장해 주세요."));
         return;
     }
     std::string error;
     if (!LuxEngine::PrefabLibrary::Save(document_.GetScene(), root, path, error)) {
-        ShowError(QStringLiteral("프리팹 저장"), QString::fromUtf8(error));
+        ShowError(LUX_UI_TEXT("프리팹 저장"), LuxUI::String::fromUtf8(error));
         return;
     }
     RefreshProjectExplorer();
-    Log(QStringLiteral("프리팹 저장: %1").arg(QString::fromUtf8(PathUtf8(path))));
+    Log(LUX_UI_TEXT("프리팹 저장: %1").arg(LuxUI::String::fromUtf8(PathUtf8(path))));
 }
 
 void EditorWindow::AddPrefabAsset(const std::filesystem::path& path) {
     if (previewActive_ || !project_)
         return;
     if (!InProject(path, project_->GetFile().parent_path())) {
-        ShowError(QStringLiteral("프리팹 배치"),
-                  QStringLiteral("프로젝트 내부의 프리팹을 선택해 주세요."));
+        ShowError(LUX_UI_TEXT("프리팹 배치"),
+                  LUX_UI_TEXT("프로젝트 내부의 프리팹을 선택해 주세요."));
         return;
     }
-    RecordEdit(QStringLiteral("프리팹 배치"), [this, path] {
+    RecordEdit(LUX_UI_TEXT("프리팹 배치"), [this, path] {
         std::string error;
         const auto root = LuxEngine::PrefabLibrary::Instantiate(document_.GetScene(), path, error);
         if (!root)
@@ -111,13 +109,12 @@ void EditorWindow::EditSelectedPrefab(int operation) {
     const auto root =
         LuxEngine::PrefabLibrary::FindInstanceRoot(document_.GetScene(), selected.GetId());
     if (!root) {
-        ShowError(QStringLiteral("프리팹 편집"),
-                  QStringLiteral("프리팹 인스턴스를 선택해 주세요."));
+        ShowError(LUX_UI_TEXT("프리팹 편집"), LUX_UI_TEXT("프리팹 인스턴스를 선택해 주세요."));
         return;
     }
-    const auto name = operation == 0   ? QStringLiteral("프리팹 갱신")
-                      : operation == 1 ? QStringLiteral("프리팹 원본 복원")
-                                       : QStringLiteral("프리팹 연결 해제");
+    const auto name = operation == 0   ? LUX_UI_TEXT("프리팹 갱신")
+                      : operation == 1 ? LUX_UI_TEXT("프리팹 원본 복원")
+                                       : LUX_UI_TEXT("프리팹 연결 해제");
     RecordEdit(name, [this, root, operation] {
         std::string error;
         auto& scene = document_.GetScene();

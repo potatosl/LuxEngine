@@ -149,6 +149,12 @@ struct InputBinding {
 class LUX_API Input {
 public:
     static void Initialize();
+    // Main-thread input bridge for embedded editor play and host applications.
+    static void SetExternalKey(LuxKey key, bool down);
+    static void ClearExternalKeys();
+    static void SetExternalMouseButton(LuxMouseButton button, bool down);
+    static void SetExternalMousePosition(float x, float y);
+    static void ClearExternalMouse();
     static void Shutdown();
     static bool BindAction(std::string_view action, InputBinding binding);
 

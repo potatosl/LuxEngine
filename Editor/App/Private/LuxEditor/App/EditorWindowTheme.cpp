@@ -1,78 +1,71 @@
 #include <LuxEditor/App/EditorWindow.hpp>
 #include <LuxEditor/Ui/IconFactory.hpp>
-#include <QAbstractButton>
-#include <QApplication>
-#include <QDoubleSpinBox>
-#include <QFont>
-#include <QLabel>
-#include <QListWidget>
-#include <QPalette>
-#include <QSettings>
-#include <QStyle>
-#include <QStyleFactory>
-#include <QToolBar>
-#include <QToolButton>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 
 namespace LuxEditor {
 void EditorWindow::ApplyTheme() {
-    auto* fusion = findChild<QStyle*>(QStringLiteral("editorFusionStyle"));
+    auto* fusion = findChild<LuxUI::Style*>(LUX_UI_TEXT("editorFusionStyle"));
     if (!fusion) {
-        fusion = QStyleFactory::create(QStringLiteral("Fusion"));
-        fusion->setObjectName(QStringLiteral("editorFusionStyle"));
+        fusion = LuxUI::StyleFactory::create(LUX_UI_TEXT("Fusion"));
+        fusion->setObjectName(LUX_UI_TEXT("editorFusionStyle"));
         fusion->setParent(this);
     }
     setStyle(fusion);
-    QFont font = QApplication::font();
+    LuxUI::Font font = LuxUI::Application::font();
     font.setPointSizeF(9.0 * uiScale_);
     setFont(font);
-    const bool light = theme_ == QLatin1String("light");
-    if (auto* brand = findChild<QLabel*>(QStringLiteral("editorBrand")))
+    const bool light = theme_ == LuxUI::Latin1String("light");
+    if (auto* brand = findChild<LuxUI::Label*>(LUX_UI_TEXT("editorBrand")))
         brand->setPixmap(MakeBrandIcon(!light).pixmap(30, 30));
     if (!project_ || project_->GetIcon().empty())
         setWindowIcon(MakeBrandIcon(!light));
-    QPalette colors = palette();
-    colors.setColor(QPalette::Window, light ? QColor("#eceef1") : QColor("#242424"));
-    colors.setColor(QPalette::WindowText, light ? QColor("#24272d") : QColor("#dedede"));
-    colors.setColor(QPalette::Base, light ? QColor("#ffffff") : QColor("#191919"));
-    colors.setColor(QPalette::AlternateBase, light ? QColor("#f3f4f6") : QColor("#202020"));
-    colors.setColor(QPalette::Text, colors.color(QPalette::WindowText));
-    colors.setColor(QPalette::Button, colors.color(QPalette::Window));
-    colors.setColor(QPalette::ButtonText, colors.color(QPalette::WindowText));
-    colors.setColor(QPalette::Highlight, QColor("#3269a8"));
-    colors.setColor(QPalette::HighlightedText, Qt::white);
-    colors.setColor(QPalette::Disabled, QPalette::Text,
-                    light ? QColor("#949aa3") : QColor("#707070"));
-    colors.setColor(QPalette::Disabled, QPalette::ButtonText,
-                    colors.color(QPalette::Disabled, QPalette::Text));
+    LuxUI::Palette colors = palette();
+    colors.setColor(LuxUI::Palette::Window,
+                    light ? LuxUI::Color("#eceef1") : LuxUI::Color("#242424"));
+    colors.setColor(LuxUI::Palette::WindowText,
+                    light ? LuxUI::Color("#24272d") : LuxUI::Color("#dedede"));
+    colors.setColor(LuxUI::Palette::Base,
+                    light ? LuxUI::Color("#ffffff") : LuxUI::Color("#191919"));
+    colors.setColor(LuxUI::Palette::AlternateBase,
+                    light ? LuxUI::Color("#f3f4f6") : LuxUI::Color("#202020"));
+    colors.setColor(LuxUI::Palette::Text, colors.color(LuxUI::Palette::WindowText));
+    colors.setColor(LuxUI::Palette::Button, colors.color(LuxUI::Palette::Window));
+    colors.setColor(LuxUI::Palette::ButtonText, colors.color(LuxUI::Palette::WindowText));
+    colors.setColor(LuxUI::Palette::Highlight, LuxUI::Color("#3269a8"));
+    colors.setColor(LuxUI::Palette::HighlightedText, LuxUI::Flags::white);
+    colors.setColor(LuxUI::Palette::Disabled, LuxUI::Palette::Text,
+                    light ? LuxUI::Color("#949aa3") : LuxUI::Color("#707070"));
+    colors.setColor(LuxUI::Palette::Disabled, LuxUI::Palette::ButtonText,
+                    colors.color(LuxUI::Palette::Disabled, LuxUI::Palette::Text));
     setPalette(colors);
-    if (auto* bar = findChild<QToolBar*>(QStringLiteral("lux-main-toolbar"))) {
-        bar->setIconSize(QSize(20, 20) * uiScale_);
+    if (auto* bar = findChild<LuxUI::ToolBar*>(LUX_UI_TEXT("lux-main-toolbar"))) {
+        bar->setIconSize(LuxUI::Size(20, 20) * uiScale_);
         if (previewStartAction_)
             if (auto* play = bar->widgetForAction(previewStartAction_))
-                play->setObjectName(QStringLiteral("playButton"));
+                play->setObjectName(LUX_UI_TEXT("playButton"));
     }
-    for (auto* number : findChildren<QDoubleSpinBox*>()) {
+    for (auto* number : findChildren<LuxUI::DoubleSpinBox*>()) {
         number->setMinimumWidth(std::max(number->minimumWidth(), static_cast<int>(56 * uiScale_)));
         number->setMaximumWidth(QWIDGETSIZE_MAX);
     }
     if (projectFiles_) {
-        projectFiles_->setIconSize(QSize(64, 64) * uiScale_);
-        if (projectFiles_->viewMode() == QListView::IconMode)
-            projectFiles_->setGridSize(QSize(112, 100) * uiScale_);
+        projectFiles_->setIconSize(LuxUI::Size(64, 64) * uiScale_);
+        if (projectFiles_->viewMode() == LuxUI::ListView::IconMode)
+            projectFiles_->setGridSize(LuxUI::Size(112, 100) * uiScale_);
     }
-    if (theme_ == QLatin1String("custom")) {
-        setStyleSheet(QSettings().value(QStringLiteral("customStyle")).toString());
+    if (theme_ == LuxUI::Latin1String("custom")) {
+        setStyleSheet(LuxUI::Settings().value(LUX_UI_TEXT("customStyle")).toString());
         return;
     }
-    const QString panel = light ? QStringLiteral("#eceef1") : QStringLiteral("#242424");
-    const QString chrome = light ? QStringLiteral("#e0e3e8") : QStringLiteral("#191919");
-    const QString field = light ? QStringLiteral("#ffffff") : QStringLiteral("#161616");
-    const QString line = light ? QStringLiteral("#bfc5ce") : QStringLiteral("#353535");
-    const QString text = light ? QStringLiteral("#25282e") : QStringLiteral("#d5d5d5");
-    const QString muted = light ? QStringLiteral("#657080") : QStringLiteral("#999999");
-    const QString hover = light ? QStringLiteral("#d0d8e2") : QStringLiteral("#353535");
-    setStyleSheet(QStringLiteral(R"CSS(
+    const LuxUI::String panel = light ? LUX_UI_TEXT("#eceef1") : LUX_UI_TEXT("#242424");
+    const LuxUI::String chrome = light ? LUX_UI_TEXT("#e0e3e8") : LUX_UI_TEXT("#191919");
+    const LuxUI::String field = light ? LUX_UI_TEXT("#ffffff") : LUX_UI_TEXT("#161616");
+    const LuxUI::String line = light ? LUX_UI_TEXT("#bfc5ce") : LUX_UI_TEXT("#353535");
+    const LuxUI::String text = light ? LUX_UI_TEXT("#25282e") : LUX_UI_TEXT("#d5d5d5");
+    const LuxUI::String muted = light ? LUX_UI_TEXT("#657080") : LUX_UI_TEXT("#999999");
+    const LuxUI::String hover = light ? LUX_UI_TEXT("#d0d8e2") : LUX_UI_TEXT("#353535");
+    setStyleSheet(LUX_UI_TEXT(R"CSS(
 QWidget { font-size:%1pt; color:%2; }
 QMainWindow { background:%3; }
 QMenuBar, QMenu, QStatusBar, QToolBar { background:%3; }

@@ -1,14 +1,6 @@
 # Build dependencies are installed by the developer, never downloaded by CMake.
 find_package(SDL3 3.2 CONFIG REQUIRED)
-find_package(box2d 2.4...<3 CONFIG REQUIRED)
-if(TARGET box2d::box2d)
-    set_target_properties(box2d::box2d PROPERTIES
-        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;NOCONFIG;"
-    )
-endif()
+find_package(Jolt CONFIG REQUIRED HINTS "$ENV{LUX_JOLT_ROOT}" "$ENV{HOME}/.local")
 # Older configurations cached an empty value before downloading stb.
 # An empty cache entry prevents find_path from searching installed headers.
 if(DEFINED STB_IMAGE_INCLUDE_DIR AND STB_IMAGE_INCLUDE_DIR STREQUAL "")

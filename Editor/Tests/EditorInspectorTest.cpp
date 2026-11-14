@@ -1,16 +1,5 @@
 #include <LuxEditor/App/EditorWindow.hpp>
-#include <QApplication>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QDockWidget>
-#include <QDoubleSpinBox>
-#include <QGroupBox>
-#include <QListWidget>
-#include <QSettings>
-#include <QSpinBox>
-#include <QTemporaryDir>
-#include <QTreeWidget>
-#include <QUndoStack>
+#include <LuxUI/Widgets.hpp>
 #include <array>
 #include <iostream>
 #include <stdexcept>
@@ -24,14 +13,15 @@ void Check(bool condition, const char* message) {
         throw std::runtime_error(message);
 }
 
-QGroupBox* Group(EditorWindow& window, const char* title) {
-    const auto expected = QString::fromLatin1(title) == QLatin1String("2D PHYSICS")
-                              ? QStringLiteral("Physics 2D")
-                              : QString::fromLatin1(title);
-    for (auto* group : window.findChildren<QGroupBox*>())
-        if (group->title().compare(expected, Qt::CaseInsensitive) == 0 ||
-            group->property("componentTitle").toString().compare(expected, Qt::CaseInsensitive) ==
-                0)
+LuxUI::GroupBox* Group(EditorWindow& window, const char* title) {
+    const auto expected = LuxUI::String::fromLatin1(title) == LuxUI::Latin1String("2D PHYSICS")
+                              ? LUX_UI_TEXT("Physics 2D")
+                              : LuxUI::String::fromLatin1(title);
+    for (auto* group : window.findChildren<LuxUI::GroupBox*>())
+        if (group->title().compare(expected, LuxUI::Flags::CaseInsensitive) == 0 ||
+            group->property("componentTitle")
+                    .toString()
+                    .compare(expected, LuxUI::Flags::CaseInsensitive) == 0)
             return group;
     throw std::runtime_error("Inspector group not found");
 }
@@ -46,7 +36,7 @@ void CheckTransform(const TransformComponent& actual, const TransformComponent& 
     Check(a == b, "editing one Transform axis preserves every untouched float exactly");
 }
 
-void TestFields(QApplication& app, const QString& directory) {
+void TestFields(LuxUI::Application& app, const LuxUI::String& directory) {
     Scene scene;
     auto entity = scene.CreateEntity("Inspector fixture");
     auto& transform = entity.GetComponent<TransformComponent>();
@@ -76,21 +66,21 @@ void TestFields(QApplication& app, const QString& directory) {
     animation.clip.loop = true;
     animation.clip.AddKeyframe({0, {}, {}, {1, 1, 1}});
     const float originalDuration = animation.clip.duration;
-    const QString path = directory + QStringLiteral("/inspector.lux");
+    const LuxUI::String path = directory + LUX_UI_TEXT("/inspector.lux");
     Check(scene.Serialize(path.toUtf8().toStdString()), "inspector fixture saves");
-    QSettings().clear();
-    QSettings().setValue(QStringLiteral("lastScene"), path);
+    LuxUI::Settings().clear();
+    LuxUI::Settings().setValue(LUX_UI_TEXT("lastScene"), path);
     EditorWindow window;
     window.show();
     app.processEvents();
-    auto* outliner = window.findChild<QTreeWidget*>(QStringLiteral("sceneOutliner"));
+    auto* outliner = window.findChild<LuxUI::TreeWidget*>(LUX_UI_TEXT("sceneOutliner"));
     Check(outliner && outliner->topLevelItemCount() == 1, "inspector fixture opens");
     outliner->setCurrentItem(outliner->topLevelItem(0));
     auto selected = [&] { return window.GetDocument().GetSelected(); };
-    auto* undo = window.findChild<QUndoStack*>();
+    auto* undo = window.findChild<LuxUI::UndoStack*>();
     Check(undo != nullptr, "undo stack exists");
 
-    const auto transforms = Group(window, "TRANSFORM")->findChildren<QDoubleSpinBox*>();
+    const auto transforms = Group(window, "TRANSFORM")->findChildren<LuxUI::DoubleSpinBox*>();
     Check(transforms.size() == 9, "all Transform fields exist");
     transforms[0]->setValue(2);
     auto expectedTransform = originalTransform;
@@ -107,13 +97,13 @@ void TestFields(QApplication& app, const QString& directory) {
     expectedTransform.scale.z = 3;
     CheckTransform(selected().GetComponent<TransformComponent>(), expectedTransform);
 
-    const auto colors = Group(window, "SPRITE RENDERER")->findChildren<QDoubleSpinBox*>();
+    const auto colors = Group(window, "SPRITE RENDERER")->findChildren<LuxUI::DoubleSpinBox*>();
     colors[2]->setValue(.5);
     const auto color = selected().GetComponent<SpriteRendererComponent>().color;
     Check(color.x == 1.234567f && color.y == -.25f && color.z == .5f && color.w == .9876543f,
           "editing one color channel preserves HDR, negative and precise untouched channels");
 
-    const auto materials = Group(window, "MESH RENDERER")->findChildren<QDoubleSpinBox*>();
+    const auto materials = Group(window, "MESH RENDERER")->findChildren<LuxUI::DoubleSpinBox*>();
     materials[0]->setValue(.4);
     Check(selected().GetComponent<MeshRendererComponent>().material.roughness == 2,
           "metallic edits preserve out-of-range roughness");
@@ -121,12 +111,12 @@ void TestFields(QApplication& app, const QString& directory) {
     Check(selected().GetComponent<MeshRendererComponent>().material.metallic == .4f,
           "roughness edits preserve metallic");
 
-    auto* alphaMode = window.findChild<QComboBox*>(QStringLiteral("materialAlphaMode"));
-    auto* alphaCutoff = window.findChild<QDoubleSpinBox*>(QStringLiteral("materialAlphaCutoff"));
-    auto* doubleSided = window.findChild<QCheckBox*>(QStringLiteral("materialDoubleSided"));
-    auto* mipmaps = window.findChild<QCheckBox*>(QStringLiteral("materialMipmaps"));
-    auto* address = window.findChild<QComboBox*>(QStringLiteral("materialAddressMode"));
-    auto* anisotropic = window.findChild<QCheckBox*>(QStringLiteral("materialAnisotropic"));
+    auto* alphaMode = window.findChild<LuxUI::ComboBox*>(LUX_UI_TEXT("materialAlphaMode"));
+    auto* alphaCutoff = window.findChild<LuxUI::DoubleSpinBox*>(LUX_UI_TEXT("materialAlphaCutoff"));
+    auto* doubleSided = window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("materialDoubleSided"));
+    auto* mipmaps = window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("materialMipmaps"));
+    auto* address = window.findChild<LuxUI::ComboBox*>(LUX_UI_TEXT("materialAddressMode"));
+    auto* anisotropic = window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("materialAnisotropic"));
     Check(alphaMode && alphaCutoff && doubleSided && mipmaps && address && anisotropic,
           "material mode and sampling controls exist");
     alphaMode->setCurrentIndex(2);
@@ -144,9 +134,9 @@ void TestFields(QApplication& app, const QString& directory) {
     mipmaps->setChecked(false);
     address->setCurrentIndex(0);
     anisotropic->setChecked(false);
-    auto* normalScale = window.findChild<QDoubleSpinBox*>(QStringLiteral("materialNormalScale"));
+    auto* normalScale = window.findChild<LuxUI::DoubleSpinBox*>(LUX_UI_TEXT("materialNormalScale"));
     auto* aoStrength =
-        window.findChild<QDoubleSpinBox*>(QStringLiteral("materialOcclusionStrength"));
+        window.findChild<LuxUI::DoubleSpinBox*>(LUX_UI_TEXT("materialOcclusionStrength"));
     Check(normalScale && aoStrength, "PBR map controls exist");
     normalScale->setValue(2);
     aoStrength->setValue(.4);
@@ -158,7 +148,7 @@ void TestFields(QApplication& app, const QString& directory) {
               editedMaterial.occlusionStrength == .4f,
           "material controls preserve authored settings");
     auto* tileGroup = Group(window, "TILEMAP");
-    const auto dimensions = tileGroup->findChildren<QSpinBox*>();
+    const auto dimensions = tileGroup->findChildren<LuxUI::SpinBox*>();
     dimensions[0]->setValue(9);
     auto tilemap = selected().GetComponent<TilemapComponent>();
     Check(tilemap.width == 9 && tilemap.height == 8 && tilemap.tileSize == .01234567f &&
@@ -170,10 +160,10 @@ void TestFields(QApplication& app, const QString& directory) {
           "height edits preserve other tilemap fields");
 
     auto* physics = Group(window, "2D PHYSICS");
-    const auto physicsFields = physics->findChildren<QDoubleSpinBox*>();
-    QCheckBox* trigger = nullptr;
-    for (auto* checkbox : physics->findChildren<QCheckBox*>())
-        if (checkbox->text() == QStringLiteral("트리거"))
+    const auto physicsFields = physics->findChildren<LuxUI::DoubleSpinBox*>();
+    LuxUI::CheckBox* trigger = nullptr;
+    for (auto* checkbox : physics->findChildren<LuxUI::CheckBox*>())
+        if (checkbox->text() == LUX_UI_TEXT("트리거"))
             trigger = checkbox;
     Check(trigger != nullptr && physicsFields.size() == 5, "physics fields exist");
     trigger->setChecked(true);
@@ -193,7 +183,7 @@ void TestFields(QApplication& app, const QString& directory) {
               actualCollider.offset.x == originalCollider.offset.x &&
               actualCollider.offset.y == originalCollider.offset.y,
           "one collider dimension edit preserves other dimensions and offsets");
-    window.findChild<QCheckBox*>(QStringLiteral("editorCollider2D"))->setChecked(false);
+    window.findChild<LuxUI::CheckBox*>(LUX_UI_TEXT("editorCollider2D"))->setChecked(false);
     Check(!selected().HasComponent<BoxCollider2DComponent>() &&
               selected().GetComponent<Rigidbody2DComponent>().gravityScale == -1,
           "removing a collider preserves the body's negative gravity");
@@ -205,14 +195,14 @@ void TestFields(QApplication& app, const QString& directory) {
     Check(!selected().HasComponent<BoxCollider2DComponent>() &&
               selected().GetComponent<Rigidbody2DComponent>().gravityScale == -1,
           "redo preserves independent body fields");
-    physics->findChild<QComboBox*>()->setCurrentIndex(0);
+    physics->findChild<LuxUI::ComboBox*>()->setCurrentIndex(0);
     Check(selected().GetComponent<Rigidbody2DComponent>().gravityScale == -1,
           "changing body type also preserves negative gravity");
 
-    QCheckBox* loop = nullptr;
-    for (auto* checkbox : window.findChild<QDockWidget*>(QStringLiteral("AnimationWorkspace"))
-                              ->findChildren<QCheckBox*>())
-        if (checkbox->text() == QStringLiteral("반복 재생"))
+    LuxUI::CheckBox* loop = nullptr;
+    for (auto* checkbox : window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("AnimationWorkspace"))
+                              ->findChildren<LuxUI::CheckBox*>())
+        if (checkbox->text() == LUX_UI_TEXT("반복 재생"))
             loop = checkbox;
     Check(loop != nullptr, "animation loop control exists");
     loop->setChecked(false);
@@ -238,14 +228,15 @@ void TestFields(QApplication& app, const QString& directory) {
 } // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("LuxEngineTests"));
-    QCoreApplication::setApplicationName(QStringLiteral("LuxEditorInspectorTests"));
-    QTemporaryDir settings, files;
+    LuxUI::Application app(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName(LUX_UI_TEXT("LuxEngineTests"));
+    LuxUI::CoreApplication::setApplicationName(LUX_UI_TEXT("LuxEditorInspectorTests"));
+    LuxUI::TemporaryDir settings, files;
     if (!settings.isValid() || !files.isValid())
         return 1;
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+    LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                             settings.path());
     try {
         TestFields(app, files.path());
         std::cout << "Inspector field preservation checks passed\n";

@@ -90,13 +90,13 @@ void GroupManipulation() {
     SelectionTransformSession session;
     Check(session.Begin(pair.document), "A selected group did not start a transaction");
     auto value = scene.GetWorldTransform(pair.second);
-    value.position.x += 4;
+    value.position.x += 4.25f;
     Check(session.Apply(scene, pair.second, value), "Group translation failed");
-    Position(scene, pair.first, {2, 0, 0});
-    Position(scene, pair.second, {6, 0, 0});
-    value.position.x += 3;
+    Position(scene, pair.first, {2.25f, 0, 0});
+    Position(scene, pair.second, {6.25f, 0, 0});
+    value.position.x += 3.125f;
     Check(session.Apply(scene, pair.second, value), "Repeated group preview failed");
-    Position(scene, pair.first, {5, 0, 0});
+    Position(scene, pair.first, {5.375f, 0, 0});
     Check(session.HasChanged(), "The transaction did not report changed data");
     Check(session.Cancel(scene), "Cancel did not restore the transaction");
     Position(scene, pair.first, {-2, 0, 0});

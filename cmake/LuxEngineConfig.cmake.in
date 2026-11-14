@@ -18,24 +18,12 @@ find_dependency(SDL3 3.2 CONFIG HINTS
     "${PACKAGE_PREFIX_DIR}/lib/cmake/SDL3"
     "${PACKAGE_PREFIX_DIR}/share/sdl3"
 )
-find_dependency(box2d 2.4...<3 CONFIG HINTS
-    "@box2d_DIR@"
-    "${PACKAGE_PREFIX_DIR}"
-    "${PACKAGE_PREFIX_DIR}/lib/cmake/box2d"
-)
-if(TARGET box2d::box2d)
-    set_target_properties(box2d::box2d PROPERTIES
-        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;NOCONFIG;"
-    )
-endif()
+find_dependency(Jolt CONFIG HINTS "@Jolt_DIR@" "${PACKAGE_PREFIX_DIR}" "$ENV{LUX_JOLT_ROOT}" "$ENV{HOME}/.local")
 include("${CMAKE_CURRENT_LIST_DIR}/LuxEngineTargets.cmake")
 
 # Map configurations for multi-config generators (Visual Studio, Xcode)
 # when only Debug (or only Release) libraries were installed.
-foreach(_lux_target LuxEngine::Engine LuxEngine::Runtime)
+foreach(_lux_target LuxEngine::Engine LuxEngine::Runtime Jolt::Jolt)
     if(TARGET ${_lux_target})
         set_target_properties(${_lux_target} PROPERTIES
             MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;Debug;NOCONFIG;"
@@ -45,15 +33,6 @@ foreach(_lux_target LuxEngine::Engine LuxEngine::Runtime)
         )
     endif()
 endforeach()
-if(TARGET box2d::box2d)
-    set_target_properties(box2d::box2d PROPERTIES
-        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RelWithDebInfo;Release;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_MINSIZEREL "MinSizeRel;Release;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_RELEASE "Release;RelWithDebInfo;Debug;NOCONFIG;"
-        MAP_IMPORTED_CONFIG_DEBUG "Debug;Release;RelWithDebInfo;NOCONFIG;"
-    )
-endif()
-
 function(lux_copy_shaders target)
     if(EXISTS "${LuxEngine_SHADER_DIR}")
         add_custom_command(TARGET ${target} POST_BUILD
@@ -63,6 +42,13 @@ endfunction()
 
 function(lux_copy_runtime target)
     lux_copy_shaders(${target})
+    get_target_property(_lux_jolt_library_type Jolt::Jolt TYPE)
+    if(_lux_jolt_library_type STREQUAL "SHARED_LIBRARY")
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:Jolt::Jolt>" "$<TARGET_FILE_DIR:${target}>"
+            VERBATIM)
+    endif()
     if(EXISTS "${LuxEngine_MODELS_DIR}")
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${LuxEngine_MODELS_DIR}"
@@ -141,16 +127,6 @@ function(lux_copy_runtime target)
                     "${LuxEngine_RUNTIME_DIR}/SDL3.dll"
                     "$<TARGET_FILE_DIR:${target}>"
             )
-        endif()
-        if(TARGET box2d::box2d)
-            get_target_property(_box2d_type box2d::box2d TYPE)
-            if(_box2d_type STREQUAL "SHARED_LIBRARY")
-                add_custom_command(TARGET ${target} POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        $<TARGET_FILE:box2d::box2d>
-                        "$<TARGET_FILE_DIR:${target}>"
-                )
-            endif()
         endif()
         if(TARGET LuxEngine::Engine)
             get_target_property(_lux_type LuxEngine::Engine TYPE)

@@ -88,7 +88,7 @@ LuxEngine standalone player for running packaged 2D/3D games without editor or d
 ## Third-Party Licenses
 See the `licenses/` directory for full license texts and dependency details.
 - SDL3 (zlib)
-- Box2D (zlib)
+- Jolt Physics (MIT)
 - The Forge (Apache-2.0)
 - .NET 10 runtime is required to execute C# game scripts
 "@

@@ -5,7 +5,7 @@
 | 경로 | 빌드 타깃 | 확인할 기능 |
 | --- | --- | --- |
 | `samples/Basic2D/` | `SampleBasic2D` | 씬·엔티티·Transform, 2D 카메라, 캐릭터 이동 |
-| `samples/Physics2D/` | `SamplePhysics2D` | Box2D 동적 상자, 정적 지형, 회전과 충돌 |
+| `samples/Physics2D/` | `SamplePhysics2D` | Jolt 동적 상자, 정적 지형, 회전과 충돌 |
 | `samples/InputBindings/` | `SampleInputBindings` | `LuxKey`, 키보드·마우스·게임패드 액션, 실행 중 키 변경 |
 | `samples/ForestSurvivor/` | `SampleForestSurvivor` | 자동 전투, 경험치, 강화 선택, 보스, 승패와 재시작 |
 | `samples/ScenePlayer/` | `LuxPlayer`에 씬 경로 전달 | 직렬화된 씬 파일을 별도 런타임에서 실행 |

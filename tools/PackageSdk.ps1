@@ -2,7 +2,8 @@
 param(
     [string]$BuildDir = "build/local",
     [string]$OutputDir = "dist",
-    [string]$Version = "0.1.0"
+    [string]$Version = "0.1.0",
+    [string]$DepsDir = "C:/LuxDeps"
 )
 
 . (Join-Path $PSScriptRoot "Utf8.ps1")
@@ -44,28 +45,28 @@ if (Test-Path $sdlDll) {
     throw "Packaging failure: Release SDL3.dll not found in $BuildDir/bin/Release. Build Release first."
 }
 
-# Bundle Box2D headers, libraries and CMake configuration
-$box2dInclude = "C:/LuxDeps/include/box2d"
-if (Test-Path $box2dInclude) {
-    New-Item -ItemType Directory -Path "$sdkStaging/include/box2d" -Force | Out-Null
-    Copy-Item -Path "$box2dInclude/*" -Destination "$sdkStaging/include/box2d" -Recurse -Force
-    Write-Host "Bundled Box2D headers"
+# Bundle Jolt headers, libraries and CMake configuration
+$JoltInclude = "$DepsDir/include/Jolt"
+if (Test-Path $JoltInclude) {
+    New-Item -ItemType Directory -Path "$sdkStaging/include/Jolt" -Force | Out-Null
+    Copy-Item -Path "$JoltInclude/*" -Destination "$sdkStaging/include/Jolt" -Recurse -Force
+    Write-Host "Bundled Jolt headers"
 }
-$box2dLibRelease = "C:/LuxDeps/lib/box2d.lib"
-if (Test-Path $box2dLibRelease) {
-    Copy-Item -Path $box2dLibRelease -Destination "$sdkStaging/lib/box2d.lib" -Force
-    Write-Host "Bundled Box2D Release lib"
+$JoltLibRelease = "$DepsDir/lib/Jolt.lib"
+if (Test-Path $JoltLibRelease) {
+    Copy-Item -Path $JoltLibRelease -Destination "$sdkStaging/lib/Jolt.lib" -Force
+    Write-Host "Bundled Jolt Release lib"
 }
-$box2dLibDebug = "C:/LuxDeps/lib/box2dd.lib"
-if (Test-Path $box2dLibDebug) {
-    Copy-Item -Path $box2dLibDebug -Destination "$sdkStaging/lib/box2dd.lib" -Force
-    Write-Host "Bundled Box2D Debug lib"
+$JoltLibDebug = "$DepsDir/lib/Joltd.lib"
+if (Test-Path $JoltLibDebug) {
+    Copy-Item -Path $JoltLibDebug -Destination "$sdkStaging/lib/Joltd.lib" -Force
+    Write-Host "Bundled Jolt Debug lib"
 }
-$box2dCmakeDir = "C:/LuxDeps/lib/cmake/box2d"
-if (Test-Path $box2dCmakeDir) {
-    New-Item -ItemType Directory -Path "$sdkStaging/lib/cmake/box2d" -Force | Out-Null
-    Copy-Item -Path "$box2dCmakeDir/*" -Destination "$sdkStaging/lib/cmake/box2d" -Recurse -Force
-    Write-Host "Bundled Box2D CMake package"
+$JoltCmakeDir = "$DepsDir/lib/cmake/Jolt"
+if (Test-Path $JoltCmakeDir) {
+    New-Item -ItemType Directory -Path "$sdkStaging/lib/cmake/Jolt" -Force | Out-Null
+    Copy-Item -Path "$JoltCmakeDir/*" -Destination "$sdkStaging/lib/cmake/Jolt" -Recurse -Force
+    Write-Host "Bundled Jolt CMake package"
 }
 
 # Bundle SDL3 headers, import library and CMake configuration
@@ -85,11 +86,15 @@ if ($sdlLib -and (Test-Path $sdlLib)) {
 # Verify essential files strictly (throw on missing file)
 $requiredFiles = @(
     "include/LuxEngine/Application.hpp",
-    "include/box2d/box2d.h",
+    "include/Jolt/Jolt.h",
     "include/SDL3/SDL.h",
     "lib/LuxEngine.lib",
     "lib/LuxRuntime.lib",
-    "lib/box2d.lib",
+    "lib/Jolt.lib",
+    "lib/Joltd.lib",
+    "lib/cmake/Jolt/JoltConfig.cmake",
+    "lib/cmake/Jolt/JoltConfig-debug.cmake",
+    "lib/cmake/Jolt/JoltConfig-release.cmake",
     "lib/SDL3.lib",
     "bin/SDL3.dll",
     "lib/cmake/LuxEngine/LuxEngineConfig.cmake",
@@ -98,6 +103,7 @@ $requiredFiles = @(
     "share/LuxEngine/shaders/DIRECT3D12/lux2d.frag",
     "licenses/LICENSE-LuxEngine.txt",
     "licenses/LICENSE-LGPLv3.txt",
+    "licenses/LICENSE-Jolt.txt",
     "licenses/DEPENDENCIES.md",
     "examples/MinimalGame/CMakeLists.txt",
     "examples/MinimalGame/main.cpp"

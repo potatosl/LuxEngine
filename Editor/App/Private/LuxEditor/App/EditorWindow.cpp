@@ -5,60 +5,13 @@
 #include <LuxEditor/Project/ProjectDialog.hpp>
 #include <LuxEditor/Scene/SceneHistory.hpp>
 #include <LuxEditor/Ui/IconFactory.hpp>
+#include <LuxEditor/Viewport/GameViewport.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
 #include <LuxEngine/Assets/AssetManager.hpp>
 #include <LuxEngine/ECS/ECS.hpp>
-#include <QAbstractButton>
-#include <QAction>
-#include <QApplication>
-#include <QCheckBox>
-#include <QClipboard>
-#include <QCloseEvent>
-#include <QComboBox>
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QDockWidget>
-#include <QDoubleSpinBox>
-#include <QDragEnterEvent>
-#include <QFile>
-#include <QFileDialog>
-#include <QFileIconProvider>
-#include <QFileInfo>
-#include <QGuiApplication>
-#include <QIcon>
-#include <QInputDialog>
-#include <QItemSelectionModel>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QKeySequenceEdit>
-#include <QLabel>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QMenu>
-#include <QMenuBar>
-#include <QMessageBox>
-#include <QMimeData>
-#include <QPlainTextEdit>
-#include <QProgressDialog>
-#include <QResizeEvent>
-#include <QScreen>
-#include <QSettings>
-#include <QSignalBlocker>
-#include <QSlider>
-#include <QStackedWidget>
-#include <QStandardPaths>
-#include <QStatusBar>
-#include <QTabWidget>
-#include <QTemporaryDir>
-#include <QToolButton>
-#include <QTreeWidget>
-#include <QTreeWidgetItemIterator>
-#include <QUndoCommand>
-#include <QUndoStack>
-#include <QUrl>
-#include <QVBoxLayout>
+#include <LuxEngine/Platform/Input.hpp>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -69,15 +22,15 @@
 
 namespace LuxEditor {
 namespace {
-QString Q(const std::string& value) {
-    return QString::fromUtf8(value);
+LuxUI::String Q(const std::string& value) {
+    return LuxUI::String::fromUtf8(value);
 }
 
-QString Q(const std::filesystem::path& value) {
+LuxUI::String Q(const std::filesystem::path& value) {
     return Q(PathUtf8(value));
 }
 
-std::string Utf8(const QString& value) {
+std::string Utf8(const LuxUI::String& value) {
     return value.toUtf8().toStdString();
 }
 
@@ -87,37 +40,38 @@ std::optional<LuxEngine::uint32> SelectedId(EditorDocument& document) {
 }
 } // namespace
 
-EditorWindow::EditorWindow(QWidget* parent)
-    : QMainWindow(parent),
-      recentProjects_(
-          PathFromUtf8(Utf8(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))) /
-          "recent-projects.txt"),
-      undo_(new QUndoStack(this)) {
+EditorWindow::EditorWindow(LuxUI::Widget* parent)
+    : LuxUI::MainWindow(parent),
+      recentProjects_(PathFromUtf8(Utf8(LuxUI::StandardPaths::writableLocation(
+                          LuxUI::StandardPaths::AppDataLocation))) /
+                      "recent-projects.txt"),
+      undo_(new LuxUI::UndoStack(this)) {
     undo_->setUndoLimit(128);
-    setWindowTitle(QStringLiteral("LuxEditor"));
+    setWindowTitle(LUX_UI_TEXT("LuxEditor"));
     setMinimumSize(960, 600);
     resize(1600, 960);
     setAcceptDrops(true);
     recentProjects_.Load();
-    connect(&autosaveTimer_, &QTimer::timeout, this, [this] { AutoSaveScene(); });
+    connect(&autosaveTimer_, &LuxUI::Timer::timeout, this, [this] { AutoSaveScene(); });
     previewTimer_.setInterval(16);
-    connect(&previewTimer_, &QTimer::timeout, this, [this] { TickPreview(); });
-    connect(undo_, &QUndoStack::indexChanged, this, [this] { UpdateChrome(); });
+    connect(&previewTimer_, &LuxUI::Timer::timeout, this, [this] { TickPreview(); });
+    connect(undo_, &LuxUI::UndoStack::indexChanged, this, [this] { UpdateChrome(); });
     sceneLoadTimer_.setInterval(25);
-    connect(&sceneLoadTimer_, &QTimer::timeout, this, [this] { PollSceneLoads(); });
+    connect(&sceneLoadTimer_, &LuxUI::Timer::timeout, this, [this] { PollSceneLoads(); });
     sceneStreamingTimer_.setInterval(100);
-    connect(&sceneStreamingTimer_, &QTimer::timeout, this, [this] { TickSceneStreaming(); });
+    connect(&sceneStreamingTimer_, &LuxUI::Timer::timeout, this, [this] { TickSceneStreaming(); });
     sceneStreamingTimer_.start();
     BuildLayout();
     BuildMenus();
-    const QSettings settings;
-    const auto previous =
-        PathFromUtf8(Utf8(settings.value(QStringLiteral("lastProject")).toString()));
+    BuildDevelopmentWorkspace();
+    BuildModelingWorkspace();
+    const LuxUI::Settings settings;
+    const auto previous = PathFromUtf8(Utf8(settings.value(LUX_UI_TEXT("lastProject")).toString()));
     if (!previous.empty() && std::filesystem::is_regular_file(previous))
         OpenProjectFile(previous,
-                        PathFromUtf8(Utf8(settings.value(QStringLiteral("lastScene")).toString())));
+                        PathFromUtf8(Utf8(settings.value(LUX_UI_TEXT("lastScene")).toString())));
     else {
-        const std::string scene = Utf8(settings.value(QStringLiteral("lastScene")).toString());
+        const std::string scene = Utf8(settings.value(LUX_UI_TEXT("lastScene")).toString());
         if (!scene.empty() && std::filesystem::is_regular_file(PathFromUtf8(scene)))
             document_.Open(scene);
     }
@@ -132,16 +86,16 @@ EditorWindow::EditorWindow(QWidget* parent)
     };
 
     std::vector<Recovery> recoveries;
-    const auto savedDocuments = settings.value(QStringLiteral("openSceneDocuments")).toByteArray();
+    const auto savedDocuments = settings.value(LUX_UI_TEXT("openSceneDocuments")).toByteArray();
     if (savedDocuments.size() <= 1024 * 1024) {
-        const auto records = QJsonDocument::fromJson(savedDocuments).array();
+        const auto records = LuxUI::JsonDocument::fromJson(savedDocuments).array();
         for (qsizetype index = 0; index < std::min<qsizetype>(records.size(), 128); ++index) {
             const auto record = records[index].toObject();
-            const auto path = Utf8(record.value(QStringLiteral("path")).toString());
+            const auto path = Utf8(record.value(LUX_UI_TEXT("path")).toString());
             if (path.empty() || document_.FindTabByPath(path))
                 continue;
             std::optional<EditorProject> context;
-            const auto projectPath = Utf8(record.value(QStringLiteral("project")).toString());
+            const auto projectPath = Utf8(record.value(LUX_UI_TEXT("project")).toString());
             std::string message;
             if (!projectPath.empty())
                 context = EditorProject::OpenForRecovery(PathFromUtf8(projectPath), message);
@@ -161,10 +115,11 @@ EditorWindow::EditorWindow(QWidget* parent)
         }
     }
     if (!recoveries.empty() &&
-        QMessageBox::question(
-            this, QStringLiteral("씬 자동 저장 복구"),
-            QStringLiteral("자동 저장된 씬 %1개를 복구하시겠습니까?").arg(recoveries.size()),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) == QMessageBox::Yes) {
+        LuxUI::MessageBox::question(
+            this, LUX_UI_TEXT("씬 자동 저장 복구"),
+            LUX_UI_TEXT("자동 저장된 씬 %1개를 복구하시겠습니까?").arg(recoveries.size()),
+            LuxUI::MessageBox::Yes | LuxUI::MessageBox::No,
+            LuxUI::MessageBox::Yes) == LuxUI::MessageBox::Yes) {
         for (const auto& recovery : recoveries) {
             const auto id = recovery.tab ? recovery.tab : document_.NewTab();
             document_.ActivateTab(id);
@@ -187,6 +142,7 @@ EditorWindow::EditorWindow(QWidget* parent)
 EditorWindow::~EditorWindow() {
     CancelViewportEdit();
     StopAnimationPlayback();
+    developmentTimer_.stop();
     autosaveTimer_.stop();
     previewTimer_.stop();
     sceneLoadTimer_.stop();
@@ -199,221 +155,222 @@ EditorWindow::~EditorWindow() {
     removeDockWidget(animationDock_);
     delete animationDock_;
     animationDock_ = nullptr;
+    if (modelingDock_) {
+        modelingDock_->blockSignals(true);
+        removeDockWidget(modelingDock_);
+        delete modelingDock_;
+        modelingDock_ = nullptr;
+    }
     delete takeCentralWidget();
-    for (QDockWidget* dock : docks_) {
+    for (LuxUI::DockWidget* dock : docks_) {
         removeDockWidget(dock);
         delete dock;
     }
 }
 
 void EditorWindow::BuildMenus() {
-    auto add = [this](QMenu* menu, const QString& title, const QString& id,
-                      const QKeySequence& fallback, const std::function<void()>& action) {
-        QAction* item = menu->addAction(title);
+    auto add = [this](LuxUI::Menu* menu, const LuxUI::String& title, const LuxUI::String& id,
+                      const LuxUI::KeySequence& fallback, const std::function<void()>& action) {
+        LuxUI::Action* item = menu->addAction(title);
         item->setObjectName(id);
-        item->setShortcut(QKeySequence(
-            QSettings().value(QStringLiteral("shortcuts/") + id, fallback.toString()).toString()));
-        connect(item, &QAction::triggered, this, [action] { action(); });
+        item->setShortcut(
+            LuxUI::KeySequence(LuxUI::Settings()
+                                   .value(LUX_UI_TEXT("shortcuts/") + id, fallback.toString())
+                                   .toString()));
+        connect(item, &LuxUI::Action::triggered, this, [action] { action(); });
         shortcutActions_.push_back(item);
         return item;
     };
-    QMenu* file = menuBar()->addMenu(QStringLiteral("파일"));
-    add(file, QStringLiteral("새 프로젝트..."), QStringLiteral("newProject"), {},
+    LuxUI::Menu* file = menuBar()->addMenu(LUX_UI_TEXT("파일"));
+    add(file, LUX_UI_TEXT("새 프로젝트..."), LUX_UI_TEXT("newProject"), {},
         [this] { NewProject(); });
-    add(file, QStringLiteral("프로젝트 열기..."), QStringLiteral("openProject"), {},
+    add(file, LUX_UI_TEXT("프로젝트 열기..."), LUX_UI_TEXT("openProject"), {},
         [this] { OpenProjectDialog(); });
-    recentMenu_ = file->addMenu(QStringLiteral("최근 프로젝트"));
+    recentMenu_ = file->addMenu(LUX_UI_TEXT("최근 프로젝트"));
     projectSettingsAction_ =
-        add(file, QStringLiteral("프로젝트 설정..."), QStringLiteral("projectSettings"), {},
+        add(file, LUX_UI_TEXT("프로젝트 설정..."), LUX_UI_TEXT("projectSettings"), {},
             [this] { EditProjectSettings(); });
-    cloneAction_ = add(file, QStringLiteral("프로젝트 복제..."), QStringLiteral("cloneProject"), {},
+    cloneAction_ = add(file, LUX_UI_TEXT("프로젝트 복제..."), LUX_UI_TEXT("cloneProject"), {},
                        [this] { CloneCurrentProject(); });
-    add(file, QStringLiteral("프로젝트 가져오기..."), QStringLiteral("importProject"), {},
+    add(file, LUX_UI_TEXT("프로젝트 가져오기..."), LUX_UI_TEXT("importProject"), {},
         [this] { ImportProjectDialog(); });
-    exportAction_ = add(file, QStringLiteral("프로젝트 내보내기..."),
-                        QStringLiteral("exportProject"), {}, [this] { ExportCurrentProject(); });
-    backupAction_ = add(file, QStringLiteral("프로젝트 백업"), QStringLiteral("backupProject"), {},
+    exportAction_ = add(file, LUX_UI_TEXT("프로젝트 내보내기..."), LUX_UI_TEXT("exportProject"), {},
+                        [this] { ExportCurrentProject(); });
+    backupAction_ = add(file, LUX_UI_TEXT("프로젝트 백업"), LUX_UI_TEXT("backupProject"), {},
                         [this] { BackupCurrentProject(); });
-    restoreAction_ = add(file, QStringLiteral("프로젝트 백업 복구..."),
-                         QStringLiteral("restoreProject"), {}, [this] { RestoreCurrentProject(); });
-    rescanAction_ = add(file, QStringLiteral("리소스 재검색"), QStringLiteral("rescanResources"),
-                        {}, [this] { RescanProjectResources(); });
+    restoreAction_ = add(file, LUX_UI_TEXT("프로젝트 백업 복구..."), LUX_UI_TEXT("restoreProject"),
+                         {}, [this] { RestoreCurrentProject(); });
+    rescanAction_ = add(file, LUX_UI_TEXT("리소스 재검색"), LUX_UI_TEXT("rescanResources"), {},
+                        [this] { RescanProjectResources(); });
     file->addSeparator();
-    add(file, QStringLiteral("새 씬"), QStringLiteral("newScene"), QKeySequence::New,
+    add(file, LUX_UI_TEXT("새 씬"), LUX_UI_TEXT("newScene"), LuxUI::KeySequence::New,
         [this] { NewSceneDocument(); });
-    add(file, QStringLiteral("장면 열기..."), QStringLiteral("openScene"), QKeySequence::Open,
+    add(file, LUX_UI_TEXT("장면 열기..."), LUX_UI_TEXT("openScene"), LuxUI::KeySequence::Open,
         [this] {
-            const QString file =
-                QFileDialog::getOpenFileName(this, QStringLiteral("장면 열기"), {},
-                                             QStringLiteral("Lux 장면 (*.lux);;모든 파일 (*)"));
+            const LuxUI::String file = LuxUI::FileDialog::getOpenFileName(
+                this, LUX_UI_TEXT("장면 열기"), {}, LUX_UI_TEXT("Lux 장면 (*.lux);;모든 파일 (*)"));
             if (!file.isEmpty())
                 OpenProjectScene(PathFromUtf8(Utf8(file)));
         });
-    add(file, QStringLiteral("저장"), QStringLiteral("saveScene"), QKeySequence::Save,
+    add(file, LUX_UI_TEXT("저장"), LUX_UI_TEXT("saveScene"), LuxUI::KeySequence::Save,
         [this] { SaveScene(false); });
-    add(file, QStringLiteral("다른 이름으로 저장..."), QStringLiteral("saveSceneAs"),
-        QKeySequence::SaveAs, [this] { SaveScene(true); });
+    add(file, LUX_UI_TEXT("다른 이름으로 저장..."), LUX_UI_TEXT("saveSceneAs"),
+        LuxUI::KeySequence::SaveAs, [this] { SaveScene(true); });
     file->addSeparator();
-    add(file, QStringLiteral("끝내기"), QStringLiteral("quit"), QKeySequence::Quit,
+    add(file, LUX_UI_TEXT("끝내기"), LUX_UI_TEXT("quit"), LuxUI::KeySequence::Quit,
         [this] { close(); });
     BuildSceneMenus();
-    QMenu* edit = menuBar()->addMenu(QStringLiteral("편집"));
-    undoAction_ = add(edit, QStringLiteral("실행 취소"), QStringLiteral("undoEdit"),
-                      QKeySequence::Undo, [this] {
+    LuxUI::Menu* edit = menuBar()->addMenu(LUX_UI_TEXT("편집"));
+    undoAction_ = add(edit, LUX_UI_TEXT("실행 취소"), LUX_UI_TEXT("undoEdit"),
+                      LuxUI::KeySequence::Undo, [this] {
                           if (!viewportEditBefore_.isEmpty())
                               CancelViewportEdit();
                           else
                               undo_->undo();
                       });
-    redoAction_ = add(edit, QStringLiteral("다시 실행"), QStringLiteral("redoEdit"),
-                      QKeySequence::Redo, [this] {
+    redoAction_ = add(edit, LUX_UI_TEXT("다시 실행"), LUX_UI_TEXT("redoEdit"),
+                      LuxUI::KeySequence::Redo, [this] {
                           if (!viewportEditBefore_.isEmpty())
                               CancelViewportEdit();
                           else
                               undo_->redo();
                       });
-    add(edit, QStringLiteral("복사"), QStringLiteral("copyEntity"), QKeySequence::Copy,
+    add(edit, LUX_UI_TEXT("복사"), LUX_UI_TEXT("copyEntity"), LuxUI::KeySequence::Copy,
         [this] { CopyEntity(); });
-    add(edit, QStringLiteral("붙여넣기"), QStringLiteral("pasteEntity"), QKeySequence::Paste,
+    add(edit, LUX_UI_TEXT("붙여넣기"), LUX_UI_TEXT("pasteEntity"), LuxUI::KeySequence::Paste,
         [this] { PasteEntity(); });
     edit->addSeparator();
-    add(edit, QStringLiteral("2D 엔티티 추가"), QStringLiteral("addEntity"),
-        QKeySequence(Qt::CTRL | Qt::Key_E), [this] { AddEntity(); });
-    add(edit, QStringLiteral("3D 메시 엔티티 추가"), QStringLiteral("addMeshEntity"), {},
+    add(edit, LUX_UI_TEXT("2D 엔티티 추가"), LUX_UI_TEXT("addEntity"),
+        LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::Key_E), [this] { AddEntity(); });
+    add(edit, LUX_UI_TEXT("3D 메시 엔티티 추가"), LUX_UI_TEXT("addMeshEntity"), {},
         [this] { AddMeshEntity(); });
     AddBasicModelMenu(edit);
-    add(edit, QStringLiteral("타일맵 추가"), QStringLiteral("addTilemap"), {},
-        [this] { AddTilemap(); });
-    add(edit, QStringLiteral("선택 삭제"), QStringLiteral("deleteEntity"), QKeySequence::Delete,
+    add(edit, LUX_UI_TEXT("타일맵 추가"), LUX_UI_TEXT("addTilemap"), {}, [this] { AddTilemap(); });
+    add(edit, LUX_UI_TEXT("선택 삭제"), LUX_UI_TEXT("deleteEntity"), LuxUI::KeySequence::Delete,
         [this] { DeleteEntity(); });
-    QMenu* view = menuBar()->addMenu(QStringLiteral("보기"));
-    add(view, QStringLiteral("애니메이션 에디터"), QStringLiteral("openAnimationWorkspace"), {},
+    LuxUI::Menu* view = menuBar()->addMenu(LUX_UI_TEXT("보기"));
+    add(view, LUX_UI_TEXT("애니메이션 에디터"), LUX_UI_TEXT("openAnimationWorkspace"), {},
         [this] { SetWorkspace(true); });
-    snapAction_ = view->addAction(QStringLiteral("격자에 맞춤"));
-    snapAction_->setCheckable(true);
-    snapAction_->setChecked(true);
-    connect(snapAction_, &QAction::toggled, this, [this](bool enabled) {
-        canvas_->SetSnapToGrid(enabled);
-        canvas3D_->SetSnapToGrid(enabled);
-        overviewCanvas_->SetSnapToGrid(enabled);
-        if (project_) {
-            auto settings = project_->GetSettings();
-            settings.snapToGrid = enabled;
-            std::string error;
-            if (!project_->UpdateSettings(settings, error))
-                ShowError(QStringLiteral("프로젝트 설정 저장 실패"), Q(error));
-        }
-    });
     view->addSeparator();
-    add(view, QStringLiteral("2D 작업 화면"), QStringLiteral("view2D"), {},
+    add(view, LUX_UI_TEXT("2D 작업 화면"), LUX_UI_TEXT("view2D"), {},
         [this] { viewportTabs_->setCurrentIndex(1); });
-    add(view, QStringLiteral("3D 배치 화면"), QStringLiteral("view3D"), {},
+    add(view, LUX_UI_TEXT("3D 배치 화면"), LUX_UI_TEXT("view3D"), {},
         [this] { viewportTabs_->setCurrentIndex(0); });
-    add(view, QStringLiteral("선택 항목에 초점"), QStringLiteral("focusSelection"),
-        QKeySequence(Qt::Key_F), [this] {
+    add(view, LUX_UI_TEXT("선택 항목에 초점"), LUX_UI_TEXT("focusSelection"),
+        LuxUI::KeySequence(LuxUI::Flags::Key_F), [this] {
             if (viewportTabs_->currentWidget() == canvas3D_)
                 canvas3D_->FocusSelection();
             else
                 canvas_->FocusSelection();
         });
-    add(view, QStringLiteral("전체 화면"), QStringLiteral("fullscreen"), QKeySequence(Qt::Key_F11),
+    add(view, LUX_UI_TEXT("전체 화면"), LUX_UI_TEXT("fullscreen"),
+        LuxUI::KeySequence(LuxUI::Flags::Key_F11),
         [this] { isFullScreen() ? showNormal() : showFullScreen(); });
-    colliderAction_ = view->addAction(QStringLiteral("2D 충돌체 표시"));
+    colliderAction_ = view->addAction(LUX_UI_TEXT("2D 충돌체 표시"));
     colliderAction_->setCheckable(true);
-    connect(colliderAction_, &QAction::toggled, this, [this](bool enabled) {
+    connect(colliderAction_, &LuxUI::Action::toggled, this, [this](bool enabled) {
         canvas_->SetDebugColliders(enabled);
         overviewCanvas_->SetDebugColliders(enabled);
     });
-    QMenu* debug = menuBar()->addMenu(QStringLiteral("디버그"));
-    add(debug, QStringLiteral("장면 실행"), QStringLiteral("previewStart"),
-        QKeySequence(Qt::Key_F5), [this] { StartPreview(); });
-    add(debug, QStringLiteral("일시정지/재개"), QStringLiteral("previewPause"),
-        QKeySequence(Qt::Key_F6), [this] { TogglePreviewPause(); });
-    add(debug, QStringLiteral("한 프레임 실행"), QStringLiteral("previewStep"),
-        QKeySequence(Qt::Key_F7), [this] { StepPreview(); });
-    add(debug, QStringLiteral("실행 중지"), QStringLiteral("previewStop"),
-        QKeySequence(Qt::SHIFT | Qt::Key_F5), [this] { StopPreview(); });
+    auto* cameraMenu = menuBar()->addMenu(LUX_UI_TEXT("카메라"));
+    AddCommand(cameraMenu, "alignCameraToSceneView", "선택 카메라를 씬 뷰에 맞추기",
+               [this] { AlignCameraToSceneView(); });
+    AddCommand(cameraMenu, "viewThroughSelectedCamera", "선택 카메라 시점으로 보기",
+               [this] { ViewThroughSelectedCamera(); });
+    LuxUI::Menu* debug = menuBar()->addMenu(LUX_UI_TEXT("디버그"));
+    add(debug, LUX_UI_TEXT("장면 실행"), LUX_UI_TEXT("previewStart"),
+        LuxUI::KeySequence(LuxUI::Flags::Key_F5), [this] { StartPreview(); });
+    add(debug, LUX_UI_TEXT("일시정지/재개"), LUX_UI_TEXT("previewPause"),
+        LuxUI::KeySequence(LuxUI::Flags::Key_F6), [this] { TogglePreviewPause(); });
+    add(debug, LUX_UI_TEXT("한 프레임 실행"), LUX_UI_TEXT("previewStep"),
+        LuxUI::KeySequence(LuxUI::Flags::Key_F7), [this] { StepPreview(); });
+    add(debug, LUX_UI_TEXT("실행 중지"), LUX_UI_TEXT("previewStop"),
+        LuxUI::KeySequence(LuxUI::Flags::SHIFT | LuxUI::Flags::Key_F5), [this] { StopPreview(); });
     debug->addSeparator();
-    add(debug, QStringLiteral("별도 창에서 실행"), QStringLiteral("playWindow"),
-        QKeySequence(Qt::CTRL | Qt::Key_F5), [this] { RunSceneInWindow(); });
-    add(debug, QStringLiteral("게임 창 닫기"), QStringLiteral("playWindowStop"),
-        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F5), [this] { StopSceneWindow(); });
-    breakOnCollisionAction_ = debug->addAction(QStringLiteral("충돌 시 일시정지"));
+    add(debug, LUX_UI_TEXT("별도 창에서 실행"), LUX_UI_TEXT("playWindow"),
+        LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::Key_F5),
+        [this] { RunSceneInWindow(); });
+    add(debug, LUX_UI_TEXT("게임 창 닫기"), LUX_UI_TEXT("playWindowStop"),
+        LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::SHIFT | LuxUI::Flags::Key_F5),
+        [this] { StopSceneWindow(); });
+    breakOnCollisionAction_ = debug->addAction(LUX_UI_TEXT("충돌 시 일시정지"));
     breakOnCollisionAction_->setCheckable(true);
     debug->addAction(docks_[7]->toggleViewAction());
-    QMenu* buildMenu = menuBar()->addMenu(QStringLiteral("빌드"));
-    add(buildMenu, QStringLiteral("Debug 빌드"), QStringLiteral("buildDebug"),
-        QKeySequence(Qt::CTRL | Qt::Key_B),
+    LuxUI::Menu* buildMenu = menuBar()->addMenu(LUX_UI_TEXT("빌드"));
+    add(buildMenu, LUX_UI_TEXT("Debug 빌드"), LUX_UI_TEXT("buildDebug"),
+        LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::Key_B),
         [this] { StartBuild(BuildConfiguration::Debug, false, BuildFollowUp::None); });
-    add(buildMenu, QStringLiteral("Release 빌드"), QStringLiteral("buildRelease"),
-        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_B),
+    add(buildMenu, LUX_UI_TEXT("Release 빌드"), LUX_UI_TEXT("buildRelease"),
+        LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::SHIFT | LuxUI::Flags::Key_B),
         [this] { StartBuild(BuildConfiguration::Release, false, BuildFollowUp::None); });
-    add(buildMenu, QStringLiteral("빌드 후 실행 (Debug)"), QStringLiteral("buildRun"),
-        QKeySequence(Qt::Key_F9),
+    add(buildMenu, LUX_UI_TEXT("빌드 후 실행 (Debug)"), LUX_UI_TEXT("buildRun"),
+        LuxUI::KeySequence(LuxUI::Flags::Key_F9),
         [this] { StartBuild(BuildConfiguration::Debug, false, BuildFollowUp::Run); });
-    add(buildMenu, QStringLiteral("클린 빌드 (Debug)"), QStringLiteral("buildClean"), {},
+    add(buildMenu, LUX_UI_TEXT("클린 빌드 (Debug)"), LUX_UI_TEXT("buildClean"), {},
         [this] { StartBuild(BuildConfiguration::Debug, true, BuildFollowUp::None); });
     buildMenu->addSeparator();
-    add(buildMenu, QStringLiteral("배포 ZIP 만들기 (Release)..."), QStringLiteral("buildPackage"),
-        {}, [this] { StartBuild(BuildConfiguration::Release, false, BuildFollowUp::Package); });
+    add(buildMenu, LUX_UI_TEXT("배포 ZIP 만들기 (Release)..."), LUX_UI_TEXT("buildPackage"), {},
+        [this] { StartBuild(BuildConfiguration::Release, false, BuildFollowUp::Package); });
     buildMenu->addSeparator();
-    add(buildMenu, QStringLiteral("빌드 중지"), QStringLiteral("buildCancel"), {},
+    add(buildMenu, LUX_UI_TEXT("빌드 중지"), LUX_UI_TEXT("buildCancel"), {},
         [this] { CancelBuild(); });
-    add(buildMenu, QStringLiteral("엔진 SDK 경로 설정..."), QStringLiteral("buildSdk"), {},
+    add(buildMenu, LUX_UI_TEXT("엔진 SDK 경로 설정..."), LUX_UI_TEXT("buildSdk"), {},
         [this] { ChooseEnginePackage(); });
-    QMenu* window = menuBar()->addMenu(QStringLiteral("창"));
-    add(window, QStringLiteral("새 에디터 창"), QStringLiteral("newWindow"), {}, [] {
+    LuxUI::Menu* window = menuBar()->addMenu(LUX_UI_TEXT("창"));
+    add(window, LUX_UI_TEXT("새 에디터 창"), LUX_UI_TEXT("newWindow"), {}, [] {
         auto* next = new EditorWindow;
-        next->setAttribute(Qt::WA_DeleteOnClose);
+        next->setAttribute(LuxUI::Flags::WA_DeleteOnClose);
         next->show();
     });
-    QMenu* displays = window->addMenu(QStringLiteral("화면으로 이동"));
-    connect(displays, &QMenu::aboutToShow, this, [this, displays] {
+    LuxUI::Menu* displays = window->addMenu(LUX_UI_TEXT("화면으로 이동"));
+    connect(displays, &LuxUI::Menu::aboutToShow, this, [this, displays] {
         displays->clear();
-        for (QScreen* screen : QGuiApplication::screens())
+        for (LuxUI::Screen* screen : LuxUI::GuiApplication::screens())
             displays->addAction(screen->name(), this, [this, screen] {
-                const QRect area = screen->availableGeometry();
+                const LuxUI::Rect area = screen->availableGeometry();
                 move(area.center() - rect().center());
             });
     });
-    add(window, QStringLiteral("명령 검색..."), QStringLiteral("commandPalette"),
-        QKeySequence(Qt::CTRL | Qt::Key_P), [this] { OpenCommandPalette(); });
+    add(window, LUX_UI_TEXT("명령 검색..."), LUX_UI_TEXT("commandPalette"),
+        LuxUI::KeySequence(LuxUI::Flags::CTRL | LuxUI::Flags::Key_P),
+        [this] { OpenCommandPalette(); });
     window->addSeparator();
-    for (QDockWidget* dock : docks_)
+    for (LuxUI::DockWidget* dock : docks_)
         window->addAction(dock->toggleViewAction());
     window->addSeparator();
-    add(window, QStringLiteral("기본 배치 복원"), QStringLiteral("resetLayout"), {},
+    add(window, LUX_UI_TEXT("기본 배치 복원"), LUX_UI_TEXT("resetLayout"), {},
         [this] { ResetWorkspaceLayout(); });
-    QMenu* preferences = menuBar()->addMenu(QStringLiteral("설정"));
-    QMenu* themes = preferences->addMenu(QStringLiteral("테마"));
+    LuxUI::Menu* preferences = menuBar()->addMenu(LUX_UI_TEXT("설정"));
+    LuxUI::Menu* themes = preferences->addMenu(LUX_UI_TEXT("테마"));
     for (const auto& [id, label] : std::array<std::pair<const char*, const char*>, 2>{
              {{"dark", "다크"}, {"light", "라이트"}}})
-        themes->addAction(QString::fromUtf8(label), this, [this, id] {
-            theme_ = QString::fromLatin1(id);
+        themes->addAction(LuxUI::String::fromUtf8(label), this, [this, id] {
+            theme_ = LuxUI::String::fromLatin1(id);
             ApplyTheme();
         });
-    themes->addAction(QStringLiteral("사용자 정의 스타일 불러오기..."), this, [this] {
-        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("스타일 파일 선택"),
-                                                          {}, QStringLiteral("Qt 스타일 (*.qss)"));
-        QFile file(path);
-        if (!path.isEmpty() && file.open(QIODevice::ReadOnly) && file.size() <= 1024 * 1024) {
-            QSettings().setValue(QStringLiteral("customStyle"), QString::fromUtf8(file.readAll()));
-            theme_ = QStringLiteral("custom");
+    themes->addAction(LUX_UI_TEXT("사용자 정의 스타일 불러오기..."), this, [this] {
+        const LuxUI::String path = LuxUI::FileDialog::getOpenFileName(
+            this, LUX_UI_TEXT("스타일 파일 선택"), {}, LUX_UI_TEXT("Qt 스타일 (*.qss)"));
+        LuxUI::File file(path);
+        if (!path.isEmpty() && file.open(LuxUI::IODevice::ReadOnly) && file.size() <= 1024 * 1024) {
+            LuxUI::Settings().setValue(LUX_UI_TEXT("customStyle"),
+                                       LuxUI::String::fromUtf8(file.readAll()));
+            theme_ = LUX_UI_TEXT("custom");
             ApplyTheme();
         }
     });
-    QMenu* scale = preferences->addMenu(QStringLiteral("UI 배율"));
+    LuxUI::Menu* scale = preferences->addMenu(LUX_UI_TEXT("UI 배율"));
     for (double factor : {.75, 1.0, 1.25, 1.5, 2.0})
-        scale->addAction(QStringLiteral("%1%").arg(static_cast<int>(factor * 100)), this,
+        scale->addAction(LUX_UI_TEXT("%1%").arg(static_cast<int>(factor * 100)), this,
                          [this, factor] {
                              uiScale_ = factor;
                              ApplyTheme();
                          });
-    add(preferences, QStringLiteral("단축키 설정..."), QStringLiteral("shortcuts"), {},
+    add(preferences, LUX_UI_TEXT("단축키 설정..."), LUX_UI_TEXT("shortcuts"), {},
         [this] { ConfigureShortcuts(); });
-    add(preferences, QStringLiteral("설정 내보내기..."), QStringLiteral("exportSettings"), {},
+    add(preferences, LUX_UI_TEXT("설정 내보내기..."), LUX_UI_TEXT("exportSettings"), {},
         [this] { ExportEditorSettings(); });
-    add(preferences, QStringLiteral("설정 가져오기..."), QStringLiteral("importSettings"), {},
+    add(preferences, LUX_UI_TEXT("설정 가져오기..."), LUX_UI_TEXT("importSettings"), {},
         [this] { ImportEditorSettings(); });
     UpdateRecentMenu();
 }
@@ -422,7 +379,7 @@ void EditorWindow::UpdateRecentMenu() {
     recentMenu_->clear();
     const auto& files = recentProjects_.Get();
     if (files.empty()) {
-        auto* item = recentMenu_->addAction(QStringLiteral("최근 프로젝트가 없습니다."));
+        auto* item = recentMenu_->addAction(LUX_UI_TEXT("최근 프로젝트가 없습니다."));
         item->setEnabled(false);
         return;
     }
@@ -431,36 +388,36 @@ void EditorWindow::UpdateRecentMenu() {
 }
 
 void EditorWindow::OpenCommandPalette() {
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("명령 검색"));
+    LuxUI::Dialog dialog(this);
+    dialog.setWindowTitle(LUX_UI_TEXT("명령 검색"));
     dialog.resize(460, 420);
-    auto* layout = new QVBoxLayout(&dialog);
-    auto* search = new QLineEdit(&dialog);
-    search->setPlaceholderText(QStringLiteral("명령을 입력해 주세요."));
-    auto* list = new QListWidget(&dialog);
+    auto* layout = new LuxUI::VBoxLayout(&dialog);
+    auto* search = new LuxUI::LineEdit(&dialog);
+    search->setPlaceholderText(LUX_UI_TEXT("명령을 입력해 주세요."));
+    auto* list = new LuxUI::ListWidget(&dialog);
     layout->addWidget(search);
     layout->addWidget(list);
-    std::vector<QAction*> commands;
-    for (QAction* action : shortcutActions_)
-        if (action->isEnabled() && action->text() != QStringLiteral("끝내기"))
+    std::vector<LuxUI::Action*> commands;
+    for (LuxUI::Action* action : shortcutActions_)
+        if (action->isEnabled() && action->text() != LUX_UI_TEXT("끝내기"))
             commands.push_back(action);
     auto refresh = [search, list, commands] {
         list->clear();
-        for (QAction* action : commands)
-            if (action->text().contains(search->text(), Qt::CaseInsensitive))
+        for (LuxUI::Action* action : commands)
+            if (action->text().contains(search->text(), LuxUI::Flags::CaseInsensitive))
                 list->addItem(action->text());
         if (list->count())
             list->setCurrentRow(0);
     };
-    connect(search, &QLineEdit::textChanged, &dialog, refresh);
-    connect(search, &QLineEdit::returnPressed, &dialog, &QDialog::accept);
-    connect(list, &QListWidget::itemDoubleClicked, &dialog, &QDialog::accept);
+    connect(search, &LuxUI::LineEdit::textChanged, &dialog, refresh);
+    connect(search, &LuxUI::LineEdit::returnPressed, &dialog, &LuxUI::Dialog::accept);
+    connect(list, &LuxUI::ListWidget::itemDoubleClicked, &dialog, &LuxUI::Dialog::accept);
     refresh();
     search->setFocus();
-    if (dialog.exec() != QDialog::Accepted || !list->currentItem())
+    if (dialog.exec() != LuxUI::Dialog::Accepted || !list->currentItem())
         return;
-    const QString chosen = list->currentItem()->text();
-    for (QAction* action : commands)
+    const LuxUI::String chosen = list->currentItem()->text();
+    for (LuxUI::Action* action : commands)
         if (action->text() == chosen) {
             action->trigger();
             break;
@@ -468,113 +425,113 @@ void EditorWindow::OpenCommandPalette() {
 }
 
 void EditorWindow::ConfigureShortcuts() {
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("단축키 설정"));
+    LuxUI::Dialog dialog(this);
+    dialog.setWindowTitle(LUX_UI_TEXT("단축키 설정"));
     dialog.resize(540, 500);
-    auto* layout = new QVBoxLayout(&dialog);
-    auto* list = new QListWidget(&dialog);
-    for (QAction* action : shortcutActions_)
+    auto* layout = new LuxUI::VBoxLayout(&dialog);
+    auto* list = new LuxUI::ListWidget(&dialog);
+    for (LuxUI::Action* action : shortcutActions_)
         list->addItem(action->text());
-    auto* editor = new QKeySequenceEdit(&dialog);
+    auto* editor = new LuxUI::KeySequenceEdit(&dialog);
     layout->addWidget(list);
-    layout->addWidget(new QLabel(QStringLiteral("선택한 명령의 단축키"), &dialog));
+    layout->addWidget(new LuxUI::Label(LUX_UI_TEXT("선택한 명령의 단축키"), &dialog));
     layout->addWidget(editor);
-    auto* buttons =
-        new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    auto* buttons = new LuxUI::DialogButtonBox(
+        LuxUI::DialogButtonBox::Save | LuxUI::DialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
-    connect(list, &QListWidget::currentRowChanged, &dialog, [this, editor](int row) {
+    connect(list, &LuxUI::ListWidget::currentRowChanged, &dialog, [this, editor](int row) {
         if (row >= 0)
             editor->setKeySequence(shortcutActions_[static_cast<size_t>(row)]->shortcut());
     });
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons, &LuxUI::DialogButtonBox::accepted, &dialog, &LuxUI::Dialog::accept);
+    connect(buttons, &LuxUI::DialogButtonBox::rejected, &dialog, &LuxUI::Dialog::reject);
     list->setCurrentRow(0);
-    if (dialog.exec() != QDialog::Accepted || list->currentRow() < 0)
+    if (dialog.exec() != LuxUI::Dialog::Accepted || list->currentRow() < 0)
         return;
     auto* action = shortcutActions_[static_cast<size_t>(list->currentRow())];
     action->setShortcut(editor->keySequence());
-    QSettings().setValue(QStringLiteral("shortcuts/") + action->objectName(),
-                         editor->keySequence().toString());
-    statusBar()->showMessage(QStringLiteral("단축키를 저장했습니다."), 4000);
+    LuxUI::Settings().setValue(LUX_UI_TEXT("shortcuts/") + action->objectName(),
+                               editor->keySequence().toString());
+    statusBar()->showMessage(LUX_UI_TEXT("단축키를 저장했습니다."), 4000);
 }
 
 void EditorWindow::ExportEditorSettings() {
-    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("에디터 설정 내보내기"),
-                                                      QStringLiteral("LuxEditorSettings.json"),
-                                                      QStringLiteral("JSON (*.json)"));
+    const LuxUI::String path = LuxUI::FileDialog::getSaveFileName(
+        this, LUX_UI_TEXT("에디터 설정 내보내기"), LUX_UI_TEXT("LuxEditorSettings.json"),
+        LUX_UI_TEXT("JSON (*.json)"));
     if (path.isEmpty())
         return;
-    QJsonObject shortcuts;
-    for (QAction* action : shortcutActions_)
+    LuxUI::JsonObject shortcuts;
+    for (LuxUI::Action* action : shortcutActions_)
         shortcuts.insert(action->objectName(), action->shortcut().toString());
-    QJsonObject settings{{QStringLiteral("format"), 1},
-                         {QStringLiteral("theme"), theme_},
-                         {QStringLiteral("uiScale"), uiScale_},
-                         {QStringLiteral("shortcuts"), shortcuts}};
-    if (theme_ == QLatin1String("custom"))
-        settings.insert(QStringLiteral("customStyle"),
-                        QSettings().value(QStringLiteral("customStyle")).toString());
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
-        file.write(QJsonDocument(settings).toJson()) < 0)
-        ShowError(QStringLiteral("설정 내보내기 실패"),
-                  QStringLiteral("설정 파일을 저장할 수 없습니다."));
+    LuxUI::JsonObject settings{{LUX_UI_TEXT("format"), 1},
+                               {LUX_UI_TEXT("theme"), theme_},
+                               {LUX_UI_TEXT("uiScale"), uiScale_},
+                               {LUX_UI_TEXT("shortcuts"), shortcuts}};
+    if (theme_ == LuxUI::Latin1String("custom"))
+        settings.insert(LUX_UI_TEXT("customStyle"),
+                        LuxUI::Settings().value(LUX_UI_TEXT("customStyle")).toString());
+    LuxUI::File file(path);
+    if (!file.open(LuxUI::IODevice::WriteOnly | LuxUI::IODevice::Truncate) ||
+        file.write(LuxUI::JsonDocument(settings).toJson()) < 0)
+        ShowError(LUX_UI_TEXT("설정 내보내기 실패"),
+                  LUX_UI_TEXT("설정 파일을 저장할 수 없습니다."));
     else
-        Log(QStringLiteral("에디터 설정을 내보냈습니다."));
+        Log(LUX_UI_TEXT("에디터 설정을 내보냈습니다."));
 }
 
 void EditorWindow::ImportEditorSettings() {
-    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("에디터 설정 가져오기"),
-                                                      {}, QStringLiteral("JSON (*.json)"));
+    const LuxUI::String path = LuxUI::FileDialog::getOpenFileName(
+        this, LUX_UI_TEXT("에디터 설정 가져오기"), {}, LUX_UI_TEXT("JSON (*.json)"));
     if (path.isEmpty())
         return;
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) {
-        ShowError(QStringLiteral("설정 가져오기 실패"),
-                  QStringLiteral("설정 파일을 읽을 수 없습니다."));
+    LuxUI::File file(path);
+    if (!file.open(LuxUI::IODevice::ReadOnly) || file.size() > 1024 * 1024) {
+        ShowError(LUX_UI_TEXT("설정 가져오기 실패"), LUX_UI_TEXT("설정 파일을 읽을 수 없습니다."));
         return;
     }
-    QJsonParseError parse;
-    const auto doc = QJsonDocument::fromJson(file.readAll(), &parse);
+    LuxUI::JsonParseError parse;
+    const auto doc = LuxUI::JsonDocument::fromJson(file.readAll(), &parse);
     const auto object = doc.object();
-    const QString theme = object.value(QStringLiteral("theme")).toString();
-    const double scale = object.value(QStringLiteral("uiScale")).toDouble(-1);
-    if (parse.error != QJsonParseError::NoError ||
-        object.value(QStringLiteral("format")).toInt() != 1 ||
-        (theme != QLatin1String("dark") && theme != QLatin1String("light") &&
-         theme != QLatin1String("custom")) ||
-        scale < .75 || scale > 2.0 || !object.value(QStringLiteral("shortcuts")).isObject()) {
-        ShowError(QStringLiteral("설정 가져오기 실패"),
-                  QStringLiteral("설정 파일 형식이 올바르지 않습니다."));
+    const LuxUI::String theme = object.value(LUX_UI_TEXT("theme")).toString();
+    const double scale = object.value(LUX_UI_TEXT("uiScale")).toDouble(-1);
+    if (parse.error != LuxUI::JsonParseError::NoError ||
+        object.value(LUX_UI_TEXT("format")).toInt() != 1 ||
+        (theme != LuxUI::Latin1String("dark") && theme != LuxUI::Latin1String("light") &&
+         theme != LuxUI::Latin1String("custom")) ||
+        scale < .75 || scale > 2.0 || !object.value(LUX_UI_TEXT("shortcuts")).isObject()) {
+        ShowError(LUX_UI_TEXT("설정 가져오기 실패"),
+                  LUX_UI_TEXT("설정 파일 형식이 올바르지 않습니다."));
         return;
     }
-    QSettings settings;
-    if (theme == QLatin1String("custom")) {
-        const QString style = object.value(QStringLiteral("customStyle")).toString();
+    LuxUI::Settings settings;
+    if (theme == LuxUI::Latin1String("custom")) {
+        const LuxUI::String style = object.value(LUX_UI_TEXT("customStyle")).toString();
         if (style.size() > 1024 * 1024) {
-            ShowError(QStringLiteral("설정 가져오기 실패"),
-                      QStringLiteral("스타일 파일이 너무 큽니다."));
+            ShowError(LUX_UI_TEXT("설정 가져오기 실패"), LUX_UI_TEXT("스타일 파일이 너무 큽니다."));
             return;
         }
-        settings.setValue(QStringLiteral("customStyle"), style);
+        settings.setValue(LUX_UI_TEXT("customStyle"), style);
     }
-    const QJsonObject shortcuts = object.value(QStringLiteral("shortcuts")).toObject();
-    for (QAction* action : shortcutActions_) {
+    const LuxUI::JsonObject shortcuts = object.value(LUX_UI_TEXT("shortcuts")).toObject();
+    for (LuxUI::Action* action : shortcutActions_) {
         const auto value = shortcuts.value(action->objectName());
         if (value.isString()) {
-            action->setShortcut(QKeySequence(value.toString()));
-            settings.setValue(QStringLiteral("shortcuts/") + action->objectName(),
-                              value.toString());
+            action->setShortcut(LuxUI::KeySequence(value.toString()));
+            settings.setValue(LUX_UI_TEXT("shortcuts/") + action->objectName(), value.toString());
         }
     }
     theme_ = theme;
     uiScale_ = scale;
     ApplyTheme();
-    Log(QStringLiteral("에디터 설정을 가져왔습니다."));
+    Log(LUX_UI_TEXT("에디터 설정을 가져왔습니다."));
 }
 
-void EditorWindow::Log(const QString& message, bool error) {
+void EditorWindow::Log(const LuxUI::String& message, bool error) {
     lastLogMessage_ = message;
+    if (developmentConsole_)
+        developmentConsole_->Append(error ? LuxUI::Severity::Error : LuxUI::Severity::Info,
+                                    "에디터", message.toUtf8().toStdString());
     if (error) {
         consoleOutput_->appendPlainText(message);
         debugPanel_->AddLog(message, true);
@@ -585,23 +542,24 @@ void EditorWindow::Log(const QString& message, bool error) {
     statusBar()->showMessage(message, 5000);
 }
 
-void EditorWindow::ShowError(const QString& title, const QString& message) {
-    Log(title + QStringLiteral(": ") + message, true);
-    QMessageBox::critical(this, title, message);
+void EditorWindow::ShowError(const LuxUI::String& title, const LuxUI::String& message) {
+    Log(title + LUX_UI_TEXT(": ") + message, true);
+    LuxUI::MessageBox::critical(this, title, message);
 }
 
-void EditorWindow::RunWithProgress(const QString& message, const std::function<void()>& task) {
-    QProgressDialog progress(message, QString(), 0, 0, this);
-    progress.setWindowModality(Qt::WindowModal);
+void EditorWindow::RunWithProgress(const LuxUI::String& message,
+                                   const std::function<void()>& task) {
+    LuxUI::ProgressDialog progress(message, LuxUI::String(), 0, 0, this);
+    progress.setWindowModality(LuxUI::Flags::WindowModal);
     progress.setCancelButton(nullptr);
     progress.setMinimumDuration(0);
     progress.show();
-    QApplication::processEvents();
+    LuxUI::Application::processEvents();
     task();
     progress.close();
 }
 
-void EditorWindow::closeEvent(QCloseEvent* event) {
+void EditorWindow::closeEvent(LuxUI::CloseEvent* event) {
     CancelViewportEdit();
     StopPreview();
     StopSceneWindow();
@@ -614,8 +572,8 @@ void EditorWindow::closeEvent(QCloseEvent* event) {
     event->accept();
 }
 
-void EditorWindow::resizeEvent(QResizeEvent* event) {
-    QMainWindow::resizeEvent(event);
+void EditorWindow::resizeEvent(LuxUI::ResizeEvent* event) {
+    LuxUI::MainWindow::resizeEvent(event);
     if (assetPreviewPanel_)
         assetPreviewPanel_->setVisible(width() >= 1500);
     if (docks_[7]) {
@@ -629,25 +587,27 @@ void EditorWindow::resizeEvent(QResizeEvent* event) {
     }
 }
 
-void EditorWindow::dragEnterEvent(QDragEnterEvent* event) {
-    for (const QUrl& url : event->mimeData()->urls()) {
-        const QString suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
-        if (suffix == QLatin1String("luxproject") || suffix == QLatin1String("luxproj") ||
-            suffix == QLatin1String("lux") || suffix == QLatin1String("luxpack") ||
-            suffix == QLatin1String("luxbackup")) {
+void EditorWindow::dragEnterEvent(LuxUI::DragEnterEvent* event) {
+    for (const LuxUI::Url& url : event->mimeData()->urls()) {
+        const LuxUI::String suffix = LuxUI::FileInfo(url.toLocalFile()).suffix().toLower();
+        if (suffix == LuxUI::Latin1String("luxproject") ||
+            suffix == LuxUI::Latin1String("luxproj") || suffix == LuxUI::Latin1String("lux") ||
+            suffix == LuxUI::Latin1String("luxpack") ||
+            suffix == LuxUI::Latin1String("luxbackup")) {
             event->acceptProposedAction();
             return;
         }
     }
 }
 
-void EditorWindow::dropEvent(QDropEvent* event) {
+void EditorWindow::dropEvent(LuxUI::DropEvent* event) {
     if (event->mimeData()->urls().isEmpty())
         return;
     const auto path = PathFromUtf8(Utf8(event->mimeData()->urls().first().toLocalFile()));
     if (path.extension() == ".luxproject" || path.extension() == ".luxproj")
         OpenProjectFile(path);
-    else if (QString::fromUtf8(PathUtf8(path.extension())).toLower() == QLatin1String(".luxprefab"))
+    else if (LuxUI::String::fromUtf8(PathUtf8(path.extension())).toLower() ==
+             LuxUI::Latin1String(".luxprefab"))
         AddPrefabAsset(path);
     else if (path.extension() == ".lux")
         OpenProjectScene(path);
@@ -660,7 +620,7 @@ void EditorWindow::dropEvent(QDropEvent* event) {
             if (result)
                 OpenProjectFile(result->GetFile());
             else
-                ShowError(QStringLiteral("가져오기 실패"), Q(error));
+                ShowError(LUX_UI_TEXT("가져오기 실패"), Q(error));
         }
     }
     event->acceptProposedAction();
@@ -674,6 +634,7 @@ void EditorWindow::RefreshAll() {
     canvas_->RefreshScene();
     canvas3D_->RefreshScene();
     overviewCanvas_->RefreshScene();
+    gameCanvas_->RefreshScene();
     UpdateChrome();
 }
 
@@ -688,19 +649,27 @@ void EditorWindow::RefreshProjectExplorer() {
     assetPreview_->clear();
     assetDetails_->clear();
     if (!project_) {
-        assetCount_->setText(QStringLiteral("프로젝트 없음"));
+        assetCount_->setText(LUX_UI_TEXT("프로젝트 없음"));
         return;
     }
     const auto root = project_->GetFile().parent_path();
-    const QString filter = projectSearch_->text();
+    const LuxUI::String filter = projectSearch_->text();
     const int category = assetFilter_->currentIndex();
-    QFileIconProvider icons;
+    LuxUI::FileIconProvider icons;
     std::error_code error;
     std::filesystem::recursive_directory_iterator it(
         root, std::filesystem::directory_options::skip_permission_denied, error),
         end;
     for (; !error && it != end && projectFilePaths_.size() < 500; it.increment(error)) {
         const auto relative = it->path().lexically_relative(root);
+        const auto filename = it->path().filename().string();
+        if (it->is_symlink(error) ||
+            (it->is_directory(error) &&
+             (filename.starts_with('.') || filename == "out" || filename == "build" ||
+              filename.starts_with("cmake-build")))) {
+            it.disable_recursion_pending();
+            continue;
+        }
         if (!relative.empty() && (*relative.begin() == ".git" || *relative.begin() == ".lux")) {
             if (it->is_directory(error))
                 it.disable_recursion_pending();
@@ -712,32 +681,43 @@ void EditorWindow::RefreshProjectExplorer() {
                 if (inside.empty() || *inside.begin() == "..")
                     continue;
             }
-            const QString label = Q(GenericPathUtf8(relative));
-            const QString suffix = Q(PathUtf8(it->path().extension())).toLower();
-            const bool scene =
-                suffix == QLatin1String(".lux") || suffix == QLatin1String(".luxprefab");
-            const bool image = suffix == QLatin1String(".png") || suffix == QLatin1String(".jpg") ||
-                               suffix == QLatin1String(".jpeg") ||
-                               suffix == QLatin1String(".webp") || suffix == QLatin1String(".bmp");
-            const bool audio = suffix == QLatin1String(".wav") || suffix == QLatin1String(".ogg") ||
-                               suffix == QLatin1String(".mp3");
-            const bool model = suffix == QLatin1String(".obj") || suffix == QLatin1String(".fbx");
-            if ((filter.isEmpty() || label.contains(filter, Qt::CaseInsensitive)) &&
+            const LuxUI::String label = Q(GenericPathUtf8(relative));
+            const LuxUI::String suffix = Q(PathUtf8(it->path().extension())).toLower();
+            const bool scene = suffix == LuxUI::Latin1String(".lux") ||
+                               suffix == LuxUI::Latin1String(".luxprefab");
+            const bool image =
+                suffix == LuxUI::Latin1String(".png") || suffix == LuxUI::Latin1String(".jpg") ||
+                suffix == LuxUI::Latin1String(".jpeg") || suffix == LuxUI::Latin1String(".webp") ||
+                suffix == LuxUI::Latin1String(".bmp");
+            const bool audio = suffix == LuxUI::Latin1String(".wav") ||
+                               suffix == LuxUI::Latin1String(".ogg") ||
+                               suffix == LuxUI::Latin1String(".mp3");
+            const bool model =
+                suffix == LuxUI::Latin1String(".obj") || suffix == LuxUI::Latin1String(".fbx");
+            if ((filter.isEmpty() || label.contains(filter, LuxUI::Flags::CaseInsensitive)) &&
                 (category == 0 || (category == 1 && scene) || (category == 2 && image) ||
                  (category == 3 && audio) || (category == 4 && model) ||
                  (category == 5 && !scene && !image && !audio && !model))) {
                 projectFilePaths_.push_back(it->path());
-                auto* item = new QListWidgetItem(label);
-                const QPixmap thumbnail(Q(it->path()));
+                auto* item = new LuxUI::ListWidgetItem(label);
+                item->setData(LuxUI::Flags::UserRole, Q(it->path()));
+                LuxUI::ImageReader reader(Q(it->path()));
+                const auto imageSize = reader.size();
+                LuxUI::Pixmap thumbnail;
+                if (image && imageSize.isValid() && imageSize.width() <= 8192 &&
+                    imageSize.height() <= 8192) {
+                    reader.setScaledSize(imageSize.scaled(128, 128, LuxUI::Flags::KeepAspectRatio));
+                    thumbnail = LuxUI::Pixmap::fromImage(reader.read());
+                }
                 item->setIcon(model                ? MakeEditorIcon(EditorIcon::Mesh)
-                              : thumbnail.isNull() ? icons.icon(QFileInfo(Q(it->path())))
-                                                   : QIcon(thumbnail));
+                              : thumbnail.isNull() ? icons.icon(LuxUI::FileInfo(Q(it->path())))
+                                                   : LuxUI::Icon(thumbnail));
                 item->setToolTip(label);
                 projectFiles_->addItem(item);
             }
         }
     }
-    assetCount_->setText(QStringLiteral("%1개 항목").arg(projectFilePaths_.size()));
+    assetCount_->setText(LUX_UI_TEXT("%1개 항목").arg(projectFilePaths_.size()));
     if (!selectedPath.empty()) {
         const auto found =
             std::find(projectFilePaths_.begin(), projectFilePaths_.end(), selectedPath);
@@ -749,11 +729,11 @@ void EditorWindow::RefreshProjectExplorer() {
 
 void EditorWindow::RefreshHierarchy() {
     refreshingHierarchy_ = true;
-    const QSignalBlocker block(hierarchy_);
+    const LuxUI::SignalBlocker block(hierarchy_);
     std::unordered_set<LuxEngine::uint32> expanded;
-    for (QTreeWidgetItemIterator it(hierarchy_); *it; ++it)
+    for (LuxUI::TreeWidgetItemIterator it(hierarchy_); *it; ++it)
         if ((*it)->isExpanded())
-            expanded.insert((*it)->data(0, Qt::UserRole).toUInt());
+            expanded.insert((*it)->data(0, LuxUI::Flags::UserRole).toUInt());
     const bool initial = hierarchy_->topLevelItemCount() == 0;
     hierarchy_->clear();
     const auto selected = document_.GetSelected();
@@ -764,12 +744,12 @@ void EditorWindow::RefreshHierarchy() {
     for (const auto& entity : entities) {
         sprites += entity.HasComponent<LuxEngine::SpriteRendererComponent>();
         meshes += entity.HasComponent<LuxEngine::MeshRendererComponent>();
-        const QString name = entity.HasComponent<LuxEngine::TagComponent>()
-                                 ? Q(entity.GetComponent<LuxEngine::TagComponent>().tag)
-                                 : QStringLiteral("#%1").arg(entity.GetId());
+        const LuxUI::String name = entity.HasComponent<LuxEngine::TagComponent>()
+                                       ? Q(entity.GetComponent<LuxEngine::TagComponent>().tag)
+                                       : LUX_UI_TEXT("#%1").arg(entity.GetId());
         if ((groupFilter_ != 1 || entity.HasComponent<LuxEngine::SpriteRendererComponent>()) &&
             (groupFilter_ != 2 || entity.HasComponent<LuxEngine::MeshRendererComponent>()) &&
-            name.contains(hierarchySearch_->text(), Qt::CaseInsensitive)) {
+            name.contains(hierarchySearch_->text(), LuxUI::Flags::CaseInsensitive)) {
             auto current = entity.GetId();
             while (current && scene.IsAlive(current) && visible.insert(current).second)
                 current = scene.GetParent(current);
@@ -778,17 +758,17 @@ void EditorWindow::RefreshHierarchy() {
     const std::array<size_t, 3> counts{entities.size(), sprites, meshes};
     for (size_t index = 0; index < counts.size(); ++index)
         groupTree_->topLevelItem(static_cast<int>(index))
-            ->setText(1, QString::number(counts[index]));
-    std::unordered_map<LuxEngine::uint32, QTreeWidgetItem*> items;
+            ->setText(1, LuxUI::String::number(counts[index]));
+    std::unordered_map<LuxEngine::uint32, LuxUI::TreeWidgetItem*> items;
     for (const auto& entity : entities) {
         if (!visible.contains(entity.GetId()))
             continue;
-        auto* item = new QTreeWidgetItem;
-        item->setData(0, Qt::UserRole, entity.GetId());
+        auto* item = new LuxUI::TreeWidgetItem;
+        item->setData(0, LuxUI::Flags::UserRole, entity.GetId());
         item->setText(0, entity.HasComponent<LuxEngine::TagComponent>()
                              ? Q(entity.GetComponent<LuxEngine::TagComponent>().tag)
-                             : QStringLiteral("#%1").arg(entity.GetId()));
-        item->setToolTip(0, QStringLiteral("#%1").arg(entity.GetId()));
+                             : LUX_UI_TEXT("#%1").arg(entity.GetId()));
+        item->setToolTip(0, LUX_UI_TEXT("#%1").arg(entity.GetId()));
         item->setIcon(0, MakeEditorIcon(entity.HasComponent<LuxEngine::MeshRendererComponent>()
                                             ? EditorIcon::Mesh
                                             : EditorIcon::Sprite));
@@ -810,56 +790,56 @@ void EditorWindow::RefreshHierarchy() {
     if (selected) {
         const auto active = items.find(selected.GetId());
         if (active != items.end())
-            hierarchy_->setCurrentItem(active->second, 0, QItemSelectionModel::NoUpdate);
+            hierarchy_->setCurrentItem(active->second, 0, LuxUI::ItemSelectionModel::NoUpdate);
     }
     refreshingHierarchy_ = false;
 }
 
 void EditorWindow::RefreshInspector() {
     refreshingInspector_ = true;
-    if (auto* space = findChild<QComboBox*>(QStringLiteral("transformSpace"))) {
-        const QSignalBlocker blocker(space);
+    if (auto* space = findChild<LuxUI::ComboBox*>(LUX_UI_TEXT("transformSpace"))) {
+        const LuxUI::SignalBlocker blocker(space);
         space->setCurrentIndex(static_cast<int>(document_.GetTransformSpace()));
     }
-    if (auto* pivot = findChild<QComboBox*>(QStringLiteral("selectionPivot"))) {
-        const QSignalBlocker blocker(pivot);
+    if (auto* pivot = findChild<LuxUI::ComboBox*>(LUX_UI_TEXT("selectionPivot"))) {
+        const LuxUI::SignalBlocker blocker(pivot);
         pivot->setCurrentIndex(static_cast<int>(document_.GetSelectionPivotMode()));
     }
     RefreshScriptDetails();
+    RefreshPhysics3DDetails();
     LuxEngine::Entity selected = document_.GetSelected();
     const auto count = document_.GetSelection().size();
     selectionLabel_->setText(
-        count > 1  ? QStringLiteral("%1개 선택 · 활성 #%2").arg(count).arg(selected.GetId())
-        : selected ? QStringLiteral("엔티티 #%1").arg(selected.GetId())
-                   : QStringLiteral("선택된 엔티티 없음"));
+        count > 1  ? LUX_UI_TEXT("%1개 선택 · 활성 #%2").arg(count).arg(selected.GetId())
+        : selected ? LUX_UI_TEXT("엔티티 #%1").arg(selected.GetId())
+                   : LUX_UI_TEXT("선택된 엔티티 없음"));
     selectionLabel_->setToolTip(
-        QStringLiteral("표시 값은 활성 오브젝트 기준입니다. Transform 필드를 변경하면 선택된 "
-                       "오브젝트에 함께 적용합니다."));
+        LUX_UI_TEXT("표시 값은 활성 오브젝트 기준입니다. Transform 필드를 변경하면 선택된 "
+                    "오브젝트에 함께 적용합니다."));
     animationPanel_->setEnabled(
         selected && selected.HasComponent<LuxEngine::TransformComponent>() && !previewActive_);
-    animationTarget_->setText(selected ? QStringLiteral("대상 · 엔티티 #%1").arg(selected.GetId())
-                                       : QStringLiteral("대상 없음"));
+    animationTarget_->setText(selected ? LUX_UI_TEXT("대상 · 엔티티 #%1").arg(selected.GetId())
+                                       : LUX_UI_TEXT("대상 없음"));
     inspectorBody_->setVisible(static_cast<bool>(selected));
-    inspectorBody_->setEnabled(static_cast<bool>(selected) && !previewActive_);
+    inspectorBody_->setEnabled(static_cast<bool>(selected));
     const auto* reference =
         selected ? selected.TryGetComponent<LuxEngine::SceneReferenceComponent>() : nullptr;
     if (reference) {
         sceneReferencePath_->setText(Q(reference->path));
         sceneReferencePath_->setToolTip(Q(reference->path));
-        const auto mode = reference->mode == LuxEngine::SceneReferenceMode::Inherited
-                              ? QStringLiteral("상속")
-                          : reference->mode == LuxEngine::SceneReferenceMode::Additive
-                              ? QStringLiteral("Additive")
-                              : QStringLiteral("중첩");
+        const auto mode =
+            reference->mode == LuxEngine::SceneReferenceMode::Inherited  ? LUX_UI_TEXT("상속")
+            : reference->mode == LuxEngine::SceneReferenceMode::Additive ? LUX_UI_TEXT("Additive")
+                                                                         : LUX_UI_TEXT("중첩");
         sceneReferenceState_->setText(
-            mode + QStringLiteral(" · ") +
-            (reference->loaded ? QStringLiteral("로드됨") : QStringLiteral("언로드됨")));
+            mode + LUX_UI_TEXT(" · ") +
+            (reference->loaded ? LUX_UI_TEXT("로드됨") : LUX_UI_TEXT("언로드됨")));
     }
     if (selected) {
         name_->setEnabled(selected.HasComponent<LuxEngine::TagComponent>());
         name_->setText(selected.HasComponent<LuxEngine::TagComponent>()
                            ? Q(selected.GetComponent<LuxEngine::TagComponent>().tag)
-                           : QString());
+                           : LuxUI::String());
         const auto value = selected.HasComponent<LuxEngine::TransformComponent>()
                                ? selected.GetComponent<LuxEngine::TransformComponent>()
                                : LuxEngine::TransformComponent{};
@@ -888,12 +868,12 @@ void EditorWindow::RefreshInspector() {
         meshEnabled_->setChecked(mesh);
         meshPath_->setText(
             mesh ? Q(selected.GetComponent<LuxEngine::MeshRendererComponent>().meshPath)
-                 : QString{});
+                 : LuxUI::String{});
         meshPath_->setEnabled(mesh);
         baseColorTexturePath_->setText(
             mesh ? Q(selected.GetComponent<LuxEngine::MeshRendererComponent>()
                          .material.baseColorTexture)
-                 : QString{});
+                 : LuxUI::String{});
         baseColorTexturePath_->setEnabled(mesh);
         const LuxEngine::Material3D material =
             mesh ? selected.GetComponent<LuxEngine::MeshRendererComponent>().material
@@ -973,7 +953,7 @@ void EditorWindow::RefreshInspector() {
                      : LuxEngine::AnimationComponent{};
         animationName_->setEnabled(animated);
         animationTime_->setEnabled(animated);
-        animationName_->setText(QString::fromUtf8(animation.clip.name));
+        animationName_->setText(LuxUI::String::fromUtf8(animation.clip.name));
         animationTime_->setValue(animation.currentTime);
         animationLoop_->setChecked(animation.clip.loop);
         animationDuration_->setValue(animation.clip.duration);
@@ -985,7 +965,7 @@ void EditorWindow::RefreshInspector() {
                 : 0);
         keyframeList_->clear();
         for (const auto& key : animation.clip.keyframes)
-            keyframeList_->addItem(QStringLiteral("%1 s").arg(key.time, 0, 'f', 3));
+            keyframeList_->addItem(LUX_UI_TEXT("%1 s").arg(key.time, 0, 'f', 3));
         animationLoop_->setEnabled(animated && canAnimate);
         animationDuration_->setEnabled(animated && canAnimate);
         animationTimeline_->setEnabled(animated && canAnimate);
@@ -998,37 +978,38 @@ void EditorWindow::RefreshInspector() {
 }
 
 void EditorWindow::UpdateChrome() {
+    if (gameCanvas_)
+        gameCanvas_->RefreshScene();
+    RefreshModelingWorkspace();
     if (undoAction_)
-        undoAction_->setEnabled(!previewActive_ &&
-                                (!viewportEditBefore_.isEmpty() || undo_->canUndo()));
+        undoAction_->setEnabled(!viewportEditBefore_.isEmpty() || undo_->canUndo());
     if (redoAction_)
-        redoAction_->setEnabled(!previewActive_ &&
-                                (!viewportEditBefore_.isEmpty() || undo_->canRedo()));
-    const QString name = document_.GetPath().empty() ? QStringLiteral("새 장면")
-                                                     : QFileInfo(Q(document_.GetPath())).fileName();
-    const QString projectName =
-        project_ ? Q(project_->GetName()) + QStringLiteral(" — ") : QString();
-    setWindowTitle(QStringLiteral("LuxEditor — ") + projectName + name +
-                   (document_.IsDirty() ? QStringLiteral(" *") : QString()));
+        redoAction_->setEnabled(!viewportEditBefore_.isEmpty() || undo_->canRedo());
+    const LuxUI::String name = document_.GetPath().empty()
+                                   ? LUX_UI_TEXT("새 장면")
+                                   : LuxUI::FileInfo(Q(document_.GetPath())).fileName();
+    const LuxUI::String projectName =
+        project_ ? Q(project_->GetName()) + LUX_UI_TEXT(" — ") : LuxUI::String();
+    setWindowTitle(LUX_UI_TEXT("LuxEditor — ") + projectName + name +
+                   (document_.IsDirty() ? LUX_UI_TEXT(" *") : LuxUI::String()));
     RefreshSceneTabs();
-    projectLabel_->setText(project_ ? Q(project_->GetName()) : QStringLiteral("프로젝트 없음"));
+    projectLabel_->setText(project_ ? Q(project_->GetName()) : LUX_UI_TEXT("프로젝트 없음"));
     if (sceneStatus_)
         sceneStatus_->setText(
-            QStringLiteral("%1개 오브젝트  ·  %2%3")
+            LUX_UI_TEXT("%1개 오브젝트  ·  %2%3")
                 .arg(document_.GetScene().GetEntityCount())
-                .arg(viewportTabs_->currentWidget() == canvas3D_ ? QStringLiteral("3D")
-                                                                 : QStringLiteral("2D"))
-                .arg(document_.IsDirty() ? QStringLiteral("  ·  저장되지 않음") : QString()));
-    for (QAction* action : {projectSettingsAction_, cloneAction_, exportAction_, backupAction_,
-                            restoreAction_, rescanAction_})
+                .arg(viewportTabs_->currentWidget() == gameCanvas_ ? LUX_UI_TEXT("Game")
+                     : viewportTabs_->currentWidget() == canvas3D_ ? LUX_UI_TEXT("3D")
+                                                                   : LUX_UI_TEXT("2D"))
+                .arg(document_.IsDirty() ? LUX_UI_TEXT("  ·  저장되지 않음") : LuxUI::String()));
+    for (LuxUI::Action* action : {projectSettingsAction_, cloneAction_, exportAction_,
+                                  backupAction_, restoreAction_, rescanAction_})
         if (action)
             action->setEnabled(project_.has_value());
 }
 
 void EditorWindow::AddEntity() {
-    if (previewActive_)
-        return;
-    RecordEdit(QStringLiteral("2D 엔티티 추가"), [this] {
+    RecordEdit(LUX_UI_TEXT("2D 엔티티 추가"), [this] {
         LuxEngine::Entity entity = document_.CreateEntity(
             "Entity " + std::to_string(document_.GetScene().GetEntityCount() + 1));
         entity.AddComponent<LuxEngine::SpriteRendererComponent>();
@@ -1037,9 +1018,7 @@ void EditorWindow::AddEntity() {
 }
 
 void EditorWindow::AddMeshEntity() {
-    if (previewActive_)
-        return;
-    RecordEdit(QStringLiteral("3D 메시 엔티티 추가"), [this] {
+    RecordEdit(LUX_UI_TEXT("3D 메시 엔티티 추가"), [this] {
         LuxEngine::Entity entity = document_.CreateEntity(
             "3D Entity " + std::to_string(document_.GetScene().GetEntityCount() + 1));
         entity.AddComponent<LuxEngine::MeshRendererComponent>();
@@ -1049,9 +1028,7 @@ void EditorWindow::AddMeshEntity() {
 }
 
 void EditorWindow::AddTilemap() {
-    if (previewActive_)
-        return;
-    RecordEdit(QStringLiteral("타일맵 추가"), [this] {
+    RecordEdit(LUX_UI_TEXT("타일맵 추가"), [this] {
         LuxEngine::Entity entity = document_.CreateEntity(
             "Tilemap " + std::to_string(document_.GetScene().GetEntityCount() + 1));
         entity.AddComponent<LuxEngine::TilemapComponent>().Resize(8, 8);
@@ -1063,8 +1040,6 @@ void EditorWindow::AddTilemap() {
 
 void EditorWindow::PaintTile(LuxEngine::uint32 id, LuxEngine::uint32 x, LuxEngine::uint32 y,
                              uint8_t tile) {
-    if (previewActive_)
-        return;
     auto* map = document_.GetScene().TryGetComponent<LuxEngine::TilemapComponent>(id);
     if (!map || map->Get(x, y) == tile || !map->Set(x, y, tile))
         return;
@@ -1079,7 +1054,7 @@ void EditorWindow::DeleteEntity() {
     if (!selected)
         return;
     const auto ids = document_.GetSelection();
-    RecordEdit(QStringLiteral("엔티티 삭제"), [this, ids] {
+    RecordEdit(LUX_UI_TEXT("엔티티 삭제"), [this, ids] {
         auto& scene = document_.GetScene();
         for (const auto id : ids)
             scene.DestroyEntity({id, &scene});
@@ -1098,11 +1073,11 @@ void EditorWindow::OnNameChanged() {
     if (selected.GetComponent<LuxEngine::TagComponent>().tag == value)
         return;
     if (value.size() > 256) {
-        Log(QStringLiteral("엔티티 이름은 UTF-8 기준 256바이트까지 입력할 수 있습니다."), true);
+        Log(LUX_UI_TEXT("엔티티 이름은 UTF-8 기준 256바이트까지 입력할 수 있습니다."), true);
         RefreshInspector();
         return;
     }
-    RecordEdit(QStringLiteral("이름 변경"), [this, value] {
+    RecordEdit(LUX_UI_TEXT("이름 변경"), [this, value] {
         document_.GetSelected().GetComponent<LuxEngine::TagComponent>().tag = value;
         document_.MarkDirty();
     });
@@ -1117,7 +1092,7 @@ void EditorWindow::OnTransformChanged(int row, int axis) {
         !document_.GetSelected().HasComponent<LuxEngine::TransformComponent>())
         return;
     // Display values can be rounded or clamped; write only the field that the user edited.
-    RecordEdit(QStringLiteral("변환 변경"), [this, row, axis] {
+    RecordEdit(LUX_UI_TEXT("변환 변경"), [this, row, axis] {
         const auto edited = static_cast<float>(transform_[row][axis]->value());
         for (const auto id : document_.GetSelection()) {
             auto* value = document_.GetScene().TryGetComponent<LuxEngine::TransformComponent>(id);
@@ -1138,7 +1113,7 @@ void EditorWindow::OnTransformChanged(int row, int axis) {
 void EditorWindow::OnSpriteChanged() {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
-    RecordEdit(QStringLiteral("스프라이트 변경"), [this] {
+    RecordEdit(LUX_UI_TEXT("스프라이트 변경"), [this] {
         LuxEngine::Entity selected = document_.GetSelected();
         if (spriteEnabled_->isChecked() &&
             !selected.HasComponent<LuxEngine::SpriteRendererComponent>())
@@ -1157,7 +1132,7 @@ void EditorWindow::OnColorChanged(int channel) {
     if (refreshingInspector_ || !document_.GetSelected() ||
         !document_.GetSelected().HasComponent<LuxEngine::SpriteRendererComponent>())
         return;
-    RecordEdit(QStringLiteral("색상 변경"), [this, channel] {
+    RecordEdit(LUX_UI_TEXT("색상 변경"), [this, channel] {
         auto& color =
             document_.GetSelected().GetComponent<LuxEngine::SpriteRendererComponent>().color;
         const std::array<float*, 4> components{&color.x, &color.y, &color.z, &color.w};
@@ -1169,10 +1144,10 @@ void EditorWindow::OnColorChanged(int channel) {
     UpdateChrome();
 }
 
-void EditorWindow::OnMeshChanged(const QWidget* field) {
+void EditorWindow::OnMeshChanged(const LuxUI::Widget* field) {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
-    RecordEdit(QStringLiteral("메시 변경"), [this, field] {
+    RecordEdit(LUX_UI_TEXT("메시 변경"), [this, field] {
         LuxEngine::Entity selected = document_.GetSelected();
         if (field == meshEnabled_) {
             if (meshEnabled_->isChecked() &&
@@ -1228,10 +1203,10 @@ void EditorWindow::OnMeshChanged(const QWidget* field) {
     UpdateChrome();
 }
 
-void EditorWindow::OnTilemapChanged(const QWidget* field) {
+void EditorWindow::OnTilemapChanged(const LuxUI::Widget* field) {
     if (refreshingInspector_ || !document_.GetSelected())
         return;
-    RecordEdit(QStringLiteral("타일맵 변경"), [this, field] {
+    RecordEdit(LUX_UI_TEXT("타일맵 변경"), [this, field] {
         LuxEngine::Entity entity = document_.GetSelected();
         if (field == tilemapEnabled_) {
             if (tilemapEnabled_->isChecked() && !entity.HasComponent<LuxEngine::TilemapComponent>())
@@ -1256,10 +1231,10 @@ void EditorWindow::OnTilemapChanged(const QWidget* field) {
     UpdateChrome();
 }
 
-void EditorWindow::OnPhysicsChanged(const QWidget* field) {
-    if (refreshingInspector_ || previewActive_ || !document_.GetSelected())
+void EditorWindow::OnPhysicsChanged(const LuxUI::Widget* field) {
+    if (refreshingInspector_ || !document_.GetSelected())
         return;
-    RecordEdit(QStringLiteral("2D 물리 변경"), [this, field] {
+    RecordEdit(LUX_UI_TEXT("2D 물리 변경"), [this, field] {
         LuxEngine::Entity entity = document_.GetSelected();
         if (field == bodyEnabled_) {
             if (bodyEnabled_->isChecked() &&
@@ -1307,72 +1282,84 @@ void EditorWindow::OnPhysicsChanged(const QWidget* field) {
 
 void EditorWindow::StartPreview() {
     CancelViewportEdit();
-    // 개발 중: 전체 게임 런타임 임베딩 대신 엔진 Scene의 물리·애니메이션만 실행합니다.
     if (previewActive_)
         return;
-    previewBefore_ = SnapshotScene();
-    if (previewBefore_.isEmpty()) {
-        Log(QStringLiteral("장면 실행용 복사본을 만들지 못했습니다."), true);
+    StopAnimationPlayback();
+    // Authoring scenes and undo history stay alive; physics and scripts own a disposable clone.
+    std::string serialized;
+    auto runtime = std::make_unique<LuxEngine::Scene>();
+    if (!document_.GetScene().SerializeToString(serialized) ||
+        !runtime->DeserializeFromString(serialized)) {
+        Log(LUX_UI_TEXT("게임 실행용 씬 복사본을 만들지 못했습니다."), true);
         return;
     }
-    previewSelected_ = SelectedId(document_);
-    previewWasDirty_ = document_.IsDirty();
+    runtime->SetSourcePath(document_.GetScene().GetSourcePath());
+    const auto scriptEntities = runtime->GetComponentEntityIds<LuxEngine::ScriptComponent>();
+    const bool hasScripts =
+        std::any_of(scriptEntities.begin(), scriptEntities.end(), [&runtime](auto id) {
+            const auto& script = runtime->GetComponent<LuxEngine::ScriptComponent>(id);
+            return script.enabled && !script.typeName.empty();
+        });
+    if (hasScripts) {
+        LuxEngine::ScriptRuntimeConfig config;
+        const auto projectFile = project_ ? project_->GetFile() : std::filesystem::path{};
+        if (playAssemblyProject_ == projectFile)
+            config.assemblyPath = playAssembly_;
+        if (config.assemblyPath.empty() && project_)
+            config.assemblyPath = project_->GetFile().parent_path() / "Scripts/GameScripts.dll";
+        if (!previewScripts_.Initialize(*runtime, config)) {
+            const auto error = previewScripts_.GetLastError();
+            previewScripts_.Shutdown();
+            Log(LuxUI::String::fromUtf8(error), true);
+            return;
+        }
+    }
+    runtimeScene_ = std::move(runtime);
     previewFrame_ = 0;
-    SetTool(EditorTool::Select);
+    lastUpdateMs_ = 0;
     previewActive_ = true;
     previewPaused_ = false;
-    for (auto* button : toolButtons_)
-        button->setEnabled(false);
-    for (auto* action : toolActions_)
-        action->setEnabled(false);
+    gameCanvas_->SetPaused(false);
+    gameCanvas_->SetInputEnabled(true);
+    gameCanvas_->RefreshScene();
+    RefreshModelingWorkspace();
+    viewportTabs_->setCurrentWidget(gameCanvas_);
+    gameCanvas_->setFocus(LuxUI::Flags::OtherFocusReason);
     previewStartAction_->setEnabled(false);
     previewPauseAction_->setEnabled(true);
     previewStepAction_->setEnabled(true);
     previewStopAction_->setEnabled(true);
-    undoAction_->setEnabled(false);
-    redoAction_->setEnabled(false);
-    inspectorBody_->setEnabled(false);
-    docks_[7]->show();
-    docks_[7]->raise();
     previewTimer_.start();
-    Log(QStringLiteral("장면 미리보기를 시작했습니다."));
+    Log(LUX_UI_TEXT("게임 실행을 시작했습니다."));
 }
 
 void EditorWindow::StopPreview() {
-    StopAnimationPlayback();
     if (!previewActive_)
         return;
     previewTimer_.stop();
     previewActive_ = false;
     previewPaused_ = false;
-    RestoreScene(previewBefore_, previewSelected_);
-    document_.SetDirty(previewWasDirty_);
-    previewBefore_.clear();
-    previewSelected_.reset();
-    for (auto* button : toolButtons_)
-        button->setEnabled(true);
-    for (auto* action : toolActions_)
-        action->setEnabled(true);
+    previewScripts_.Shutdown();
+    gameCanvas_->SetInputEnabled(false);
+    gameCanvas_->SetPaused(false);
+    runtimeScene_.reset();
     previewStartAction_->setEnabled(true);
     previewPauseAction_->setEnabled(false);
     previewStepAction_->setEnabled(false);
     previewStopAction_->setEnabled(false);
-    undoAction_->setEnabled(undo_->canUndo());
-    redoAction_->setEnabled(undo_->canRedo());
     RefreshAll();
-    Log(QStringLiteral("장면 미리보기를 중지하고 편집 상태를 복원했습니다."));
+    Log(LUX_UI_TEXT("게임 실행을 중지했습니다."));
 }
 
 void EditorWindow::TogglePreviewPause() {
     if (!previewActive_)
         return;
     previewPaused_ = !previewPaused_;
+    gameCanvas_->SetPaused(previewPaused_);
     if (previewPaused_)
         previewTimer_.stop();
     else
         previewTimer_.start();
-    Log(previewPaused_ ? QStringLiteral("장면 미리보기를 일시정지했습니다.")
-                       : QStringLiteral("장면 미리보기를 재개했습니다."));
 }
 
 void EditorWindow::StepPreview() {
@@ -1382,43 +1369,57 @@ void EditorWindow::StepPreview() {
         return;
     previewPaused_ = true;
     previewTimer_.stop();
+    gameCanvas_->SetPaused(true);
     TickPreview();
 }
 
 void EditorWindow::TickPreview() {
-    if (!previewActive_)
+    if (!previewActive_ || !runtimeScene_)
         return;
+    auto& scene = *runtimeScene_;
     const auto start = std::chrono::steady_clock::now();
     try {
-        document_.GetScene().OnUpdate(1.0 / 60.0);
+        if (previewScripts_.IsRunning() && !previewScripts_.Update(1.0 / 60.0))
+            throw std::runtime_error(previewScripts_.GetLastError());
+        scene.OnUpdate(1.0 / 60.0);
+        LuxEngine::Input::AdvanceFrame();
     } catch (const std::exception& error) {
-        Log(QStringLiteral("장면 실행 오류: %1").arg(QString::fromUtf8(error.what())), true);
-        StopPreview();
+        previewPaused_ = true;
+        previewTimer_.stop();
+        gameCanvas_->SetPaused(true);
+        Log(LUX_UI_TEXT("게임 실행 오류: %1 — 실행을 일시정지했습니다.")
+                .arg(LuxUI::String::fromUtf8(error.what())),
+            true);
+        gameCanvas_->RefreshScene();
         return;
     }
     ++previewFrame_;
-    const double elapsed =
+    lastUpdateMs_ =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     const auto selected = SelectedId(document_);
-    debugPanel_->UpdateScene(document_.GetScene(), selected.value_or(0), previewFrame_, elapsed);
-    for (const auto& event : document_.GetScene().GetCollisionEvents2D())
-        debugPanel_->AddLog(
-            QStringLiteral("프레임 %1: #%2 ↔ #%3 %4")
-                .arg(previewFrame_)
-                .arg(event.entityA)
-                .arg(event.entityB)
-                .arg(event.isTrigger ? QStringLiteral("트리거") : QStringLiteral("충돌")),
-            false);
+    debugPanel_->UpdateScene(scene, selected.value_or(0), previewFrame_, lastUpdateMs_);
+    for (const auto& event : scene.GetCollisionEvents2D())
+        debugPanel_->AddLog(LUX_UI_TEXT("프레임 %1: #%2 ↔ #%3 %4")
+                                .arg(previewFrame_)
+                                .arg(event.entityA)
+                                .arg(event.entityB)
+                                .arg(event.isTrigger ? LUX_UI_TEXT("트리거") : LUX_UI_TEXT("충돌")),
+                            false);
+    for (const auto& event : scene.GetCollisionEvents3D())
+        debugPanel_->AddLog(LUX_UI_TEXT("3D 프레임 %1: #%2 ↔ #%3 %4")
+                                .arg(previewFrame_)
+                                .arg(event.entityA)
+                                .arg(event.entityB)
+                                .arg(event.isTrigger ? LUX_UI_TEXT("트리거") : LUX_UI_TEXT("충돌")),
+                            false);
     if (breakOnCollisionAction_->isChecked() &&
-        !document_.GetScene().GetCollisionEvents2D().empty()) {
+        (!scene.GetCollisionEvents2D().empty() || !scene.GetCollisionEvents3D().empty())) {
         previewPaused_ = true;
         previewTimer_.stop();
-        Log(QStringLiteral("충돌 이벤트에서 실행을 일시정지했습니다."));
+        gameCanvas_->SetPaused(true);
+        Log(LUX_UI_TEXT("충돌 이벤트에서 게임 실행을 일시정지했습니다."));
     }
-    RefreshInspector();
-    canvas_->RefreshScene();
-    canvas3D_->RefreshScene();
-    overviewCanvas_->RefreshScene();
+    gameCanvas_->RefreshScene();
 }
 
 void EditorWindow::SetTool(EditorTool tool) {
@@ -1440,9 +1441,9 @@ void EditorWindow::SetTool(EditorTool tool) {
     }
     canvas_->SetTool(tool);
     canvas3D_->SetTool(tool);
-    const std::array<QString, 6> descriptions{
-        QStringLiteral("선택"), QStringLiteral("이동"),    QStringLiteral("회전"),
-        QStringLiteral("크기"), QStringLiteral("타일 붓"), QStringLiteral("타일 지우개")};
+    const std::array<LuxUI::String, 6> descriptions{
+        LUX_UI_TEXT("선택"), LUX_UI_TEXT("이동"),    LUX_UI_TEXT("회전"),
+        LUX_UI_TEXT("크기"), LUX_UI_TEXT("타일 붓"), LUX_UI_TEXT("타일 지우개")};
     toolHint_->setText(descriptions[static_cast<size_t>(tool)]);
     tilePalette_->setEnabled(tool == EditorTool::TileBrush);
 }
@@ -1452,7 +1453,7 @@ EditorSnapshot EditorWindow::SnapshotScene() {
     if (!document_.GetScene().SerializeToString(serialized))
         return {};
     EditorSnapshot snapshot;
-    snapshot.scene = QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+    snapshot.scene = LuxUI::ByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
     snapshot.selection = document_.GetSelection();
     for (LuxEngine::Entity entity : document_.GetScene().GetEntities())
         if (entity.HasComponent<LuxEngine::AnimationComponent>())
@@ -1479,12 +1480,10 @@ void EditorWindow::RestoreScene(const EditorSnapshot& snapshot,
     }
     restoringHistory_ = false;
     if (!restored)
-        Log(QStringLiteral("장면 상태 복원에 실패했습니다."), true);
+        Log(LUX_UI_TEXT("장면 상태 복원에 실패했습니다."), true);
 }
 
-void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& edit) {
-    if (previewActive_)
-        return;
+void EditorWindow::RecordEdit(const LuxUI::String& name, const std::function<void()>& edit) {
     if (restoringHistory_) {
         edit();
         return;
@@ -1495,7 +1494,7 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     if (!document_.IsDirty() && !before.isEmpty())
         cleanScenes_[document_.GetActiveTabId()] = before;
     if (before.isEmpty()) {
-        Log(QStringLiteral("편집 기록 실패 (%1): 편집 전 장면 스냅샷을 생성하지 못했습니다.")
+        Log(LUX_UI_TEXT("편집 기록 실패 (%1): 편집 전 장면 스냅샷을 생성하지 못했습니다.")
                 .arg(name),
             true);
         return;
@@ -1507,14 +1506,13 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
             throw std::runtime_error("편집 도중 다른 씬으로 전환되었습니다.");
     } catch (const std::exception& error) {
         RestoreSceneAt(tabId, before, previous);
-        Log(QStringLiteral("편집 실패 (%1): %2 — 이전 장면 상태로 복원했습니다.")
-                .arg(name, QString::fromUtf8(error.what())),
+        Log(LUX_UI_TEXT("편집 실패 (%1): %2 — 이전 장면 상태로 복원했습니다.")
+                .arg(name, LuxUI::String::fromUtf8(error.what())),
             true);
         return;
     } catch (...) {
         RestoreSceneAt(tabId, before, previous);
-        Log(QStringLiteral(
-                "편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
+        Log(LUX_UI_TEXT("편집 실패 (%1): 알 수 없는 예외가 발생하여 이전 장면 상태로 복원했습니다.")
                 .arg(name),
             true);
         return;
@@ -1522,8 +1520,7 @@ void EditorWindow::RecordEdit(const QString& name, const std::function<void()>& 
     const auto after = SnapshotScene();
     if (after.isEmpty()) {
         RestoreSceneAt(tabId, before, previous);
-        Log(QStringLiteral(
-                "편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
+        Log(LUX_UI_TEXT("편집 실패 (%1): 편집 후 장면 직렬화에 실패하여 이전 상태로 복원했습니다.")
                 .arg(name),
             true);
         return;
@@ -1562,161 +1559,158 @@ void EditorWindow::CopyEntity() {
                         *resource = document_.GetScene().ResolveAssetPath(*resource);
         std::string serialized;
         if (!ids.contains(selected.GetId()) || !subtree.SerializeToString(serialized)) {
-            Log(QStringLiteral("계층을 복사하지 못했습니다."), true);
+            Log(LUX_UI_TEXT("계층을 복사하지 못했습니다."), true);
             return;
         }
         const auto payload =
-            QByteArray::number(static_cast<qulonglong>(ids.at(selected.GetId()))) + '\n' +
-            QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+            LuxUI::ByteArray::number(static_cast<qulonglong>(ids.at(selected.GetId()))) + '\n' +
+            LuxUI::ByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
         if (payload.size() > 64 * 1024 * 1024) {
-            Log(QStringLiteral("복사할 계층이 허용 크기를 넘었습니다."), true);
+            Log(LUX_UI_TEXT("복사할 계층이 허용 크기를 넘었습니다."), true);
             return;
         }
-        auto* mime = new QMimeData;
-        mime->setData(QStringLiteral("application/x-lux-scene-subtree"), payload);
-        QApplication::clipboard()->setMimeData(mime);
+        auto* mime = new LuxUI::MimeData;
+        mime->setData(LUX_UI_TEXT("application/x-lux-scene-subtree"), payload);
+        LuxUI::Application::clipboard()->setMimeData(mime);
         return;
     }
-    QJsonObject object;
-    object.insert(QStringLiteral("version"), 2);
-    object.insert(QStringLiteral("hasTag"), selected.HasComponent<LuxEngine::TagComponent>());
-    object.insert(QStringLiteral("hasTransform"),
+    LuxUI::JsonObject object;
+    object.insert(LUX_UI_TEXT("version"), 2);
+    object.insert(LUX_UI_TEXT("hasTag"), selected.HasComponent<LuxEngine::TagComponent>());
+    object.insert(LUX_UI_TEXT("hasTransform"),
                   selected.HasComponent<LuxEngine::TransformComponent>());
     if (selected.HasComponent<LuxEngine::TagComponent>())
-        object.insert(QStringLiteral("name"),
-                      Q(selected.GetComponent<LuxEngine::TagComponent>().tag));
+        object.insert(LUX_UI_TEXT("name"), Q(selected.GetComponent<LuxEngine::TagComponent>().tag));
     if (selected.HasComponent<LuxEngine::TransformComponent>()) {
         const auto& t = selected.GetComponent<LuxEngine::TransformComponent>();
-        object.insert(QStringLiteral("position"),
-                      QJsonArray{t.position.x, t.position.y, t.position.z});
-        object.insert(QStringLiteral("rotation"),
-                      QJsonArray{t.rotation.x, t.rotation.y, t.rotation.z});
-        object.insert(QStringLiteral("scale"), QJsonArray{t.scale.x, t.scale.y, t.scale.z});
+        object.insert(LUX_UI_TEXT("position"),
+                      LuxUI::JsonArray{t.position.x, t.position.y, t.position.z});
+        object.insert(LUX_UI_TEXT("rotation"),
+                      LuxUI::JsonArray{t.rotation.x, t.rotation.y, t.rotation.z});
+        object.insert(LUX_UI_TEXT("scale"), LuxUI::JsonArray{t.scale.x, t.scale.y, t.scale.z});
     }
     if (selected.HasComponent<LuxEngine::SpriteRendererComponent>()) {
         const auto& c = selected.GetComponent<LuxEngine::SpriteRendererComponent>().color;
-        object.insert(QStringLiteral("sprite"), QJsonArray{c.x, c.y, c.z, c.w});
+        object.insert(LUX_UI_TEXT("sprite"), LuxUI::JsonArray{c.x, c.y, c.z, c.w});
     }
     if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
         const auto& m = selected.GetComponent<LuxEngine::MeshRendererComponent>().material;
         const auto& c = m.albedoColor;
-        QJsonObject options;
-        options.insert(QStringLiteral("alphaMode"), static_cast<int>(m.alphaMode));
-        options.insert(QStringLiteral("alphaCutoff"), m.alphaCutoff);
-        options.insert(QStringLiteral("doubleSided"), m.doubleSided);
-        options.insert(QStringLiteral("normalScale"), m.normalScale);
-        options.insert(QStringLiteral("occlusionStrength"), m.occlusionStrength);
-        options.insert(QStringLiteral("mipmaps"), m.textureSampling.mipmaps);
-        options.insert(QStringLiteral("addressMode"),
-                       static_cast<int>(m.textureSampling.addressMode));
-        options.insert(QStringLiteral("anisotropic"), m.textureSampling.anisotropic);
+        LuxUI::JsonObject options;
+        options.insert(LUX_UI_TEXT("alphaMode"), static_cast<int>(m.alphaMode));
+        options.insert(LUX_UI_TEXT("alphaCutoff"), m.alphaCutoff);
+        options.insert(LUX_UI_TEXT("doubleSided"), m.doubleSided);
+        options.insert(LUX_UI_TEXT("normalScale"), m.normalScale);
+        options.insert(LUX_UI_TEXT("occlusionStrength"), m.occlusionStrength);
+        options.insert(LUX_UI_TEXT("mipmaps"), m.textureSampling.mipmaps);
+        options.insert(LUX_UI_TEXT("addressMode"), static_cast<int>(m.textureSampling.addressMode));
+        options.insert(LUX_UI_TEXT("anisotropic"), m.textureSampling.anisotropic);
         const std::array<std::pair<const char*, const std::string*>, 4> maps{
             {{"normalTexture", &m.normalTexture},
              {"metallicTexture", &m.metallicTexture},
              {"roughnessTexture", &m.roughnessTexture},
              {"occlusionTexture", &m.occlusionTexture}}};
         for (const auto& [name, path] : maps)
-            options.insert(QString::fromLatin1(name),
-                           path->empty() ? QString{}
+            options.insert(LuxUI::String::fromLatin1(name),
+                           path->empty() ? LuxUI::String{}
                                          : Q(document_.GetScene().ResolveAssetPath(*path)));
-        object.insert(QStringLiteral("materialOptions"), options);
-        object.insert(QStringLiteral("mesh"),
-                      QJsonArray{m.metallic, m.roughness, c.x, c.y, c.z, c.w});
+        object.insert(LUX_UI_TEXT("materialOptions"), options);
+        object.insert(LUX_UI_TEXT("mesh"),
+                      LuxUI::JsonArray{m.metallic, m.roughness, c.x, c.y, c.z, c.w});
         const auto& path = selected.GetComponent<LuxEngine::MeshRendererComponent>().meshPath;
         if (!path.empty())
-            object.insert(QStringLiteral("meshPath"),
-                          Q(document_.GetScene().ResolveAssetPath(path)));
+            object.insert(LUX_UI_TEXT("meshPath"), Q(document_.GetScene().ResolveAssetPath(path)));
     }
     if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
         const auto& path =
             selected.GetComponent<LuxEngine::MeshRendererComponent>().material.baseColorTexture;
         if (!path.empty())
-            object.insert(QStringLiteral("baseColorTexture"),
+            object.insert(LUX_UI_TEXT("baseColorTexture"),
                           Q(document_.GetScene().ResolveAssetPath(path)));
     }
     if (selected.HasComponent<LuxEngine::CameraComponent>()) {
         const auto& cam = selected.GetComponent<LuxEngine::CameraComponent>();
-        QJsonObject camObj;
-        camObj.insert(QStringLiteral("primary"), cam.isPrimary);
-        camObj.insert(QStringLiteral("perspective"), cam.isPerspective);
-        camObj.insert(QStringLiteral("fov"), cam.fov);
-        camObj.insert(QStringLiteral("orthoSize"), cam.orthoSize);
-        object.insert(QStringLiteral("camera"), camObj);
+        LuxUI::JsonObject camObj;
+        camObj.insert(LUX_UI_TEXT("primary"), cam.isPrimary);
+        camObj.insert(LUX_UI_TEXT("perspective"), cam.isPerspective);
+        camObj.insert(LUX_UI_TEXT("fov"), cam.fov);
+        camObj.insert(LUX_UI_TEXT("orthoSize"), cam.orthoSize);
+        object.insert(LUX_UI_TEXT("camera"), camObj);
     }
     if (selected.HasComponent<LuxEngine::TilemapComponent>()) {
         const auto& map = selected.GetComponent<LuxEngine::TilemapComponent>();
-        QJsonObject mapObj;
-        mapObj.insert(QStringLiteral("width"), static_cast<int>(map.width));
-        mapObj.insert(QStringLiteral("height"), static_cast<int>(map.height));
-        mapObj.insert(QStringLiteral("tileSize"), map.tileSize);
-        QJsonArray tilesArr;
+        LuxUI::JsonObject mapObj;
+        mapObj.insert(LUX_UI_TEXT("width"), static_cast<int>(map.width));
+        mapObj.insert(LUX_UI_TEXT("height"), static_cast<int>(map.height));
+        mapObj.insert(LUX_UI_TEXT("tileSize"), map.tileSize);
+        LuxUI::JsonArray tilesArr;
         for (uint8_t tile : map.tiles)
             tilesArr.append(static_cast<int>(tile));
-        mapObj.insert(QStringLiteral("tiles"), tilesArr);
-        object.insert(QStringLiteral("tilemap"), mapObj);
+        mapObj.insert(LUX_UI_TEXT("tiles"), tilesArr);
+        object.insert(LUX_UI_TEXT("tilemap"), mapObj);
     }
     if (selected.HasComponent<LuxEngine::Rigidbody2DComponent>()) {
         const auto& rb = selected.GetComponent<LuxEngine::Rigidbody2DComponent>();
-        QJsonObject rbObj;
-        rbObj.insert(QStringLiteral("type"), static_cast<int>(rb.type));
-        rbObj.insert(QStringLiteral("velocity"), QJsonArray{rb.velocity.x, rb.velocity.y});
-        rbObj.insert(QStringLiteral("mass"), rb.mass);
-        rbObj.insert(QStringLiteral("gravityScale"), rb.gravityScale);
-        object.insert(QStringLiteral("rigidbody2d"), rbObj);
+        LuxUI::JsonObject rbObj;
+        rbObj.insert(LUX_UI_TEXT("type"), static_cast<int>(rb.type));
+        rbObj.insert(LUX_UI_TEXT("velocity"), LuxUI::JsonArray{rb.velocity.x, rb.velocity.y});
+        rbObj.insert(LUX_UI_TEXT("mass"), rb.mass);
+        rbObj.insert(LUX_UI_TEXT("gravityScale"), rb.gravityScale);
+        object.insert(LUX_UI_TEXT("rigidbody2d"), rbObj);
     }
     if (selected.HasComponent<LuxEngine::BoxCollider2DComponent>()) {
         const auto& col = selected.GetComponent<LuxEngine::BoxCollider2DComponent>();
-        QJsonObject colObj;
-        colObj.insert(QStringLiteral("size"), QJsonArray{col.size.x, col.size.y});
-        colObj.insert(QStringLiteral("offset"), QJsonArray{col.offset.x, col.offset.y});
-        colObj.insert(QStringLiteral("trigger"), col.isTrigger);
-        object.insert(QStringLiteral("collider2d"), colObj);
+        LuxUI::JsonObject colObj;
+        colObj.insert(LUX_UI_TEXT("size"), LuxUI::JsonArray{col.size.x, col.size.y});
+        colObj.insert(LUX_UI_TEXT("offset"), LuxUI::JsonArray{col.offset.x, col.offset.y});
+        colObj.insert(LUX_UI_TEXT("trigger"), col.isTrigger);
+        object.insert(LUX_UI_TEXT("collider2d"), colObj);
     }
     if (selected.HasComponent<LuxEngine::Rigidbody3DComponent>()) {
         const auto& rb = selected.GetComponent<LuxEngine::Rigidbody3DComponent>();
-        QJsonObject rbObj;
-        rbObj.insert(QStringLiteral("type"), static_cast<int>(rb.type));
-        rbObj.insert(QStringLiteral("velocity"),
-                     QJsonArray{rb.velocity.x, rb.velocity.y, rb.velocity.z});
-        rbObj.insert(QStringLiteral("mass"), rb.mass);
-        rbObj.insert(QStringLiteral("gravityScale"), rb.gravityScale);
-        object.insert(QStringLiteral("rigidbody3d"), rbObj);
+        LuxUI::JsonObject rbObj;
+        rbObj.insert(LUX_UI_TEXT("type"), static_cast<int>(rb.type));
+        rbObj.insert(LUX_UI_TEXT("velocity"),
+                     LuxUI::JsonArray{rb.velocity.x, rb.velocity.y, rb.velocity.z});
+        rbObj.insert(LUX_UI_TEXT("mass"), rb.mass);
+        rbObj.insert(LUX_UI_TEXT("gravityScale"), rb.gravityScale);
+        object.insert(LUX_UI_TEXT("rigidbody3d"), rbObj);
     }
     if (selected.HasComponent<LuxEngine::BoxCollider3DComponent>()) {
         const auto& col = selected.GetComponent<LuxEngine::BoxCollider3DComponent>();
-        QJsonObject colObj;
-        colObj.insert(QStringLiteral("size"), QJsonArray{col.size.x, col.size.y, col.size.z});
-        colObj.insert(QStringLiteral("offset"),
-                      QJsonArray{col.offset.x, col.offset.y, col.offset.z});
-        colObj.insert(QStringLiteral("trigger"), col.isTrigger);
-        object.insert(QStringLiteral("collider3d"), colObj);
+        LuxUI::JsonObject colObj;
+        colObj.insert(LUX_UI_TEXT("size"), LuxUI::JsonArray{col.size.x, col.size.y, col.size.z});
+        colObj.insert(LUX_UI_TEXT("offset"),
+                      LuxUI::JsonArray{col.offset.x, col.offset.y, col.offset.z});
+        colObj.insert(LUX_UI_TEXT("trigger"), col.isTrigger);
+        object.insert(LUX_UI_TEXT("collider3d"), colObj);
     }
     if (selected.HasComponent<LuxEngine::AnimationComponent>()) {
         const auto& anim = selected.GetComponent<LuxEngine::AnimationComponent>();
-        QJsonObject animObj;
-        animObj.insert(QStringLiteral("name"), Q(anim.clip.name));
-        animObj.insert(QStringLiteral("duration"), anim.clip.duration);
-        animObj.insert(QStringLiteral("loop"), anim.clip.loop);
-        animObj.insert(QStringLiteral("playing"), anim.playing);
-        QJsonArray keysArr;
+        LuxUI::JsonObject animObj;
+        animObj.insert(LUX_UI_TEXT("name"), Q(anim.clip.name));
+        animObj.insert(LUX_UI_TEXT("duration"), anim.clip.duration);
+        animObj.insert(LUX_UI_TEXT("loop"), anim.clip.loop);
+        animObj.insert(LUX_UI_TEXT("playing"), anim.playing);
+        LuxUI::JsonArray keysArr;
         for (const auto& k : anim.clip.keyframes) {
-            QJsonObject kObj;
-            kObj.insert(QStringLiteral("time"), k.time);
-            kObj.insert(QStringLiteral("position"),
-                        QJsonArray{k.position.x, k.position.y, k.position.z});
-            kObj.insert(QStringLiteral("rotation"),
-                        QJsonArray{k.rotation.x, k.rotation.y, k.rotation.z});
-            kObj.insert(QStringLiteral("scale"), QJsonArray{k.scale.x, k.scale.y, k.scale.z});
+            LuxUI::JsonObject kObj;
+            kObj.insert(LUX_UI_TEXT("time"), k.time);
+            kObj.insert(LUX_UI_TEXT("position"),
+                        LuxUI::JsonArray{k.position.x, k.position.y, k.position.z});
+            kObj.insert(LUX_UI_TEXT("rotation"),
+                        LuxUI::JsonArray{k.rotation.x, k.rotation.y, k.rotation.z});
+            kObj.insert(LUX_UI_TEXT("scale"), LuxUI::JsonArray{k.scale.x, k.scale.y, k.scale.z});
             keysArr.append(kObj);
         }
-        animObj.insert(QStringLiteral("keyframes"), keysArr);
-        object.insert(QStringLiteral("animation"), animObj);
+        animObj.insert(LUX_UI_TEXT("keyframes"), keysArr);
+        object.insert(LUX_UI_TEXT("animation"), animObj);
     }
-    auto* mime = new QMimeData;
-    mime->setData(QStringLiteral("application/x-lux-entity"),
-                  QJsonDocument(object).toJson(QJsonDocument::Compact));
-    QApplication::clipboard()->setMimeData(mime);
-    Log(QStringLiteral("엔티티를 복사했습니다."));
+    auto* mime = new LuxUI::MimeData;
+    mime->setData(LUX_UI_TEXT("application/x-lux-entity"),
+                  LuxUI::JsonDocument(object).toJson(LuxUI::JsonDocument::Compact));
+    LuxUI::Application::clipboard()->setMimeData(mime);
+    Log(LUX_UI_TEXT("엔티티를 복사했습니다."));
 }
 
 namespace {
@@ -1726,7 +1720,7 @@ constexpr float kMaxClipboardMass = 1000000.0f;
 constexpr float kMaxClipboardGravityScale = 10000.0f;
 constexpr float kMaxClipboardDuration = 86400.0f;
 
-bool IsStrictValidUtf8(const QByteArray& bytes) {
+bool IsStrictValidUtf8(const LuxUI::ByteArray& bytes) {
     const auto* s = reinterpret_cast<const unsigned char*>(bytes.constData());
     const size_t len = static_cast<size_t>(bytes.size());
     size_t i = 0;
@@ -1764,7 +1758,7 @@ bool IsStrictValidUtf8(const QByteArray& bytes) {
     return true;
 }
 
-bool ParseFiniteFloat(const QJsonValue& val, float& out, float minVal = -kMaxClipboardCoord,
+bool ParseFiniteFloat(const LuxUI::JsonValue& val, float& out, float minVal = -kMaxClipboardCoord,
                       float maxVal = kMaxClipboardCoord) {
     if (!val.isDouble())
         return false;
@@ -1778,7 +1772,7 @@ bool ParseFiniteFloat(const QJsonValue& val, float& out, float minVal = -kMaxCli
     return true;
 }
 
-bool ParseExactInt(const QJsonValue& val, int& out, int minVal, int maxVal) {
+bool ParseExactInt(const LuxUI::JsonValue& val, int& out, int minVal, int maxVal) {
     if (!val.isDouble())
         return false;
     const double d = val.toDouble();
@@ -1789,8 +1783,8 @@ bool ParseExactInt(const QJsonValue& val, int& out, int minVal, int maxVal) {
     return true;
 }
 
-bool ParseVec2(const QJsonValue& val, LuxEngine::Vec2& out, float minVal = -kMaxClipboardCoord,
-               float maxVal = kMaxClipboardCoord) {
+bool ParseVec2(const LuxUI::JsonValue& val, LuxEngine::Vec2& out,
+               float minVal = -kMaxClipboardCoord, float maxVal = kMaxClipboardCoord) {
     if (!val.isArray())
         return false;
     const auto arr = val.toArray();
@@ -1800,8 +1794,8 @@ bool ParseVec2(const QJsonValue& val, LuxEngine::Vec2& out, float minVal = -kMax
            ParseFiniteFloat(arr[1], out.y, minVal, maxVal);
 }
 
-bool ParseVec3(const QJsonValue& val, LuxEngine::Vec3& out, float minVal = -kMaxClipboardCoord,
-               float maxVal = kMaxClipboardCoord) {
+bool ParseVec3(const LuxUI::JsonValue& val, LuxEngine::Vec3& out,
+               float minVal = -kMaxClipboardCoord, float maxVal = kMaxClipboardCoord) {
     if (!val.isArray())
         return false;
     const auto arr = val.toArray();
@@ -1812,8 +1806,8 @@ bool ParseVec3(const QJsonValue& val, LuxEngine::Vec3& out, float minVal = -kMax
            ParseFiniteFloat(arr[2], out.z, minVal, maxVal);
 }
 
-bool ParseVec4(const QJsonValue& val, LuxEngine::Vec4& out, float minVal = -kMaxClipboardCoord,
-               float maxVal = kMaxClipboardCoord) {
+bool ParseVec4(const LuxUI::JsonValue& val, LuxEngine::Vec4& out,
+               float minVal = -kMaxClipboardCoord, float maxVal = kMaxClipboardCoord) {
     if (!val.isArray())
         return false;
     const auto arr = val.toArray();
@@ -1828,7 +1822,7 @@ bool ParseVec4(const QJsonValue& val, LuxEngine::Vec4& out, float minVal = -kMax
 struct ValidatedClipboardEntity {
     bool hasTag = true;
     bool hasTransform = true;
-    QString name;
+    LuxUI::String name;
     LuxEngine::TransformComponent transform;
     std::optional<LuxEngine::SpriteRendererComponent> sprite;
     std::optional<LuxEngine::MeshRendererComponent> mesh;
@@ -1841,112 +1835,111 @@ struct ValidatedClipboardEntity {
     std::optional<LuxEngine::AnimationComponent> animation;
 };
 
-bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& parsed,
-                           QString& errorMsg) {
+bool ValidateClipboardJson(const LuxUI::JsonObject& object, ValidatedClipboardEntity& parsed,
+                           LuxUI::String& errorMsg) {
     for (auto it = object.begin(); it != object.end(); ++it) {
-        const QString& key = it.key();
-        if (key != QStringLiteral("name") && key != QStringLiteral("position") &&
-            key != QStringLiteral("rotation") && key != QStringLiteral("scale") &&
-            key != QStringLiteral("sprite") && key != QStringLiteral("mesh") &&
-            key != QStringLiteral("camera") && key != QStringLiteral("tilemap") &&
-            key != QStringLiteral("rigidbody2d") && key != QStringLiteral("collider2d") &&
-            key != QStringLiteral("rigidbody3d") && key != QStringLiteral("collider3d") &&
-            key != QStringLiteral("animation") && key != QStringLiteral("meshPath") &&
-            key != QStringLiteral("baseColorTexture") && key != QStringLiteral("materialOptions") &&
-            key != QStringLiteral("version") && key != QStringLiteral("hasTag") &&
-            key != QStringLiteral("hasTransform")) {
-            errorMsg = QStringLiteral("알 수 없는 클립보드 필드가 포함되어 있습니다: %1").arg(key);
+        const LuxUI::String& key = it.key();
+        if (key != LUX_UI_TEXT("name") && key != LUX_UI_TEXT("position") &&
+            key != LUX_UI_TEXT("rotation") && key != LUX_UI_TEXT("scale") &&
+            key != LUX_UI_TEXT("sprite") && key != LUX_UI_TEXT("mesh") &&
+            key != LUX_UI_TEXT("camera") && key != LUX_UI_TEXT("tilemap") &&
+            key != LUX_UI_TEXT("rigidbody2d") && key != LUX_UI_TEXT("collider2d") &&
+            key != LUX_UI_TEXT("rigidbody3d") && key != LUX_UI_TEXT("collider3d") &&
+            key != LUX_UI_TEXT("animation") && key != LUX_UI_TEXT("meshPath") &&
+            key != LUX_UI_TEXT("baseColorTexture") && key != LUX_UI_TEXT("materialOptions") &&
+            key != LUX_UI_TEXT("version") && key != LUX_UI_TEXT("hasTag") &&
+            key != LUX_UI_TEXT("hasTransform")) {
+            errorMsg = LUX_UI_TEXT("알 수 없는 클립보드 필드가 포함되어 있습니다: %1").arg(key);
             return false;
         }
     }
 
-    if ((object.contains(QStringLiteral("meshPath")) ||
-         object.contains(QStringLiteral("baseColorTexture")) ||
-         object.contains(QStringLiteral("materialOptions"))) &&
-        !object.contains(QStringLiteral("mesh"))) {
-        errorMsg = QStringLiteral("메시 컴포넌트가 없는 자산 경로는 붙여넣을 수 없습니다.");
+    if ((object.contains(LUX_UI_TEXT("meshPath")) ||
+         object.contains(LUX_UI_TEXT("baseColorTexture")) ||
+         object.contains(LUX_UI_TEXT("materialOptions"))) &&
+        !object.contains(LUX_UI_TEXT("mesh"))) {
+        errorMsg = LUX_UI_TEXT("메시 컴포넌트가 없는 자산 경로는 붙여넣을 수 없습니다.");
         return false;
     }
-    if (object.contains(QStringLiteral("version"))) {
-        const auto version = object.value(QStringLiteral("version"));
+    if (object.contains(LUX_UI_TEXT("version"))) {
+        const auto version = object.value(LUX_UI_TEXT("version"));
         if (!version.isDouble() || version.toDouble() != 2 ||
-            !object.value(QStringLiteral("hasTag")).isBool() ||
-            !object.value(QStringLiteral("hasTransform")).isBool()) {
-            errorMsg = QStringLiteral("클립보드 버전 또는 컴포넌트 존재 정보가 올바르지 않습니다.");
+            !object.value(LUX_UI_TEXT("hasTag")).isBool() ||
+            !object.value(LUX_UI_TEXT("hasTransform")).isBool()) {
+            errorMsg = LUX_UI_TEXT("클립보드 버전 또는 컴포넌트 존재 정보가 올바르지 않습니다.");
             return false;
         }
-        parsed.hasTag = object.value(QStringLiteral("hasTag")).toBool();
-        parsed.hasTransform = object.value(QStringLiteral("hasTransform")).toBool();
-    } else if (object.contains(QStringLiteral("hasTag")) ||
-               object.contains(QStringLiteral("hasTransform"))) {
-        errorMsg = QStringLiteral("클립보드 컴포넌트 존재 정보에 버전이 없습니다.");
+        parsed.hasTag = object.value(LUX_UI_TEXT("hasTag")).toBool();
+        parsed.hasTransform = object.value(LUX_UI_TEXT("hasTransform")).toBool();
+    } else if (object.contains(LUX_UI_TEXT("hasTag")) ||
+               object.contains(LUX_UI_TEXT("hasTransform"))) {
+        errorMsg = LUX_UI_TEXT("클립보드 컴포넌트 존재 정보에 버전이 없습니다.");
         return false;
     }
-    if ((!parsed.hasTag && object.contains(QStringLiteral("name"))) ||
-        (!parsed.hasTransform && (object.contains(QStringLiteral("position")) ||
-                                  object.contains(QStringLiteral("rotation")) ||
-                                  object.contains(QStringLiteral("scale"))))) {
-        errorMsg = QStringLiteral("클립보드 컴포넌트 존재 정보와 값이 일치하지 않습니다.");
+    if ((!parsed.hasTag && object.contains(LUX_UI_TEXT("name"))) ||
+        (!parsed.hasTransform &&
+         (object.contains(LUX_UI_TEXT("position")) || object.contains(LUX_UI_TEXT("rotation")) ||
+          object.contains(LUX_UI_TEXT("scale"))))) {
+        errorMsg = LUX_UI_TEXT("클립보드 컴포넌트 존재 정보와 값이 일치하지 않습니다.");
         return false;
     }
     if (parsed.hasTag) {
-        const QJsonValue nameVal = object.value(QStringLiteral("name"));
+        const LuxUI::JsonValue nameVal = object.value(LUX_UI_TEXT("name"));
         if (!nameVal.isString()) {
-            errorMsg = QStringLiteral("엔티티 이름(name) 필드가 누락되었거나 문자열이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("엔티티 이름(name) 필드가 누락되었거나 문자열이 아닙니다.");
             return false;
         }
         parsed.name = nameVal.toString().trimmed();
         if (parsed.name.isEmpty() || parsed.name.size() > 256 ||
-            parsed.name.contains(QChar::ReplacementCharacter)) {
-            errorMsg = QStringLiteral("엔티티 이름이 비어 있거나 허용 길이를 초과했습니다.");
+            parsed.name.contains(LuxUI::Char::ReplacementCharacter)) {
+            errorMsg = LUX_UI_TEXT("엔티티 이름이 비어 있거나 허용 길이를 초과했습니다.");
             return false;
         }
     }
     if (parsed.hasTransform) {
-        if (!object.contains(QStringLiteral("position")) ||
-            !object.contains(QStringLiteral("rotation")) ||
-            !object.contains(QStringLiteral("scale"))) {
+        if (!object.contains(LUX_UI_TEXT("position")) ||
+            !object.contains(LUX_UI_TEXT("rotation")) || !object.contains(LUX_UI_TEXT("scale"))) {
             errorMsg =
-                QStringLiteral("필수 Transform 필드(position, rotation, scale)가 누락되었습니다.");
+                LUX_UI_TEXT("필수 Transform 필드(position, rotation, scale)가 누락되었습니다.");
             return false;
         }
-        if (!ParseVec3(object.value(QStringLiteral("position")), parsed.transform.position) ||
-            !ParseVec3(object.value(QStringLiteral("rotation")), parsed.transform.rotation) ||
-            !ParseVec3(object.value(QStringLiteral("scale")), parsed.transform.scale)) {
-            errorMsg = QStringLiteral("Transform 수치가 유효하지 않거나 허용 범위를 벗어났습니다.");
+        if (!ParseVec3(object.value(LUX_UI_TEXT("position")), parsed.transform.position) ||
+            !ParseVec3(object.value(LUX_UI_TEXT("rotation")), parsed.transform.rotation) ||
+            !ParseVec3(object.value(LUX_UI_TEXT("scale")), parsed.transform.scale)) {
+            errorMsg = LUX_UI_TEXT("Transform 수치가 유효하지 않거나 허용 범위를 벗어났습니다.");
             return false;
         }
         if (std::abs(parsed.transform.scale.x) < 1e-5f ||
             std::abs(parsed.transform.scale.y) < 1e-5f ||
             std::abs(parsed.transform.scale.z) < 1e-5f) {
-            errorMsg = QStringLiteral("Transform 크기는 0이 될 수 없습니다.");
+            errorMsg = LUX_UI_TEXT("Transform 크기는 0이 될 수 없습니다.");
             return false;
         }
     }
-    if (object.contains(QStringLiteral("sprite"))) {
+    if (object.contains(LUX_UI_TEXT("sprite"))) {
         LuxEngine::SpriteRendererComponent comp;
-        if (!ParseVec4(object.value(QStringLiteral("sprite")), comp.color, 0.0f, 100.0f)) {
-            errorMsg = QStringLiteral("스프라이트 색상 데이터가 유효하지 않습니다.");
+        if (!ParseVec4(object.value(LUX_UI_TEXT("sprite")), comp.color, 0.0f, 100.0f)) {
+            errorMsg = LUX_UI_TEXT("스프라이트 색상 데이터가 유효하지 않습니다.");
             return false;
         }
         parsed.sprite = comp;
     }
 
-    if (object.contains(QStringLiteral("mesh"))) {
-        const QJsonValue meshVal = object.value(QStringLiteral("mesh"));
+    if (object.contains(LUX_UI_TEXT("mesh"))) {
+        const LuxUI::JsonValue meshVal = object.value(LUX_UI_TEXT("mesh"));
         if (!meshVal.isArray()) {
-            errorMsg = QStringLiteral("메시 데이터가 배열 형식이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("메시 데이터가 배열 형식이 아닙니다.");
             return false;
         }
         const auto meshArr = meshVal.toArray();
         if (meshArr.size() != 2 && meshArr.size() != 6) {
-            errorMsg = QStringLiteral("메시 배열 길이가 올바르지 않습니다.");
+            errorMsg = LUX_UI_TEXT("메시 배열 길이가 올바르지 않습니다.");
             return false;
         }
         LuxEngine::MeshRendererComponent comp;
         if (!ParseFiniteFloat(meshArr[0], comp.material.metallic, 0.0f, 1.0f) ||
             !ParseFiniteFloat(meshArr[1], comp.material.roughness, 0.0f, 1.0f)) {
-            errorMsg = QStringLiteral("메시 재질 수치가 허용 범위(0~1)를 벗어났습니다.");
+            errorMsg = LUX_UI_TEXT("메시 재질 수치가 허용 범위(0~1)를 벗어났습니다.");
             return false;
         }
         if (meshArr.size() == 6) {
@@ -1954,81 +1947,80 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
                 !ParseFiniteFloat(meshArr[3], comp.material.albedoColor.y, 0.0f, 100.0f) ||
                 !ParseFiniteFloat(meshArr[4], comp.material.albedoColor.z, 0.0f, 100.0f) ||
                 !ParseFiniteFloat(meshArr[5], comp.material.albedoColor.w, 0.0f, 100.0f)) {
-                errorMsg = QStringLiteral("메시 알베도 색상이 유효하지 않습니다.");
+                errorMsg = LUX_UI_TEXT("메시 알베도 색상이 유효하지 않습니다.");
                 return false;
             }
         }
-        if (object.contains(QStringLiteral("meshPath"))) {
-            const auto path = object.value(QStringLiteral("meshPath"));
+        if (object.contains(LUX_UI_TEXT("meshPath"))) {
+            const auto path = object.value(LUX_UI_TEXT("meshPath"));
             if (!path.isString()) {
-                errorMsg = QStringLiteral("메시 파일 경로가 문자열이 아닙니다.");
+                errorMsg = LUX_UI_TEXT("메시 파일 경로가 문자열이 아닙니다.");
                 return false;
             }
             comp.meshPath = path.toString().toUtf8().toStdString();
             if (comp.meshPath.size() > 4096 || comp.meshPath.find('\0') != std::string::npos) {
-                errorMsg = QStringLiteral("메시 파일 경로가 올바르지 않습니다.");
+                errorMsg = LUX_UI_TEXT("메시 파일 경로가 올바르지 않습니다.");
                 return false;
             }
         }
-        if (object.contains(QStringLiteral("baseColorTexture"))) {
-            const auto path = object.value(QStringLiteral("baseColorTexture"));
+        if (object.contains(LUX_UI_TEXT("baseColorTexture"))) {
+            const auto path = object.value(LUX_UI_TEXT("baseColorTexture"));
             if (!path.isString()) {
-                errorMsg = QStringLiteral("기본 색상 텍스처 경로가 문자열이 아닙니다.");
+                errorMsg = LUX_UI_TEXT("기본 색상 텍스처 경로가 문자열이 아닙니다.");
                 return false;
             }
             comp.material.baseColorTexture = path.toString().toUtf8().toStdString();
             if (comp.material.baseColorTexture.size() > 4096 ||
                 comp.material.baseColorTexture.find('\0') != std::string::npos) {
-                errorMsg = QStringLiteral("기본 색상 텍스처 경로가 올바르지 않습니다.");
+                errorMsg = LUX_UI_TEXT("기본 색상 텍스처 경로가 올바르지 않습니다.");
                 return false;
             }
         }
-        if (object.contains(QStringLiteral("materialOptions"))) {
-            const auto raw = object.value(QStringLiteral("materialOptions"));
+        if (object.contains(LUX_UI_TEXT("materialOptions"))) {
+            const auto raw = object.value(LUX_UI_TEXT("materialOptions"));
             if (!raw.isObject()) {
-                errorMsg = QStringLiteral("재질 옵션이 객체가 아닙니다.");
+                errorMsg = LUX_UI_TEXT("재질 옵션이 객체가 아닙니다.");
                 return false;
             }
             const auto options = raw.toObject();
-            const auto mode = options.value(QStringLiteral("alphaMode"));
-            const auto address = options.value(QStringLiteral("addressMode"));
+            const auto mode = options.value(LUX_UI_TEXT("alphaMode"));
+            const auto address = options.value(LUX_UI_TEXT("addressMode"));
             if (!mode.isDouble() || mode.toDouble() < 0 || mode.toDouble() > 2 ||
                 mode.toDouble() != mode.toInt() || !address.isDouble() || address.toDouble() < 0 ||
                 address.toDouble() > 1 || address.toDouble() != address.toInt() ||
-                !options.value(QStringLiteral("doubleSided")).isBool() ||
-                !options.value(QStringLiteral("mipmaps")).isBool() ||
-                !options.value(QStringLiteral("anisotropic")).isBool() ||
-                !ParseFiniteFloat(options.value(QStringLiteral("alphaCutoff")),
+                !options.value(LUX_UI_TEXT("doubleSided")).isBool() ||
+                !options.value(LUX_UI_TEXT("mipmaps")).isBool() ||
+                !options.value(LUX_UI_TEXT("anisotropic")).isBool() ||
+                !ParseFiniteFloat(options.value(LUX_UI_TEXT("alphaCutoff")),
                                   comp.material.alphaCutoff, 0, 1) ||
-                !ParseFiniteFloat(options.value(QStringLiteral("normalScale")),
+                !ParseFiniteFloat(options.value(LUX_UI_TEXT("normalScale")),
                                   comp.material.normalScale, 0, 16) ||
-                !ParseFiniteFloat(options.value(QStringLiteral("occlusionStrength")),
+                !ParseFiniteFloat(options.value(LUX_UI_TEXT("occlusionStrength")),
                                   comp.material.occlusionStrength, 0, 1)) {
-                errorMsg = QStringLiteral("재질 옵션의 형식 또는 범위가 올바르지 않습니다.");
+                errorMsg = LUX_UI_TEXT("재질 옵션의 형식 또는 범위가 올바르지 않습니다.");
                 return false;
             }
             comp.material.alphaMode = static_cast<LuxEngine::MaterialAlphaMode>(mode.toInt());
-            comp.material.doubleSided = options.value(QStringLiteral("doubleSided")).toBool();
-            comp.material.textureSampling.mipmaps =
-                options.value(QStringLiteral("mipmaps")).toBool();
+            comp.material.doubleSided = options.value(LUX_UI_TEXT("doubleSided")).toBool();
+            comp.material.textureSampling.mipmaps = options.value(LUX_UI_TEXT("mipmaps")).toBool();
             comp.material.textureSampling.addressMode =
                 static_cast<LuxEngine::TextureAddressMode>(address.toInt());
             comp.material.textureSampling.anisotropic =
-                options.value(QStringLiteral("anisotropic")).toBool();
+                options.value(LUX_UI_TEXT("anisotropic")).toBool();
             const std::array<std::pair<const char*, std::string*>, 4> maps{
                 {{"normalTexture", &comp.material.normalTexture},
                  {"metallicTexture", &comp.material.metallicTexture},
                  {"roughnessTexture", &comp.material.roughnessTexture},
                  {"occlusionTexture", &comp.material.occlusionTexture}}};
             for (const auto& [name, path] : maps) {
-                const auto value = options.value(QString::fromLatin1(name));
+                const auto value = options.value(LuxUI::String::fromLatin1(name));
                 if (!value.isString()) {
-                    errorMsg = QStringLiteral("재질 텍스처 경로가 문자열이 아닙니다.");
+                    errorMsg = LUX_UI_TEXT("재질 텍스처 경로가 문자열이 아닙니다.");
                     return false;
                 }
                 *path = value.toString().toUtf8().toStdString();
                 if (path->size() > 4096 || path->find('\0') != std::string::npos) {
-                    errorMsg = QStringLiteral("재질 텍스처 경로가 올바르지 않습니다.");
+                    errorMsg = LUX_UI_TEXT("재질 텍스처 경로가 올바르지 않습니다.");
                     return false;
                 }
             }
@@ -2036,23 +2028,23 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         parsed.mesh = comp;
     }
 
-    if (object.contains(QStringLiteral("camera"))) {
-        const QJsonValue camVal = object.value(QStringLiteral("camera"));
+    if (object.contains(LUX_UI_TEXT("camera"))) {
+        const LuxUI::JsonValue camVal = object.value(LUX_UI_TEXT("camera"));
         if (!camVal.isObject()) {
-            errorMsg = QStringLiteral("카메라 컴포넌트가 객체 형식이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("카메라 컴포넌트가 객체 형식이 아닙니다.");
             return false;
         }
         const auto camObj = camVal.toObject();
-        const QJsonValue primVal = camObj.value(QStringLiteral("primary"));
-        const QJsonValue perspVal = camObj.value(QStringLiteral("perspective"));
+        const LuxUI::JsonValue primVal = camObj.value(LUX_UI_TEXT("primary"));
+        const LuxUI::JsonValue perspVal = camObj.value(LUX_UI_TEXT("perspective"));
         LuxEngine::CameraComponent comp;
         if (!primVal.isBool() || !perspVal.isBool() ||
-            !ParseFiniteFloat(camObj.value(QStringLiteral("fov")), comp.fov, 0.0f, 180.0f) ||
+            !ParseFiniteFloat(camObj.value(LUX_UI_TEXT("fov")), comp.fov, 0.0f, 180.0f) ||
             comp.fov <= 0.0f || comp.fov >= 180.0f ||
-            !ParseFiniteFloat(camObj.value(QStringLiteral("orthoSize")), comp.orthoSize, 0.0f,
+            !ParseFiniteFloat(camObj.value(LUX_UI_TEXT("orthoSize")), comp.orthoSize, 0.0f,
                               kMaxClipboardCoord) ||
             comp.orthoSize <= 0.0f) {
-            errorMsg = QStringLiteral("카메라 FOV 또는 직교 크기가 유효 범위를 벗어났습니다.");
+            errorMsg = LUX_UI_TEXT("카메라 FOV 또는 직교 크기가 유효 범위를 벗어났습니다.");
             return false;
         }
         comp.isPrimary = primVal.toBool();
@@ -2060,43 +2052,42 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         parsed.camera = comp;
     }
 
-    if (object.contains(QStringLiteral("tilemap"))) {
-        const QJsonValue mapVal = object.value(QStringLiteral("tilemap"));
+    if (object.contains(LUX_UI_TEXT("tilemap"))) {
+        const LuxUI::JsonValue mapVal = object.value(LUX_UI_TEXT("tilemap"));
         if (!mapVal.isObject()) {
-            errorMsg = QStringLiteral("타일맵 컴포넌트가 객체 형식이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("타일맵 컴포넌트가 객체 형식이 아닙니다.");
             return false;
         }
         const auto mapObj = mapVal.toObject();
         int w = 0, h = 0;
         float tileSize = 0.0f;
-        if (!ParseExactInt(mapObj.value(QStringLiteral("width")), w, 1, 256) ||
-            !ParseExactInt(mapObj.value(QStringLiteral("height")), h, 1, 256) ||
-            !ParseFiniteFloat(mapObj.value(QStringLiteral("tileSize")), tileSize, 0.0f, 64.0f) ||
+        if (!ParseExactInt(mapObj.value(LUX_UI_TEXT("width")), w, 1, 256) ||
+            !ParseExactInt(mapObj.value(LUX_UI_TEXT("height")), h, 1, 256) ||
+            !ParseFiniteFloat(mapObj.value(LUX_UI_TEXT("tileSize")), tileSize, 0.0f, 64.0f) ||
             tileSize <= 0.0f) {
-            errorMsg =
-                QStringLiteral("타일맵 크기(최대 256x256) 또는 타일 크기가 유효하지 않습니다.");
+            errorMsg = LUX_UI_TEXT("타일맵 크기(최대 256x256) 또는 타일 크기가 유효하지 않습니다.");
             return false;
         }
-        const QJsonValue tilesVal = mapObj.value(QStringLiteral("tiles"));
+        const LuxUI::JsonValue tilesVal = mapObj.value(LUX_UI_TEXT("tiles"));
         if (!tilesVal.isArray()) {
-            errorMsg = QStringLiteral("타일맵 tiles 배열이 누락되었습니다.");
+            errorMsg = LUX_UI_TEXT("타일맵 tiles 배열이 누락되었습니다.");
             return false;
         }
         const auto tilesArr = tilesVal.toArray();
         if (tilesArr.size() != static_cast<qsizetype>(w * h)) {
-            errorMsg = QStringLiteral("타일맵 셀 개수가 가로x세로 크기와 일치하지 않습니다.");
+            errorMsg = LUX_UI_TEXT("타일맵 셀 개수가 가로x세로 크기와 일치하지 않습니다.");
             return false;
         }
         LuxEngine::TilemapComponent comp;
         if (!comp.Resize(static_cast<LuxEngine::uint32>(w), static_cast<LuxEngine::uint32>(h))) {
-            errorMsg = QStringLiteral("타일맵 할당에 실패했습니다.");
+            errorMsg = LUX_UI_TEXT("타일맵 할당에 실패했습니다.");
             return false;
         }
         comp.tileSize = tileSize;
         for (qsizetype i = 0; i < tilesArr.size(); ++i) {
             int tv = -1;
             if (!ParseExactInt(tilesArr[i], tv, 0, 5)) {
-                errorMsg = QStringLiteral("타일맵 셀 값이 허용 범위(0~5)를 벗어났습니다.");
+                errorMsg = LUX_UI_TEXT("타일맵 셀 값이 허용 범위(0~5)를 벗어났습니다.");
                 return false;
             }
             comp.tiles[static_cast<size_t>(i)] = static_cast<uint8_t>(tv);
@@ -2104,122 +2095,121 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         parsed.tilemap = std::move(comp);
     }
 
-    if (object.contains(QStringLiteral("rigidbody2d"))) {
-        const QJsonValue rbVal = object.value(QStringLiteral("rigidbody2d"));
+    if (object.contains(LUX_UI_TEXT("rigidbody2d"))) {
+        const LuxUI::JsonValue rbVal = object.value(LUX_UI_TEXT("rigidbody2d"));
         if (!rbVal.isObject()) {
-            errorMsg = QStringLiteral("2D 강체 컴포넌트가 객체 형식이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("2D 강체 컴포넌트가 객체 형식이 아닙니다.");
             return false;
         }
         const auto rbObj = rbVal.toObject();
         int type = -1;
         LuxEngine::Rigidbody2DComponent comp;
-        if (!ParseExactInt(rbObj.value(QStringLiteral("type")), type, 0, 2) ||
-            !ParseVec2(rbObj.value(QStringLiteral("velocity")), comp.velocity) ||
-            !ParseFiniteFloat(rbObj.value(QStringLiteral("mass")), comp.mass, 0.0f,
+        if (!ParseExactInt(rbObj.value(LUX_UI_TEXT("type")), type, 0, 2) ||
+            !ParseVec2(rbObj.value(LUX_UI_TEXT("velocity")), comp.velocity) ||
+            !ParseFiniteFloat(rbObj.value(LUX_UI_TEXT("mass")), comp.mass, 0.0f,
                               kMaxClipboardMass) ||
             comp.mass <= 0.0f ||
-            !ParseFiniteFloat(rbObj.value(QStringLiteral("gravityScale")), comp.gravityScale,
+            !ParseFiniteFloat(rbObj.value(LUX_UI_TEXT("gravityScale")), comp.gravityScale,
                               -kMaxClipboardGravityScale, kMaxClipboardGravityScale)) {
-            errorMsg = QStringLiteral("2D 강체 속성(질량, 속도, 중력 배율)이 유효하지 않습니다.");
+            errorMsg = LUX_UI_TEXT("2D 강체 속성(질량, 속도, 중력 배율)이 유효하지 않습니다.");
             return false;
         }
         comp.type = static_cast<LuxEngine::BodyType>(type);
         parsed.rigidbody2d = comp;
     }
 
-    if (object.contains(QStringLiteral("collider2d"))) {
-        const QJsonValue colVal = object.value(QStringLiteral("collider2d"));
+    if (object.contains(LUX_UI_TEXT("collider2d"))) {
+        const LuxUI::JsonValue colVal = object.value(LUX_UI_TEXT("collider2d"));
         if (!colVal.isObject()) {
-            errorMsg = QStringLiteral("2D 콜라이더 컴포넌트가 객체 형식이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("2D 콜라이더 컴포넌트가 객체 형식이 아닙니다.");
             return false;
         }
         const auto colObj = colVal.toObject();
-        const QJsonValue trigVal = colObj.value(QStringLiteral("trigger"));
+        const LuxUI::JsonValue trigVal = colObj.value(LUX_UI_TEXT("trigger"));
         LuxEngine::BoxCollider2DComponent comp;
         if (!trigVal.isBool() ||
-            !ParseVec2(colObj.value(QStringLiteral("size")), comp.size, 0.0f, kMaxClipboardCoord) ||
+            !ParseVec2(colObj.value(LUX_UI_TEXT("size")), comp.size, 0.0f, kMaxClipboardCoord) ||
             comp.size.x <= 0.0f || comp.size.y <= 0.0f ||
-            !ParseVec2(colObj.value(QStringLiteral("offset")), comp.offset)) {
-            errorMsg = QStringLiteral("2D 콜라이더 크기 또는 오프셋이 유효하지 않습니다.");
+            !ParseVec2(colObj.value(LUX_UI_TEXT("offset")), comp.offset)) {
+            errorMsg = LUX_UI_TEXT("2D 콜라이더 크기 또는 오프셋이 유효하지 않습니다.");
             return false;
         }
         comp.isTrigger = trigVal.toBool();
         parsed.collider2d = comp;
     }
 
-    if (object.contains(QStringLiteral("rigidbody3d"))) {
-        const QJsonValue rbVal = object.value(QStringLiteral("rigidbody3d"));
+    if (object.contains(LUX_UI_TEXT("rigidbody3d"))) {
+        const LuxUI::JsonValue rbVal = object.value(LUX_UI_TEXT("rigidbody3d"));
         if (!rbVal.isObject()) {
-            errorMsg = QStringLiteral("3D 강체 컴포넌트가 객체 형식이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("3D 강체 컴포넌트가 객체 형식이 아닙니다.");
             return false;
         }
         const auto rbObj = rbVal.toObject();
         int type = -1;
         LuxEngine::Rigidbody3DComponent comp;
-        if (!ParseExactInt(rbObj.value(QStringLiteral("type")), type, 0, 2) ||
-            !ParseVec3(rbObj.value(QStringLiteral("velocity")), comp.velocity) ||
-            !ParseFiniteFloat(rbObj.value(QStringLiteral("mass")), comp.mass, 0.0f,
+        if (!ParseExactInt(rbObj.value(LUX_UI_TEXT("type")), type, 0, 2) ||
+            !ParseVec3(rbObj.value(LUX_UI_TEXT("velocity")), comp.velocity) ||
+            !ParseFiniteFloat(rbObj.value(LUX_UI_TEXT("mass")), comp.mass, 0.0f,
                               kMaxClipboardMass) ||
             comp.mass <= 0.0f ||
-            !ParseFiniteFloat(rbObj.value(QStringLiteral("gravityScale")), comp.gravityScale,
+            !ParseFiniteFloat(rbObj.value(LUX_UI_TEXT("gravityScale")), comp.gravityScale,
                               -kMaxClipboardGravityScale, kMaxClipboardGravityScale)) {
-            errorMsg = QStringLiteral("3D 강체 속성(질량, 속도, 중력 배율)이 유효하지 않습니다.");
+            errorMsg = LUX_UI_TEXT("3D 강체 속성(질량, 속도, 중력 배율)이 유효하지 않습니다.");
             return false;
         }
         comp.type = static_cast<LuxEngine::BodyType>(type);
         parsed.rigidbody3d = comp;
     }
 
-    if (object.contains(QStringLiteral("collider3d"))) {
-        const QJsonValue colVal = object.value(QStringLiteral("collider3d"));
+    if (object.contains(LUX_UI_TEXT("collider3d"))) {
+        const LuxUI::JsonValue colVal = object.value(LUX_UI_TEXT("collider3d"));
         if (!colVal.isObject()) {
-            errorMsg = QStringLiteral("3D 콜라이더 컴포넌트가 객체 형식이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("3D 콜라이더 컴포넌트가 객체 형식이 아닙니다.");
             return false;
         }
         const auto colObj = colVal.toObject();
-        const QJsonValue trigVal = colObj.value(QStringLiteral("trigger"));
+        const LuxUI::JsonValue trigVal = colObj.value(LUX_UI_TEXT("trigger"));
         LuxEngine::BoxCollider3DComponent comp;
         if (!trigVal.isBool() ||
-            !ParseVec3(colObj.value(QStringLiteral("size")), comp.size, 0.0f, kMaxClipboardCoord) ||
+            !ParseVec3(colObj.value(LUX_UI_TEXT("size")), comp.size, 0.0f, kMaxClipboardCoord) ||
             comp.size.x <= 0.0f || comp.size.y <= 0.0f || comp.size.z <= 0.0f ||
-            !ParseVec3(colObj.value(QStringLiteral("offset")), comp.offset)) {
-            errorMsg = QStringLiteral("3D 콜라이더 크기 또는 오프셋이 유효하지 않습니다.");
+            !ParseVec3(colObj.value(LUX_UI_TEXT("offset")), comp.offset)) {
+            errorMsg = LUX_UI_TEXT("3D 콜라이더 크기 또는 오프셋이 유효하지 않습니다.");
             return false;
         }
         comp.isTrigger = trigVal.toBool();
         parsed.collider3d = comp;
     }
 
-    if (object.contains(QStringLiteral("animation"))) {
-        const QJsonValue animVal = object.value(QStringLiteral("animation"));
+    if (object.contains(LUX_UI_TEXT("animation"))) {
+        const LuxUI::JsonValue animVal = object.value(LUX_UI_TEXT("animation"));
         if (!animVal.isObject()) {
-            errorMsg = QStringLiteral("애니메이션 컴포넌트가 객체 형식이 아닙니다.");
+            errorMsg = LUX_UI_TEXT("애니메이션 컴포넌트가 객체 형식이 아닙니다.");
             return false;
         }
         const auto animObj = animVal.toObject();
-        const QJsonValue clipNameVal = animObj.value(QStringLiteral("name"));
-        const QJsonValue loopVal = animObj.value(QStringLiteral("loop"));
-        const QJsonValue playingVal = animObj.value(QStringLiteral("playing"));
-        const QJsonValue keysVal = animObj.value(QStringLiteral("keyframes"));
+        const LuxUI::JsonValue clipNameVal = animObj.value(LUX_UI_TEXT("name"));
+        const LuxUI::JsonValue loopVal = animObj.value(LUX_UI_TEXT("loop"));
+        const LuxUI::JsonValue playingVal = animObj.value(LUX_UI_TEXT("playing"));
+        const LuxUI::JsonValue keysVal = animObj.value(LUX_UI_TEXT("keyframes"));
         LuxEngine::AnimationComponent comp;
         if (!clipNameVal.isString() || !loopVal.isBool() || !playingVal.isBool() ||
             !keysVal.isArray() ||
-            !ParseFiniteFloat(animObj.value(QStringLiteral("duration")), comp.clip.duration, 0.0f,
+            !ParseFiniteFloat(animObj.value(LUX_UI_TEXT("duration")), comp.clip.duration, 0.0f,
                               kMaxClipboardDuration) ||
             comp.clip.duration <= 0.0f) {
-            errorMsg = QStringLiteral("애니메이션 클립 속성 또는 재생 시간이 유효하지 않습니다.");
+            errorMsg = LUX_UI_TEXT("애니메이션 클립 속성 또는 재생 시간이 유효하지 않습니다.");
             return false;
         }
-        const QString clipName = clipNameVal.toString().trimmed();
+        const LuxUI::String clipName = clipNameVal.toString().trimmed();
         if (clipName.isEmpty() || clipName.size() > 256 ||
-            clipName.contains(QChar::ReplacementCharacter)) {
-            errorMsg = QStringLiteral("애니메이션 클립 이름이 유효하지 않습니다.");
+            clipName.contains(LuxUI::Char::ReplacementCharacter)) {
+            errorMsg = LUX_UI_TEXT("애니메이션 클립 이름이 유효하지 않습니다.");
             return false;
         }
         const auto keysArr = keysVal.toArray();
         if (keysArr.size() > 4096) {
-            errorMsg =
-                QStringLiteral("애니메이션 키프레임 수가 최대 허용치(4096개)를 초과했습니다.");
+            errorMsg = LUX_UI_TEXT("애니메이션 키프레임 수가 최대 허용치(4096개)를 초과했습니다.");
             return false;
         }
         comp.clip.name = clipName.toUtf8().toStdString();
@@ -2227,20 +2217,19 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
         comp.playing = playingVal.toBool();
         for (const auto& kv : keysArr) {
             if (!kv.isObject()) {
-                errorMsg = QStringLiteral("애니메이션 키프레임이 객체 형식이 아닙니다.");
+                errorMsg = LUX_UI_TEXT("애니메이션 키프레임이 객체 형식이 아닙니다.");
                 return false;
             }
             const auto kObj = kv.toObject();
             LuxEngine::Keyframe key;
-            if (!ParseFiniteFloat(kObj.value(QStringLiteral("time")), key.time, 0.0f,
+            if (!ParseFiniteFloat(kObj.value(LUX_UI_TEXT("time")), key.time, 0.0f,
                                   kMaxClipboardDuration) ||
-                key.time < 0.0f ||
-                !ParseVec3(kObj.value(QStringLiteral("position")), key.position) ||
-                !ParseVec3(kObj.value(QStringLiteral("rotation")), key.rotation) ||
-                !ParseVec3(kObj.value(QStringLiteral("scale")), key.scale) ||
+                key.time < 0.0f || !ParseVec3(kObj.value(LUX_UI_TEXT("position")), key.position) ||
+                !ParseVec3(kObj.value(LUX_UI_TEXT("rotation")), key.rotation) ||
+                !ParseVec3(kObj.value(LUX_UI_TEXT("scale")), key.scale) ||
                 std::abs(key.scale.x) < 1e-5f || std::abs(key.scale.y) < 1e-5f ||
                 std::abs(key.scale.z) < 1e-5f) {
-                errorMsg = QStringLiteral("애니메이션 키프레임 수치가 유효하지 않습니다.");
+                errorMsg = LUX_UI_TEXT("애니메이션 키프레임 수치가 유효하지 않습니다.");
                 return false;
             }
             comp.clip.AddKeyframe(key);
@@ -2252,9 +2241,9 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
 } // namespace
 
 void EditorWindow::PasteEntity() {
-    const auto* mime = QApplication::clipboard()->mimeData();
-    if (mime && mime->hasFormat(QStringLiteral("application/x-lux-scene-subtree"))) {
-        const auto payload = mime->data(QStringLiteral("application/x-lux-scene-subtree"));
+    const auto* mime = LuxUI::Application::clipboard()->mimeData();
+    if (mime && mime->hasFormat(LUX_UI_TEXT("application/x-lux-scene-subtree"))) {
+        const auto payload = mime->data(LUX_UI_TEXT("application/x-lux-scene-subtree"));
         const auto newline = payload.indexOf('\n');
         bool valid = false;
         const auto root = payload.left(newline).toUInt(&valid);
@@ -2265,10 +2254,10 @@ void EditorWindow::PasteEntity() {
                 std::string(payload.constData() + newline + 1,
                             static_cast<size_t>(payload.size() - newline - 1))) ||
             !subtree->IsAlive(root)) {
-            Log(QStringLiteral("붙여넣을 계층 데이터가 유효하지 않습니다."), true);
+            Log(LUX_UI_TEXT("붙여넣을 계층 데이터가 유효하지 않습니다."), true);
             return;
         }
-        RecordEdit(QStringLiteral("계층 붙여넣기"), [this, subtree, root] {
+        RecordEdit(LUX_UI_TEXT("계층 붙여넣기"), [this, subtree, root] {
             const auto ids = document_.GetScene().ImportEntities(*subtree, {root});
             if (!ids.contains(root))
                 throw std::runtime_error("계층을 붙여넣지 못했습니다.");
@@ -2283,36 +2272,36 @@ void EditorWindow::PasteEntity() {
         RefreshAll();
         return;
     }
-    if (!mime || !mime->hasFormat(QStringLiteral("application/x-lux-entity")))
+    if (!mime || !mime->hasFormat(LUX_UI_TEXT("application/x-lux-entity")))
         return;
-    const QByteArray rawBytes = mime->data(QStringLiteral("application/x-lux-entity"));
+    const LuxUI::ByteArray rawBytes = mime->data(LUX_UI_TEXT("application/x-lux-entity"));
     if (rawBytes.isEmpty() || rawBytes.size() > kMaxClipboardJsonBytes) {
-        Log(QStringLiteral(
+        Log(LUX_UI_TEXT(
                 "붙여넣기 실패: 클립보드 데이터가 비어 있거나 허용 크기(1MB)를 초과했습니다."),
             true);
         return;
     }
     if (!IsStrictValidUtf8(rawBytes)) {
-        Log(QStringLiteral(
+        Log(LUX_UI_TEXT(
                 "붙여넣기 실패: 클립보드 데이터에 잘못된 UTF-8 인코딩이 포함되어 있습니다."),
             true);
         return;
     }
-    QJsonParseError parse;
-    const auto doc = QJsonDocument::fromJson(rawBytes, &parse);
-    if (parse.error != QJsonParseError::NoError || !doc.isObject()) {
-        Log(QStringLiteral("붙여넣기 실패: 클립보드 JSON 구문이 손상되었습니다."), true);
+    LuxUI::JsonParseError parse;
+    const auto doc = LuxUI::JsonDocument::fromJson(rawBytes, &parse);
+    if (parse.error != LuxUI::JsonParseError::NoError || !doc.isObject()) {
+        Log(LUX_UI_TEXT("붙여넣기 실패: 클립보드 JSON 구문이 손상되었습니다."), true);
         return;
     }
     ValidatedClipboardEntity validated;
-    QString validationError;
+    LuxUI::String validationError;
     if (!ValidateClipboardJson(doc.object(), validated, validationError)) {
-        Log(QStringLiteral("붙여넣기 실패: %1").arg(validationError), true);
+        Log(LUX_UI_TEXT("붙여넣기 실패: %1").arg(validationError), true);
         return;
     }
 
-    RecordEdit(QStringLiteral("엔티티 붙여넣기"), [this, validated = std::move(validated)] {
-        QString name = validated.name + QStringLiteral(" 복사본");
+    RecordEdit(LUX_UI_TEXT("엔티티 붙여넣기"), [this, validated = std::move(validated)] {
+        LuxUI::String name = validated.name + LUX_UI_TEXT(" 복사본");
         if (name.toUtf8().size() > 256)
             name = validated.name;
         LuxEngine::Entity entity = document_.CreateEntity(Utf8(name));
@@ -2364,11 +2353,20 @@ const EditorDocument& EditorWindow::GetDocument() const noexcept {
     return document_;
 }
 
-const QString& EditorWindow::LastLogMessage() const noexcept {
+LuxEngine::Scene* EditorWindow::GetRuntimeScene() noexcept {
+    return runtimeScene_.get();
+}
+
+const LuxEngine::Scene* EditorWindow::GetRuntimeScene() const noexcept {
+    return runtimeScene_.get();
+}
+
+const LuxUI::String& EditorWindow::LastLogMessage() const noexcept {
     return lastLogMessage_;
 }
 
-void EditorWindow::ExecuteRecordedEdit(const QString& name, const std::function<void()>& edit) {
+void EditorWindow::ExecuteRecordedEdit(const LuxUI::String& name,
+                                       const std::function<void()>& edit) {
     RecordEdit(name, edit);
     RefreshAll();
 }

@@ -1,6 +1,8 @@
 #include <LuxEngine/Platform/Input.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cmath>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -18,7 +20,10 @@ struct Action {
 struct InputState {
     std::unordered_map<std::string, Action> actions;
     std::unordered_set<int32> keys;
+    std::unordered_set<int32> externalKeys;
     std::unordered_set<int32> mouseButtons;
+    std::unordered_set<int32> externalMouseButtons;
+    std::optional<std::pair<float, float>> externalMousePosition;
     std::unordered_map<SDL_JoystickID, std::unordered_set<int32>> gamepadButtons;
     std::unordered_map<SDL_JoystickID, SDL_Gamepad*> gamepads;
 };
@@ -44,9 +49,10 @@ bool Valid(InputBinding binding) {
 bool PhysicalDown(const InputState& state, InputBinding binding) {
     switch (binding.device) {
     case InputDevice::Keyboard:
-        return state.keys.contains(binding.code);
+        return state.keys.contains(binding.code) || state.externalKeys.contains(binding.code);
     case InputDevice::MouseButton:
-        return state.mouseButtons.contains(binding.code);
+        return state.mouseButtons.contains(binding.code) ||
+               state.externalMouseButtons.contains(binding.code);
     case InputDevice::GamepadButton:
         for (const auto& [id, buttons] : state.gamepadButtons)
             if (buttons.contains(binding.code))
@@ -217,6 +223,8 @@ void Input::ProcessEvent(const SDL_Event& event) {
 }
 
 bool Input::IsKeyPressed(int32 keycode) {
+    if (State().externalKeys.contains(keycode))
+        return true;
     int numKeys = 0;
     const bool* state = SDL_GetKeyboardState(&numKeys);
     if (!state)
@@ -229,6 +237,8 @@ bool Input::IsKeyPressed(int32 keycode) {
 bool Input::IsMouseButtonPressed(int32 button) {
     if (button < 1 || button > 32)
         return false;
+    if (State().externalMouseButtons.contains(button))
+        return true;
     float x = 0.0f;
     float y = 0.0f;
     const SDL_MouseButtonFlags flags = SDL_GetMouseState(&x, &y);
@@ -247,6 +257,8 @@ bool Input::IsGamepadButtonPressed(LuxGamepadButton button) {
 }
 
 std::pair<float, float> Input::GetMousePosition() {
+    if (State().externalMousePosition)
+        return *State().externalMousePosition;
     float x = 0.0f;
     float y = 0.0f;
     SDL_GetMouseState(&x, &y);
@@ -306,4 +318,41 @@ bool Input::IsMouseButtonPressed(LuxMouseButton button) {
 }
 
 bool InputBinding::operator==(const InputBinding&) const = default;
+
+void Input::SetExternalKey(LuxKey key, bool down) {
+    if (!Valid(InputBinding::Key(key)))
+        return;
+    if (down)
+        State().externalKeys.insert(static_cast<int32>(key));
+    else
+        State().externalKeys.erase(static_cast<int32>(key));
+    RefreshActions(State(), true);
+}
+
+void Input::ClearExternalKeys() {
+    State().externalKeys.clear();
+    RefreshActions(State(), true);
+}
+
+void Input::SetExternalMouseButton(LuxMouseButton button, bool down) {
+    const auto binding = InputBinding::Mouse(button);
+    if (!Valid(binding))
+        return;
+    if (down)
+        State().externalMouseButtons.insert(binding.code);
+    else
+        State().externalMouseButtons.erase(binding.code);
+    RefreshActions(State(), true);
+}
+
+void Input::SetExternalMousePosition(float x, float y) {
+    if (std::isfinite(x) && std::isfinite(y))
+        State().externalMousePosition = std::pair{x, y};
+}
+
+void Input::ClearExternalMouse() {
+    State().externalMouseButtons.clear();
+    State().externalMousePosition.reset();
+    RefreshActions(State(), true);
+}
 } // namespace LuxEngine

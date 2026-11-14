@@ -2,7 +2,7 @@
 #include <LuxEngine/Animation/AnimationEngine.hpp>
 #include <LuxEngine/Core/Core.hpp>
 #include <LuxEngine/ECS/ECS.hpp>
-#include <LuxEngine/Physics/PhysicsEngine.hpp>
+#include <LuxEngine/Physics/PhysicsWorld.hpp>
 #include <algorithm>
 #include <iosfwd>
 #include <stdexcept>
@@ -15,7 +15,8 @@
 
 namespace LuxEngine {
 class Entity;
-class PhysicsWorld2D;
+class ScenePhysicsWorld;
+class ModelAsset;
 
 struct SceneSettings {
     Vec4 clearColor{.12f, .14f, .16f, 1};
@@ -74,6 +75,7 @@ public:
 
     // BeginContact events from the most recent 2D physics step, including sensors.
     const std::vector<Collision2DEvent>& GetCollisionEvents2D() const;
+    const std::vector<Collision3DEvent>& GetCollisionEvents3D() const;
     enum class SaveFault {
         None,
         TempWriteFailure,
@@ -141,14 +143,17 @@ private:
     bool ValidateForSerialization();
     void AdoptLoadedScene(Scene& parsed);
     void RepairReferenceLinks();
-    void RemovePhysicsBody2D(uint32 id);
+    void RemovePhysicsBody(uint32 id);
     uint32 nextEntityId_ = 1;
     std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
     std::unordered_set<uint32> entities_;
     std::unordered_map<std::type_index, std::unique_ptr<PoolBase>> pools_;
-    std::unique_ptr<PhysicsWorld2D> physics2D_;
+    std::unique_ptr<ScenePhysicsWorld> physics2D_;
+    std::unique_ptr<ScenePhysicsWorld> physics3D_;
+    std::vector<Collision3DEvent> collisionEvents3D_;
     std::vector<Collision2DEvent> collisionEvents2D_;
     std::vector<uint32> updateBuffer_;
+    std::unordered_map<std::string, Ref<ModelAsset>> modelAssets_;
     SceneSettings settings_;
     std::string sourcePath_;
     double physicsAccumulator_ = 0;

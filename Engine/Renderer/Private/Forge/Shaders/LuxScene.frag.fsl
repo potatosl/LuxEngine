@@ -15,7 +15,7 @@ STRUCT(MeshOutput)
 // Port of Shaders/Modern.frag.hlsl (Basic.frag.hlsl with lit = true and MODERN_3D): writes linear
 // HDR colour; LuxTone.frag.fsl applies exposure, tone mapping and sRGB encoding.
 ROOT_SIGNATURE(DefaultRootSignature)
-float4 PS_MAIN(MeshOutput In)
+float4 PS_MAIN(MeshOutput In, SV_ISFRONTFACE(bool) frontFacing)
 {
     INIT_MAIN;
     float4 texel = SampleMaterial(gTexture, In.uv);
@@ -24,7 +24,8 @@ float4 PS_MAIN(MeshOutput In)
         discard;
     if (gDraw.options.y < 1.5f)
         color.a = 1.0f;
-    const float3 faceNormal = dot(In.normal, In.normal) > 1e-10f ? In.normal : cross(ddy(In.world), ddx(In.world));
+    const bool authoredNormal = dot(In.normal, In.normal) > 1e-10f;
+    const float3 faceNormal = authoredNormal ? In.normal : cross(ddy(In.world), ddx(In.world));
     const float lenSq = dot(faceNormal, faceNormal);
     float3 normal = lenSq > 1e-10f ? faceNormal * rsqrt(lenSq) : float3(0.0f, 1.0f, 0.0f);
     const uint maps = uint(round(gDraw.options.w));
@@ -49,6 +50,10 @@ float4 PS_MAIN(MeshOutput In)
             }
         }
     }
+    // Derivative fallback normals already face the viewer. Authored/normal-mapped normals
+    // retain the mesh's outward orientation and must be reversed for a double-sided back face.
+    if (authoredNormal && gDraw.materialOptions.w > 0.5f && !frontFacing)
+        normal = -normal;
     const uint pointCount = min(gLights.count.x, 16u);
     if (In.options.w > 0.5f)
     {

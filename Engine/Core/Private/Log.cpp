@@ -1,5 +1,7 @@
 #include <LuxEngine/Core/Log.hpp>
 #include <SDL3/SDL_log.h>
+#include <deque>
+#include <mutex>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -11,6 +13,20 @@
 #endif
 
 namespace LuxEngine {
+namespace {
+std::mutex logMutex;
+std::deque<LogEntry> history;
+uint64_t nextSequence = 0;
+} // namespace
+
+std::vector<LogEntry> Log::ReadAfter(uint64_t sequence) {
+    std::lock_guard lock(logMutex);
+    std::vector<LogEntry> result;
+    for (const auto& entry : history)
+        if (entry.sequence > sequence)
+            result.push_back(entry);
+    return result;
+}
 
 void Log::ConfigureUtf8Output() noexcept {
 #ifdef _WIN32
@@ -29,6 +45,12 @@ void Log::Shutdown() {
 }
 
 void Log::Print(LogLevel level, std::string_view message) {
+    {
+        std::lock_guard lock(logMutex);
+        history.push_back({++nextSequence, level, std::string(message.substr(0, 16384))});
+        while (history.size() > 2000)
+            history.pop_front();
+    }
     const char* msgStr = message.empty() ? "" : message.data();
     const int msgLen = static_cast<int>(message.length());
 

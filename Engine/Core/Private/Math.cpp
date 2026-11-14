@@ -1,4 +1,5 @@
 #include <LuxEngine/Core/Math.hpp>
+#include <limits>
 
 namespace LuxEngine {
 Vec2 Vec2::operator+(const Vec2& o) const {
@@ -81,12 +82,21 @@ Mat4 Mat4::Perspective(float fovRadians, float aspect, float nearClip, float far
         !std::isfinite(farClip) || fovRadians <= 0 || fovRadians >= std::numbers::pi_v<float> ||
         aspect <= 0 || nearClip <= 0 || farClip <= nearClip)
         throw std::invalid_argument("Invalid perspective projection");
-    const float tanHalfFov = std::tan(fovRadians / 2.0f);
-    result.elements[0] = 1.0f / (aspect * tanHalfFov);
-    result.elements[5] = 1.0f / tanHalfFov;
-    result.elements[10] = farClip / (nearClip - farClip);
+    const auto representable = [](double value) {
+        if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+            throw std::invalid_argument("Perspective projection exceeds float range");
+        const auto converted = static_cast<float>(value);
+        if (!std::isfinite(converted) || (value != 0.0 && converted == 0.0f))
+            throw std::invalid_argument("Perspective projection exceeds float range");
+        return converted;
+    };
+    const double near = nearClip, far = farClip;
+    const double tanHalfFov = std::tan(static_cast<double>(fovRadians) * .5);
+    result.elements[0] = representable(1.0 / (static_cast<double>(aspect) * tanHalfFov));
+    result.elements[5] = representable(1.0 / tanHalfFov);
+    result.elements[10] = representable(far / (near - far));
     result.elements[11] = -1.0f;
-    result.elements[14] = -(farClip * nearClip) / (farClip - nearClip);
+    result.elements[14] = representable(-(far * near) / (far - near));
     result.elements[15] = 0.0f;
     return result;
 }

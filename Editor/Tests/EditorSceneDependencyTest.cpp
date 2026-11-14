@@ -2,10 +2,10 @@
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Scene/SceneDependencies.hpp>
 #include <LuxEngine/Assets/AssetManager.hpp>
+#include <LuxEngine/Assets/ModelAsset.hpp>
 #include <LuxEngine/EntryPoint.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
-#include <QColor>
-#include <QImage>
+#include <LuxUI/Widgets.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -163,6 +163,40 @@ void TestMeshDependencies() {
                           "missing mesh dependencies are rejected before game builds");
 }
 
+void TestAnimatedModelDependencies() {
+    Fixture fixture;
+    const auto modelFile = fixture.project.GetFile().parent_path() / "Assets" / "Animated.fbx";
+    fs::create_directories(modelFile.parent_path());
+    fs::copy_file(fs::path(LUX_FBX_ANIMATED_FIXTURE), modelFile);
+    Scene scene;
+    auto entity = scene.CreateEntity("Skinned model");
+    auto& mesh = entity.AddComponent<MeshRendererComponent>();
+    mesh.meshPath = PathUtf8(modelFile);
+    mesh.modelSubmesh = 0;
+    auto& animation = entity.AddComponent<ModelAnimationComponent>();
+    animation.modelPath = mesh.meshPath;
+    animation.clip = 0;
+    std::string error;
+    const auto model = ModelAsset::LoadFbx(mesh.meshPath, error);
+    Check(model && !model->submeshes.empty(), "structured dependency fixture loads");
+    animation.nodeIndex = model->submeshes[0].node;
+    Check(ValidateProjectSceneReferences(fixture.project, scene, error),
+          "structured skinned FBX bypasses the legacy static mesh importer");
+    mesh.modelSubmesh = 1000;
+    RejectWithoutMutation(fixture, scene, "missing FBX material part is rejected before build");
+    mesh.modelSubmesh = 0;
+    animation.clip = 1000;
+    RejectWithoutMutation(fixture, scene, "missing FBX clip is rejected before build");
+    animation.clip = 0;
+    animation.nodeIndex = model->submeshes[0].node == 0 ? 1 : 0;
+    RejectWithoutMutation(fixture, scene, "FBX geometry and animation nodes must match");
+    animation.nodeIndex = model->submeshes[0].node;
+    mesh.meshPath.clear();
+    animation.modelPath = PathUtf8(fixture.root / "Outside.fbx");
+    fs::copy_file(modelFile, PathFromUtf8(animation.modelPath));
+    RejectWithoutMutation(fixture, scene, "standalone FBX animation dependencies stay in project");
+}
+
 void TestTextureDependencies() {
     Fixture fixture;
     Scene scene;
@@ -171,9 +205,9 @@ void TestTextureDependencies() {
     const auto file =
         fixture.project.GetFile().parent_path() / "Assets" / PathFromUtf8("한글 텍스처.PnG");
     fs::create_directories(file.parent_path());
-    QImage image(2, 2, QImage::Format_RGBA8888);
-    image.fill(QColor(128, 90, 30));
-    Check(image.save(QString::fromUtf8(PathUtf8(file)), "PNG"),
+    LuxUI::Image image(2, 2, LuxUI::Image::Format_RGBA8888);
+    image.fill(LuxUI::Color(128, 90, 30));
+    Check(image.save(LuxUI::String::fromUtf8(PathUtf8(file)), "PNG"),
           "dependency texture fixture writes");
     material.baseColorTexture = PathUtf8(file);
     std::string error;
@@ -316,6 +350,7 @@ int RunDependencyChecks(int, char**) {
     try {
         TestSourcesAndSnapshots();
         TestMeshDependencies();
+        TestAnimatedModelDependencies();
         TestEnvironmentDependencies();
         TestTextureDependencies();
         TestTransitiveSources();

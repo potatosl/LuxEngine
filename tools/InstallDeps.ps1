@@ -1,4 +1,4 @@
-# Installs LuxEngine build dependencies (vcpkg packages + Box2D 2.4.1)
+# Installs LuxEngine build dependencies (vcpkg packages + Jolt Physics 5.6.0)
 param(
     [string]$DepsDir = "C:\LuxDeps",
     [string]$VcpkgDir = "C:\vcpkg",
@@ -43,10 +43,10 @@ Run "vcpkg install $($vcpkgPackages -join ' ')" {
     & $vcpkgExe install --triplet x64-windows --clean-after-build @vcpkgPackages
 }
 
-# Build and install Box2D 2.4.1
-if (-not (Test-Path "$DepsDir\src\box2d")) {
+# Build and install Jolt Physics 5.6.0
+if (-not (Test-Path "$DepsDir\src\jolt")) {
     New-Item -ItemType Directory -Path "$DepsDir\src" -Force | Out-Null
-    Run "clone box2d 2.4.1" { git clone --depth 1 -b v2.4.1 https://github.com/erincatto/box2d "$DepsDir\src\box2d" }
+    Run "clone Jolt 5.6.0" { git clone --depth 1 -b v5.6.0 https://github.com/jrouwe/JoltPhysics "$DepsDir\src\jolt" }
 }
 
 $genArgs = @()
@@ -56,13 +56,13 @@ if (Test-Path "C:/Program Files/Microsoft Visual Studio/18") {
     $genArgs = @("-G", "Visual Studio 17 2022", "-A", "x64")
 }
 
-Run "configure box2d" {
-    & $cmake -S "$DepsDir\src\box2d" -B "$DepsDir\build\box2d" @genArgs -DBOX2D_BUILD_UNIT_TESTS=OFF -DBOX2D_BUILD_TESTBED=OFF -DBOX2D_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX="$DepsDir" -DCMAKE_DEBUG_POSTFIX=d
+Run "configure jolt" {
+    & $cmake -S "$DepsDir\src\jolt\Build" -B "$DepsDir\build\jolt" @genArgs -DTARGET_UNIT_TESTS=OFF -DTARGET_HELLO_WORLD=OFF -DTARGET_SAMPLES=OFF -DTARGET_VIEWER=OFF -DTARGET_PERFORMANCE_TEST=OFF -DUSE_STATIC_MSVC_RUNTIME_LIBRARY=OFF -DINTERPROCEDURAL_OPTIMIZATION=OFF -DDEBUG_RENDERER_IN_DEBUG_AND_RELEASE=OFF -DPROFILER_IN_DEBUG_AND_RELEASE=OFF -DJPH_USE_DX12=OFF -DJPH_USE_VK=OFF -DJPH_USE_MTL=OFF -DJPH_USE_CPU_COMPUTE=OFF -DCMAKE_INSTALL_PREFIX="$DepsDir" -DCMAKE_DEBUG_POSTFIX=d
 }
 
 foreach ($cfg in "Release", "Debug") {
-    Run "build box2d $cfg" { & $cmake --build "$DepsDir\build\box2d" --config $cfg -- /m /v:minimal }
-    Run "install box2d $cfg" { & $cmake --install "$DepsDir\build\box2d" --config $cfg }
+    Run "build jolt $cfg" { & $cmake --build "$DepsDir\build\jolt" --config $cfg -- /m /v:minimal }
+    Run "install jolt $cfg" { & $cmake --install "$DepsDir\build\jolt" --config $cfg }
 }
 
 Write-Host "`nAll LuxEngine dependencies installed successfully."

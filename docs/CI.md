@@ -19,9 +19,9 @@
 
 ## 의존성과 재현성
 
-The Forge는 `cmake/TheForge.cmake`에 기록한 리비전의 `Common_3`를 별도 체크아웃한다. .NET 10 SDK와 Python 3.12도 명시적으로 준비한다. Windows는 Qt 6.8.3, vcpkg 의존성, Box2D 2.4.1을 설치한다. 이전 Vulkan SDK·별도 DXC 설치는 Windows D3D12 빌드에서 제거했다.
+The Forge는 `cmake/TheForge.cmake`에 기록한 리비전의 `Common_3`를 별도 체크아웃한다. .NET 10 SDK와 Python 3.12도 명시적으로 준비한다. Windows는 Qt 6.8.3, vcpkg 의존성, Jolt Physics 5.6.0을 설치한다. 이전 Vulkan SDK·별도 DXC 설치는 Windows D3D12 빌드에서 제거했다.
 
-Unix의 SDL3·Box2D·stb는 `tools/ci/SetupUnixDependencies.sh`의 고정 리비전에서 미리 빌드·설치하고 캐시한다. 시스템 라이브러리는 apt 또는 Homebrew로 설치한다. Box2D 3.x를 자동 선택하지 않는다. CI의 준비 단계에서만 내려받으며 프로젝트의 CMake 구성은 다운로드를 수행하지 않는다.
+Unix의 SDL3·Jolt·stb는 `tools/ci/SetupUnixDependencies.sh`의 고정 리비전에서 미리 빌드·설치하고 캐시한다. 시스템 라이브러리는 apt 또는 Homebrew로 설치한다. Jolt의 Debug·Release 아카이브를 각각 설치한다. CI의 준비 단계에서만 내려받으며 프로젝트의 CMake 구성은 다운로드를 수행하지 않는다.
 
 `LUX_ENABLE_SANITIZERS=ON`은 Linux GCC·Clang의 엔진 타깃을 계측한다. The Forge 외부 소스와 .NET CLR은 이 검사 대상에서 제외했다. 일반 빌드에서는 기본값 `OFF`를 유지한다.
 

@@ -1,10 +1,9 @@
 #include <LuxEditor/Project/EditorProject.hpp>
 #include <LuxEditor/Project/PathEncoding.hpp>
 #include <LuxEditor/Scene/SceneAuthoringIO.hpp>
+#include <LuxUI/Widgets.hpp>
 
 #include <LuxEngine/Scene/Scene.hpp>
-#include <QImageReader>
-#include <QString>
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -47,7 +46,7 @@ bool EditorProject::SetIcon(const std::filesystem::path& image, std::string& err
         error = "PNG, JPEG, ICO 또는 ICNS 이미지를 선택해 주세요.";
         return false;
     }
-    QImageReader reader(QString::fromUtf8(PathUtf8(image)));
+    LuxUI::ImageReader reader(LuxUI::String::fromUtf8(PathUtf8(image)));
     if (extension != ".icns" && !reader.canRead()) {
         error = "아이콘 이미지 파일을 읽을 수 없습니다.";
         return false;

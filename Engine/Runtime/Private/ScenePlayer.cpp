@@ -67,11 +67,15 @@ ScenePlayerCameraView ResolveScenePlayerCamera(Scene& scene, const ScenePlayerVi
     for (const auto id : scene.GetComponentEntityIds<CameraComponent>()) {
         const auto& camera = scene.GetComponent<CameraComponent>(id);
         if (!camera.isPrimary || !camera.isPerspective || !std::isfinite(camera.fov) ||
-            camera.fov <= 0 || camera.fov >= 180 || !scene.HasComponent<TransformComponent>(id))
+            camera.fov <= 0 || camera.fov >= 180 || !std::isfinite(camera.nearClip) ||
+            !std::isfinite(camera.farClip) || camera.nearClip <= 0 ||
+            camera.farClip <= camera.nearClip || !scene.HasComponent<TransformComponent>(id))
             continue;
-        const float tangent = std::tan(ToRadians(camera.fov) * .5f);
-        if (!std::isfinite(tangent) || tangent <= 0 || !std::isfinite(1.0f / tangent))
+        try {
+            Mat4::Perspective(ToRadians(camera.fov), 1.0f, camera.nearClip, camera.farClip);
+        } catch (const std::invalid_argument&) {
             continue;
+        }
         const auto matrix = scene.GetWorldMatrix(id);
         const auto* m = matrix.elements;
         const Vec3 position{m[12], m[13], m[14]};
@@ -87,7 +91,7 @@ ScenePlayerCameraView ResolveScenePlayerCamera(Scene& scene, const ScenePlayerVi
         const float separation = (target - position).Dot(target - position);
         if (!Finite(target) || !std::isfinite(separation) || separation <= 0)
             continue;
-        result = {position, target, up, camera.fov};
+        result = {position, target, up, camera.fov, camera.nearClip, camera.farClip};
         break;
     }
     return result;
@@ -300,7 +304,8 @@ void ScenePlayer::UpdateCamera() {
                           view.centerY - view.halfHeight, view.centerY + view.halfHeight);
 
     const auto primary = ResolveScenePlayerCamera(*scene_, view_);
-    camera3D_.SetPerspective(ToRadians(primary.fovDegrees), aspect, 0.1f, 1000.0f);
+    camera3D_.SetPerspective(ToRadians(primary.fovDegrees), aspect, primary.nearClip,
+                             primary.farClip);
     camera3D_.SetPosition(primary.position);
     camera3D_.SetTarget(primary.target);
     camera3D_.SetUp(primary.up);

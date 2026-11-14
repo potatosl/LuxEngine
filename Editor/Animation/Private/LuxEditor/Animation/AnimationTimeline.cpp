@@ -1,11 +1,5 @@
 #include <LuxEditor/Animation/AnimationTimeline.hpp>
-#include <QContextMenuEvent>
-#include <QKeyEvent>
-#include <QMenu>
-#include <QMouseEvent>
-#include <QPainter>
-#include <QPainterPath>
-#include <QWheelEvent>
+#include <LuxUI/Widgets.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -16,20 +10,19 @@ constexpr int RulerHeight = 38;
 constexpr int RowHeight = 32;
 constexpr int TrackCount = 4;
 
-QPolygonF Diamond(const QPointF& center, double size) {
-    return {center + QPointF(0, -size), center + QPointF(size, 0), center + QPointF(0, size),
-            center + QPointF(-size, 0)};
+LuxUI::PolygonF Diamond(const LuxUI::PointF& center, double size) {
+    return {center + LuxUI::PointF(0, -size), center + LuxUI::PointF(size, 0),
+            center + LuxUI::PointF(0, size), center + LuxUI::PointF(-size, 0)};
 }
 } // namespace
 
-AnimationTimeline::AnimationTimeline(QWidget* parent, AnimationTimelineActions actions)
-    : QSlider(Qt::Horizontal, parent), actions_(std::move(actions)) {
+AnimationTimeline::AnimationTimeline(LuxUI::Widget* parent, AnimationTimelineActions actions)
+    : LuxUI::Slider(LuxUI::Flags::Horizontal, parent), actions_(std::move(actions)) {
     setMinimumHeight(RulerHeight + RowHeight * TrackCount + 28);
-    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    setFocusPolicy(Qt::StrongFocus);
+    setSizePolicy(LuxUI::SizePolicy::Expanding, LuxUI::SizePolicy::Expanding);
+    setFocusPolicy(LuxUI::Flags::StrongFocus);
     setMouseTracking(true);
-    setToolTip(
-        QStringLiteral("시간 눈금: 재생 헤드 이동 · 키 드래그: 시간 변경 · Delete: 키 삭제"));
+    setToolTip(LUX_UI_TEXT("시간 눈금: 재생 헤드 이동 · 키 드래그: 시간 변경 · Delete: 키 삭제"));
 }
 
 void AnimationTimeline::SetZoom(double zoom) {
@@ -67,7 +60,7 @@ double AnimationTimeline::PositionAt(float time) const {
     return HeaderWidth + (time / Duration() - origin) * span * zoom_;
 }
 
-int AnimationTimeline::KeyAt(const QPointF& point) const {
+int AnimationTimeline::KeyAt(const LuxUI::PointF& point) const {
     if (point.x() < HeaderWidth || point.y() < RulerHeight ||
         (!curveMode_ && point.y() > RulerHeight + (expanded_ ? TrackCount : 1) * RowHeight))
         return -1;
@@ -82,36 +75,37 @@ int AnimationTimeline::KeyAt(const QPointF& point) const {
     return -1;
 }
 
-void AnimationTimeline::paintEvent(QPaintEvent*) {
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
+void AnimationTimeline::paintEvent(LuxUI::PaintEvent*) {
+    LuxUI::Painter painter(this);
+    painter.setRenderHint(LuxUI::Painter::Antialiasing);
     // Read the workspace palette rather than QSlider's style palette. Some Qt styles keep
     // a white Base role on custom-painted slider children despite the dark parent stylesheet.
     const auto theme = window()->palette();
-    const bool dark = theme.color(QPalette::Window).lightness() < 128;
-    const auto background = theme.color(QPalette::Window).darker(dark ? 125 : 100);
+    const bool dark = theme.color(LuxUI::Palette::Window).lightness() < 128;
+    const auto background = theme.color(LuxUI::Palette::Window).darker(dark ? 125 : 100);
     const auto alternate = dark ? background.lighter(118) : background.darker(104);
-    const auto text = theme.color(QPalette::WindowText);
+    const auto text = theme.color(LuxUI::Palette::WindowText);
     const auto divider = dark ? background.lighter(160) : background.darker(120);
-    const auto accent = theme.color(QPalette::Highlight).lighter(dark ? 150 : 100);
+    const auto accent = theme.color(LuxUI::Palette::Highlight).lighter(dark ? 150 : 100);
     painter.fillRect(rect(), background);
-    painter.fillRect(QRect(0, 0, width(), RulerHeight), alternate);
-    painter.fillRect(QRect(0, RulerHeight, HeaderWidth, height()), alternate);
+    painter.fillRect(LuxUI::Rect(0, 0, width(), RulerHeight), alternate);
+    painter.fillRect(LuxUI::Rect(0, RulerHeight, HeaderWidth, height()), alternate);
     painter.setPen(divider);
     painter.drawLine(HeaderWidth, 0, HeaderWidth, height());
     painter.setPen(text);
-    painter.drawText(QRect(12, 0, HeaderWidth - 24, RulerHeight), Qt::AlignVCenter,
-                     curveMode_ ? QStringLiteral("위치 곡선") : QStringLiteral("변환 트랙"));
-    const QStringList labels{
-        expanded_ ? QStringLiteral("▾  Transform") : QStringLiteral("▸  Transform"),
-        QStringLiteral("    위치"), QStringLiteral("    회전"), QStringLiteral("    크기")};
+    painter.drawText(LuxUI::Rect(12, 0, HeaderWidth - 24, RulerHeight), LuxUI::Flags::AlignVCenter,
+                     curveMode_ ? LUX_UI_TEXT("위치 곡선") : LUX_UI_TEXT("변환 트랙"));
+    const LuxUI::StringList labels{
+        expanded_ ? LUX_UI_TEXT("▾  Transform") : LUX_UI_TEXT("▸  Transform"),
+        LUX_UI_TEXT("    위치"), LUX_UI_TEXT("    회전"), LUX_UI_TEXT("    크기")};
     for (int row = 0; !curveMode_ && row < (expanded_ ? TrackCount : 1); ++row) {
         const int y = RulerHeight + row * RowHeight;
         if (row % 2 == 1)
-            painter.fillRect(QRect(HeaderWidth + 1, y, width() - HeaderWidth, RowHeight),
+            painter.fillRect(LuxUI::Rect(HeaderWidth + 1, y, width() - HeaderWidth, RowHeight),
                              alternate);
         painter.setPen(text);
-        painter.drawText(QRect(12, y, HeaderWidth - 24, RowHeight), Qt::AlignVCenter, labels[row]);
+        painter.drawText(LuxUI::Rect(12, y, HeaderWidth - 24, RowHeight),
+                         LuxUI::Flags::AlignVCenter, labels[row]);
         painter.setPen(divider);
         painter.drawLine(0, y + RowHeight, width(), y + RowHeight);
     }
@@ -125,14 +119,14 @@ void AnimationTimeline::paintEvent(QPaintEvent*) {
     const double first = std::ceil(TimeAt(HeaderWidth) / tickStep) * tickStep;
     const double last = TimeAt(width() - 18);
     painter.save();
-    painter.setClipRect(QRect(HeaderWidth, 0, width() - HeaderWidth, height()));
+    painter.setClipRect(LuxUI::Rect(HeaderWidth, 0, width() - HeaderWidth, height()));
     for (double time = first; time <= last + tickStep * .1; time += tickStep) {
         const auto x = PositionAt(static_cast<float>(time));
         painter.setPen(divider);
-        painter.drawLine(QPointF(x, RulerHeight - 6), QPointF(x, height()));
+        painter.drawLine(LuxUI::PointF(x, RulerHeight - 6), LuxUI::PointF(x, height()));
         painter.setPen(text);
-        painter.drawText(QRectF(x + 5, 1, 66, RulerHeight - 7), Qt::AlignVCenter,
-                         QStringLiteral("%1\n%2 s")
+        painter.drawText(LuxUI::RectF(x + 5, 1, 66, RulerHeight - 7), LuxUI::Flags::AlignVCenter,
+                         LUX_UI_TEXT("%1\n%2 s")
                              .arg(std::llround(time * fps))
                              .arg(time, 0, 'f', tickStep < .1 ? 2 : 1));
     }
@@ -141,29 +135,29 @@ void AnimationTimeline::paintEvent(QPaintEvent*) {
         entity ? entity.TryGetComponent<LuxEngine::AnimationComponent>() : nullptr;
     if (animation) {
         if (curveMode_ && !animation->clip.keyframes.empty()) {
-            const QColor colors[] = {QColor(228, 103, 103), QColor(108, 193, 127),
-                                     QColor(106, 156, 229)};
+            const LuxUI::Color colors[] = {LuxUI::Color(228, 103, 103), LuxUI::Color(108, 193, 127),
+                                           LuxUI::Color(106, 156, 229)};
             float low = 0, high = 1;
             for (const auto& key : animation->clip.keyframes) {
                 low = std::min({low, key.position.x, key.position.y, key.position.z});
                 high = std::max({high, key.position.x, key.position.y, key.position.z});
             }
             for (int axis = 0; axis < 3; ++axis) {
-                QPainterPath curve;
+                LuxUI::PainterPath curve;
                 bool firstPoint = true;
                 for (const auto& key : animation->clip.keyframes) {
                     const float values[] = {key.position.x, key.position.y, key.position.z};
                     const auto y = RulerHeight + 10 +
                                    (high - values[axis]) / (high - low) *
                                        std::max(1, height() - RulerHeight - 30);
-                    const QPointF point(PositionAt(key.time), y);
+                    const LuxUI::PointF point(PositionAt(key.time), y);
                     if (firstPoint)
                         curve.moveTo(point);
                     else
                         curve.lineTo(point);
                     firstPoint = false;
                 }
-                painter.setPen(QPen(colors[axis], 2));
+                painter.setPen(LuxUI::Pen(colors[axis], 2));
                 painter.drawPath(curve);
                 for (size_t index = 0; index < animation->clip.keyframes.size(); ++index) {
                     const auto& key = animation->clip.keyframes[index];
@@ -172,7 +166,7 @@ void AnimationTimeline::paintEvent(QPaintEvent*) {
                                    (high - values[axis]) / (high - low) *
                                        std::max(1, height() - RulerHeight - 30);
                     painter.setBrush(static_cast<int>(index) == actions_.selectedKey()
-                                         ? QColor(255, 192, 84)
+                                         ? LuxUI::Color(255, 192, 84)
                                          : colors[axis]);
                     painter.drawPolygon(Diamond({PositionAt(key.time), y}, 4.5));
                 }
@@ -181,45 +175,47 @@ void AnimationTimeline::paintEvent(QPaintEvent*) {
         for (size_t index = 0; !curveMode_ && index < animation->clip.keyframes.size(); ++index) {
             const auto x = PositionAt(animation->clip.keyframes[index].time);
             const bool selected = static_cast<int>(index) == actions_.selectedKey();
-            painter.setPen(QPen(selected ? accent.lighter(140) : QColor(150, 111, 49), 1));
-            painter.setBrush(selected ? accent : QColor(192, 151, 79));
+            painter.setPen(
+                LuxUI::Pen(selected ? accent.lighter(140) : LuxUI::Color(150, 111, 49), 1));
+            painter.setBrush(selected ? accent : LuxUI::Color(192, 151, 79));
             for (int row = 0; row < (expanded_ ? TrackCount : 1); ++row)
                 painter.drawPolygon(Diamond({x, RulerHeight + row * RowHeight + RowHeight / 2.0},
                                             selected ? 5.5 : 4.5));
         }
     }
     if (draggedKey_ >= 0) {
-        painter.setPen(QPen(accent, 1, Qt::DashLine));
+        painter.setPen(LuxUI::Pen(accent, 1, LuxUI::Flags::DashLine));
         const double x = PositionAt(draggedTime_);
-        painter.drawLine(QPointF(x, RulerHeight), QPointF(x, height()));
+        painter.drawLine(LuxUI::PointF(x, RulerHeight), LuxUI::PointF(x, height()));
     }
     const float current = animation ? animation->currentTime : 0;
     const double x = PositionAt(current);
-    painter.setPen(QPen(accent, 1.5));
-    painter.drawLine(QPointF(x, 0), QPointF(x, height()));
+    painter.setPen(LuxUI::Pen(accent, 1.5));
+    painter.drawLine(LuxUI::PointF(x, 0), LuxUI::PointF(x, height()));
     painter.setBrush(accent);
-    painter.drawPolygon(QPolygonF{{x - 6, 0}, {x + 6, 0}, {x + 6, 16}, {x, 22}, {x - 6, 16}});
+    painter.drawPolygon(LuxUI::PolygonF{{x - 6, 0}, {x + 6, 0}, {x + 6, 16}, {x, 22}, {x - 6, 16}});
     painter.restore();
     if (curveMode_) {
-        const QColor colors[] = {QColor(228, 103, 103), QColor(108, 193, 127),
-                                 QColor(106, 156, 229)};
-        const QStringList channels{QStringLiteral("●  위치 X"), QStringLiteral("●  위치 Y"),
-                                   QStringLiteral("●  위치 Z")};
+        const LuxUI::Color colors[] = {LuxUI::Color(228, 103, 103), LuxUI::Color(108, 193, 127),
+                                       LuxUI::Color(106, 156, 229)};
+        const LuxUI::StringList channels{LUX_UI_TEXT("●  위치 X"), LUX_UI_TEXT("●  위치 Y"),
+                                         LUX_UI_TEXT("●  위치 Z")};
         for (int axis = 0; axis < 3; ++axis) {
             painter.setPen(colors[axis]);
-            painter.drawText(QRect(16, RulerHeight + axis * RowHeight, HeaderWidth - 24, RowHeight),
-                             Qt::AlignVCenter, channels[axis]);
+            painter.drawText(
+                LuxUI::Rect(16, RulerHeight + axis * RowHeight, HeaderWidth - 24, RowHeight),
+                LuxUI::Flags::AlignVCenter, channels[axis]);
         }
         painter.setPen(text);
-        painter.drawText(QRect(16, RulerHeight + 3 * RowHeight, HeaderWidth - 24, RowHeight),
-                         Qt::AlignVCenter, QStringLiteral("선형 보간"));
+        painter.drawText(LuxUI::Rect(16, RulerHeight + 3 * RowHeight, HeaderWidth - 24, RowHeight),
+                         LuxUI::Flags::AlignVCenter, LUX_UI_TEXT("선형 보간"));
     }
     if (!animation) {
         painter.setPen(text);
         painter.drawText(
-            QRect(HeaderWidth + 20, RulerHeight + 12, width() - HeaderWidth - 40, 100),
-            Qt::AlignCenter | Qt::TextWordWrap,
-            QStringLiteral("애니메이션 클립을 생성하면 키프레임을 편집할 수 있습니다."));
+            LuxUI::Rect(HeaderWidth + 20, RulerHeight + 12, width() - HeaderWidth - 40, 100),
+            LuxUI::Flags::AlignCenter | LuxUI::Flags::TextWordWrap,
+            LUX_UI_TEXT("애니메이션 클립을 생성하면 키프레임을 편집할 수 있습니다."));
     }
 }
 
@@ -232,15 +228,16 @@ void AnimationTimeline::Scrub(double x) {
         setValue(static_cast<int>(std::lround(1000 * time / Duration())));
 }
 
-void AnimationTimeline::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton && !curveMode_ && event->position().x() < HeaderWidth &&
-        event->position().y() >= RulerHeight && event->position().y() < RulerHeight + RowHeight) {
+void AnimationTimeline::mousePressEvent(LuxUI::MouseEvent* event) {
+    if (event->button() == LuxUI::Flags::LeftButton && !curveMode_ &&
+        event->position().x() < HeaderWidth && event->position().y() >= RulerHeight &&
+        event->position().y() < RulerHeight + RowHeight) {
         expanded_ = !expanded_;
         update();
         event->accept();
         return;
     }
-    if (event->button() != Qt::LeftButton || event->position().x() < HeaderWidth) {
+    if (event->button() != LuxUI::Flags::LeftButton || event->position().x() < HeaderWidth) {
         event->ignore();
         return;
     }
@@ -259,7 +256,7 @@ void AnimationTimeline::mousePressEvent(QMouseEvent* event) {
     event->accept();
 }
 
-void AnimationTimeline::mouseMoveEvent(QMouseEvent* event) {
+void AnimationTimeline::mouseMoveEvent(LuxUI::MouseEvent* event) {
     if (!isSliderDown())
         return;
     const int fps = std::max(1, actions_.framesPerSecond());
@@ -269,8 +266,8 @@ void AnimationTimeline::mouseMoveEvent(QMouseEvent* event) {
     event->accept();
 }
 
-void AnimationTimeline::mouseReleaseEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton || !isSliderDown())
+void AnimationTimeline::mouseReleaseEvent(LuxUI::MouseEvent* event) {
+    if (event->button() != LuxUI::Flags::LeftButton || !isSliderDown())
         return;
     if (draggedKey_ >= 0)
         actions_.moveKey(draggedKey_, draggedTime_);
@@ -280,8 +277,8 @@ void AnimationTimeline::mouseReleaseEvent(QMouseEvent* event) {
     event->accept();
 }
 
-void AnimationTimeline::mouseDoubleClickEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton || event->position().x() < HeaderWidth)
+void AnimationTimeline::mouseDoubleClickEvent(LuxUI::MouseEvent* event) {
+    if (event->button() != LuxUI::Flags::LeftButton || event->position().x() < HeaderWidth)
         return;
     setSliderDown(true);
     Scrub(event->position().x());
@@ -289,58 +286,62 @@ void AnimationTimeline::mouseDoubleClickEvent(QMouseEvent* event) {
     actions_.addKey();
 }
 
-void AnimationTimeline::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Space && actions_.togglePlayback) {
+void AnimationTimeline::keyPressEvent(LuxUI::KeyEvent* event) {
+    if (event->key() == LuxUI::Flags::Key_Space && actions_.togglePlayback) {
         actions_.togglePlayback();
         event->accept();
-    } else if ((event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) &&
+    } else if ((event->key() == LuxUI::Flags::Key_Left ||
+                event->key() == LuxUI::Flags::Key_Right) &&
                actions_.seekTime) {
         const auto entity = actions_.target();
         const auto* animation =
             entity ? entity.TryGetComponent<LuxEngine::AnimationComponent>() : nullptr;
         if (animation) {
             setSliderDown(true);
-            actions_.seekTime(animation->currentTime + (event->key() == Qt::Key_Left ? -1.0 : 1.0) /
-                                                           std::max(1, actions_.framesPerSecond()));
+            actions_.seekTime(animation->currentTime +
+                              (event->key() == LuxUI::Flags::Key_Left ? -1.0 : 1.0) /
+                                  std::max(1, actions_.framesPerSecond()));
             setSliderDown(false);
         }
         event->accept();
-    } else if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+    } else if (event->key() == LuxUI::Flags::Key_Delete ||
+               event->key() == LuxUI::Flags::Key_Backspace) {
         actions_.removeKey();
         event->accept();
     } else {
-        QSlider::keyPressEvent(event);
+        LuxUI::Slider::keyPressEvent(event);
     }
 }
 
-void AnimationTimeline::wheelEvent(QWheelEvent* event) {
-    if (event->modifiers() & Qt::ControlModifier)
+void AnimationTimeline::wheelEvent(LuxUI::WheelEvent* event) {
+    if (event->modifiers() & LuxUI::Flags::ControlModifier)
         SetZoom(zoom_ * (event->angleDelta().y() > 0 ? 1.25 : .8));
     else
         SetScroll(scroll_ - event->angleDelta().y() / 1200.0);
     event->accept();
 }
 
-void AnimationTimeline::contextMenuEvent(QContextMenuEvent* event) {
+void AnimationTimeline::contextMenuEvent(LuxUI::ContextMenuEvent* event) {
     const int key = KeyAt(event->pos());
     if (key >= 0)
         actions_.selectKey(key);
-    QMenu menu(this);
-    menu.addAction(QStringLiteral("현재 시간에 키 추가"), [this] { actions_.addKey(); });
-    auto* remove = menu.addAction(QStringLiteral("선택 키 삭제"), [this] { actions_.removeKey(); });
+    LuxUI::Menu menu(this);
+    menu.addAction(LUX_UI_TEXT("현재 시간에 키 추가"), [this] { actions_.addKey(); });
+    auto* remove = menu.addAction(LUX_UI_TEXT("선택 키 삭제"), [this] { actions_.removeKey(); });
     remove->setEnabled(actions_.selectedKey() >= 0);
     menu.exec(event->globalPos());
 }
 
-bool AnimationTimeline::event(QEvent* event) {
-    if (event->type() == QEvent::ShortcutOverride) {
-        const auto key = static_cast<QKeyEvent*>(event)->key();
-        if (key == Qt::Key_Delete || key == Qt::Key_Backspace || key == Qt::Key_Space) {
+bool AnimationTimeline::event(LuxUI::Event* event) {
+    if (event->type() == LuxUI::Event::ShortcutOverride) {
+        const auto key = static_cast<LuxUI::KeyEvent*>(event)->key();
+        if (key == LuxUI::Flags::Key_Delete || key == LuxUI::Flags::Key_Backspace ||
+            key == LuxUI::Flags::Key_Space) {
             event->accept();
             return true;
         }
     }
-    return QSlider::event(event);
+    return LuxUI::Slider::event(event);
 }
 
 } // namespace LuxEditor

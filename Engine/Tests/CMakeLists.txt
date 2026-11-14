@@ -188,3 +188,42 @@ lux_set_target_warnings(LuxPrefabLibraryTests)
 lux_copy_runtime(LuxPrefabLibraryTests)
 add_test(NAME Engine_prefab_library COMMAND LuxPrefabLibraryTests)
 set_tests_properties(Engine_prefab_library PROPERTIES LABELS "headless;scene;prefab" TIMEOUT 90)
+
+add_executable(LuxJoltPhysicsTests JoltPhysicsTest.cpp)
+target_link_libraries(LuxJoltPhysicsTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxJoltPhysicsTests)
+lux_copy_runtime(LuxJoltPhysicsTests)
+add_test(NAME Engine_jolt_physics COMMAND LuxJoltPhysicsTests)
+set_tests_properties(Engine_jolt_physics PROPERTIES LABELS "headless;physics;jolt" TIMEOUT 60)
+
+add_executable(LuxEmbeddedInputTests EmbeddedInputTest.cpp)
+target_link_libraries(LuxEmbeddedInputTests PRIVATE LuxEngine::Engine Threads::Threads)
+lux_set_target_warnings(LuxEmbeddedInputTests)
+lux_copy_runtime(LuxEmbeddedInputTests)
+add_test(NAME Engine_embedded_input COMMAND LuxEmbeddedInputTests)
+set_tests_properties(Engine_embedded_input PROPERTIES LABELS "headless;input;editor" TIMEOUT 30)
+
+add_executable(LuxFbxModelTests FbxModelTest.cpp)
+target_link_libraries(LuxFbxModelTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxFbxModelTests)
+lux_copy_runtime(LuxFbxModelTests)
+add_test(NAME Engine_fbx_model COMMAND LuxFbxModelTests "${LUX_BASIC_MODEL_SOURCE_DIR}")
+set_tests_properties(Engine_fbx_model PROPERTIES LABELS "headless;assets;fbx" TIMEOUT 90)
+
+add_executable(LuxFbxModelSceneTests FbxModelSceneTest.cpp)
+target_link_libraries(LuxFbxModelSceneTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxFbxModelSceneTests)
+lux_copy_runtime(LuxFbxModelSceneTests)
+add_test(NAME Engine_fbx_model_scene COMMAND LuxFbxModelSceneTests
+    "${CMAKE_CURRENT_SOURCE_DIR}/Fixtures/AnimatedTriangle.fbx")
+set_tests_properties(Engine_fbx_model_scene PROPERTIES LABELS "headless;assets;fbx;scene" TIMEOUT 90)
+target_compile_definitions(LuxFbxRenderTests PRIVATE
+    LUX_FBX_ANIMATED_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/Fixtures/AnimatedTriangle.fbx")
+
+add_executable(LuxMaterialSidedTests MaterialSidedTest.cpp)
+target_link_libraries(LuxMaterialSidedTests PRIVATE LuxEngine::Engine)
+lux_set_target_warnings(LuxMaterialSidedTests)
+lux_copy_runtime(LuxMaterialSidedTests)
+add_test(NAME Engine_material_sided COMMAND LuxMaterialSidedTests)
+set_tests_properties(Engine_material_sided PROPERTIES LABELS "gpu;materials;fbx" TIMEOUT 90
+    SKIP_RETURN_CODE 77 ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;LUX_VULKAN_VALIDATION=sync")

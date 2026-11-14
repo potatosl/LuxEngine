@@ -250,6 +250,7 @@ bool Scene::SerializeToString(std::string& output) {
                 value["metallic"] = ToJson(component->material.metallic);
                 value["roughness"] = ToJson(component->material.roughness);
                 value["asset"] = ToJson(component->meshPath);
+                value["model_submesh"] = component->modelSubmesh;
                 value["base_color_texture"] = ToJson(component->material.baseColorTexture);
                 value["alpha_mode"] = static_cast<int>(component->material.alphaMode);
                 value["alpha_cutoff"] = ToJson(component->material.alphaCutoff);
@@ -266,12 +267,25 @@ bool Scene::SerializeToString(std::string& output) {
                     {"anisotropic", component->material.textureSampling.anisotropic}};
                 components["mesh"] = std::move(value);
             }
+            if (const auto* component = TryGetComponent<ModelAnimationComponent>(id)) {
+                components["model_animation"] = {
+                    {"asset", component->modelPath},
+                    {"node", component->nodeIndex},
+                    {"clip", component->clip},
+                    {"time", component->time},
+                    {"speed", component->speed},
+                    {"playing", component->playing},
+                    {"loop", component->loop},
+                    {"apply_node_transform", component->applyNodeTransform}};
+            }
             if (const auto* component = TryGetComponent<CameraComponent>(id)) {
                 Json value = Json::object();
                 value["primary"] = ToJson(component->isPrimary);
                 value["perspective"] = ToJson(component->isPerspective);
                 value["fov"] = ToJson(component->fov);
                 value["ortho_size"] = ToJson(component->orthoSize);
+                value["near_clip"] = component->nearClip;
+                value["far_clip"] = component->farClip;
                 components["camera"] = std::move(value);
             }
             if (const auto* component = TryGetComponent<Rigidbody2DComponent>(id)) {
@@ -442,6 +456,8 @@ bool Scene::DeserializeJson(const std::string& data) {
                     ReadJsonValue(value.at("metallic"), component.material.metallic);
                     ReadJsonValue(value.at("roughness"), component.material.roughness);
                     ReadJsonValue(value.at("asset"), component.meshPath);
+                    if (value.contains("model_submesh"))
+                        ReadJsonValue(value.at("model_submesh"), component.modelSubmesh);
                     ReadJsonValue(value.at("base_color_texture"),
                                   component.material.baseColorTexture);
                     if (value.contains("alpha_mode")) {
@@ -493,6 +509,18 @@ bool Scene::DeserializeJson(const std::string& data) {
                             static_cast<TextureAddressMode>(address);
                     }
                     entity.AddComponent<MeshRendererComponent>(std::move(component));
+                } else if (name == "model_animation") {
+                    ModelAnimationComponent component;
+                    RequireValidScene(value.is_object());
+                    ReadJsonValue(value.at("asset"), component.modelPath);
+                    ReadJsonValue(value.at("node"), component.nodeIndex);
+                    ReadJsonValue(value.at("clip"), component.clip);
+                    ReadJsonValue(value.at("time"), component.time);
+                    ReadJsonValue(value.at("speed"), component.speed);
+                    ReadJsonValue(value.at("playing"), component.playing);
+                    ReadJsonValue(value.at("loop"), component.loop);
+                    ReadJsonValue(value.at("apply_node_transform"), component.applyNodeTransform);
+                    entity.AddComponent<ModelAnimationComponent>(std::move(component));
                 } else if (name == "camera") {
                     CameraComponent component;
                     RequireValidScene(value.is_object());
@@ -500,6 +528,10 @@ bool Scene::DeserializeJson(const std::string& data) {
                     ReadJsonValue(value.at("perspective"), component.isPerspective);
                     ReadJsonValue(value.at("fov"), component.fov);
                     ReadJsonValue(value.at("ortho_size"), component.orthoSize);
+                    if (value.contains("near_clip"))
+                        ReadJsonValue(value.at("near_clip"), component.nearClip);
+                    if (value.contains("far_clip"))
+                        ReadJsonValue(value.at("far_clip"), component.farClip);
                     entity.AddComponent<CameraComponent>(std::move(component));
                 } else if (name == "rigidbody2d") {
                     Rigidbody2DComponent component;

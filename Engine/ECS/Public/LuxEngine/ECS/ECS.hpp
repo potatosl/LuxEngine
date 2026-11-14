@@ -69,6 +69,18 @@ struct TilemapComponent {
 struct MeshRendererComponent {
     Material3D material;
     std::string meshPath;
+    int32 modelSubmesh = -1;
+};
+
+struct ModelAnimationComponent {
+    std::string modelPath;
+    uint32 nodeIndex = 0;
+    int32 clip = -1;
+    double time = 0.0;
+    double speed = 1.0;
+    bool playing = false;
+    bool loop = true;
+    bool applyNodeTransform = true;
 };
 
 struct ScriptComponent {
@@ -82,6 +94,8 @@ struct CameraComponent {
     bool isPerspective = false;
     float fov = 45.0f;
     float orthoSize = 10.0f;
+    float nearClip = .1f;
+    float farClip = 1000.f;
 };
 
 } // namespace LuxEngine

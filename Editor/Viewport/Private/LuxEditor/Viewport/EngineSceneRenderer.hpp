@@ -1,9 +1,9 @@
 #pragma once
 #include <LuxEngine/Core/Core.hpp>
 #include <LuxEngine/Core/Math.hpp>
-#include <QImage>
-#include <QRectF>
-#include <QString>
+#include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
+#include <LuxEngine/Renderer/Renderer3D/Renderer3D.hpp>
+#include <LuxUI/Widgets.hpp>
 #include <functional>
 #include <memory>
 
@@ -13,6 +13,15 @@ class GpuDevice;
 } // namespace LuxEngine
 
 namespace LuxEditor {
+
+struct GameViewCamera {
+    bool perspective = false;
+    LuxEngine::OrthographicCamera camera2D;
+    LuxEngine::PerspectiveCamera camera3D;
+};
+
+// Shared by GPU and software Game Views. Scene View camera state never enters this path.
+GameViewCamera ResolveGameViewCamera(LuxEngine::Scene& scene, int width, int height);
 
 // Renders a Scene with the engine's The Forge Renderer2D and Renderer3D into images the Qt viewport
 // can show. The engine needs an SDL window for its swapchain, so a hidden window is used and every
@@ -32,14 +41,20 @@ public:
     void Shutdown();
     void Reset();
     // worldBounds: left, top (larger y), right, bottom in world units.
-    bool Render(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight, const QRectF& worldBounds,
-                QImage& output);
+    bool Render(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
+                const LuxUI::RectF& worldBounds, LuxUI::Image& output);
     // 3D perspective rendering with the engine Renderer3D.
     bool Render3D(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                   const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
-                  QImage& output, QImage* skyboxBackground = nullptr);
+                  LuxUI::Image& output, LuxUI::Image* skyboxBackground = nullptr,
+                  const LuxEngine::PerspectiveCamera* cameraOverride = nullptr);
+    bool RenderGame(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight, LuxUI::Image& output);
+    // Scene View modeling preview replaces one entity's geometry without modifying its asset.
+    bool SetMeshPreview(LuxEngine::uint32 entity, std::span<const LuxEngine::Vertex3D> vertices,
+                        std::span<const LuxEngine::uint32> indices);
+    void ClearMeshPreview();
 
-    const QString& LastError() const;
+    const LuxUI::String& LastError() const;
 
     LuxEngine::GpuDevice* GetGpuDevice() noexcept;
     const LuxEngine::GpuDevice* GetGpuDevice() const noexcept;
@@ -47,6 +62,7 @@ public:
                        LuxEngine::Vec3& maximum) const;
 
     LuxEngine::uint32 GetRecoveryCount() const noexcept;
+    double LastRenderMs() const;
 
     // Disabled for offscreen/minimal Qt platforms unless SetForceAllowed(true) or
     // LUX_EDITOR_FORCE_GPU_VIEWPORT is set, and disabled when LUX_EDITOR_SOFTWARE_VIEWPORT is set.
@@ -59,19 +75,24 @@ public:
 private:
     bool Render3DPass(LuxEngine::Scene& scene, int pixelWidth, int pixelHeight,
                       const LuxEngine::Vec3& focus, double yaw, double pitch, double distance,
-                      QImage& output, bool backgroundOnly, bool drawSkybox);
+                      LuxUI::Image& output, bool backgroundOnly, bool drawSkybox,
+                      const LuxEngine::PerspectiveCamera* cameraOverride);
     bool InitializeState(LuxEngine::uint32 initialWidth = 640,
                          LuxEngine::uint32 initialHeight = 360);
     bool BeginViewportFrame(LuxEngine::uint32 width, LuxEngine::uint32 height);
-    bool ReadbackToImage(QImage& output);
+    bool ReadbackToImage(LuxUI::Image& output);
 
     struct State;
+    struct MeshPreview;
     std::unique_ptr<State> state_;
+    std::unique_ptr<MeshPreview> meshPreview_;
+    LuxEngine::uint64 previewRevision_ = 0;
     bool attempted_ = false;
+    double lastRenderMs_ = 0;
     bool rendering_ = false;
     bool pendingShutdown_ = false;
     LuxEngine::uint32 recoveries_ = 0;
-    QString error_;
+    LuxUI::String error_;
     std::function<void()> postSceneHook_;
 };
 } // namespace LuxEditor

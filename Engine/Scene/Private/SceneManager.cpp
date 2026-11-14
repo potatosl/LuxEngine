@@ -250,6 +250,12 @@ void RewritePaths(Scene& scene, const fs::path& owner, const fs::path* destinati
             throw std::runtime_error("Invalid rebased environment path");
     }
     for (auto entity : scene.GetEntities()) {
+        if (auto* animation = entity.TryGetComponent<ModelAnimationComponent>()) {
+            const auto absolute = Canonical(Path(animation->modelPath), owner);
+            const auto relative =
+                destination ? absolute.lexically_relative(destination->parent_path()) : fs::path{};
+            animation->modelPath = Utf8(destination && !relative.empty() ? relative : absolute);
+        }
         if (auto* mesh = entity.TryGetComponent<MeshRendererComponent>())
             for (auto* resource :
                  {&mesh->meshPath, &mesh->material.baseColorTexture, &mesh->material.normalTexture,

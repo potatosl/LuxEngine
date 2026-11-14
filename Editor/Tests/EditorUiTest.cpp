@@ -9,26 +9,7 @@
 #include <LuxEngine/Renderer/Renderer2D/Renderer2D.hpp>
 #include <LuxEngine/Renderer/Renderer3D/Renderer3D.hpp>
 #include <LuxEngine/Testing/GpuFault.hpp>
-#include <QAction>
-#include <QApplication>
-#include <QCheckBox>
-#include <QClipboard>
-#include <QDockWidget>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QListWidget>
-#include <QMessageBox>
-#include <QMimeData>
-#include <QMouseEvent>
-#include <QPixmap>
-#include <QPushButton>
-#include <QSettings>
-#include <QTabWidget>
-#include <QTemporaryDir>
-#include <QTimer>
-#include <QTreeWidget>
-#include <QUndoStack>
+#include <LuxUI/Widgets.hpp>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
@@ -255,22 +236,22 @@ struct StressConfig {
 
 StressConfig ParseStressConfig(int argc, char** argv) {
     StressConfig cfg;
-    const QString envAll = qEnvironmentVariable("LUX_STRESS_ITERATIONS");
+    const LuxUI::String envAll = qEnvironmentVariable("LUX_STRESS_ITERATIONS");
     if (!envAll.isEmpty()) {
         const int n = ParsePositiveInt(envAll.toStdString(), kDefaultIterations);
         cfg.gpuIterations = n;
         cfg.viewportIterations = n;
         cfg.undoIterations = n;
     }
-    const QString envGpu = qEnvironmentVariable("LUX_GPU_STRESS_ITERATIONS");
+    const LuxUI::String envGpu = qEnvironmentVariable("LUX_GPU_STRESS_ITERATIONS");
     if (!envGpu.isEmpty())
         cfg.gpuIterations = ParsePositiveInt(envGpu.toStdString(), cfg.gpuIterations);
 
-    const QString envVp = qEnvironmentVariable("LUX_VIEWPORT_STRESS_ITERATIONS");
+    const LuxUI::String envVp = qEnvironmentVariable("LUX_VIEWPORT_STRESS_ITERATIONS");
     if (!envVp.isEmpty())
         cfg.viewportIterations = ParsePositiveInt(envVp.toStdString(), cfg.viewportIterations);
 
-    const QString envUndo = qEnvironmentVariable("LUX_UNDO_STRESS_ITERATIONS");
+    const LuxUI::String envUndo = qEnvironmentVariable("LUX_UNDO_STRESS_ITERATIONS");
     if (!envUndo.isEmpty())
         cfg.undoIterations = ParsePositiveInt(envUndo.toStdString(), cfg.undoIterations);
 
@@ -327,82 +308,82 @@ std::string FormatVulkanVersion(LuxEngine::uint32 version) {
     return std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch);
 }
 
-void SetClipboardJsonBytes(const QByteArray& rawBytes) {
-    auto* mime = new QMimeData;
-    mime->setData(QStringLiteral("application/x-lux-entity"), rawBytes);
-    QApplication::clipboard()->setMimeData(mime);
+void SetClipboardJsonBytes(const LuxUI::ByteArray& rawBytes) {
+    auto* mime = new LuxUI::MimeData;
+    mime->setData(LUX_UI_TEXT("application/x-lux-entity"), rawBytes);
+    LuxUI::Application::clipboard()->setMimeData(mime);
 }
 
-void SetClipboardJsonObject(const QJsonObject& obj) {
-    SetClipboardJsonBytes(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+void SetClipboardJsonObject(const LuxUI::JsonObject& obj) {
+    SetClipboardJsonBytes(LuxUI::JsonDocument(obj).toJson(LuxUI::JsonDocument::Compact));
 }
 
-QJsonObject MakeValidClipboardEntityJson() {
-    QJsonObject obj;
-    obj.insert(QStringLiteral("name"), QStringLiteral("검증엔티티"));
-    obj.insert(QStringLiteral("position"), QJsonArray{1.5, -2.5, 3.0});
-    obj.insert(QStringLiteral("rotation"), QJsonArray{0.1, 0.2, 0.3});
-    obj.insert(QStringLiteral("scale"), QJsonArray{2.0, 3.0, 4.0});
-    obj.insert(QStringLiteral("sprite"), QJsonArray{0.2, 0.4, 0.6, 1.0});
-    obj.insert(QStringLiteral("mesh"), QJsonArray{0.25, 0.75, 0.8, 0.7, 0.6, 1.0});
+LuxUI::JsonObject MakeValidClipboardEntityJson() {
+    LuxUI::JsonObject obj;
+    obj.insert(LUX_UI_TEXT("name"), LUX_UI_TEXT("검증엔티티"));
+    obj.insert(LUX_UI_TEXT("position"), LuxUI::JsonArray{1.5, -2.5, 3.0});
+    obj.insert(LUX_UI_TEXT("rotation"), LuxUI::JsonArray{0.1, 0.2, 0.3});
+    obj.insert(LUX_UI_TEXT("scale"), LuxUI::JsonArray{2.0, 3.0, 4.0});
+    obj.insert(LUX_UI_TEXT("sprite"), LuxUI::JsonArray{0.2, 0.4, 0.6, 1.0});
+    obj.insert(LUX_UI_TEXT("mesh"), LuxUI::JsonArray{0.25, 0.75, 0.8, 0.7, 0.6, 1.0});
 
-    QJsonObject cam;
-    cam.insert(QStringLiteral("primary"), true);
-    cam.insert(QStringLiteral("perspective"), true);
-    cam.insert(QStringLiteral("fov"), 65.0);
-    cam.insert(QStringLiteral("orthoSize"), 12.0);
-    obj.insert(QStringLiteral("camera"), cam);
+    LuxUI::JsonObject cam;
+    cam.insert(LUX_UI_TEXT("primary"), true);
+    cam.insert(LUX_UI_TEXT("perspective"), true);
+    cam.insert(LUX_UI_TEXT("fov"), 65.0);
+    cam.insert(LUX_UI_TEXT("orthoSize"), 12.0);
+    obj.insert(LUX_UI_TEXT("camera"), cam);
 
-    QJsonObject map;
-    map.insert(QStringLiteral("width"), 2);
-    map.insert(QStringLiteral("height"), 2);
-    map.insert(QStringLiteral("tileSize"), 1.5);
-    map.insert(QStringLiteral("tiles"), QJsonArray{1, 2, 3, 4});
-    obj.insert(QStringLiteral("tilemap"), map);
+    LuxUI::JsonObject map;
+    map.insert(LUX_UI_TEXT("width"), 2);
+    map.insert(LUX_UI_TEXT("height"), 2);
+    map.insert(LUX_UI_TEXT("tileSize"), 1.5);
+    map.insert(LUX_UI_TEXT("tiles"), LuxUI::JsonArray{1, 2, 3, 4});
+    obj.insert(LUX_UI_TEXT("tilemap"), map);
 
-    QJsonObject rb2d;
-    rb2d.insert(QStringLiteral("type"), 2);
-    rb2d.insert(QStringLiteral("velocity"), QJsonArray{3.5, -1.5});
-    rb2d.insert(QStringLiteral("mass"), 4.25);
-    rb2d.insert(QStringLiteral("gravityScale"), 1.75);
-    obj.insert(QStringLiteral("rigidbody2d"), rb2d);
+    LuxUI::JsonObject rb2d;
+    rb2d.insert(LUX_UI_TEXT("type"), 2);
+    rb2d.insert(LUX_UI_TEXT("velocity"), LuxUI::JsonArray{3.5, -1.5});
+    rb2d.insert(LUX_UI_TEXT("mass"), 4.25);
+    rb2d.insert(LUX_UI_TEXT("gravityScale"), 1.75);
+    obj.insert(LUX_UI_TEXT("rigidbody2d"), rb2d);
 
-    QJsonObject col2d;
-    col2d.insert(QStringLiteral("size"), QJsonArray{2.5, 3.5});
-    col2d.insert(QStringLiteral("offset"), QJsonArray{0.25, -0.5});
-    col2d.insert(QStringLiteral("trigger"), true);
-    obj.insert(QStringLiteral("collider2d"), col2d);
+    LuxUI::JsonObject col2d;
+    col2d.insert(LUX_UI_TEXT("size"), LuxUI::JsonArray{2.5, 3.5});
+    col2d.insert(LUX_UI_TEXT("offset"), LuxUI::JsonArray{0.25, -0.5});
+    col2d.insert(LUX_UI_TEXT("trigger"), true);
+    obj.insert(LUX_UI_TEXT("collider2d"), col2d);
 
-    QJsonObject rb3d;
-    rb3d.insert(QStringLiteral("type"), 1);
-    rb3d.insert(QStringLiteral("velocity"), QJsonArray{1.0, 2.0, 3.0});
-    rb3d.insert(QStringLiteral("mass"), 8.0);
-    rb3d.insert(QStringLiteral("gravityScale"), 0.5);
-    obj.insert(QStringLiteral("rigidbody3d"), rb3d);
+    LuxUI::JsonObject rb3d;
+    rb3d.insert(LUX_UI_TEXT("type"), 1);
+    rb3d.insert(LUX_UI_TEXT("velocity"), LuxUI::JsonArray{1.0, 2.0, 3.0});
+    rb3d.insert(LUX_UI_TEXT("mass"), 8.0);
+    rb3d.insert(LUX_UI_TEXT("gravityScale"), 0.5);
+    obj.insert(LUX_UI_TEXT("rigidbody3d"), rb3d);
 
-    QJsonObject col3d;
-    col3d.insert(QStringLiteral("size"), QJsonArray{1.5, 2.5, 3.5});
-    col3d.insert(QStringLiteral("offset"), QJsonArray{-0.1, 0.2, -0.3});
-    col3d.insert(QStringLiteral("trigger"), false);
-    obj.insert(QStringLiteral("collider3d"), col3d);
+    LuxUI::JsonObject col3d;
+    col3d.insert(LUX_UI_TEXT("size"), LuxUI::JsonArray{1.5, 2.5, 3.5});
+    col3d.insert(LUX_UI_TEXT("offset"), LuxUI::JsonArray{-0.1, 0.2, -0.3});
+    col3d.insert(LUX_UI_TEXT("trigger"), false);
+    obj.insert(LUX_UI_TEXT("collider3d"), col3d);
 
-    QJsonObject anim;
-    anim.insert(QStringLiteral("name"), QStringLiteral("이동클립"));
-    anim.insert(QStringLiteral("duration"), 2.5);
-    anim.insert(QStringLiteral("loop"), true);
-    anim.insert(QStringLiteral("playing"), false);
-    QJsonObject key0;
-    key0.insert(QStringLiteral("time"), 0.0);
-    key0.insert(QStringLiteral("position"), QJsonArray{0.0, 0.0, 0.0});
-    key0.insert(QStringLiteral("rotation"), QJsonArray{0.0, 0.0, 0.0});
-    key0.insert(QStringLiteral("scale"), QJsonArray{1.0, 1.0, 1.0});
-    QJsonObject key1;
-    key1.insert(QStringLiteral("time"), 1.25);
-    key1.insert(QStringLiteral("position"), QJsonArray{4.0, 5.0, 6.0});
-    key1.insert(QStringLiteral("rotation"), QJsonArray{0.0, 1.0, 0.0});
-    key1.insert(QStringLiteral("scale"), QJsonArray{2.0, 2.0, 2.0});
-    anim.insert(QStringLiteral("keyframes"), QJsonArray{key0, key1});
-    obj.insert(QStringLiteral("animation"), anim);
+    LuxUI::JsonObject anim;
+    anim.insert(LUX_UI_TEXT("name"), LUX_UI_TEXT("이동클립"));
+    anim.insert(LUX_UI_TEXT("duration"), 2.5);
+    anim.insert(LUX_UI_TEXT("loop"), true);
+    anim.insert(LUX_UI_TEXT("playing"), false);
+    LuxUI::JsonObject key0;
+    key0.insert(LUX_UI_TEXT("time"), 0.0);
+    key0.insert(LUX_UI_TEXT("position"), LuxUI::JsonArray{0.0, 0.0, 0.0});
+    key0.insert(LUX_UI_TEXT("rotation"), LuxUI::JsonArray{0.0, 0.0, 0.0});
+    key0.insert(LUX_UI_TEXT("scale"), LuxUI::JsonArray{1.0, 1.0, 1.0});
+    LuxUI::JsonObject key1;
+    key1.insert(LUX_UI_TEXT("time"), 1.25);
+    key1.insert(LUX_UI_TEXT("position"), LuxUI::JsonArray{4.0, 5.0, 6.0});
+    key1.insert(LUX_UI_TEXT("rotation"), LuxUI::JsonArray{0.0, 1.0, 0.0});
+    key1.insert(LUX_UI_TEXT("scale"), LuxUI::JsonArray{2.0, 2.0, 2.0});
+    anim.insert(LUX_UI_TEXT("keyframes"), LuxUI::JsonArray{key0, key1});
+    obj.insert(LUX_UI_TEXT("animation"), anim);
     return obj;
 }
 
@@ -494,12 +475,12 @@ LuxEngine::Entity FindEntityByTag(LuxEngine::Scene& scene, const std::string& ta
     return {};
 }
 
-bool HasNonBackgroundPixel(const QImage& image, int bgR, int bgG, int bgB) {
+bool HasNonBackgroundPixel(const LuxUI::Image& image, int bgR, int bgG, int bgB) {
     if (image.isNull())
         return false;
     for (int y = 0; y < image.height(); ++y) {
         for (int x = 0; x < image.width(); ++x) {
-            const QColor c = image.pixelColor(x, y);
+            const LuxUI::Color c = image.pixelColor(x, y);
             if (std::abs(c.red() - bgR) > 15 || std::abs(c.green() - bgG) > 15 ||
                 std::abs(c.blue() - bgB) > 15) {
                 return true;
@@ -509,7 +490,8 @@ bool HasNonBackgroundPixel(const QImage& image, int bgR, int bgG, int bgB) {
     return false;
 }
 
-int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const StressConfig& cfg) {
+int RunHeadlessEditorUiTests(LuxUI::Application& app, LuxUI::TemporaryDir& settings,
+                             const StressConfig& cfg) {
     using namespace LuxEngine;
     using namespace LuxEditor;
     // Strictly disable GPU viewport in Editor_ui so it runs 100% headlessly without GPU dependency.
@@ -521,55 +503,61 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     window.show();
     app.processEvents();
 
-    Check(window.findChildren<QDockWidget*>().size() == 9,
-          "nine dock panels include the animation workspace");
-    auto* tabs = window.findChild<QTabWidget*>();
+    for (int index = 0; index < 8; ++index)
+        Check(window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("lux-dock-%1").arg(index)),
+              "standard editor dock is available");
+    Check(window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("AnimationWorkspace")) &&
+              window.findChild<LuxUI::DockWidget*>(LUX_UI_TEXT("performanceProfilerDock")),
+          "animation and profiler workspaces are available");
+    auto* tabs = window.findChild<LuxUI::TabWidget*>();
     Check(tabs && tabs->count() == 2, "2D and 3D workspaces exist");
-    const QByteArray state = window.saveState(1);
+    const LuxUI::ByteArray state = window.saveState(1);
     Check(!state.isEmpty() && window.restoreState(state, 1), "dock layout roundtrip");
 
-    auto* hierarchy = window.findChild<QTreeWidget*>(QStringLiteral("sceneOutliner"));
-    auto* add = window.findChild<QAction*>(QStringLiteral("addEntity"));
+    auto* hierarchy = window.findChild<LuxUI::TreeWidget*>(LUX_UI_TEXT("sceneOutliner"));
+    auto* add = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("addEntity"));
     Check(add && hierarchy->topLevelItemCount() == 0, "new document starts empty");
     add->trigger();
     Check(hierarchy->topLevelItemCount() == 1, "entity can be added from menu");
 
-    auto* undo = window.findChild<QUndoStack*>();
+    auto* undo = window.findChild<LuxUI::UndoStack*>();
     Check(undo && undo->canUndo(), "scene edit enters undo history");
     undo->undo();
     Check(hierarchy->topLevelItemCount() == 0 && undo->canRedo(), "undo restores scene");
     undo->redo();
     Check(hierarchy->topLevelItemCount() == 1, "redo restores edit");
 
-    auto* addTilemap = window.findChild<QAction*>(QStringLiteral("addTilemap"));
+    auto* addTilemap = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("addTilemap"));
     Check(addTilemap != nullptr, "tilemap action exists");
     addTilemap->trigger();
     Check(hierarchy->topLevelItemCount() == 2, "tilemap can be added");
     app.processEvents();
 
-    auto* canvas = window.findChild<QWidget*>(QStringLiteral("sceneViewport2D"));
+    auto* canvas = window.findChild<LuxUI::Widget*>(LUX_UI_TEXT("sceneViewport2D"));
     Check(canvas && canvas->isVisible(), "2D tile editor is visible");
     const int beforePaint = undo->count();
-    const QPointF tile(canvas->width() * .5 + 36, canvas->height() * .5 - 36);
-    const QPointF globalTile = canvas->mapToGlobal(tile.toPoint());
-    QMouseEvent press(QEvent::MouseButtonPress, tile, globalTile, Qt::LeftButton, Qt::LeftButton,
-                      Qt::NoModifier);
-    QMouseEvent release(QEvent::MouseButtonRelease, tile, globalTile, Qt::LeftButton, Qt::NoButton,
-                        Qt::NoModifier);
-    QApplication::sendEvent(canvas, &press);
-    QApplication::sendEvent(canvas, &release);
+    const LuxUI::PointF tile(canvas->width() * .5 + 36, canvas->height() * .5 - 36);
+    const LuxUI::PointF globalTile = canvas->mapToGlobal(tile.toPoint());
+    LuxUI::MouseEvent press(LuxUI::Event::MouseButtonPress, tile, globalTile,
+                            LuxUI::Flags::LeftButton, LuxUI::Flags::LeftButton,
+                            LuxUI::Flags::NoModifier);
+    LuxUI::MouseEvent release(LuxUI::Event::MouseButtonRelease, tile, globalTile,
+                              LuxUI::Flags::LeftButton, LuxUI::Flags::NoButton,
+                              LuxUI::Flags::NoModifier);
+    LuxUI::Application::sendEvent(canvas, &press);
+    LuxUI::Application::sendEvent(canvas, &release);
     Check(undo->count() == beforePaint + 1, "tile painting enters undo history");
 
-    for (const QString& id : {QStringLiteral("editorBody2D"), QStringLiteral("editorCollider2D"),
-                              QStringLiteral("editorAnimation")}) {
-        auto* checkbox = window.findChild<QCheckBox*>(id);
+    for (const LuxUI::String& id : {LUX_UI_TEXT("editorBody2D"), LUX_UI_TEXT("editorCollider2D"),
+                                    LUX_UI_TEXT("editorAnimation")}) {
+        auto* checkbox = window.findChild<LuxUI::CheckBox*>(id);
         Check(checkbox != nullptr, "component editor exists");
         checkbox->setChecked(true);
         Check(checkbox->isChecked(), "component can be added in inspector");
     }
 
-    auto* copyAction = window.findChild<QAction*>(QStringLiteral("copyEntity"));
-    auto* pasteAction = window.findChild<QAction*>(QStringLiteral("pasteEntity"));
+    auto* copyAction = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("copyEntity"));
+    auto* pasteAction = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("pasteEntity"));
     Check(copyAction && pasteAction, "copy and paste actions exist");
 
     // --- PART 3.1: Configurable (100x / 1000x) Undo/Redo Regression ---
@@ -578,9 +566,9 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     copyAction->trigger();
     pasteAction->trigger();
     Check(hierarchy->topLevelItemCount() == 3, "copy and paste entity duplicates all components");
-    for (const QString& id : {QStringLiteral("editorBody2D"), QStringLiteral("editorCollider2D"),
-                              QStringLiteral("editorAnimation")}) {
-        auto* checkbox = window.findChild<QCheckBox*>(id);
+    for (const LuxUI::String& id : {LUX_UI_TEXT("editorBody2D"), LUX_UI_TEXT("editorCollider2D"),
+                                    LUX_UI_TEXT("editorAnimation")}) {
+        auto* checkbox = window.findChild<LuxUI::CheckBox*>(id);
         Check(checkbox && checkbox->isChecked(),
               "pasted entity retains physics, collider and animation components");
     }
@@ -594,11 +582,11 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     Check(hierarchy->topLevelItemCount() == 3 &&
               window.GetDocument().GetScene().GetEntityCount() == 3,
           "valid full-component clipboard JSON pasted");
-    for (const QString& id :
-         {QStringLiteral("editorSprite"), QStringLiteral("editorMesh"),
-          QStringLiteral("editorTilemap"), QStringLiteral("editorBody2D"),
-          QStringLiteral("editorCollider2D"), QStringLiteral("editorAnimation")}) {
-        auto* checkbox = window.findChild<QCheckBox*>(id);
+    for (const LuxUI::String& id :
+         {LUX_UI_TEXT("editorSprite"), LUX_UI_TEXT("editorMesh"), LUX_UI_TEXT("editorTilemap"),
+          LUX_UI_TEXT("editorBody2D"), LUX_UI_TEXT("editorCollider2D"),
+          LUX_UI_TEXT("editorAnimation")}) {
+        auto* checkbox = window.findChild<LuxUI::CheckBox*>(id);
         Check(checkbox && checkbox->isChecked(),
               "inspector checkboxes reflect pasted entity components");
     }
@@ -687,19 +675,20 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // intact
     copyAction->trigger();
     {
-        const auto copiedDoc = QJsonDocument::fromJson(QApplication::clipboard()->mimeData()->data(
-            QStringLiteral("application/x-lux-entity")));
+        const auto copiedDoc =
+            LuxUI::JsonDocument::fromJson(LuxUI::Application::clipboard()->mimeData()->data(
+                LUX_UI_TEXT("application/x-lux-entity")));
         Check(copiedDoc.isObject(), "copied back entity JSON is valid object");
         const auto copiedObj = copiedDoc.object();
-        Check(copiedObj.contains(QStringLiteral("sprite")) &&
-                  copiedObj.contains(QStringLiteral("mesh")) &&
-                  copiedObj.contains(QStringLiteral("camera")) &&
-                  copiedObj.contains(QStringLiteral("tilemap")) &&
-                  copiedObj.contains(QStringLiteral("rigidbody2d")) &&
-                  copiedObj.contains(QStringLiteral("collider2d")) &&
-                  copiedObj.contains(QStringLiteral("rigidbody3d")) &&
-                  copiedObj.contains(QStringLiteral("collider3d")) &&
-                  copiedObj.contains(QStringLiteral("animation")),
+        Check(copiedObj.contains(LUX_UI_TEXT("sprite")) &&
+                  copiedObj.contains(LUX_UI_TEXT("mesh")) &&
+                  copiedObj.contains(LUX_UI_TEXT("camera")) &&
+                  copiedObj.contains(LUX_UI_TEXT("tilemap")) &&
+                  copiedObj.contains(LUX_UI_TEXT("rigidbody2d")) &&
+                  copiedObj.contains(LUX_UI_TEXT("collider2d")) &&
+                  copiedObj.contains(LUX_UI_TEXT("rigidbody3d")) &&
+                  copiedObj.contains(LUX_UI_TEXT("collider3d")) &&
+                  copiedObj.contains(LUX_UI_TEXT("animation")),
               "all 9 optional components preserved on copied entity");
     }
 
@@ -726,7 +715,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
                   undo->count() == stableUndoCount && undo->index() == stableUndoIndex &&
                   hierarchy->indexOfTopLevelItem(hierarchy->currentItem()) == stableSelectedRow &&
                   currentSelectedId == stableSelectedId &&
-                  window.LastLogMessage().contains(QStringLiteral("붙여넣기 실패")),
+                  window.LastLogMessage().contains(LUX_UI_TEXT("붙여넣기 실패")),
               label);
     };
 
@@ -748,9 +737,9 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // 4. Negative Mass
     {
         auto bad = MakeValidClipboardEntityJson();
-        QJsonObject rb = bad.value(QStringLiteral("rigidbody2d")).toObject();
-        rb.insert(QStringLiteral("mass"), -2.0);
-        bad.insert(QStringLiteral("rigidbody2d"), rb);
+        LuxUI::JsonObject rb = bad.value(LUX_UI_TEXT("rigidbody2d")).toObject();
+        rb.insert(LUX_UI_TEXT("mass"), -2.0);
+        bad.insert(LUX_UI_TEXT("rigidbody2d"), rb);
         SetClipboardJsonObject(bad);
         assertRejected("4. negative mass rejected");
     }
@@ -758,16 +747,16 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // 5. Abnormal Collider
     {
         auto bad = MakeValidClipboardEntityJson();
-        QJsonObject col = bad.value(QStringLiteral("collider2d")).toObject();
-        col.insert(QStringLiteral("size"), QJsonArray{-1.0, 2.0});
-        bad.insert(QStringLiteral("collider2d"), col);
+        LuxUI::JsonObject col = bad.value(LUX_UI_TEXT("collider2d")).toObject();
+        col.insert(LUX_UI_TEXT("size"), LuxUI::JsonArray{-1.0, 2.0});
+        bad.insert(LUX_UI_TEXT("collider2d"), col);
         SetClipboardJsonObject(bad);
         assertRejected("5a. negative collider2d size rejected");
 
         auto bad3d = MakeValidClipboardEntityJson();
-        QJsonObject col3 = bad3d.value(QStringLiteral("collider3d")).toObject();
-        col3.insert(QStringLiteral("size"), QJsonArray{1.0, 1.0, 0.0});
-        bad3d.insert(QStringLiteral("collider3d"), col3);
+        LuxUI::JsonObject col3 = bad3d.value(LUX_UI_TEXT("collider3d")).toObject();
+        col3.insert(LUX_UI_TEXT("size"), LuxUI::JsonArray{1.0, 1.0, 0.0});
+        bad3d.insert(LUX_UI_TEXT("collider3d"), col3);
         SetClipboardJsonObject(bad3d);
         assertRejected("5b. zero collider3d size rejected");
     }
@@ -775,16 +764,16 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // 6. Invalid Transform (out-of-bounds position, zero scale, wrong array length)
     {
         auto badPos = MakeValidClipboardEntityJson();
-        badPos.insert(QStringLiteral("position"), QJsonArray{250000.0, 0.0, 0.0});
+        badPos.insert(LUX_UI_TEXT("position"), LuxUI::JsonArray{250000.0, 0.0, 0.0});
         SetClipboardJsonObject(badPos);
         assertRejected("6a. out-of-bounds transform position rejected");
 
         auto badScale = MakeValidClipboardEntityJson();
-        badScale.insert(QStringLiteral("scale"), QJsonArray{0.0, 1.0, 1.0});
+        badScale.insert(LUX_UI_TEXT("scale"), LuxUI::JsonArray{0.0, 1.0, 1.0});
         SetClipboardJsonObject(badScale);
         assertRejected("6b. zero transform scale rejected");
 
-        badScale.insert(QStringLiteral("scale"), QJsonArray{1.0, 1.0});
+        badScale.insert(LUX_UI_TEXT("scale"), LuxUI::JsonArray{1.0, 1.0});
         SetClipboardJsonObject(badScale);
         assertRejected("6c. wrong transform array length rejected");
     }
@@ -792,14 +781,14 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // 7. Abnormal Camera FOV
     {
         auto bad = MakeValidClipboardEntityJson();
-        QJsonObject cam = bad.value(QStringLiteral("camera")).toObject();
-        cam.insert(QStringLiteral("fov"), 185.0);
-        bad.insert(QStringLiteral("camera"), cam);
+        LuxUI::JsonObject cam = bad.value(LUX_UI_TEXT("camera")).toObject();
+        cam.insert(LUX_UI_TEXT("fov"), 185.0);
+        bad.insert(LUX_UI_TEXT("camera"), cam);
         SetClipboardJsonObject(bad);
         assertRejected("7a. camera FOV >= 180 rejected");
 
-        cam.insert(QStringLiteral("fov"), 0.0);
-        bad.insert(QStringLiteral("camera"), cam);
+        cam.insert(LUX_UI_TEXT("fov"), 0.0);
+        bad.insert(LUX_UI_TEXT("camera"), cam);
         SetClipboardJsonObject(bad);
         assertRejected("7b. camera FOV <= 0 rejected");
     }
@@ -807,10 +796,10 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // 8. Excessive Tilemap size (> 256x256)
     {
         auto bad = MakeValidClipboardEntityJson();
-        QJsonObject map = bad.value(QStringLiteral("tilemap")).toObject();
-        map.insert(QStringLiteral("width"), 300);
-        map.insert(QStringLiteral("height"), 300);
-        bad.insert(QStringLiteral("tilemap"), map);
+        LuxUI::JsonObject map = bad.value(LUX_UI_TEXT("tilemap")).toObject();
+        map.insert(LUX_UI_TEXT("width"), 300);
+        map.insert(LUX_UI_TEXT("height"), 300);
+        bad.insert(LUX_UI_TEXT("tilemap"), map);
         SetClipboardJsonObject(bad);
         assertRejected("8. tilemap > 256x256 rejected");
     }
@@ -818,24 +807,24 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // 9. Keyframe 4097개 (> 4096)
     {
         auto bad = MakeValidClipboardEntityJson();
-        QJsonObject anim = bad.value(QStringLiteral("animation")).toObject();
-        QJsonArray manyKeys;
-        QJsonObject k;
-        k.insert(QStringLiteral("time"), 0.1);
-        k.insert(QStringLiteral("position"), QJsonArray{0.0, 0.0, 0.0});
-        k.insert(QStringLiteral("rotation"), QJsonArray{0.0, 0.0, 0.0});
-        k.insert(QStringLiteral("scale"), QJsonArray{1.0, 1.0, 1.0});
+        LuxUI::JsonObject anim = bad.value(LUX_UI_TEXT("animation")).toObject();
+        LuxUI::JsonArray manyKeys;
+        LuxUI::JsonObject k;
+        k.insert(LUX_UI_TEXT("time"), 0.1);
+        k.insert(LUX_UI_TEXT("position"), LuxUI::JsonArray{0.0, 0.0, 0.0});
+        k.insert(LUX_UI_TEXT("rotation"), LuxUI::JsonArray{0.0, 0.0, 0.0});
+        k.insert(LUX_UI_TEXT("scale"), LuxUI::JsonArray{1.0, 1.0, 1.0});
         for (int i = 0; i < 4097; ++i)
             manyKeys.append(k);
-        anim.insert(QStringLiteral("keyframes"), manyKeys);
-        bad.insert(QStringLiteral("animation"), anim);
+        anim.insert(LUX_UI_TEXT("keyframes"), manyKeys);
+        bad.insert(LUX_UI_TEXT("animation"), anim);
         SetClipboardJsonObject(bad);
         assertRejected("9. 4097 keyframes (> 4096) rejected");
     }
 
     // 10. Invalid UTF-8
-    SetClipboardJsonBytes(QByteArray("{\"name\":\"\xFF\xFE\xC0\xAF\",\"position\":[0,0,0],"
-                                     "\"rotation\":[0,0,0],\"scale\":[1,1,1]}"));
+    SetClipboardJsonBytes(LuxUI::ByteArray("{\"name\":\"\xFF\xFE\xC0\xAF\",\"position\":[0,0,0],"
+                                           "\"rotation\":[0,0,0],\"scale\":[1,1,1]}"));
     assertRejected("10. invalid UTF-8 sequence rejected");
 
     // 11. Corrupted JSON
@@ -844,7 +833,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
 
     // 12. > 1MB JSON
     {
-        QByteArray huge(1024 * 1024 + 512, ' ');
+        LuxUI::ByteArray huge(1024 * 1024 + 512, ' ');
         huge[0] = '{';
         huge[huge.size() - 1] = '}';
         SetClipboardJsonBytes(huge);
@@ -854,12 +843,12 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // 13. Missing required fields ("name", "position", "rotation", "scale")
     {
         auto bad = MakeValidClipboardEntityJson();
-        bad.remove(QStringLiteral("position"));
+        bad.remove(LUX_UI_TEXT("position"));
         SetClipboardJsonObject(bad);
         assertRejected("13a. missing position field rejected");
 
         auto badName = MakeValidClipboardEntityJson();
-        badName.remove(QStringLiteral("name"));
+        badName.remove(LUX_UI_TEXT("name"));
         SetClipboardJsonObject(badName);
         assertRejected("13b. missing name field rejected");
     }
@@ -869,7 +858,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     // --- PART 3.4: RecordEdit Exception Rollback & Error Logging ---
     std::cerr
         << "[Editor_ui] PART 3.4: Verifying RecordEdit exception rollback and error logging\n";
-    window.ExecuteRecordedEdit(QStringLiteral("강제 오류 편집"), [&] {
+    window.ExecuteRecordedEdit(LUX_UI_TEXT("강제 오류 편집"), [&] {
         Entity temp = window.GetDocument().CreateEntity("예외임시엔티티");
         temp.AddComponent<SpriteRendererComponent>();
         throw std::runtime_error("의도된 테스트 예외");
@@ -881,7 +870,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
               "RecordEdit rolls back scene state on exception");
         Check(hierarchy->topLevelItemCount() == stableEntityCount &&
                   undo->count() == stableUndoCount && undo->index() == stableUndoIndex &&
-                  window.LastLogMessage().contains(QStringLiteral("편집 실패")),
+                  window.LastLogMessage().contains(LUX_UI_TEXT("편집 실패")),
               "RecordEdit preserves undo stack and logs user-visible error on exception");
     }
     std::cerr << "[Editor_ui] PART 3.4 PASS: RecordEdit exception recovery verified\n";
@@ -901,9 +890,7 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
               "pre-save serialized scene matches baseline");
 
         const std::string savedScenePath =
-            settings.filePath(QStringLiteral("actual_pasted_editor_scene.lux"))
-                .toUtf8()
-                .toStdString();
+            settings.filePath(LUX_UI_TEXT("actual_pasted_editor_scene.lux")).toUtf8().toStdString();
         Check(window.GetDocument().SaveAs(savedScenePath),
               "actual EditorWindow document with pasted entity saves to .lux file");
 
@@ -930,31 +917,31 @@ int RunHeadlessEditorUiTests(QApplication& app, QTemporaryDir& settings, const S
     undo->undo();
     Check(hierarchy->topLevelItemCount() == 2, "undo after save/reopen test returns to 2 entities");
 
-    auto* startPreview = window.findChild<QAction*>(QStringLiteral("previewStart"));
-    auto* stepPreview = window.findChild<QAction*>(QStringLiteral("previewStep"));
-    auto* stopPreview = window.findChild<QAction*>(QStringLiteral("previewStop"));
+    auto* startPreview = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("previewStart"));
+    auto* stepPreview = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("previewStep"));
+    auto* stopPreview = window.findChild<LuxUI::Action*>(LUX_UI_TEXT("previewStop"));
     Check(startPreview && stepPreview && stopPreview, "preview controls exist");
     std::cerr << "[Editor_ui] preview\n";
     startPreview->trigger();
     stepPreview->trigger();
-    auto* debugState = window.findChild<QTreeWidget*>(QStringLiteral("debugState"));
+    auto* debugState = window.findChild<LuxUI::TreeWidget*>(LUX_UI_TEXT("debugState"));
     Check(debugState && debugState->topLevelItemCount() > 0, "debugger shows runtime state");
     stopPreview->trigger();
     Check(hierarchy->topLevelItemCount() == 2, "preview restores editable scene");
 
     tabs->setCurrentIndex(0);
     std::cerr << "[Editor_ui] offscreen widget render\n";
-    QPixmap frame(window.size());
+    LuxUI::Pixmap frame(window.size());
     window.render(&frame);
-    const QString screenshot = qEnvironmentVariable("LUX_EDITOR_TEST_SCREENSHOT");
+    const LuxUI::String screenshot = qEnvironmentVariable("LUX_EDITOR_TEST_SCREENSHOT");
     if (!screenshot.isEmpty())
         frame.save(screenshot);
     Check(!frame.isNull(), "Qt workspace renders offscreen");
     window.resize(960, 600);
     app.processEvents();
-    const QString smallScreenshot = qEnvironmentVariable("LUX_EDITOR_TEST_SMALL_SCREENSHOT");
+    const LuxUI::String smallScreenshot = qEnvironmentVariable("LUX_EDITOR_TEST_SMALL_SCREENSHOT");
     if (!smallScreenshot.isEmpty()) {
-        QPixmap smallFrame(window.size());
+        LuxUI::Pixmap smallFrame(window.size());
         window.render(&smallFrame);
         smallFrame.save(smallScreenshot);
     }
@@ -1066,7 +1053,7 @@ void PrintIsolationDelta(const char* name, int iters, const DetailedCpuMemorySam
               << "KB, MappedDelta=" << vmMapDeltaKB << "KB, ImageDelta=" << vmImgDeltaKB << "KB\n";
 }
 
-int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
+int RunGpuLifecycleTests(LuxUI::Application& app, const StressConfig& cfg) {
     using namespace LuxEngine;
     using namespace LuxEditor;
     const auto overallStart = std::chrono::steady_clock::now();
@@ -1177,8 +1164,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         for (int i = 0; i < kIsolationIterations; ++i) {
             auto r = std::make_unique<EngineSceneRenderer>();
             Check(r->EnsureReady() && r->GetGpuDevice() != nullptr, "Isolation Full Val=Off");
-            QImage img2D, img3D;
-            Check(r->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D) &&
+            LuxUI::Image img2D, img3D;
+            Check(r->Render(scene2D, 160, 120, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), img2D) &&
                       !img2D.isNull(),
                   "Isolation Full 2D Val=Off");
             Check(r->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D) &&
@@ -1231,8 +1218,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         for (int i = 0; i < kIsolationIterations; ++i) {
             auto r = std::make_unique<EngineSceneRenderer>();
             Check(r->EnsureReady() && r->GetGpuDevice() != nullptr, "Isolation Full Val=Sync");
-            QImage img2D, img3D;
-            Check(r->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D) &&
+            LuxUI::Image img2D, img3D;
+            Check(r->Render(scene2D, 160, 120, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), img2D) &&
                       !img2D.isNull(),
                   "Isolation Full 2D Val=Sync");
             Check(r->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D) &&
@@ -1271,9 +1258,9 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
                                 "EngineSceneRenderer failed to initialize GpuDevice and contexts");
 
         {
-            QImage img2D;
+            LuxUI::Image img2D;
             CheckWithGpuDiagnostics(
-                renderer->Render(scene2D, 160, 120, QRectF(-5.0, 5.0, 10.0, -10.0), img2D),
+                renderer->Render(scene2D, 160, 120, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), img2D),
                 "EngineSceneRenderer::Render2D", iterNum, renderer.get(), "2D render failed");
             CheckWithGpuDiagnostics(!img2D.isNull() && img2D.width() == 160 &&
                                         img2D.height() == 120 &&
@@ -1281,7 +1268,7 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
                                     "EngineSceneRenderer::Readback2D", iterNum, renderer.get(),
                                     "2D QImage readback invalid or missing rendered quad pixels");
 
-            QImage img3D;
+            LuxUI::Image img3D;
             CheckWithGpuDiagnostics(
                 renderer->Render3D(scene3D, 160, 120, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, img3D),
                 "EngineSceneRenderer::Render3D", iterNum, renderer.get(), "3D render failed");
@@ -1307,12 +1294,19 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         CheckWithGpuDiagnostics(counters.validationErrors == 0, "VulkanValidation", iterNum,
                                 renderer.get(),
                                 "Vulkan validation error detected during EngineSceneRenderer loop");
+        // Resource accounting is backend-specific: Forge excludes its internal white texture
+        // and leaves unavailable allocation counts at zero. Compare identical, completed
+        // renderer lifecycles against the first healthy frame instead of Vulkan-only values.
+        const auto& expectedMemory = iterNum == 1 ? memStats : cpFirst.gpuMem;
         CheckWithGpuDiagnostics(
-            memStats.liveBuffers == 0 && memStats.liveTextures == 1 &&
-                memStats.pendingDestructions == 0 && memStats.pendingStagingBytes == 0 &&
-                memStats.allocationCount > 0 && memStats.allocationBytes > 0,
+            memStats.pendingDestructions == 0 && memStats.pendingStagingBytes == 0 &&
+                memStats.allocationBytes > 0 &&
+                memStats.liveBuffers == expectedMemory.liveBuffers &&
+                memStats.liveTextures == expectedMemory.liveTextures &&
+                memStats.allocationCount == expectedMemory.allocationCount &&
+                memStats.allocationBytes == expectedMemory.allocationBytes,
             "ActiveGpuResourceCheck", iterNum, renderer.get(),
-            "Active GPU resource counts deviated from expected baseline before Shutdown");
+            "Active GPU resources drifted between identical renderer lifecycles before Shutdown");
 
         // Verify post-shutdown context safety when tearing down
         Renderer2D::Context observer2D(renderer->GetGpuDevice());
@@ -1428,14 +1422,14 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         CheckWithGpuDiagnostics(rendererB->EnsureReady(), "ViewportStress::InitB", 0,
                                 rendererB.get(), "rendererB failed to initialize");
 
-        QImage warmupA, warmupB;
+        LuxUI::Image warmupA, warmupB;
         CheckWithGpuDiagnostics(
-            rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), warmupA) &&
+            rendererA->Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), warmupA) &&
                 rendererA->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.4, 0.3, 5.0, warmupA),
             "ViewportStress::WarmupA", 0, rendererA.get(), "rendererA warmup failed");
         CheckWithGpuDiagnostics(
             rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0, warmupB) &&
-                rendererB->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), warmupB),
+                rendererB->Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), warmupB),
             "ViewportStress::WarmupB", 0, rendererB.get(), "rendererB warmup failed");
         CheckWithGpuDiagnostics(
             rendererA->GetGpuDevice()->WaitIdle() && rendererB->GetGpuDevice()->WaitIdle(),
@@ -1459,7 +1453,7 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             vp2D->resize(200, 150);
             vp3D->resize(200, 150);
 
-            QImage imgA, imgB;
+            LuxUI::Image imgA, imgB;
             if (close2DFirst) {
                 // Close 2D viewport & context first, then verify 3D viewport/renderer still renders
                 vp2D.reset();
@@ -1482,7 +1476,7 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
                 ctx3D.reset();
                 CheckWithGpuDiagnostics(
                     rendererA->IsReady() &&
-                        rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0),
+                        rendererA->Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0),
                                           imgA) &&
                         !imgA.isNull(),
                     "ViewportStress::Render2DAfter3DClosed", iterNum, rendererA.get(),
@@ -1563,8 +1557,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
     for (int closeOrder = 0; closeOrder < 2; ++closeOrder) {
         auto rendererA = std::make_unique<EngineSceneRenderer>();
         auto rendererB = std::make_unique<EngineSceneRenderer>();
-        QImage imgA, imgB;
-        Check(rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgA),
+        LuxUI::Image imgA, imgB;
+        Check(rendererA->Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), imgA),
               "viewport A initial 2D render");
         Check(rendererB->Render3D(scene3D, 200, 150, {0.0f, 0.0f, 0.0f}, 0.5, 0.2, 4.0, imgB),
               "viewport B initial 3D render");
@@ -1576,7 +1570,7 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
                 "ViewportPeerTeardown::B3DAfterA", closeOrder + 1, rendererB.get(),
                 "viewport B renders 3D after viewport A GpuDevice is destroyed first");
             CheckWithGpuDiagnostics(
-                rendererB->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgB),
+                rendererB->Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), imgB),
                 "ViewportPeerTeardown::B2DAfterA", closeOrder + 1, rendererB.get(),
                 "viewport B renders 2D after viewport A GpuDevice is destroyed first");
             totalValidationErrors += rendererB->GetGpuDevice()->GetCounters().validationErrors;
@@ -1584,7 +1578,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             rendererB.reset();
             CheckWithGpuDiagnostics(
                 rendererA->IsReady() &&
-                    rendererA->Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), imgA),
+                    rendererA->Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0),
+                                      imgA),
                 "ViewportPeerTeardown::A2DAfterB", closeOrder + 1, rendererA.get(),
                 "viewport A renders 2D after viewport B GpuDevice is destroyed first");
             CheckWithGpuDiagnostics(
@@ -1601,11 +1596,11 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
                  "fault injection tests...\n";
     {
         EngineSceneRenderer renderer;
-        QImage output;
+        LuxUI::Image output;
         const std::pair<int, int> sizes[] = {{160, 120}, {320, 240}, {256, 256},
                                              {400, 220}, {128, 96},  {360, 180}};
         for (const auto& [w, h] : sizes) {
-            Check(renderer.Render(scene2D, w, h, QRectF(-5.0, 5.0, 10.0, -10.0), output) &&
+            Check(renderer.Render(scene2D, w, h, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), output) &&
                       output.width() == w && output.height() == h,
                   "2D viewport resize during rendering matches target dimensions");
             Check(renderer.Render3D(scene3D, w, h, {0.0f, 0.0f, 0.0f}, 0.2, 0.2, 5.0, output) &&
@@ -1621,7 +1616,7 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             Check(renderer.IsReady() && renderer.GetGpuDevice() != nullptr,
                   "GpuDevice remains alive while mid-frame render is still executing");
         });
-        Check(renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output) &&
+        Check(renderer.Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), output) &&
                   hookCalled && !output.isNull(),
               "in-progress frame completes cleanly when Shutdown() is requested mid-render");
         renderer.SetPostSceneHookForTesting(nullptr);
@@ -1667,26 +1662,28 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
         // 4th
         for (uint32 expectedRecovery = 1; expectedRecovery <= 3; ++expectedRecovery) {
             Vk::InjectFault(Vk::Fault::DeviceLost);
-            Check(!renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output),
+            Check(!renderer.Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), output),
                   "DeviceLost fault fails the active frame cleanly");
             Vk::ClearFaults();
-            Check(renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output) &&
-                      renderer.IsReady() && renderer.GetRecoveryCount() == expectedRecovery,
-                  "EngineSceneRenderer automatically recovers after DeviceLost within limit");
+            Check(
+                renderer.Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), output) &&
+                    renderer.IsReady() && renderer.GetRecoveryCount() == expectedRecovery,
+                "EngineSceneRenderer automatically recovers after DeviceLost within limit");
         }
         Vk::InjectFault(Vk::Fault::DeviceLost);
-        Check(!renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output),
+        Check(!renderer.Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), output),
               "4th DeviceLost fails active frame");
         Vk::ClearFaults();
-        Check(!renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output) &&
-                  !renderer.IsReady() && renderer.LastError().contains(QStringLiteral("복구 한도")),
+        Check(!renderer.Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), output) &&
+                  !renderer.IsReady() && renderer.LastError().contains(LUX_UI_TEXT("복구 한도")),
               "EngineSceneRenderer enforces recovery limit after 3 recoveries");
 
         renderer.Reset();
-        Check(renderer.GetRecoveryCount() == 0 &&
-                  renderer.Render(scene2D, 200, 150, QRectF(-5.0, 5.0, 10.0, -10.0), output) &&
-                  renderer.IsReady(),
-              "Reset() clears recovery counter and restores rendering");
+        Check(
+            renderer.GetRecoveryCount() == 0 &&
+                renderer.Render(scene2D, 200, 150, LuxUI::RectF(-5.0, 5.0, 10.0, -10.0), output) &&
+                renderer.IsReady(),
+            "Reset() clears recovery counter and restores rendering");
 #endif
         totalValidationErrors += renderer.GetGpuDevice()->GetCounters().validationErrors;
         Check(renderer.GetGpuDevice()->GetCounters().validationErrors == 0,
@@ -1723,14 +1720,14 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             const auto& sz = testSizes[i % std::size(testSizes)];
             if (i % 2 == 0) {
                 vp2D.resize(sz.first, sz.second);
-                QImage buffer(sz.first, sz.second, QImage::Format_ARGB32_Premultiplied);
-                buffer.fill(Qt::black);
+                LuxUI::Image buffer(sz.first, sz.second, LuxUI::Image::Format_ARGB32_Premultiplied);
+                buffer.fill(LuxUI::Flags::black);
                 vp2D.render(&buffer);
                 Check(!buffer.isNull(), "SceneViewport2D QPainter render succeeded");
             } else {
                 vp3D.resize(sz.first, sz.second);
-                QImage buffer(sz.first, sz.second, QImage::Format_ARGB32_Premultiplied);
-                buffer.fill(Qt::black);
+                LuxUI::Image buffer(sz.first, sz.second, LuxUI::Image::Format_ARGB32_Premultiplied);
+                buffer.fill(LuxUI::Flags::black);
                 vp3D.render(&buffer);
                 Check(!buffer.isNull(), "SceneViewport3D QPainter render succeeded");
             }
@@ -1756,8 +1753,8 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
             SceneViewport3D sw3D(nullptr, doc, [](auto) {}, [](auto, const auto&) {}, [] {}, [] {});
             sw2D.resize(320, 240);
             sw3D.resize(320, 240);
-            QImage img2D(320, 240, QImage::Format_ARGB32_Premultiplied);
-            QImage img3D(320, 240, QImage::Format_ARGB32_Premultiplied);
+            LuxUI::Image img2D(320, 240, LuxUI::Image::Format_ARGB32_Premultiplied);
+            LuxUI::Image img3D(320, 240, LuxUI::Image::Format_ARGB32_Premultiplied);
             sw2D.render(&img2D);
             sw3D.render(&img3D);
             Check(!img2D.isNull() && !img3D.isNull(),
@@ -1818,29 +1815,30 @@ int RunGpuLifecycleTests(QApplication& app, const StressConfig& cfg) {
 } // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("LuxEngineTests"));
-    QCoreApplication::setApplicationName(QStringLiteral("LuxEditorUiTests"));
-    QTemporaryDir settings;
+    LuxUI::Application app(argc, argv);
+    LuxUI::CoreApplication::setOrganizationName(LUX_UI_TEXT("LuxEngineTests"));
+    LuxUI::CoreApplication::setApplicationName(LUX_UI_TEXT("LuxEditorUiTests"));
+    LuxUI::TemporaryDir settings;
     if (!settings.isValid())
         return 1;
     // A modal dialog would block this headless test forever. Dismiss it (No/OK) and say so.
     int dialogs = 0;
-    QTimer dismiss;
+    LuxUI::Timer dismiss;
     dismiss.setInterval(100);
-    QObject::connect(&dismiss, &QTimer::timeout, [&dialogs] {
-        if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+    LuxUI::Object::connect(&dismiss, &LuxUI::Timer::timeout, [&dialogs] {
+        if (auto* box = qobject_cast<LuxUI::MessageBox*>(LuxUI::Application::activeModalWidget())) {
             ++dialogs;
             std::cerr << "dialog dismissed: " << box->text().toStdString() << '\n';
-            if (auto* no = box->button(QMessageBox::No))
+            if (auto* no = box->button(LuxUI::MessageBox::No))
                 no->click();
             else
                 box->reject();
         }
     });
     dismiss.start();
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    LuxUI::Settings::setDefaultFormat(LuxUI::Settings::IniFormat);
+    LuxUI::Settings::setPath(LuxUI::Settings::IniFormat, LuxUI::Settings::UserScope,
+                             settings.path());
 
     const StressConfig cfg = ParseStressConfig(argc, argv);
 
