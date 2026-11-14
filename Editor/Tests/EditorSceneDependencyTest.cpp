@@ -184,6 +184,10 @@ void TestTextureDependencies() {
     entity.GetComponent<MeshRendererComponent>().meshPath = PathUtf8(model);
     RejectWithoutMutation(fixture, scene,
                           "textured models without authored UVs fail before packaging");
+    material.baseColorTexture.clear();
+    material.normalTexture = PathUtf8(file);
+    RejectWithoutMutation(fixture, scene,
+                          "normal-only materials also require authored mesh UVs before packaging");
     std::ofstream(model, std::ios::trunc)
         << "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
     Check(AssetManager::ReloadMesh(PathUtf8(model), error, true) &&

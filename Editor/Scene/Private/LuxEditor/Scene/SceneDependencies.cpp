@@ -4,6 +4,7 @@
 #include <LuxEngine/Assets/AssetManager.hpp>
 #include <LuxEngine/Environment/EnvironmentMap.hpp>
 #include <LuxEngine/Scene/Entity.hpp>
+#include <LuxEngine/Scene/PrefabLibrary.hpp>
 #include <LuxEngine/Scene/SceneManager.hpp>
 #include <filesystem>
 #include <fstream>
@@ -90,7 +91,11 @@ private:
         const auto resolved = fs::canonical(path, error);
         if (error || !fs::is_regular_file(resolved, error) || error)
             throw std::runtime_error("참조 씬 파일을 찾을 수 없습니다: " + GenericPathUtf8(path));
-        if (!project_.ContainsScene(resolved))
+        const auto relative = resolved.lexically_relative(root);
+        const bool prefab = LuxEngine::PrefabLibrary::IsPrefabPath(resolved) && !relative.empty() &&
+                            !relative.is_absolute() && *relative.begin() != ".." &&
+                            !Ignored(relative);
+        if (!project_.ContainsScene(resolved) && !prefab)
             throw std::runtime_error("프로젝트 밖의 씬은 게임에 포함할 수 없습니다: " +
                                      GenericPathUtf8(path));
         return resolved;
@@ -156,36 +161,48 @@ private:
                                                  mesh->meshPath);
                     meshHasUvs_[file] = hasUvs;
                 }
-                if (!mesh->material.baseColorTexture.empty() && !meshHasUvs_.at(file))
+                if ((!mesh->material.baseColorTexture.empty() ||
+                     !mesh->material.normalTexture.empty() ||
+                     !mesh->material.metallicTexture.empty() ||
+                     !mesh->material.roughnessTexture.empty() ||
+                     !mesh->material.occlusionTexture.empty()) &&
+                    !meshHasUvs_.at(file))
                     throw std::runtime_error("텍스처를 적용할 UV 좌표가 없는 모델입니다: " +
                                              mesh->meshPath);
             }
             if (const auto* mesh = entity.TryGetComponent<LuxEngine::MeshRendererComponent>();
-                mesh && !mesh->material.baseColorTexture.empty()) {
-                const auto& resource = mesh->material.baseColorTexture;
-                if (!LuxEngine::AssetManager::IsBaseColorTextureFile(resource))
-                    throw std::runtime_error("지원하지 않는 기본 색상 텍스처 형식입니다: " +
-                                             resource);
-                const auto input = PathFromUtf8(resource);
-                std::error_code error;
-                const auto file =
-                    fs::canonical(input.is_absolute() ? input : owner.parent_path() / input, error);
-                const auto relative = file.lexically_relative(root);
-                if (error || relative.empty() || relative.is_absolute() ||
-                    *relative.begin() == ".." || Ignored(relative))
-                    throw std::runtime_error("기본 색상 텍스처는 프로젝트 내부에 있어야 합니다: " +
-                                             resource);
-                if (textureFiles_.insert(file).second) {
-                    const auto size = fs::file_size(file, error);
-                    if (error)
-                        throw std::runtime_error("텍스처 파일을 읽을 수 없습니다: " + resource);
-                    Charge(size);
-                    int width = 0, height = 0;
-                    std::vector<LuxEngine::uint8> pixels;
-                    if (!LuxEngine::AssetManager::DecodeTextureCpu(GenericPathUtf8(file), width,
-                                                                   height, pixels))
-                        throw std::runtime_error("기본 색상 텍스처 파일이 올바르지 않습니다: " +
+                mesh) {
+                for (const auto* texturePath :
+                     {&mesh->material.baseColorTexture, &mesh->material.normalTexture,
+                      &mesh->material.metallicTexture, &mesh->material.roughnessTexture,
+                      &mesh->material.occlusionTexture}) {
+                    const auto& resource = *texturePath;
+                    if (resource.empty())
+                        continue;
+                    if (!LuxEngine::AssetManager::IsBaseColorTextureFile(resource))
+                        throw std::runtime_error("지원하지 않는 기본 색상 텍스처 형식입니다: " +
                                                  resource);
+                    const auto input = PathFromUtf8(resource);
+                    std::error_code error;
+                    const auto file = fs::canonical(
+                        input.is_absolute() ? input : owner.parent_path() / input, error);
+                    const auto relative = file.lexically_relative(root);
+                    if (error || relative.empty() || relative.is_absolute() ||
+                        *relative.begin() == ".." || Ignored(relative))
+                        throw std::runtime_error(
+                            "기본 색상 텍스처는 프로젝트 내부에 있어야 합니다: " + resource);
+                    if (textureFiles_.insert(file).second) {
+                        const auto size = fs::file_size(file, error);
+                        if (error)
+                            throw std::runtime_error("텍스처 파일을 읽을 수 없습니다: " + resource);
+                        Charge(size);
+                        int width = 0, height = 0;
+                        std::vector<LuxEngine::uint8> pixels;
+                        if (!LuxEngine::AssetManager::DecodeTextureCpu(GenericPathUtf8(file), width,
+                                                                       height, pixels))
+                            throw std::runtime_error("기본 색상 텍스처 파일이 올바르지 않습니다: " +
+                                                     resource);
+                    }
                 }
             }
             const auto* reference = entity.TryGetComponent<LuxEngine::SceneReferenceComponent>();

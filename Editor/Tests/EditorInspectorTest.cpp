@@ -121,6 +121,42 @@ void TestFields(QApplication& app, const QString& directory) {
     Check(selected().GetComponent<MeshRendererComponent>().material.metallic == .4f,
           "roughness edits preserve metallic");
 
+    auto* alphaMode = window.findChild<QComboBox*>(QStringLiteral("materialAlphaMode"));
+    auto* alphaCutoff = window.findChild<QDoubleSpinBox*>(QStringLiteral("materialAlphaCutoff"));
+    auto* doubleSided = window.findChild<QCheckBox*>(QStringLiteral("materialDoubleSided"));
+    auto* mipmaps = window.findChild<QCheckBox*>(QStringLiteral("materialMipmaps"));
+    auto* address = window.findChild<QComboBox*>(QStringLiteral("materialAddressMode"));
+    auto* anisotropic = window.findChild<QCheckBox*>(QStringLiteral("materialAnisotropic"));
+    Check(alphaMode && alphaCutoff && doubleSided && mipmaps && address && anisotropic,
+          "material mode and sampling controls exist");
+    alphaMode->setCurrentIndex(2);
+    Check(selected().GetComponent<MeshRendererComponent>().material.alphaMode ==
+              MaterialAlphaMode::Blend,
+          "alpha mode edits reach the scene");
+    undo->undo();
+    Check(selected().GetComponent<MeshRendererComponent>().material.alphaMode ==
+              MaterialAlphaMode::Mask,
+          "alpha mode undo restores the scene");
+    undo->redo();
+    alphaMode->setCurrentIndex(1);
+    alphaCutoff->setValue(.6);
+    doubleSided->setChecked(false);
+    mipmaps->setChecked(false);
+    address->setCurrentIndex(0);
+    anisotropic->setChecked(false);
+    auto* normalScale = window.findChild<QDoubleSpinBox*>(QStringLiteral("materialNormalScale"));
+    auto* aoStrength =
+        window.findChild<QDoubleSpinBox*>(QStringLiteral("materialOcclusionStrength"));
+    Check(normalScale && aoStrength, "PBR map controls exist");
+    normalScale->setValue(2);
+    aoStrength->setValue(.4);
+    const auto& editedMaterial = selected().GetComponent<MeshRendererComponent>().material;
+    Check(editedMaterial.alphaCutoff == .6f && !editedMaterial.doubleSided &&
+              !editedMaterial.textureSampling.mipmaps &&
+              editedMaterial.textureSampling.addressMode == TextureAddressMode::Clamp &&
+              !editedMaterial.textureSampling.anisotropic && editedMaterial.normalScale == 2 &&
+              editedMaterial.occlusionStrength == .4f,
+          "material controls preserve authored settings");
     auto* tileGroup = Group(window, "TILEMAP");
     const auto dimensions = tileGroup->findChildren<QSpinBox*>();
     dimensions[0]->setValue(9);

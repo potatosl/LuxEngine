@@ -80,6 +80,7 @@ QString SceneName(const EditorDocument::TabInfo& tab) {
 void EditorWindow::BuildSceneMenus() {
     auto* menu = menuBar()->addMenu(QStringLiteral("씬"));
     menu->setObjectName(QStringLiteral("sceneMenu"));
+    BuildPrefabMenus(menu);
     const auto add = [&](const QString& label, const char* name, auto callback) {
         auto* action = menu->addAction(label);
         action->setObjectName(QString::fromLatin1(name));

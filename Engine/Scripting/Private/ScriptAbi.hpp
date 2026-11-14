@@ -23,10 +23,13 @@ struct ManagedApi {
     uint32 version;
     uint32 size;
     uint64(LUX_SCRIPT_CALL* load)(uint64 world, const char* path, int length);
-    int(LUX_SCRIPT_CALL* attach)(uint64 context, uint32 entity, const char* type, int length);
+    int(LUX_SCRIPT_CALL* attach)(uint64 context, uint32 entity, const char* type, int length,
+                                 const char* fields, int fieldLength);
     int(LUX_SCRIPT_CALL* detach)(uint64 context, uint32 entity);
     int(LUX_SCRIPT_CALL* update)(uint64 context, double deltaTime);
     void(LUX_SCRIPT_CALL* unload)(uint64 context);
+    int(LUX_SCRIPT_CALL* describe)(uint64 context, const char* type, int length, char* destination,
+                                   int capacity);
     int(LUX_SCRIPT_CALL* lastError)(char* destination, int capacity);
 };
 

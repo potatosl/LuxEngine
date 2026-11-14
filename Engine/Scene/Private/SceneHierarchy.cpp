@@ -377,9 +377,12 @@ bool Scene::ApplyState(Scene& prepared) {
     return true;
 }
 
-std::unordered_map<uint32, uint32>
-Scene::ImportEntities(const Scene& source, const std::vector<uint32>& roots, uint32 parent) {
+std::unordered_map<uint32, uint32> Scene::ImportEntities(const Scene& source,
+                                                         const std::vector<uint32>& roots,
+                                                         uint32 parent, bool preserveIds) {
     std::unordered_map<uint32, uint32> mapping;
+    if (preserveIds && (!entities_.empty() || parent != 0))
+        return mapping;
     if ((parent && !IsAlive(parent)) || !ValidateHierarchy() || !source.ValidateHierarchy())
         return mapping;
     std::unordered_map<uint32, std::vector<uint32>> children;
@@ -410,6 +413,8 @@ Scene::ImportEntities(const Scene& source, const std::vector<uint32>& roots, uin
         mapping.reserve(ordered.size());
         created.reserve(ordered.size());
         for (const auto id : ordered) {
+            if (preserveIds)
+                nextEntityId_ = id;
             const auto destination = CreateEntity();
             created.push_back(destination.GetId());
             mapping.emplace(id, destination.GetId());
@@ -439,6 +444,12 @@ Scene::ImportEntities(const Scene& source, const std::vector<uint32>& roots, uin
                         destination, InstanceSourceComponent{mapping.at(origin->instanceRoot),
                                                              origin->sourceEntity});
         }
+        for (const auto id : created)
+            if (auto* script = TryGetComponent<ScriptComponent>(id))
+                for (auto& [name, value] : script->fields)
+                    if (auto* reference = std::get_if<ScriptEntityReference>(&value))
+                        reference->id =
+                            mapping.contains(reference->id) ? mapping.at(reference->id) : 0;
         for (const auto id : created)
             if (auto* reference = TryGetComponent<SceneReferenceComponent>(id)) {
                 std::erase_if(reference->entityMap,

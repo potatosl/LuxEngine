@@ -42,6 +42,7 @@ public:
                             SceneReferenceMode mode, std::string& error, uint32 parent = 0);
     bool RefreshInstances(Scene& target, std::string& error);
     bool RefreshInstance(Scene& target, uint32 root, std::string& error);
+    bool RevertInstance(Scene& target, uint32 root, std::string& error);
     bool UnloadInstance(Scene& target, uint32 root, std::string& error);
     bool ConfigureStreaming(Scene& target, uint32 root, Vec2 center, float loadRadius,
                             float unloadRadius, std::string& error);

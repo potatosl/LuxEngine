@@ -104,6 +104,7 @@ function(lux_copy_runtime target)
         file(GLOB_RECURSE _lux_mesh_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[oO][bB][jJ]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[fF][bB][xX]"
+            "${CMAKE_CURRENT_SOURCE_DIR}/*.[lL][uU][xX][pP][rR][eE][fF][aA][bB]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[pP][nN][gG]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[jJ][pP][gG]"
             "${CMAKE_CURRENT_SOURCE_DIR}/*.[jJ][pP][eE][gG]"

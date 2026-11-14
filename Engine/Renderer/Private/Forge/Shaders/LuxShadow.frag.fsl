@@ -12,7 +12,8 @@ ROOT_SIGNATURE(DefaultRootSignature)
 void PS_MAIN(ShadowOutput In)
 {
     INIT_MAIN;
-    if (In.color.a * SampleTex2D(gTexture, gSamplerBilinearClamp, In.uv).a == 0.0f)
+    if (gDraw.options.y > 0.5f &&
+        In.color.a * SampleMaterial(gTexture, In.uv).a < gDraw.options.z)
         discard;
     RETURN();
 }

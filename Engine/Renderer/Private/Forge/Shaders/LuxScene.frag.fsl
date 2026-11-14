@@ -18,23 +18,43 @@ ROOT_SIGNATURE(DefaultRootSignature)
 float4 PS_MAIN(MeshOutput In)
 {
     INIT_MAIN;
-    float4 texel;
-    if (gDraw.options.x > 0.5f)
-        texel = SampleTex2D(gTexture, gSamplerPointClamp, In.uv);
-    else
-        texel = SampleTex2D(gTexture, gSamplerBilinearClamp, In.uv);
+    float4 texel = SampleMaterial(gTexture, In.uv);
     float4 color = In.color * texel;
-    if (In.options.x > 0.5f && color.a == 0.0f)
+    if (gDraw.options.y > 0.5f && gDraw.options.y < 1.5f && color.a < gDraw.options.z)
         discard;
+    if (gDraw.options.y < 1.5f)
+        color.a = 1.0f;
     const float3 faceNormal = dot(In.normal, In.normal) > 1e-10f ? In.normal : cross(ddy(In.world), ddx(In.world));
     const float lenSq = dot(faceNormal, faceNormal);
-    const float3 normal = lenSq > 1e-10f ? faceNormal * rsqrt(lenSq) : float3(0.0f, 1.0f, 0.0f);
+    float3 normal = lenSq > 1e-10f ? faceNormal * rsqrt(lenSq) : float3(0.0f, 1.0f, 0.0f);
+    const uint maps = uint(round(gDraw.options.w));
+    if ((maps & 1u) != 0u)
+    {
+        const float2 uvx = ddx(In.uv), uvy = ddy(In.uv);
+        const float3 worldx = ddx(In.world), worldy = ddy(In.world);
+        const float determinant = uvx.x * uvy.y - uvx.y * uvy.x;
+        if (abs(determinant) > 1e-8f)
+        {
+            float3 tangent = (worldx * uvy.y - worldy * uvx.y) / determinant;
+            tangent -= normal * dot(normal, tangent);
+            const float tangentLength = dot(tangent, tangent);
+            if (tangentLength > 1e-10f)
+            {
+                tangent *= rsqrt(tangentLength);
+                const float3 rawBitangent = (worldy * uvx.x - worldx * uvy.x) / determinant;
+                const float3 bitangent = cross(normal, tangent) * (dot(cross(normal, tangent), rawBitangent) < 0.0f ? -1.0f : 1.0f);
+                float3 mapped = SampleMaterial(gNormalTexture, In.uv).xyz * 2.0f - 1.0f;
+                mapped.xy *= gDraw.materialOptions.x;
+                normal = SafeDirection(tangent * mapped.x + bitangent * mapped.y + normal * mapped.z, normal);
+            }
+        }
+    }
     const uint pointCount = min(gLights.count.x, 16u);
     if (In.options.w > 0.5f)
     {
         const float3 v = SafeDirection(gLights.camera.xyz - In.world, normal);
-        const float metal = saturate(In.options.y);
-        const float rough = clamp(In.options.z, 0.045f, 1.0f);
+        const float metal = saturate(In.options.y * ((maps & 2u) != 0u ? SampleMaterial(gMetallicTexture, In.uv).r : 1.0f));
+        const float rough = clamp(In.options.z * ((maps & 4u) != 0u ? SampleMaterial(gRoughnessTexture, In.uv).r : 1.0f), 0.045f, 1.0f);
         float3 result = Brdf(color.rgb, metal, rough, normal, v, -gLights.direction.xyz) *
                         gLights.colorIntensity.rgb * max(gLights.colorIntensity.w, 0.0f);
         result *= DirectionalShadow(In.world, normal);
@@ -48,7 +68,8 @@ float4 PS_MAIN(MeshOutput In)
             result += Brdf(color.rgb, metal, rough, normal, v, SafeDirection(delta, normal)) * sourceColor.rgb *
                       max(sourceColor.w, 0.0f) * falloff * falloff;
         }
-        result += EnvironmentLighting(color.rgb, metal, rough, normal, v);
+        const float occlusion = (maps & 8u) != 0u ? lerp(1.0f, SampleMaterial(gOcclusionTexture, In.uv).r, gDraw.materialOptions.y) : 1.0f;
+        result += EnvironmentLighting(color.rgb, metal, rough, normal, v) * occlusion;
         color.rgb = result;
     }
     else

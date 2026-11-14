@@ -1,4 +1,5 @@
 #include <LuxEngine/Scene/Entity.hpp>
+#include <LuxEngine/Scene/PrefabLibrary.hpp>
 #include <LuxEngine/Scene/SceneManager.hpp>
 #include <algorithm>
 #include <atomic>
@@ -190,11 +191,21 @@ SceneSettings InheritedSettings(const SceneSettings& current, const SceneSetting
     return result;
 }
 
-std::string EntitySignature(Scene& scene, uint32 id) {
+std::string EntitySignature(Scene& scene, uint32 id, const IdMap& referenceIds) {
     Scene single;
     auto entity = single.CreateEntity();
     if (!single.CopyEntityComponents(scene, id, entity.GetId()))
         throw std::runtime_error("인스턴스 속성을 비교할 수 없습니다.");
+    std::string externalReferences;
+    if (auto* script = entity.TryGetComponent<ScriptComponent>())
+        for (auto& [name, value] : script->fields)
+            if (auto* reference = std::get_if<ScriptEntityReference>(&value)) {
+                const auto found = referenceIds.find(reference->id);
+                if (reference->id && found == referenceIds.end())
+                    externalReferences += std::to_string(name.size()) + ":" + name + ":" +
+                                          std::to_string(reference->id) + ";";
+                reference->id = found == referenceIds.end() ? 0 : found->second;
+            }
     if (auto* reference = entity.TryGetComponent<SceneReferenceComponent>()) {
         reference->baseline.clear();
         reference->suspended.clear();
@@ -204,11 +215,11 @@ std::string EntitySignature(Scene& scene, uint32 id) {
     std::string signature;
     if (!single.SerializeToString(signature))
         throw std::runtime_error("인스턴스 속성을 비교할 수 없습니다.");
-    return signature;
+    return signature + "\nexternal:" + externalReferences;
 }
 
 bool SameEntity(Scene& current, uint32 local, Scene& previous, uint32 source, const IdMap& map,
-                uint32 container) {
+                const IdMap& localReferences, const IdMap& sourceReferences, uint32 container) {
     if (!current.IsAlive(local) || !previous.IsAlive(source))
         return false;
     const auto oldParent = previous.GetParent(source);
@@ -218,7 +229,8 @@ bool SameEntity(Scene& current, uint32 local, Scene& previous, uint32 source, co
     const auto* localHierarchy = current.TryGetComponent<HierarchyComponent>(local);
     return current.GetParent(local) == expectedParent &&
            (oldHierarchy && oldHierarchy->group) == (localHierarchy && localHierarchy->group) &&
-           EntitySignature(current, local) == EntitySignature(previous, source);
+           EntitySignature(current, local, localReferences) ==
+               EntitySignature(previous, source, sourceReferences);
 }
 
 // Persisted metadata can contain previous source and unloaded-subtree snapshots. Their reference
@@ -239,7 +251,10 @@ void RewritePaths(Scene& scene, const fs::path& owner, const fs::path* destinati
     }
     for (auto entity : scene.GetEntities()) {
         if (auto* mesh = entity.TryGetComponent<MeshRendererComponent>())
-            for (auto* resource : {&mesh->meshPath, &mesh->material.baseColorTexture}) {
+            for (auto* resource :
+                 {&mesh->meshPath, &mesh->material.baseColorTexture, &mesh->material.normalTexture,
+                  &mesh->material.metallicTexture, &mesh->material.roughnessTexture,
+                  &mesh->material.occlusionTexture}) {
                 if (resource->empty())
                     continue;
                 const auto absolute = Canonical(Path(*resource), owner);
@@ -521,28 +536,52 @@ struct SceneManager::State {
     }
 
     std::shared_ptr<Scene> LoadResolved(const fs::path& requested, LoadContext& context);
-    void RefreshOne(Scene& target, uint32 root, Scene& source);
+    void RefreshOne(Scene& target, uint32 root, Scene& source, bool reset = false);
     SceneLoadResult LoadTop(const fs::path& requested, bool preload,
                             std::optional<uint64> submittedGeneration = std::nullopt);
 };
 
-void SceneManager::State::RefreshOne(Scene& target, uint32 root, Scene& source) {
+void SceneManager::State::RefreshOne(Scene& target, uint32 root, Scene& source, bool reset) {
     if (!target.HasComponent<SceneReferenceComponent>(root))
         throw std::runtime_error("씬 참조 루트를 찾을 수 없습니다.");
     if (!target.GetComponent<SceneReferenceComponent>(root).loaded)
         RestoreSubtree(target, root);
     auto reference = target.GetComponent<SceneReferenceComponent>(root);
     const auto oldMap = ReadMap(reference);
+    if (reset) {
+        std::unordered_set<uint32> retained;
+        for (const auto& [sourceId, localId] : oldMap)
+            if (source.IsAlive(sourceId) && target.IsAlive(localId) &&
+                IsDescendant(target, localId, root))
+                retained.insert(localId);
+        std::vector<uint32> removed;
+        for (const auto entity : target.GetEntities())
+            if (entity.GetId() != root && IsDescendant(target, entity.GetId(), root) &&
+                !retained.contains(entity.GetId()))
+                removed.push_back(entity.GetId());
+        for (const auto localId : retained)
+            if (!target.SetParent(localId, root, false))
+                throw std::runtime_error("프리팹 계층을 초기화할 수 없습니다.");
+        for (const auto localId : removed)
+            if (target.IsAlive(localId))
+                target.DestroyEntity(Entity(localId, &target));
+    }
     Scene previous;
     const bool hasBaseline = !reference.baseline.empty();
     if (hasBaseline && !previous.DeserializeFromString(reference.baseline))
         throw std::runtime_error("씬 상속의 이전 기준 상태를 읽을 수 없습니다.");
+    IdMap localReferences, sourceReferences;
+    for (const auto& [sourceId, localId] : oldMap) {
+        localReferences[localId] = sourceId;
+        sourceReferences[sourceId] = sourceId;
+    }
     std::unordered_map<uint32, bool> untouched;
     std::unordered_set<uint32> protectedReferences;
     for (const auto& [sourceId, localId] : oldMap) {
         if (!target.IsAlive(localId) || !previous.IsAlive(sourceId))
             continue;
-        const bool same = SameEntity(target, localId, previous, sourceId, oldMap, root);
+        const bool same = SameEntity(target, localId, previous, sourceId, oldMap, localReferences,
+                                     sourceReferences, root);
         untouched[sourceId] = same;
         const auto* nested = target.TryGetComponent<SceneReferenceComponent>(localId);
         if (nested && (!nested->loaded || !same))
@@ -554,8 +593,8 @@ void SceneManager::State::RefreshOne(Scene& target, uint32 root, Scene& source) 
     for (auto entity : source.GetEntities()) {
         const auto id = entity.GetId();
         for (auto parent = id; parent != 0; parent = source.GetParent(parent)) {
-            if ((previous.IsAlive(parent) && !oldMap.contains(parent)) ||
-                (parent != id && protectedReferences.contains(parent))) {
+            if (!reset && ((previous.IsAlive(parent) && !oldMap.contains(parent)) ||
+                           (parent != id && protectedReferences.contains(parent)))) {
                 skipped.insert(id);
                 break;
             }
@@ -596,7 +635,7 @@ void SceneManager::State::RefreshOne(Scene& target, uint32 root, Scene& source) 
         if (skipped.contains(sourceId) || !mapping.contains(sourceId))
             continue;
         const bool added = !oldMap.contains(sourceId);
-        if (!added && !untouched[sourceId])
+        if (!reset && !added && !untouched[sourceId])
             continue;
         const auto localId = mapping.at(sourceId);
         std::optional<SceneReferenceComponent> unloaded;
@@ -605,6 +644,12 @@ void SceneManager::State::RefreshOne(Scene& target, uint32 root, Scene& source) 
             unloaded = *nested;
         if (!target.CopyEntityComponents(source, sourceId, localId))
             throw std::runtime_error("참조된 씬의 엔티티를 복사할 수 없습니다.");
+        if (auto* script = target.TryGetComponent<ScriptComponent>(localId))
+            for (auto& [name, value] : script->fields)
+                if (auto* reference = std::get_if<ScriptEntityReference>(&value)) {
+                    const auto found = mapping.find(reference->id);
+                    reference->id = found == mapping.end() ? 0 : found->second;
+                }
         if (unloaded) {
             auto& nested = target.GetComponent<SceneReferenceComponent>(localId);
             nested.loaded = false;
@@ -664,6 +709,8 @@ std::shared_ptr<Scene> SceneManager::State::LoadResolved(const fs::path& request
         auto result = std::make_shared<Scene>();
         if (!result->DeserializeFromString(Read(path, context)))
             throw std::runtime_error("씬 파일 형식이 올바르지 않습니다: " + Utf8(path));
+        if (PrefabLibrary::IsPrefabPath(path) && result->GetChildren(0).size() != 1)
+            throw std::runtime_error("프리팹은 최상위 오브젝트 하나를 포함해야 합니다.");
         result->SetSourcePath(Utf8(path));
         RewritePaths(*result, path, nullptr);
         ValidateInheritance(*result);
@@ -971,6 +1018,29 @@ bool SceneManager::RefreshInstance(Scene& target, uint32 root, std::string& erro
         auto source = state_->LoadResolved(path, context);
         auto staged = Clone(target);
         state_->RefreshOne(*staged, root, *source);
+        Commit(target, *staged);
+        return true;
+    } catch (const std::exception& failure) {
+        error = failure.what();
+        return false;
+    }
+}
+
+bool SceneManager::RevertInstance(Scene& target, uint32 root, std::string& error) {
+    error.clear();
+    try {
+        const auto* reference = target.TryGetComponent<SceneReferenceComponent>(root);
+        if (!reference)
+            throw std::runtime_error("씬 참조 루트를 선택해 주세요.");
+        auto context = ContextFor(target);
+        {
+            std::lock_guard lock(state_->mutex);
+            context.cacheGeneration = state_->generation;
+        }
+        const auto path = Canonical(Path(reference->path), Path(target.GetSourcePath()));
+        auto source = state_->LoadResolved(path, context);
+        auto staged = Clone(target);
+        state_->RefreshOne(*staged, root, *source, true);
         Commit(target, *staged);
         return true;
     } catch (const std::exception& failure) {

@@ -15,11 +15,23 @@ struct Vertex3D {
     Vec2 texCoords;
 };
 
+enum class MaterialAlphaMode { Opaque, Mask, Blend };
+
 struct Material3D {
     Vec4 albedoColor{1.0f, 1.0f, 1.0f, 1.0f};
     float metallic = 0.0f;
     float roughness = 0.5f;
     std::string baseColorTexture;
+    std::string normalTexture;
+    std::string metallicTexture;
+    std::string roughnessTexture;
+    std::string occlusionTexture;
+    float normalScale = 1.f;
+    float occlusionStrength = 1.f;
+    TextureSampling textureSampling{true, TextureAddressMode::Repeat, true, false};
+    MaterialAlphaMode alphaMode = MaterialAlphaMode::Mask;
+    float alphaCutoff = 0.001f;
+    bool doubleSided = true;
 };
 
 struct PointLight {
@@ -129,7 +141,9 @@ public:
         bool GetMeshBounds(const std::string& path, Vec3& minimum, Vec3& maximum) const;
 
     private:
-        GpuTexture* ResolveBaseColorTexture(const std::string& path);
+        Ref<GpuTexture>
+        ResolveBaseColorTexture(const std::string& path, TextureSampling sampling,
+                                TextureColorSpace colorSpace = TextureColorSpace::Srgb);
         struct Impl;
         std::unique_ptr<Impl> impl_;
     };

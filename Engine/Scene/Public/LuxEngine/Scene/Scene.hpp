@@ -50,8 +50,9 @@ public:
     TransformComponent GetWorldTransform(uint32 id) const;
     bool SetWorldTransform(uint32 id, const TransformComponent& value);
     bool ValidateHierarchy() const;
-    std::unordered_map<uint32, uint32>
-    ImportEntities(const Scene& source, const std::vector<uint32>& roots = {}, uint32 parent = 0);
+    std::unordered_map<uint32, uint32> ImportEntities(const Scene& source,
+                                                      const std::vector<uint32>& roots = {},
+                                                      uint32 parent = 0, bool preserveIds = false);
     // Replace built-in authored data while preserving the destination's hierarchy/provenance.
     bool CopyEntityComponents(const Scene& source, uint32 sourceId, uint32 targetId);
     // Commit validated authored data while retaining unchanged native physics bodies/runtime.

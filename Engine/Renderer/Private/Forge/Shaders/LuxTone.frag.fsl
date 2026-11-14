@@ -16,7 +16,7 @@ float4 PS_MAIN(FullscreenOutput In)
     float4 color = LoadTex2D(gHdrImage, NO_SAMPLER, int2(In.position.xy), 0);
     if (color.a <= 0.0f)
         discard;
-    color.rgb = max(color.rgb * gScene.camera.w, 0.0f);
+    color.rgb = max(color.rgb / max(color.a, 1e-6f) * gScene.camera.w, 0.0f);
     if (gScene.options.z > 0.5f)
         color.rgb = saturate((color.rgb * (2.51f * color.rgb + 0.03f)) / (color.rgb * (2.43f * color.rgb + 0.59f) + 0.14f));
     color.rgb = lerp(12.92f * color.rgb, 1.055f * pow(color.rgb, float3(1.0f / 2.4f, 1.0f / 2.4f, 1.0f / 2.4f)) - 0.055f, step(0.0031308f, color.rgb));

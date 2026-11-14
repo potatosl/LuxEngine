@@ -7,6 +7,7 @@
 #include <LuxEditor/Ui/IconFactory.hpp>
 #include <LuxEditor/Viewport/SceneViewport2D.hpp>
 #include <LuxEditor/Viewport/SceneViewport3D.hpp>
+#include <LuxEngine/Assets/AssetManager.hpp>
 #include <LuxEngine/ECS/ECS.hpp>
 #include <QAbstractButton>
 #include <QAction>
@@ -646,6 +647,8 @@ void EditorWindow::dropEvent(QDropEvent* event) {
     const auto path = PathFromUtf8(Utf8(event->mimeData()->urls().first().toLocalFile()));
     if (path.extension() == ".luxproject" || path.extension() == ".luxproj")
         OpenProjectFile(path);
+    else if (QString::fromUtf8(PathUtf8(path.extension())).toLower() == QLatin1String(".luxprefab"))
+        AddPrefabAsset(path);
     else if (path.extension() == ".lux")
         OpenProjectScene(path);
     else if (path.extension() == ".luxpack" || path.extension() == ".luxbackup") {
@@ -711,7 +714,8 @@ void EditorWindow::RefreshProjectExplorer() {
             }
             const QString label = Q(GenericPathUtf8(relative));
             const QString suffix = Q(PathUtf8(it->path().extension())).toLower();
-            const bool scene = suffix == QLatin1String(".lux");
+            const bool scene =
+                suffix == QLatin1String(".lux") || suffix == QLatin1String(".luxprefab");
             const bool image = suffix == QLatin1String(".png") || suffix == QLatin1String(".jpg") ||
                                suffix == QLatin1String(".jpeg") ||
                                suffix == QLatin1String(".webp") || suffix == QLatin1String(".bmp");
@@ -821,6 +825,7 @@ void EditorWindow::RefreshInspector() {
         const QSignalBlocker blocker(pivot);
         pivot->setCurrentIndex(static_cast<int>(document_.GetSelectionPivotMode()));
     }
+    RefreshScriptDetails();
     LuxEngine::Entity selected = document_.GetSelected();
     const auto count = document_.GetSelection().size();
     selectionLabel_->setText(
@@ -897,6 +902,31 @@ void EditorWindow::RefreshInspector() {
         roughness_->setValue(std::clamp(static_cast<double>(material.roughness), 0.0, 1.0));
         metallic_->setEnabled(mesh);
         roughness_->setEnabled(mesh);
+        materialAlphaMode_->setCurrentIndex(static_cast<int>(material.alphaMode));
+        materialAlphaMode_->setEnabled(mesh);
+        materialAlphaCutoff_->setValue(material.alphaCutoff);
+        materialAlphaCutoff_->setEnabled(mesh &&
+                                         material.alphaMode == LuxEngine::MaterialAlphaMode::Mask);
+        materialDoubleSided_->setChecked(material.doubleSided);
+        materialDoubleSided_->setEnabled(mesh);
+        const std::array<std::string, 4> paths{material.normalTexture, material.metallicTexture,
+                                               material.roughnessTexture,
+                                               material.occlusionTexture};
+        for (size_t i = 0; i < paths.size(); ++i) {
+            materialMapPaths_[i]->setText(Q(paths[i]));
+            materialMapPaths_[i]->setEnabled(mesh);
+        }
+        materialNormalScale_->setValue(material.normalScale);
+        materialNormalScale_->setEnabled(mesh);
+        materialOcclusionStrength_->setValue(material.occlusionStrength);
+        materialOcclusionStrength_->setEnabled(mesh);
+        materialMipmaps_->setChecked(material.textureSampling.mipmaps);
+        materialMipmaps_->setEnabled(mesh);
+        materialAddressMode_->setCurrentIndex(
+            static_cast<int>(material.textureSampling.addressMode));
+        materialAddressMode_->setEnabled(mesh);
+        materialAnisotropic_->setChecked(material.textureSampling.anisotropic);
+        materialAnisotropic_->setEnabled(mesh);
         const bool tiled = selected.HasComponent<LuxEngine::TilemapComponent>();
         tilemapEnabled_->setChecked(tiled);
         const LuxEngine::TilemapComponent map =
@@ -1157,6 +1187,39 @@ void EditorWindow::OnMeshChanged(const QWidget* field) {
                 material.metallic = static_cast<float>(metallic_->value());
             else if (field == roughness_)
                 material.roughness = static_cast<float>(roughness_->value());
+            else if (field == materialAlphaMode_)
+                material.alphaMode =
+                    static_cast<LuxEngine::MaterialAlphaMode>(materialAlphaMode_->currentIndex());
+            else if (field == materialAlphaCutoff_)
+                material.alphaCutoff = static_cast<float>(materialAlphaCutoff_->value());
+            else if (field == materialDoubleSided_)
+                material.doubleSided = materialDoubleSided_->isChecked();
+            else if (field == materialNormalScale_)
+                material.normalScale = static_cast<float>(materialNormalScale_->value());
+            else if (field == materialOcclusionStrength_)
+                material.occlusionStrength =
+                    static_cast<float>(materialOcclusionStrength_->value());
+            else if (field == materialMipmaps_)
+                material.textureSampling.mipmaps = materialMipmaps_->isChecked();
+            else if (field == materialAddressMode_)
+                material.textureSampling.addressMode = static_cast<LuxEngine::TextureAddressMode>(
+                    materialAddressMode_->currentIndex());
+            else if (field == materialAnisotropic_)
+                material.textureSampling.anisotropic = materialAnisotropic_->isChecked();
+            const std::array<std::string*, 4> paths{
+                &material.normalTexture, &material.metallicTexture, &material.roughnessTexture,
+                &material.occlusionTexture};
+            for (size_t i = 0; i < paths.size(); ++i) {
+                if (field != materialMapPaths_[i])
+                    continue;
+                const auto path = materialMapPaths_[i]->text().toUtf8().toStdString();
+                if (path.size() > 4096 || path.find('\0') != std::string::npos)
+                    return;
+                if (!path.empty() && !LuxEngine::AssetManager::ValidateTextureFile(
+                                         document_.GetScene().ResolveAssetPath(path)))
+                    return;
+                *paths[i] = path;
+            }
         }
         document_.MarkDirty();
     });
@@ -1481,7 +1544,8 @@ void EditorWindow::CopyEntity() {
     LuxEngine::Entity selected = document_.GetSelected();
     if (!selected)
         return;
-    if (document_.GetScene().GetParent(selected.GetId()) ||
+    if (selected.HasComponent<LuxEngine::ScriptComponent>() ||
+        document_.GetScene().GetParent(selected.GetId()) ||
         !document_.GetScene().GetChildren(selected.GetId()).empty() ||
         selected.HasComponent<LuxEngine::SceneReferenceComponent>() ||
         (selected.HasComponent<LuxEngine::HierarchyComponent>() &&
@@ -1490,7 +1554,10 @@ void EditorWindow::CopyEntity() {
         const auto ids = subtree.ImportEntities(document_.GetScene(), {selected.GetId()});
         for (auto object : subtree.GetEntities())
             if (auto* mesh = object.TryGetComponent<LuxEngine::MeshRendererComponent>(); mesh)
-                for (auto* resource : {&mesh->meshPath, &mesh->material.baseColorTexture})
+                for (auto* resource :
+                     {&mesh->meshPath, &mesh->material.baseColorTexture,
+                      &mesh->material.normalTexture, &mesh->material.metallicTexture,
+                      &mesh->material.roughnessTexture, &mesh->material.occlusionTexture})
                     if (!resource->empty())
                         *resource = document_.GetScene().ResolveAssetPath(*resource);
         std::string serialized;
@@ -1533,6 +1600,26 @@ void EditorWindow::CopyEntity() {
     if (selected.HasComponent<LuxEngine::MeshRendererComponent>()) {
         const auto& m = selected.GetComponent<LuxEngine::MeshRendererComponent>().material;
         const auto& c = m.albedoColor;
+        QJsonObject options;
+        options.insert(QStringLiteral("alphaMode"), static_cast<int>(m.alphaMode));
+        options.insert(QStringLiteral("alphaCutoff"), m.alphaCutoff);
+        options.insert(QStringLiteral("doubleSided"), m.doubleSided);
+        options.insert(QStringLiteral("normalScale"), m.normalScale);
+        options.insert(QStringLiteral("occlusionStrength"), m.occlusionStrength);
+        options.insert(QStringLiteral("mipmaps"), m.textureSampling.mipmaps);
+        options.insert(QStringLiteral("addressMode"),
+                       static_cast<int>(m.textureSampling.addressMode));
+        options.insert(QStringLiteral("anisotropic"), m.textureSampling.anisotropic);
+        const std::array<std::pair<const char*, const std::string*>, 4> maps{
+            {{"normalTexture", &m.normalTexture},
+             {"metallicTexture", &m.metallicTexture},
+             {"roughnessTexture", &m.roughnessTexture},
+             {"occlusionTexture", &m.occlusionTexture}}};
+        for (const auto& [name, path] : maps)
+            options.insert(QString::fromLatin1(name),
+                           path->empty() ? QString{}
+                                         : Q(document_.GetScene().ResolveAssetPath(*path)));
+        object.insert(QStringLiteral("materialOptions"), options);
         object.insert(QStringLiteral("mesh"),
                       QJsonArray{m.metallic, m.roughness, c.x, c.y, c.z, c.w});
         const auto& path = selected.GetComponent<LuxEngine::MeshRendererComponent>().meshPath;
@@ -1765,15 +1852,17 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
             key != QStringLiteral("rigidbody2d") && key != QStringLiteral("collider2d") &&
             key != QStringLiteral("rigidbody3d") && key != QStringLiteral("collider3d") &&
             key != QStringLiteral("animation") && key != QStringLiteral("meshPath") &&
-            key != QStringLiteral("baseColorTexture") && key != QStringLiteral("version") &&
-            key != QStringLiteral("hasTag") && key != QStringLiteral("hasTransform")) {
+            key != QStringLiteral("baseColorTexture") && key != QStringLiteral("materialOptions") &&
+            key != QStringLiteral("version") && key != QStringLiteral("hasTag") &&
+            key != QStringLiteral("hasTransform")) {
             errorMsg = QStringLiteral("알 수 없는 클립보드 필드가 포함되어 있습니다: %1").arg(key);
             return false;
         }
     }
 
     if ((object.contains(QStringLiteral("meshPath")) ||
-         object.contains(QStringLiteral("baseColorTexture"))) &&
+         object.contains(QStringLiteral("baseColorTexture")) ||
+         object.contains(QStringLiteral("materialOptions"))) &&
         !object.contains(QStringLiteral("mesh"))) {
         errorMsg = QStringLiteral("메시 컴포넌트가 없는 자산 경로는 붙여넣을 수 없습니다.");
         return false;
@@ -1892,6 +1981,56 @@ bool ValidateClipboardJson(const QJsonObject& object, ValidatedClipboardEntity& 
                 comp.material.baseColorTexture.find('\0') != std::string::npos) {
                 errorMsg = QStringLiteral("기본 색상 텍스처 경로가 올바르지 않습니다.");
                 return false;
+            }
+        }
+        if (object.contains(QStringLiteral("materialOptions"))) {
+            const auto raw = object.value(QStringLiteral("materialOptions"));
+            if (!raw.isObject()) {
+                errorMsg = QStringLiteral("재질 옵션이 객체가 아닙니다.");
+                return false;
+            }
+            const auto options = raw.toObject();
+            const auto mode = options.value(QStringLiteral("alphaMode"));
+            const auto address = options.value(QStringLiteral("addressMode"));
+            if (!mode.isDouble() || mode.toDouble() < 0 || mode.toDouble() > 2 ||
+                mode.toDouble() != mode.toInt() || !address.isDouble() || address.toDouble() < 0 ||
+                address.toDouble() > 1 || address.toDouble() != address.toInt() ||
+                !options.value(QStringLiteral("doubleSided")).isBool() ||
+                !options.value(QStringLiteral("mipmaps")).isBool() ||
+                !options.value(QStringLiteral("anisotropic")).isBool() ||
+                !ParseFiniteFloat(options.value(QStringLiteral("alphaCutoff")),
+                                  comp.material.alphaCutoff, 0, 1) ||
+                !ParseFiniteFloat(options.value(QStringLiteral("normalScale")),
+                                  comp.material.normalScale, 0, 16) ||
+                !ParseFiniteFloat(options.value(QStringLiteral("occlusionStrength")),
+                                  comp.material.occlusionStrength, 0, 1)) {
+                errorMsg = QStringLiteral("재질 옵션의 형식 또는 범위가 올바르지 않습니다.");
+                return false;
+            }
+            comp.material.alphaMode = static_cast<LuxEngine::MaterialAlphaMode>(mode.toInt());
+            comp.material.doubleSided = options.value(QStringLiteral("doubleSided")).toBool();
+            comp.material.textureSampling.mipmaps =
+                options.value(QStringLiteral("mipmaps")).toBool();
+            comp.material.textureSampling.addressMode =
+                static_cast<LuxEngine::TextureAddressMode>(address.toInt());
+            comp.material.textureSampling.anisotropic =
+                options.value(QStringLiteral("anisotropic")).toBool();
+            const std::array<std::pair<const char*, std::string*>, 4> maps{
+                {{"normalTexture", &comp.material.normalTexture},
+                 {"metallicTexture", &comp.material.metallicTexture},
+                 {"roughnessTexture", &comp.material.roughnessTexture},
+                 {"occlusionTexture", &comp.material.occlusionTexture}}};
+            for (const auto& [name, path] : maps) {
+                const auto value = options.value(QString::fromLatin1(name));
+                if (!value.isString()) {
+                    errorMsg = QStringLiteral("재질 텍스처 경로가 문자열이 아닙니다.");
+                    return false;
+                }
+                *path = value.toString().toUtf8().toStdString();
+                if (path->size() > 4096 || path->find('\0') != std::string::npos) {
+                    errorMsg = QStringLiteral("재질 텍스처 경로가 올바르지 않습니다.");
+                    return false;
+                }
             }
         }
         parsed.mesh = comp;

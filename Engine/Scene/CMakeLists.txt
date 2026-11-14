@@ -6,6 +6,7 @@ lux_engine_module(Scene
         Public/LuxEngine/Scene/Entity.hpp
         Public/LuxEngine/Scene/Scene.hpp
         Public/LuxEngine/Scene/SceneManager.hpp
+        Public/LuxEngine/Scene/PrefabLibrary.hpp
     SOURCES
         Private/Entity.cpp
         Private/PhysicsWorld2D.cpp
@@ -13,4 +14,5 @@ lux_engine_module(Scene
         Private/Scene.cpp
         Private/SceneHierarchy.cpp
         Private/SceneManager.cpp
+        Private/PrefabLibrary.cpp
 )

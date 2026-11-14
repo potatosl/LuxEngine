@@ -3,6 +3,7 @@
 #include <LuxEngine/Scripting/ScriptRuntime.hpp>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 
@@ -73,6 +74,69 @@ int main(int argc, char** argv) {
         }
         Check(!runtime.Update(.25) && !runtime.IsRunning(),
               "Expired scene lifetime was not rejected");
+        Scene authored;
+        auto target = authored.CreateEntity("Target");
+        auto scripted = authored.CreateEntity("Fields");
+        ScriptComponent component{"ScriptTests.Fields", true};
+        component.fields = {
+            {"Health", int32{7}},      {"Speed", 3.5f},
+            {"Enabled", true},         {"Title", std::string("필드 회귀")},
+            {"Offset", Vec3{1, 2, 3}}, {"Tint", Vec4{1, .5f, .25f, 1}},
+            {"window", Vec2{8, 9}},    {"Target", ScriptEntityReference{target.GetId()}}};
+        scripted.AddComponent<ScriptComponent>(component);
+        std::string fieldScene;
+        Check(authored.SerializeToString(fieldScene), "Script fields did not serialize");
+        Scene restoredFields;
+        Check(restoredFields.DeserializeFromString(fieldScene),
+              "Script fields did not deserialize");
+        CheckRuntime(runtime.Initialize(restoredFields, config), runtime);
+        std::vector<ScriptFieldDescription> descriptions;
+        CheckRuntime(runtime.DescribeFields("ScriptTests.Fields", descriptions), runtime);
+        Check(descriptions.size() == 8, "Public or attributed private fields were not reflected");
+        std::vector<ScriptFieldDescription> single;
+        CheckRuntime(runtime.DescribeFields("ScriptTests.MetadataOnce", single), runtime);
+        Check(single.size() == 1 && std::get<std::string>(single.front().defaultValue) == "x",
+              "Metadata inspection must construct the script only once");
+        Check(!runtime.DescribeFields("ScriptTests.LargeMetadata", single) &&
+                  runtime.GetLastError().find("65536-byte UTF-8 limit") != std::string::npos &&
+                  single.size() == 1 && std::get<std::string>(single.front().defaultValue) == "x",
+              "Oversized metadata must report its limit and preserve prior metadata");
+        Check(!runtime.DescribeFields("ScriptTests.UnsupportedField", descriptions) &&
+                  runtime.GetLastError().find("Unsupported serialized script field") !=
+                      std::string::npos,
+              "Unsupported field type was not rejected");
+        CheckRuntime(runtime.Update(0), runtime);
+        const auto fieldTransform =
+            restoredFields.GetComponent<TransformComponent>(scripted.GetId());
+        Check(fieldTransform.position.x == 7 && fieldTransform.position.y == 3.5f &&
+                  fieldTransform.position.z == static_cast<float>(target.GetId()),
+              "Authored fields or entity reference were not applied before creation");
+        runtime.Shutdown();
+        Scene imported;
+        imported.CreateEntity("Existing");
+        const auto mapping = imported.ImportEntities(authored, {});
+        Check(mapping.size() == 2 &&
+                  std::get<ScriptEntityReference>(
+                      imported.GetComponent<ScriptComponent>(mapping.at(scripted.GetId()))
+                          .fields.at("Target"))
+                          .id == mapping.at(target.GetId()),
+              "Imported script entity references were not remapped");
+        auto& importedFields =
+            imported.GetComponent<ScriptComponent>(mapping.at(scripted.GetId())).fields;
+        importedFields["Health"] = std::string("wrong type");
+        CheckRuntime(runtime.Initialize(imported, config), runtime);
+        Check(!runtime.Update(0) &&
+                  runtime.GetLastError().find("type changed") != std::string::npos,
+              "A mismatched authored field type reached OnCreate");
+        runtime.Shutdown();
+        ScriptFieldMap invalidFields;
+        Check(!DeserializeScriptFields("{\"bad\":{\"type\":4294967296,\"value\":true}}",
+                                       invalidFields),
+              "Overflowed field kind was accepted");
+        std::string invalidOutput;
+        Check(!SerializeScriptFields({{"bad", std::numeric_limits<float>::infinity()}},
+                                     invalidOutput),
+              "Non-finite authored value was accepted");
         config.assemblyPath += ".missing";
         Check(!runtime.Initialize(scene, config), "Missing assembly was accepted");
         std::cout

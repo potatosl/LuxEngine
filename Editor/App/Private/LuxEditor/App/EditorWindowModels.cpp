@@ -125,10 +125,15 @@ void EditorWindow::ChooseModelAsset() {
         return;
     }
     const auto selected = document_.GetSelected();
-    if (selected.HasComponent<LuxEngine::MeshRendererComponent>() &&
-        !selected.GetComponent<LuxEngine::MeshRendererComponent>()
-             .material.baseColorTexture.empty() &&
-        !data.hasTexCoords) {
+    const auto hasTextures = [&] {
+        if (!selected.HasComponent<LuxEngine::MeshRendererComponent>())
+            return false;
+        const auto& material = selected.GetComponent<LuxEngine::MeshRendererComponent>().material;
+        return !material.baseColorTexture.empty() || !material.normalTexture.empty() ||
+               !material.metallicTexture.empty() || !material.roughnessTexture.empty() ||
+               !material.occlusionTexture.empty();
+    };
+    if (hasTextures() && !data.hasTexCoords) {
         ShowError(QStringLiteral("모델 불러오기"),
                   QStringLiteral("텍스처를 유지하려면 UV 좌표가 있는 모델이 필요합니다."));
         return;
